@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/messages.ts', 'src/references.ts', 'src/translations.ts', 'src/canon.ts', 'src/config.ts'],
+  entry: ['src/messages.ts', 'src/references.ts', 'src/translations.ts', 'src/canon.ts', 'src/config.ts', 'src/sermon.ts'],
   format: ['esm'],
   dts: true,
   clean: true,
