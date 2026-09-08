@@ -4,11 +4,14 @@ import { createPuppeteerLauncher } from './puppeteer-launcher.js';
 const launch = vi.fn().mockResolvedValue({ newPage: vi.fn(), close: vi.fn() });
 vi.mock('puppeteer', () => ({ launch: (config: Record<string, unknown>) => launch(config) }));
 
+// puppeteer would otherwise install signal handlers that exit the process, skipping our cleanup.
+const OWN_SIGNALS = { handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false };
+
 describe('createPuppeteerLauncher', () => {
-  it('launches headless with no extra configuration by default', async () => {
+  it('launches headless, and keeps signal handling for the caller, by default', async () => {
     launch.mockClear();
     await createPuppeteerLauncher()();
-    expect(launch).toHaveBeenCalledWith({ headless: true });
+    expect(launch).toHaveBeenCalledWith({ headless: true, ...OWN_SIGNALS });
   });
 
   it('passes through the executable path, args and headless flag', async () => {
@@ -22,6 +25,7 @@ describe('createPuppeteerLauncher', () => {
       headless: false,
       executablePath: '/usr/bin/chromium',
       args: ['--no-sandbox'],
+      ...OWN_SIGNALS,
     });
   });
 });
