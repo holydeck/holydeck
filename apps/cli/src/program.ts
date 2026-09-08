@@ -24,6 +24,7 @@ export interface GlobalOptions {
   serverUrl?: string;
   json?: boolean;
   browserFetch?: boolean;
+  verbose?: boolean;
 }
 
 export function buildProgram(ctx: CliContext): Command {
@@ -35,6 +36,7 @@ export function buildProgram(ctx: CliContext): Command {
     .option('--data-dir <dir>', 'override the data directory')
     .option('--server-url <url>', 'use a remote HolyDeck server instead of the local datastore')
     .option('--json', 'machine-readable output on informational commands')
+    .option('--verbose', 'report where every chapter of the output came from')
     .option('--browser-fetch', 'fetch bible.com through a headless browser (needs puppeteer)')
     .option('--no-browser-fetch', 'force plain HTTP fetching even if the config enables the browser')
     .exitOverride()

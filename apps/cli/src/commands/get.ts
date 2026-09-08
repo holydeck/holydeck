@@ -40,7 +40,11 @@ export async function runGet(
     refresh: options.refresh,
     fetchMissing: options.fetchMissing,
   });
-  await renderAndDeliver(ctx, runtime, sermon, loaded, { template: options.template, copy: options.copy });
+  await renderAndDeliver(ctx, runtime, sermon, loaded, {
+    template: options.template,
+    copy: options.copy,
+    verbose: globals.verbose,
+  });
 }
 
 export function registerGet(program: Command, ctx: CliContext): void {

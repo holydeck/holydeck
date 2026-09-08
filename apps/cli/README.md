@@ -128,12 +128,13 @@ holydeck get "சங்கீதம் 118:24"
 
 `get` and `get-verses` do not stop at a chapter the datastore lacks: they fetch it,
 store it, and render from the stored copy, so an ad-hoc reference works without syncing
-a whole translation first. Every chapter says where its text came from in a footer on
-stderr — `source: cache` with the revision date, or `source: live · … · fetched just now`
-for one this run went and got.
+a whole translation first. A run that had to fetch says so on stderr in one line; add
+`--verbose` and every chapter names its own source instead — `source: cache` with the
+revision date, or `source: live · … · fetched just now` for one this run went and got.
 
 ```sh
 holydeck get "GEN 30:5-7,9"                     # fetches GEN 30 if it is not stored yet
+holydeck get "GEN 30:5-7,9" --verbose           # names the source of every chapter
 holydeck get "GEN 30:5-7,9" --no-fetch-missing  # fails instead, leaving the datastore alone
 ```
 

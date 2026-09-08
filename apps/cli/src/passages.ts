@@ -17,13 +17,17 @@ import type { Spinner } from './spinner.js';
 
 export interface LoadedPassages {
   entries: EntryData[];
+  /** One line per chapter and translation saying where its text came from; shown by --verbose. */
   footers: string[];
+  /** How many of those chapters this run went and fetched. */
+  live: number;
 }
 
 export interface DeliverOptions {
   template?: string;
   copy?: boolean;
   output?: string;
+  verbose?: boolean;
 }
 
 interface LoadOptions {
@@ -59,6 +63,7 @@ async function loadLocal(
 ): Promise<LoadedPassages> {
   const storeFiles: Record<string, TranslationStoreFile | undefined> = {};
   const footers: string[] = [];
+  let live = 0;
   const chapters = chapterRefs(sermon);
   for (const abbr of sermon.translations) {
     // Fetching a chapter can mean starting a browser, so say which one is holding things up.
@@ -83,17 +88,19 @@ async function loadLocal(
       }
     }
     storeFiles[abbr] = file;
-    // Every chapter reports where its text came from; a spinner clears itself, a footer stays.
-    const live = new Set(fetched.map((item) => `${item.book}.${item.chapter}`));
+    // Every chapter records where its text came from, for --verbose and for the summary line.
+    const fresh = new Set(fetched.map((item) => `${item.book}.${item.chapter}`));
     for (const ref of chapters) {
       const record = getChapter(file, ref.book, ref.chapter);
       const revision = record ? latestRevision(record) : undefined;
       if (revision) {
-        footers.push(footerFor(abbr, ref, revision.rev, revision.fetchedAt, live.has(`${ref.book}.${ref.chapter}`)));
+        const isLive = fresh.has(`${ref.book}.${ref.chapter}`);
+        if (isLive) live += 1;
+        footers.push(footerFor(abbr, ref, revision.rev, revision.fetchedAt, isLive));
       }
     }
   }
-  return { entries: assembleEntries(sermon, storeFiles), footers };
+  return { entries: assembleEntries(sermon, storeFiles), footers, live };
 }
 
 async function loadServer(
@@ -107,6 +114,7 @@ async function loadServer(
   if (!server) throw new Error('loadServer requires server mode');
   const storeFiles: Record<string, TranslationStoreFile | undefined> = {};
   const footers: string[] = [];
+  let live = 0;
   const chapters = chapterRefs(sermon);
   for (const abbr of sermon.translations) {
     const file = createEmptyStoreFile(abbr, ctx.now().toISOString());
@@ -129,6 +137,7 @@ async function loadServer(
       };
       const book = (file.books[ref.book] ??= { chapters: {} });
       book.chapters[ref.chapter] = record;
+      if (response.source === 'live') live += 1;
       footers.push(footerFor(abbr, ref, response.revision, response.fetchedAt, response.source === 'live'));
     }
     // Asked after the verses: a chapter fetched just now teaches the server the translation's
@@ -136,7 +145,7 @@ async function loadServer(
     file.canon = await server.getCanon(abbr);
     storeFiles[abbr] = file;
   }
-  return { entries: assembleEntries(sermon, storeFiles), footers };
+  return { entries: assembleEntries(sermon, storeFiles), footers, live };
 }
 
 export async function loadEntryData(
@@ -174,6 +183,10 @@ export async function renderAndDeliver(
     await ctx.clipboard(output);
     errLine(ctx, formatMessage('copied_to_clipboard'));
   }
-  for (const footer of loaded.footers) errLine(ctx, footer);
+  if (options.verbose === true) {
+    for (const footer of loaded.footers) errLine(ctx, footer);
+  } else if (loaded.live > 0) {
+    errLine(ctx, formatMessage('fetch_summary', { live: loaded.live, total: loaded.footers.length }));
+  }
   return output;
 }
