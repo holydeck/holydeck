@@ -1,0 +1,80 @@
+{
+  "name": "@holydeck/core",
+  "version": "0.0.0",
+  "description": "Core engine for HolyDeck: bible references, local datastore, scraper, sync, templating",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./messages": {
+      "types": "./dist/messages.d.ts",
+      "import": "./dist/messages.js"
+    },
+    "./references": {
+      "types": "./dist/references.d.ts",
+      "import": "./dist/references.js"
+    },
+    "./translations": {
+      "types": "./dist/translations.d.ts",
+      "import": "./dist/translations.js"
+    },
+    "./canon": {
+      "types": "./dist/canon.d.ts",
+      "import": "./dist/canon.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    },
+    "./sermon": {
+      "types": "./dist/sermon.d.ts",
+      "import": "./dist/sermon.js"
+    },
+    "./template": {
+      "types": "./dist/template.d.ts",
+      "import": "./dist/template.js"
+    },
+    "./storage": {
+      "types": "./dist/storage.d.ts",
+      "import": "./dist/storage.js"
+    },
+    "./file-store": {
+      "types": "./dist/file-store.d.ts",
+      "import": "./dist/file-store.js"
+    },
+    "./scraper": {
+      "types": "./dist/scraper.d.ts",
+      "import": "./dist/scraper.js"
+    },
+    "./fetcher": {
+      "types": "./dist/fetcher.d.ts",
+      "import": "./dist/fetcher.js"
+    },
+    "./sync": {
+      "types": "./dist/sync.d.ts",
+      "import": "./dist/sync.js"
+    },
+    "./assemble": {
+      "types": "./dist/assemble.d.ts",
+      "import": "./dist/assemble.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.0",
+    "tsup": "^8.5.1",
+    "vitest": "^5.0.0"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "liquidjs": "^10.29.0",
+    "yaml": "^2.9.0"
+  }
+}
