@@ -9,15 +9,20 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "test:release": "node --test \"scripts/release/**/*.test.mjs\"",
+    "release": "release-it"
   },
   "packageManager": "pnpm@12.3.4+sha512.961aa41fb077da3a04a441d9f8e15ebc0c96da8ef710b2eb67bf9ee7cb0610eabd48f1fd85f51cffe73846785fa0f87c56a3a872a1d893f8446741b5cce45457",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@release-it/conventional-changelog": "^12.0.0",
     "@types/node": "^26.4.1",
     "eslint": "^10.10.0",
+    "release-it": "^21.0.2",
     "turbo": "^2.10.12",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.69.0"
-  }
+  },
+  "version": "0.0.0"
 }
