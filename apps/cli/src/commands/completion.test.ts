@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { knownTranslations } from '@holydeck/core/translations';
 import { makeContext } from '../../test/harness.js';
-import { runCli } from '../program.js';
+import { buildProgram, runCli } from '../program.js';
+import { COMMAND_NAMES } from './completion.js';
+
+// Hard-coded (not derived from the source) so dropping `.sort()` in completion.ts,
+// or editing the translation catalog, surfaces here instead of silently passing.
+const KNOWN_TRANSLATION_ABBREVIATIONS = ['AMP', 'ICL00D', 'KJV', 'NIV', 'NLT', 'NR06', 'SCH2000', 'TAOVBSI', 'VULG'];
 
 describe('completion', () => {
   it('prints a zsh completion script', async () => {
@@ -28,19 +32,26 @@ describe('completion', () => {
   it('requires a shell argument unless --translations is used', async () => {
     const setup = makeContext();
     await expect(runCli(setup.ctx, ['completion'])).resolves.toBe(1);
-    expect(setup.stderr()).toContain('Unknown shell');
+    expect(setup.stderr()).toContain('Unknown shell "(none)". Supported: zsh, bash.');
   });
 
   it('prints known translation abbreviations with the hidden --translations flag', async () => {
     const setup = makeContext();
     await expect(runCli(setup.ctx, ['completion', '--translations'])).resolves.toBe(0);
     const lines = setup.stdout().trimEnd().split('\n');
-    expect(lines).toEqual(Object.keys(knownTranslations).sort());
+    expect(lines).toEqual(KNOWN_TRANSLATION_ABBREVIATIONS);
   });
 
   it('hides --translations from help output', async () => {
     const setup = makeContext();
     await expect(runCli(setup.ctx, ['completion', '--help'])).resolves.not.toBe(1);
     expect(setup.stdout()).not.toContain('--translations');
+  });
+
+  it('keeps COMMAND_NAMES in sync with the commands registered on the program', () => {
+    const setup = makeContext();
+    const program = buildProgram(setup.ctx);
+    const registered = program.commands.map((command) => command.name()).sort();
+    expect(registered).toEqual([...COMMAND_NAMES].sort());
   });
 });
