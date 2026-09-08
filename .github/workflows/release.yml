@@ -126,17 +126,20 @@ jobs:
         run: |
           if live="$(npm view "holydeck@$VERSION" version --registry https://registry.npmjs.org 2>&1)"; then
             echo "holydeck@$VERSION is already live on npmjs, nothing to stage"
+            echo "- holydeck@$VERSION already live on npmjs (nothing to stage)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "npm view says holydeck@$VERSION is not live: $live"
           if output="$(npm stage publish "$RUNNER_TEMP"/tarballs/holydeck-[0-9]*.tgz 2>&1)"; then
             echo "$output"
             echo "holydeck@$VERSION is staged, approve it to make it live (see RELEASING.md)"
+            echo "- holydeck@$VERSION → staged on npmjs (awaiting approval)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "$output"
           if grep -qiE 'cannot publish over|EPUBLISHCONFLICT|already (staged|published)' <<<"$output"; then
             echo "npm reported a duplicate-version conflict; treating holydeck@$VERSION as already present"
+            echo "- holydeck@$VERSION already staged or live on npmjs (skipped)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           exit 1
@@ -175,12 +178,14 @@ jobs:
         run: |
           if live="$(npm view "@holydeck/cli@$VERSION" version --registry https://npm.pkg.github.com 2>&1)"; then
             echo "@holydeck/cli@$VERSION is already on GitHub Packages, skipping"
+            echo "- @holydeck/cli@$VERSION already on GitHub Packages (skipped)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "npm view says @holydeck/cli@$VERSION is not published yet: $live"
           mkdir -p "$RUNNER_TEMP/mirror"
           (cd apps/cli && npm pkg set name=@holydeck/cli && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
           npm publish "$RUNNER_TEMP"/mirror/holydeck-cli-*.tgz --registry=https://npm.pkg.github.com
+          echo "- @holydeck/cli@$VERSION → published to GitHub Packages" >> "$GITHUB_STEP_SUMMARY"
 
   docker:
     needs: [verify, publish-npm]
@@ -210,9 +215,11 @@ jobs:
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists, skipping"
-            exit 0
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
+          url="$(gh release view "$GITHUB_REF_NAME" --json url -q .url)"
+          echo "- release: $url" >> "$GITHUB_STEP_SUMMARY"
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

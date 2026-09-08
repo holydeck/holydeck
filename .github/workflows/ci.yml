@@ -45,7 +45,27 @@ jobs:
       - name: Test the release scripts
         run: pnpm run test:release
       - name: Lint, typecheck, test, build
-        run: pnpm turbo lint typecheck test build
+        run: |
+          declare -A pipeline_status
+          overall=0
+          for step in lint typecheck test build; do
+            if pnpm turbo run "$step"; then
+              pipeline_status[$step]=pass
+            else
+              pipeline_status[$step]=fail
+              overall=1
+            fi
+          done
+          {
+            echo '### Pipeline results'
+            echo
+            echo '| Step | Result |'
+            echo '| --- | --- |'
+            for step in lint typecheck test build; do
+              echo "| $step | ${pipeline_status[$step]} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$overall"
 
   docker:
     needs: verify
