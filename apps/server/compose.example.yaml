@@ -1,0 +1,25 @@
+# Example stack: HolyDeck server + MongoDB.
+#
+# The server has no auth or TLS of its own — put your reverse proxy in front
+# (e.g. https://bible.example.com -> your-proxy -> server:3000) and terminate
+# TLS / access control there.
+services:
+  server:
+    image: ghcr.io/holydeck/server:latest
+    restart: unless-stopped
+    environment:
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017
+      HOLYDECK_MONGO_DB: holydeck
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
