@@ -4,6 +4,8 @@ import { HolyDeckError } from './messages.js';
 import { appendRevision, createEmptyStoreFile, validateStoreFile } from './storage.js';
 import type { TranslationStoreFile, VerseMap } from './storage.js';
 
+const ABBR_PATTERN = /^[A-Z0-9]{1,16}$/;
+
 export interface FileStoreOptions {
   now?: () => string;
   lockTimeoutMs?: number;
@@ -27,12 +29,20 @@ export class FileStore {
     this.staleLockMs = options.staleLockMs ?? 60_000;
   }
 
+  private normalizeAbbr(abbr: string): string {
+    const upper = abbr.toUpperCase();
+    if (!ABBR_PATTERN.test(upper)) {
+      throw new HolyDeckError('invalid_translation', { abbr });
+    }
+    return upper;
+  }
+
   translationPath(abbr: string): string {
-    return join(this.dataDir, 'bibles', `${abbr.toUpperCase()}.json`);
+    return join(this.dataDir, 'bibles', `${this.normalizeAbbr(abbr)}.json`);
   }
 
   private lockPath(abbr: string): string {
-    return join(this.dataDir, 'bibles', `.${abbr.toUpperCase()}.lock`);
+    return join(this.dataDir, 'bibles', `.${this.normalizeAbbr(abbr)}.lock`);
   }
 
   async load(abbr: string): Promise<TranslationStoreFile | undefined> {

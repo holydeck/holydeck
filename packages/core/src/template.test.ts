@@ -91,4 +91,16 @@ describe('renderOutput', () => {
     await expect(renderOutput(DEFAULT_TEMPLATE, entries)).rejects.toBe(inner);
     spy.mockRestore();
   });
+
+  it('blocks {% render %} from reading files off the real filesystem', async () => {
+    await expect(renderOutput('{% render "package.json" %}', entries)).rejects.toMatchObject({
+      code: 'template_invalid',
+    });
+  });
+
+  it('blocks {% include %} from reading files off the real filesystem', async () => {
+    await expect(renderOutput('{% include "package.json" %}', entries)).rejects.toMatchObject({
+      code: 'template_invalid',
+    });
+  });
 });

@@ -70,6 +70,28 @@ describe('putChapter', () => {
   });
 });
 
+describe('translation abbr validation', () => {
+  it('rejects a traversal abbr in translationPath', () => {
+    try {
+      store.translationPath('../../etc/passwd');
+      expect.unreachable();
+    } catch (error) {
+      expect((error as HolyDeckError).code).toBe('invalid_translation');
+    }
+  });
+
+  it('rejects a traversal abbr before it can touch the filesystem via putChapter', async () => {
+    await expect(store.putChapter('../../etc/passwd', 'PSA', '117', { '1': 'A' }, 1)).rejects.toMatchObject({
+      code: 'invalid_translation',
+    });
+  });
+
+  it.each(['KJV', 'SCH2000', 'NR06', 'TAOVBSI'])('leaves a valid registry abbr %s unaffected', async (abbr) => {
+    expect(await store.load(abbr)).toBeUndefined();
+    expect(store.translationPath(abbr)).toContain(`${abbr}.json`);
+  });
+});
+
 describe('withLock', () => {
   it('serializes concurrent critical sections', async () => {
     const order: string[] = [];
