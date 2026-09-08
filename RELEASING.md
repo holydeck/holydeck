@@ -93,17 +93,22 @@ machine, and you are on a clean, up-to-date `main`.
   a commit that is not on `main`. Fix `main`, delete the tag locally and
   remotely, and release again.
 - **Any job fails:** fix the cause and re-run the failed job from the
-  workflow run page. Every job that writes something checks first and skips
-  what is already there, so a re-run cannot fail on work an earlier run
-  finished: both publish steps ask the registry for the version, and
-  `github-release` asks for the release.
+  workflow run page. Both publish steps ask the registry for the version
+  first and `github-release` asks for the release, so in the normal case a
+  re-run skips whatever an earlier run finished rather than failing on it.
+  (`docker` has no such check — it simply pushes the same digest again, which
+  is harmless.)
 - **What the npmjs guard actually does:** it can see a *live* version but
   not a *staged* one — a trusted-publisher token may only run `npm publish`
   and `npm stage publish`, never `npm stage list`. So it skips outright when
-  the version is already live, and otherwise stages, recognising npm's
-  duplicate-version error as "already staged" and letting the job pass. Any
-  other failure — an unauthorized action, a bad tarball, a network error —
-  still fails the job.
+  the version is already live, and otherwise stages, letting the job pass
+  only if npm refuses with a duplicate-version error. Any other failure —
+  an unauthorized action, a bad tarball, a registry write conflict, a
+  network error — still fails the job, deliberately: the guard is narrow so
+  that it can never report success with nothing staged. If a re-run of
+  `publish-npm` does fail on a publish conflict, run `npm stage list holydeck`
+  locally to see whether the version is already staged before doing anything
+  else.
 - **Manual publish fallback** (if a re-run is impossible): from a checkout
   of the release tag, build first (`pnpm turbo build --filter=holydeck...` —
   the CLI ships `dist/`, which is gitignored and only exists after a
