@@ -143,6 +143,43 @@ describe('withLock', () => {
     expect(await store.withLock('KJV', async () => 'ran')).toBe('ran');
     unlinkSpy.mockRestore();
   });
+
+  it('refreshes a held lock so a competing withLock waits instead of stealing it as stale', async () => {
+    const refreshingStore = new FileStore(dir, {
+      lockTimeoutMs: 5000,
+      lockPollMs: 20,
+      staleLockMs: 120,
+    });
+    const order: string[] = [];
+    await Promise.all([
+      refreshingStore.withLock('KJV', async () => {
+        order.push('a-in');
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        order.push('a-out');
+      }),
+      (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        order.push('b-in');
+        await refreshingStore.withLock('KJV', async () => {
+          order.push('b-run');
+        });
+      })(),
+    ]);
+    expect(order).toEqual(['a-in', 'b-in', 'a-out', 'b-run']);
+  });
+
+  it('tolerates a lock refresh failing because the lock file vanished mid-hold', async () => {
+    const utimesSpy = vi
+      .spyOn(fsPromises, 'utimes')
+      .mockRejectedValue(Object.assign(new Error('gone'), { code: 'ENOENT' }));
+    const refreshingStore = new FileStore(dir, { lockTimeoutMs: 2000, lockPollMs: 20, staleLockMs: 60 });
+    const result = await refreshingStore.withLock('KJV', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return 'ok';
+    });
+    expect(result).toBe('ok');
+    utimesSpy.mockRestore();
+  });
 });
 
 describe('FileStore defaults', () => {

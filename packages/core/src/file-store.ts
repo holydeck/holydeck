@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { HolyDeckError } from './messages.js';
 import { appendRevision, createEmptyStoreFile, validateStoreFile } from './storage.js';
@@ -86,9 +86,15 @@ export class FileStore {
         await new Promise((resolve) => setTimeout(resolve, this.lockPollMs));
       }
     }
+    const refresh = setInterval(() => {
+      const now = new Date();
+      utimes(lockPath, now, now).catch(() => undefined);
+    }, this.staleLockMs / 3);
+    refresh.unref();
     try {
       return await fn();
     } finally {
+      clearInterval(refresh);
       await unlink(lockPath).catch(() => undefined);
     }
   }
