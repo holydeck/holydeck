@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildTestApp } from '../../test/helpers/app.js';
+import { chapterHtml } from '../../test/helpers/scrape.js';
 import type { TestApp } from '../../test/helpers/app.js';
 
 interface RenderBody {
@@ -118,6 +119,26 @@ describe('POST /api/v1/render', () => {
     expect(fetched.statusCode).toBe(200);
     expect(fetched.json<RenderBody>().output).toContain('Psalms 117:1 (NIV)');
     expect(ctx.urls.some((u) => u.includes('PSA.117'))).toBe(true);
+  });
+
+  it('renders with English book names and says so when the real ones cannot be fetched', async () => {
+    const offline = await buildTestApp({
+      scrape: (requestUrl) => {
+        if (requestUrl.includes('/api/bible/version/')) throw new Error('version API down');
+        return chapterHtml('PSA', '117', { '1': 'O praise the LORD, all ye nations.', '2': 'Praise him, all ye people.' });
+      },
+    });
+    const response = await offline.app.inject({
+      method: 'POST',
+      url,
+      headers: { 'content-type': 'text/yaml' },
+      payload: modernSermon,
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<RenderBody>();
+    expect(body.output).toContain('Psalms 117:1-2 (KJV)');
+    expect(body.notices.some((notice) => notice.includes('book names of KJV'))).toBe(true);
+    await offline.stop();
   });
 
   it('400s with sermon_invalid on unparseable YAML and on a JSON null body', async () => {

@@ -26,13 +26,19 @@ export interface VersesResult {
   bookName: string;
 }
 
-export async function readVerses(store: MongoStore, fetcher: Fetcher, request: VersesRequest): Promise<VersesResult> {
+export async function readVerses(
+  store: MongoStore,
+  fetcher: Fetcher,
+  request: VersesRequest,
+  onCanonUnavailable?: (reason: string) => void,
+): Promise<VersesResult> {
   const abbr = request.abbr.toUpperCase();
   const book = request.book.toUpperCase();
   const chapter = String(request.chapter);
   const { file, fetched } = await ensureChapters(store, fetcher, abbr, [{ book, chapter }], {
     refresh: request.refresh,
     fetchMissing: request.fetchMissing,
+    onCanonUnavailable,
   });
   const canon = file?.canon ?? bundledCanon();
   const record = getChapter(file, book, chapter);

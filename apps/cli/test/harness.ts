@@ -7,6 +7,7 @@ import type { HttpGet } from '@holydeck/core/fetcher';
 import { FileStore } from '@holydeck/core/file-store';
 import { createEmptyStoreFile } from '@holydeck/core/storage';
 import type { VerseMap } from '@holydeck/core/storage';
+import { bundledCanon } from '@holydeck/core/canon';
 import type { Canon, TranslationMeta } from '@holydeck/core/canon';
 import type { CliContext } from '../src/context.js';
 import type { HttpPost } from '../src/server-client.js';
@@ -113,11 +114,14 @@ export async function seedStore(
   dataDir: string,
   abbr: string,
   chapters: Array<{ book: string; chapter: string; verses: VerseMap; canonVerseCount?: number }>,
-  extras: { canon?: Canon; meta?: TranslationMeta } = {},
+  extras: { canon?: Canon; meta?: TranslationMeta; withoutCanon?: boolean } = {},
 ): Promise<void> {
   const store = new FileStore(dataDir, { now: () => SEED_TIME });
   const file = (await store.load(abbr)) ?? createEmptyStoreFile(abbr, SEED_TIME);
-  if (extras.canon) file.canon = extras.canon;
+  // A synced translation carries its own canon, so a seeded one does too: without it a render
+  // would go and fetch the book names, which no canned response answers. withoutCanon seeds the
+  // store an older version left behind, which is what teaches this one to repair itself.
+  if (extras.withoutCanon !== true) file.canon = extras.canon ?? bundledCanon();
   if (extras.meta) file.meta = extras.meta;
   for (const chapter of chapters) {
     store.putChapterInFile(file, chapter.book, chapter.chapter, chapter.verses, chapter.canonVerseCount ?? Object.keys(chapter.verses).length);

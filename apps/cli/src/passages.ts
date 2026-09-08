@@ -71,6 +71,9 @@ async function loadLocal(
         if (spinner === undefined) spinner = startSpinner(ctx, text);
         else spinner.label(text);
       },
+      onCanonUnavailable: (reason) => {
+        errLine(ctx, formatMessage('canon_unavailable', { abbr, reason }));
+      },
     }).finally(() => {
       spinner?.stop();
     });
@@ -107,7 +110,6 @@ async function loadServer(
   const chapters = chapterRefs(sermon);
   for (const abbr of sermon.translations) {
     const file = createEmptyStoreFile(abbr, ctx.now().toISOString());
-    file.canon = await server.getCanon(abbr);
     for (const ref of chapters) {
       const verses = shiftedVerses(sermon, abbr, ref);
       const response = await server.getVerses(abbr, ref.book, Number(ref.chapter), verses, {
@@ -129,6 +131,9 @@ async function loadServer(
       book.chapters[ref.chapter] = record;
       footers.push(footerFor(abbr, ref, response.revision, response.fetchedAt, response.source === 'live'));
     }
+    // Asked after the verses: a chapter fetched just now teaches the server the translation's
+    // own canon, and that is what names the books of this very render.
+    file.canon = await server.getCanon(abbr);
     storeFiles[abbr] = file;
   }
   return { entries: assembleEntries(sermon, storeFiles), footers };

@@ -105,6 +105,7 @@ describe('GET /api/v1/verse (deprecated shim)', () => {
   });
 
   it("400s with the frozen not-found literal for an unknown book", async () => {
+    await seedGermanCanon(); // a stored canon that does not hold the book still falls back to the bundled one
     const response = await ctx.app.inject({ method: 'GET', url: `${url}?book=Nope&chapter=1&verses=1` });
     expect(response.statusCode).toBe(400);
     expect(response.json<LegacyError>()).toEqual({
@@ -138,6 +139,8 @@ describe('GET /api/v1/verse (deprecated shim)', () => {
   });
 
   it('re-fetches when force is set', async () => {
+    // A store with its canon asks for nothing: the shim checks the chapter against that canon.
+    await seedGermanCanon();
     await ctx.store.putChapter('KJV', 'PSA', '117', { '1': 'Stale.', '2': 'Two.' }, 2);
     const cached = await ctx.app.inject({ method: 'GET', url: `${url}?book=PSA&chapter=117&verses=1` });
     expect(cached.json<LegacySuccess>().passage).toBe('Stale.');

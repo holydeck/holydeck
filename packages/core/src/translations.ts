@@ -12,10 +12,15 @@ export const knownTranslations: Record<string, number> = {
   VULG: 823,
 };
 
-export function translationId(abbr: string): number {
+/** The bible.com id of a translation, or undefined for a name this build does not know. */
+export function findTranslationId(abbr: string): number | undefined {
   const upper = abbr.trim().toUpperCase();
   if (/^\d+$/.test(upper)) return Number(upper);
-  const id = knownTranslations[upper];
+  return knownTranslations[upper];
+}
+
+export function translationId(abbr: string): number {
+  const id = findTranslationId(abbr);
   if (id === undefined) {
     throw new HolyDeckError('unknown_translation', {
       abbr,

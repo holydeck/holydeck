@@ -3,6 +3,7 @@ import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { HolyDeckError } from './messages.js';
 import { appendRevision, createEmptyStoreFile, validateStoreFile } from './storage.js';
+import type { Canon, TranslationMeta } from './canon.js';
 import type { TranslationStoreFile, VerseMap } from './storage.js';
 
 const ABBR_PATTERN = /^[A-Z0-9]{1,16}$/;
@@ -193,6 +194,16 @@ export class FileStore {
       const result = this.putChapterInFile(file, book, chapter, verses, canonVerseCount);
       await this.save(abbr, file);
       return result;
+    });
+  }
+
+  /** Records a translation's own metadata and canon — where its localized book names come from. */
+  async putVersionMeta(abbr: string, meta: TranslationMeta, canon: Canon): Promise<void> {
+    await this.withLock(abbr, async () => {
+      const file = (await this.load(abbr)) ?? createEmptyStoreFile(abbr, this.now());
+      file.meta = meta;
+      file.canon = canon;
+      await this.save(abbr, file);
     });
   }
 

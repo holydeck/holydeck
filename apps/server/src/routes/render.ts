@@ -1,5 +1,6 @@
 import { assembleEntries } from '@holydeck/core/assemble';
 import { chapterRefs, ensureChapters } from '@holydeck/core/fetch-missing';
+import { formatMessage } from '@holydeck/core/messages';
 import { parseSermonFile } from '@holydeck/core/sermon';
 import { renderOutput } from '@holydeck/core/template';
 import { flagParam } from './verses.js';
@@ -18,12 +19,15 @@ export function registerRenderRoute(api: FastifyInstance, deps: AppDeps): void {
     };
     const refs = chapterRefs(sermon);
     const storeFiles: Record<string, TranslationStoreFile | undefined> = {};
+    const notices = [...sermon.notices];
     for (const abbr of sermon.translations) {
-      const { file } = await ensureChapters(deps.store, deps.fetcher, abbr, refs, options);
+      const { file } = await ensureChapters(deps.store, deps.fetcher, abbr, refs, {
+        ...options,
+        onCanonUnavailable: (reason) => notices.push(formatMessage('canon_unavailable', { abbr, reason })),
+      });
       storeFiles[abbr.toUpperCase()] = file;
     }
     const entries = assembleEntries(sermon, storeFiles);
-    const notices = [...sermon.notices];
     const output = await renderOutput(sermon.template, entries, notices);
     return { output, notices };
   });

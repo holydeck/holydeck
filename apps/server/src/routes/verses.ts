@@ -1,3 +1,4 @@
+import { formatMessage } from '@holydeck/core/messages';
 import { parseVerseList } from '@holydeck/core/references';
 import { readVerses } from '../verses-service.js';
 import type { FastifyInstance } from 'fastify';
@@ -40,15 +41,20 @@ export function registerVersesRoute(api: FastifyInstance, deps: AppDeps): void {
     },
     async (request) => {
       const query = request.query;
-      const result = await readVerses(deps.store, deps.fetcher, {
-        abbr: request.params.abbr,
-        book: query.book,
-        chapter: query.chapter,
-        verses: parseVerseList(query.verses),
-        refresh: flagParam(query.refresh),
-        fetchMissing: flagParam(query.fetchMissing, true),
-        revision: query.revision,
-      });
+      const result = await readVerses(
+        deps.store,
+        deps.fetcher,
+        {
+          abbr: request.params.abbr,
+          book: query.book,
+          chapter: query.chapter,
+          verses: parseVerseList(query.verses),
+          refresh: flagParam(query.refresh),
+          fetchMissing: flagParam(query.fetchMissing, true),
+          revision: query.revision,
+        },
+        (reason) => request.log.warn(formatMessage('canon_unavailable', { abbr: request.params.abbr, reason })),
+      );
       const verses: VerseMap = {};
       for (const entry of result.verses) {
         verses[String(entry.verse)] = entry.text;

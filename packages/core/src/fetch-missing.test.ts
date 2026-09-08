@@ -32,15 +32,19 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function stubFetcher(text = 'fetched text'): { fetcher: Fetcher; chapterUrls: string[] } {
+function stubFetcher(text = 'fetched text'): { fetcher: Fetcher; chapterUrls: string[]; versionUrls: string[] } {
   const chapterUrls: string[] = [];
+  const versionUrls: string[] = [];
   const httpGet: HttpGet = async (url) => {
-    if (url.includes('/api/bible/version/')) return { status: 200, body: versionJson };
+    if (url.includes('/api/bible/version/')) {
+      versionUrls.push(url);
+      return { status: 200, body: versionJson };
+    }
     chapterUrls.push(url);
     const [, book, chapter] = /\/bible\/\d+\/([A-Z0-9]+)\.(\d+)/.exec(url) ?? [];
     return { status: 200, body: chapterHtml(book ?? 'GEN', chapter ?? '1', text) };
   };
-  return { fetcher: new Fetcher({ httpGet, sleep: async () => {}, backoffMs: 1, retries: 0 }), chapterUrls };
+  return { fetcher: new Fetcher({ httpGet, sleep: async () => {}, backoffMs: 1, retries: 0 }), chapterUrls, versionUrls };
 }
 
 const sermonWith = (entries: Array<{ book: string; chapter: number }>): SermonFile => ({
@@ -74,7 +78,67 @@ describe('ensureChapters', () => {
     await expect(store.load('KJV')).resolves.toBeDefined();
   });
 
-  it('fetches nothing when every chapter is already stored', async () => {
+  it('learns the translation canon on the first fetch and does not ask for it twice', async () => {
+    const { fetcher, versionUrls } = stubFetcher();
+    await ensureChapters(store, fetcher, 'KJV', [{ book: 'GEN', chapter: '30' }]);
+
+    const file = await store.load('KJV');
+    expect(file?.canon?.books.length).toBeGreaterThan(0);
+    expect(file?.meta?.abbreviation).toBe('KJV');
+    expect(versionUrls).toHaveLength(1);
+
+    await ensureChapters(store, fetcher, 'KJV', [{ book: 'PSA', chapter: '118' }]);
+    expect(versionUrls).toHaveLength(1);
+  });
+
+  it('learns the book names of a store written before they were kept, fetching no chapter for it', async () => {
+    await store.putChapter('KJV', 'GEN', '30', { '1': 'already here' }, 1);
+    const { fetcher, chapterUrls, versionUrls } = stubFetcher();
+    const result = await ensureChapters(store, fetcher, 'KJV', [{ book: 'GEN', chapter: '30' }]);
+
+    expect(result.file?.canon?.books.length).toBeGreaterThan(0);
+    expect(versionUrls).toHaveLength(1);
+    expect(chapterUrls).toEqual([]);
+  });
+
+  it('asks for nothing at all when fetching is off, canon or no canon', async () => {
+    await store.putChapter('KJV', 'GEN', '30', { '1': 'already here' }, 1);
+    const { fetcher, chapterUrls, versionUrls } = stubFetcher();
+    const result = await ensureChapters(store, fetcher, 'KJV', [{ book: 'GEN', chapter: '30' }], {
+      fetchMissing: false,
+    });
+
+    expect(result.file?.canon).toBeUndefined();
+    expect([...versionUrls, ...chapterUrls]).toEqual([]);
+  });
+
+  it('asks for no book names for a translation bible.com has no id for', async () => {
+    await store.putChapter('WEB', 'GEN', '30', { '1': 'imported text' }, 1);
+    const { fetcher, chapterUrls, versionUrls } = stubFetcher();
+    const result = await ensureChapters(store, fetcher, 'WEB', [{ book: 'GEN', chapter: '30' }]);
+
+    expect(result.file?.canon).toBeUndefined();
+    expect([...versionUrls, ...chapterUrls]).toEqual([]);
+  });
+
+  it('renders on with English names when the book names stay out of reach', async () => {
+    const httpGet: HttpGet = async (url) => {
+      if (url.includes('/api/bible/version/')) return { status: 503, body: 'busy' };
+      return { status: 200, body: chapterHtml('GEN', '30', 'fetched anyway') };
+    };
+    const fetcher = new Fetcher({ httpGet, sleep: async () => {}, backoffMs: 1, retries: 0 });
+    const reasons: string[] = [];
+    const result = await ensureChapters(store, fetcher, 'KJV', [{ book: 'GEN', chapter: '30' }], {
+      onCanonUnavailable: (reason) => reasons.push(reason),
+    });
+
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('503');
+    expect(result.file?.canon).toBeUndefined();
+    expect(getChapter(result.file, 'GEN', '30')?.revisions.at(-1)?.verses['1']).toBe('fetched anyway');
+  });
+
+  it('fetches no chapter when every one is already stored', async () => {
     await store.putChapter('KJV', 'GEN', '30', { '1': 'already here' }, 1);
     const { fetcher, chapterUrls } = stubFetcher();
     const result = await ensureChapters(store, fetcher, 'KJV', [{ book: 'GEN', chapter: '30' }]);
