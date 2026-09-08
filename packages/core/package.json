@@ -68,6 +68,10 @@
     "./assemble": {
       "types": "./dist/assemble.d.ts",
       "import": "./dist/assemble.js"
+    },
+    "./fetch-missing": {
+      "types": "./dist/fetch-missing.d.ts",
+      "import": "./dist/fetch-missing.js"
     }
   },
   "scripts": {
