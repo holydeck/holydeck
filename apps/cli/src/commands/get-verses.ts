@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { Command, Option } from 'commander';
 import { HolyDeckError, formatMessage } from '@holydeck/core/messages';
 import { parseSermonFile } from '@holydeck/core/sermon';
@@ -8,6 +6,7 @@ import type { CliContext } from '../context.js';
 import { loadEntryData, renderAndDeliver } from '../passages.js';
 import type { GlobalOptions } from '../program.js';
 import { createRuntime, runtimeFlags } from '../runtime.js';
+import { readSermonFile } from '../sermon-file.js';
 import { readState, writeState } from '../state.js';
 
 export interface GetVersesOptions {
@@ -53,13 +52,7 @@ export async function runGetVerses(
     throw new HolyDeckError('sermon_invalid', { reason: 'no sermon file given (pass a path or --last)' });
   }
 
-  const absolutePath = resolve(ctx.cwd, sermonPath);
-  let text: string;
-  try {
-    text = await readFile(absolutePath, 'utf8');
-  } catch {
-    throw new HolyDeckError('sermon_file_missing', { path: absolutePath });
-  }
+  const { path: absolutePath, text } = await readSermonFile(ctx, sermonPath);
 
   const sermon = parseSermonFile(text);
   for (const notice of sermon.notices) errLine(ctx, notice);
