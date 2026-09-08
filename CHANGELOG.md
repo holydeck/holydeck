@@ -1,5 +1,11 @@
 # Changelog
 
+## [2026.9.2](https://github.com/holydeck/holydeck/compare/v2026.9.1...v2026.9.2) (2026-09-08)
+
+### Features
+
+* **cli:** add OIDC server authentication ([d06fc2c](https://github.com/holydeck/holydeck/commit/d06fc2ca19bf83ba2dcb471e5adcb88a7d9b9744))
+
 ## 2026.9.1 (2026-09-08)
 
 ### Features
