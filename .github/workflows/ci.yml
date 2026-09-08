@@ -25,6 +25,7 @@ jobs:
           path: /home/runner/.cache/mongodb-binaries
           key: mongodb-binaries-${{ runner.os }}-8.0.4
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:release
       - run: pnpm turbo lint typecheck test build
 
   docker:
