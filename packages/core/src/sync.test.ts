@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseVersionMeta } from './canon.js';
 import { Fetcher } from './fetcher.js';
@@ -166,6 +166,21 @@ describe('syncTranslation', () => {
     const dry = await syncTranslation(store, fetcher, 'KJV', { dryRun: true });
     expect(urls).toHaveLength(0); // no version fetch needed — canon already on disk
     expect(dry.planned).toBe(1189);
+  });
+
+  it('treats a null canon on disk as missing and refetches metadata on a dry run', async () => {
+    const path = store.translationPath('KJV');
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify({ schemaVersion: 1, translation: 'KJV', updatedAt: store.now(), canon: null, books: {} }),
+      'utf8',
+    );
+    const { fetcher, urls } = stubFetcher((url) => versionOk(url) ?? { status: 200, body: chapterHtml('GEN', '1', 'x') });
+    const dry = await syncTranslation(store, fetcher, 'KJV', { dryRun: true });
+    expect(urls).toContain('https://www.bible.com/api/bible/version/1'); // null canon is treated as missing — refetch happens
+    expect(dry.planned).toBe(1189);
+    expect(dry.plan?.[0]).toEqual({ book: 'GEN', chapter: '1', reason: 'missing' });
   });
 
   it('uses the default real-time sleep between fetches when no custom sleep is supplied', async () => {
