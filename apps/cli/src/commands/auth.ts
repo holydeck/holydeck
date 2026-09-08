@@ -54,13 +54,18 @@ export async function runAuthLogin(
   globals: GlobalOptions,
   dependencies?: OidcDependencies,
 ): Promise<void> {
-  const url = await serverUrl(ctx, globals);
-  const env = ctx.platform.env;
-  const issuer = required(options.issuer ?? env.HOLYDECK_OIDC_ISSUER, '--issuer', 'HOLYDECK_OIDC_ISSUER');
-  const clientId = required(options.clientId ?? env.HOLYDECK_OIDC_CLIENT_ID, '--client-id', 'HOLYDECK_OIDC_CLIENT_ID');
-  const audience = options.audience ?? env.HOLYDECK_OIDC_AUDIENCE;
-  const resource = options.resource ?? env.HOLYDECK_OIDC_RESOURCE;
-  const scope = options.scope ?? env.HOLYDECK_OIDC_SCOPE;
+  const config = await resolveRuntimeConfig(ctx, {
+    ...runtimeFlags(globals),
+    oidcIssuer: options.issuer,
+    oidcClientId: options.clientId,
+    oidcAudience: options.audience,
+    oidcResource: options.resource,
+    oidcScope: options.scope,
+    oidcCallbackPort: options.callbackPort,
+  });
+  const url = required(config.values.serverUrl, '--server-url', 'HOLYDECK_SERVER_URL');
+  const issuer = required(config.values.oidcIssuer, '--issuer', 'HOLYDECK_OIDC_ISSUER');
+  const clientId = required(config.values.oidcClientId, '--client-id', 'HOLYDECK_OIDC_CLIENT_ID');
   const deps = dependencies ?? defaultOidcDependencies({
     httpGet: ctx.httpGet,
     httpPost: ctx.httpPost,
@@ -74,10 +79,10 @@ export async function runAuthLogin(
       serverUrl: url,
       issuer,
       clientId,
-      audience,
-      resource,
-      scope,
-      callbackPort: options.callbackPort,
+      audience: config.values.oidcAudience,
+      resource: config.values.oidcResource,
+      scope: config.values.oidcScope,
+      callbackPort: config.values.oidcCallbackPort,
       onAuthorizationUrl: (authorizationUrl, opened) => {
         errLine(ctx, opened ? `Opened ${authorizationUrl}` : `Open this URL in a browser: ${authorizationUrl}`);
       },
@@ -118,7 +123,7 @@ export function registerAuth(program: Command, ctx: CliContext): void {
     .option('--audience <url>', 'access-token audience (or HOLYDECK_OIDC_AUDIENCE)')
     .option('--resource <url>', 'access-token resource prefix (or HOLYDECK_OIDC_RESOURCE)')
     .option('--scope <scope>', 'space-separated scopes (or HOLYDECK_OIDC_SCOPE)')
-    .option('--callback-port <port>', 'loopback callback port', Number, 53682)
+    .option('--callback-port <port>', 'loopback callback port', Number)
     .action(async (options: AuthLoginOptions, command: Command) => {
       await runAuthLogin(ctx, options, command.optsWithGlobals<GlobalOptions>());
     });

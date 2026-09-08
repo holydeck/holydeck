@@ -59,6 +59,27 @@ describe('createRuntime', () => {
     expect(runtime.config.sources.dataDir).toBe('flag');
   });
 
+  it('maps OIDC login options onto the config flag layer', async () => {
+    const { ctx } = makeContext();
+    const runtime = await createRuntime(ctx, {
+      oidcIssuer: 'https://auth.example.com',
+      oidcClientId: 'holydeck-cli',
+      oidcAudience: 'https://audience.example.com',
+      oidcResource: 'https://resource.example.com',
+      oidcScope: 'openid offline_access',
+      oidcCallbackPort: 4567,
+    });
+    expect(runtime.config.values).toMatchObject({
+      oidcIssuer: 'https://auth.example.com',
+      oidcClientId: 'holydeck-cli',
+      oidcAudience: 'https://audience.example.com',
+      oidcResource: 'https://resource.example.com',
+      oidcScope: 'openid offline_access',
+      oidcCallbackPort: 4567,
+    });
+    expect(runtime.config.sources.oidcIssuer).toBe('flag');
+  });
+
   it('routes scrape traffic through the browser when browserFetch is on', async () => {
     const launcher = fakeLauncher('<html>from the browser</html>');
     const { ctx } = makeContext({ overrides: { browserLauncher: launcher } });

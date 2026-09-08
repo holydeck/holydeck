@@ -15,6 +15,12 @@ export interface GlobalFlags {
   serverUrl?: string;
   translations?: string;
   browserFetch?: boolean;
+  oidcIssuer?: string;
+  oidcClientId?: string;
+  oidcAudience?: string;
+  oidcResource?: string;
+  oidcScope?: string;
+  oidcCallbackPort?: number;
 }
 
 export interface Runtime {
@@ -67,6 +73,12 @@ export async function resolveRuntimeConfig(ctx: CliContext, flags: GlobalFlags =
   const flagValues: Partial<HolyDeckConfig> = {};
   if (flags.dataDir !== undefined) flagValues.dataDir = flags.dataDir;
   if (flags.serverUrl !== undefined) flagValues.serverUrl = flags.serverUrl;
+  if (flags.oidcIssuer !== undefined) flagValues.oidcIssuer = flags.oidcIssuer;
+  if (flags.oidcClientId !== undefined) flagValues.oidcClientId = flags.oidcClientId;
+  if (flags.oidcAudience !== undefined) flagValues.oidcAudience = flags.oidcAudience;
+  if (flags.oidcResource !== undefined) flagValues.oidcResource = flags.oidcResource;
+  if (flags.oidcScope !== undefined) flagValues.oidcScope = flags.oidcScope;
+  if (flags.oidcCallbackPort !== undefined) flagValues.oidcCallbackPort = flags.oidcCallbackPort;
   if (flags.translations !== undefined) {
     flagValues.defaultTranslations = flags.translations
       .split(',')

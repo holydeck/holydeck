@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { configFilePath } from '@holydeck/core/config';
 import { HolyDeckError } from '@holydeck/core/messages';
 import { makeContext } from '../../test/harness.js';
 import { authFilePath, readOidcSession, saveOidcSession } from '../oidc.js';
@@ -93,6 +95,29 @@ describe('auth commands', () => {
       scope: 'openid offline_access',
     });
     expect((await readOidcSession(setup.ctx.platform, serverUrl))?.audience).toBeUndefined();
+  });
+
+  it('reuses OIDC login settings from the config file', async () => {
+    const setup = makeContext();
+    const path = configFilePath(setup.ctx.platform);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, [
+      `serverUrl: ${serverUrl}`,
+      `oidcIssuer: ${issuer}`,
+      'oidcClientId: holydeck-cli',
+      `oidcResource: ${serverUrl}`,
+      'oidcScope: offline_access authelia.bearer.authz',
+      'oidcCallbackPort: 4567',
+    ].join('\n'));
+
+    await runAuthLogin(setup.ctx, {}, {}, loginDependencies(true));
+
+    expect(await readOidcSession(setup.ctx.platform, serverUrl)).toMatchObject({
+      clientId: 'holydeck-cli',
+      resource: serverUrl,
+      scope: 'offline_access authelia.bearer.authz',
+    });
+    expect(setup.stderr()).toContain('Opened https://auth.example.com/authorize');
   });
 
   it.each([

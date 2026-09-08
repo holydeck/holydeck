@@ -218,7 +218,11 @@ printing tokens, or `holydeck auth logout` to remove it.
 For unattended configuration, the required login options can also be supplied as
 `HOLYDECK_OIDC_ISSUER` and `HOLYDECK_OIDC_CLIENT_ID`; optional values are
 `HOLYDECK_OIDC_AUDIENCE`, `HOLYDECK_OIDC_RESOURCE`, and
-`HOLYDECK_OIDC_SCOPE`.
+`HOLYDECK_OIDC_SCOPE`, plus `HOLYDECK_OIDC_CALLBACK_PORT` when the default
+port is unavailable. To make later logins just `holydeck auth login`, save
+the same values as `serverUrl`, `oidcIssuer`, `oidcClientId`, `oidcAudience`,
+`oidcResource`, `oidcScope`, and `oidcCallbackPort` in `config.yaml`. Run
+`holydeck config init` to generate a commented template containing every key.
 
 ## Links
 
