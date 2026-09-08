@@ -101,6 +101,55 @@ describe('ServerClient URLs and parsing', () => {
       },
     ]);
   });
+
+  it('adds a bearer token to GET and POST requests', async () => {
+    const headers: Record<string, string>[] = [];
+    const httpGet: HttpGet = async (_url, requestHeaders) => {
+      headers.push(requestHeaders);
+      return { status: 200, body: JSON.stringify({ status: 'ok', version: '1', uptime: 1, store: 'ok' }) };
+    };
+    const httpPost: HttpPost = async (_url, _body, requestHeaders) => {
+      headers.push(requestHeaders);
+      return { status: 200, body: JSON.stringify({ output: 'ok' }) };
+    };
+    const client = new ServerClient('https://holydeck.example.com', {
+      httpGet,
+      httpPost,
+      accessToken: async () => 'access-token',
+    });
+    await client.health();
+    await client.render('x');
+    expect(headers).toEqual([
+      { accept: 'application/json', authorization: 'Bearer access-token' },
+      {
+        accept: 'application/json',
+        authorization: 'Bearer access-token',
+        'content-type': 'text/plain; charset=utf-8',
+      },
+    ]);
+  });
+
+  it('forces one token refresh and retries after HTTP 401', async () => {
+    const tokens: Array<string | undefined> = [];
+    const forced: Array<boolean | undefined> = [];
+    const httpGet: HttpGet = async (_url, headers) => {
+      tokens.push(headers['authorization']);
+      return tokens.length === 1
+        ? { status: 401, body: 'expired' }
+        : { status: 200, body: JSON.stringify({ status: 'ok', version: '1', uptime: 1, store: 'ok' }) };
+    };
+    const client = new ServerClient('https://holydeck.example.com', {
+      httpGet,
+      httpPost: noPost,
+      accessToken: async (force) => {
+        forced.push(force);
+        return force ? 'new' : 'old';
+      },
+    });
+    await expect(client.health()).resolves.toMatchObject({ status: 'ok' });
+    expect(tokens).toEqual(['Bearer old', 'Bearer new']);
+    expect(forced).toEqual([undefined, true]);
+  });
 });
 
 describe('ServerClient errors', () => {
@@ -182,5 +231,17 @@ describe('ServerClient errors', () => {
     const error = await client.getTranslations().catch((e: unknown) => e as HolyDeckError);
     expect((error as HolyDeckError).code).toBe('server_unreachable');
     expect((error as HolyDeckError).params['reason']).toBe('connection reset');
+  });
+
+  it('preserves authentication errors from a token provider', async () => {
+    const expected = new HolyDeckError('auth_failed', { reason: 'refresh rejected' });
+    const client = new ServerClient('https://holydeck.example.com', {
+      httpGet: noGet,
+      httpPost: noPost,
+      accessToken: async () => {
+        throw expected;
+      },
+    });
+    await expect(client.health()).rejects.toBe(expected);
   });
 });

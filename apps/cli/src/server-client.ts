@@ -10,6 +10,8 @@ export type HttpPost = (
   headers: Record<string, string>,
 ) => Promise<{ status: number; body: string }>;
 
+export type AccessTokenProvider = (forceRefresh?: boolean) => Promise<string | undefined>;
+
 export interface ServerTranslationSummary {
   abbreviation: string;
   id: number;
@@ -59,21 +61,33 @@ export class ServerClient {
   readonly baseUrl: string;
   private readonly httpGet: HttpGet;
   private readonly httpPost: HttpPost;
+  private readonly accessToken?: AccessTokenProvider;
 
-  constructor(serverUrl: string, options: { httpGet: HttpGet; httpPost: HttpPost }) {
+  constructor(serverUrl: string, options: { httpGet: HttpGet; httpPost: HttpPost; accessToken?: AccessTokenProvider }) {
     this.baseUrl = serverUrl.replace(/\/+$/, '');
     this.httpGet = options.httpGet;
     this.httpPost = options.httpPost;
+    this.accessToken = options.accessToken;
+  }
+
+  private async send(url: string, post: string | undefined, token: string | undefined): Promise<{ status: number; body: string }> {
+    const headers: Record<string, string> = { ...ACCEPT };
+    if (token !== undefined) headers['authorization'] = `Bearer ${token}`;
+    return post === undefined
+      ? await this.httpGet(url, headers)
+      : await this.httpPost(url, post, { ...headers, 'content-type': 'text/plain; charset=utf-8' });
   }
 
   private async request(url: string, post?: string): Promise<unknown> {
     let response: { status: number; body: string };
     try {
-      response =
-        post === undefined
-          ? await this.httpGet(url, ACCEPT)
-          : await this.httpPost(url, post, { ...ACCEPT, 'content-type': 'text/plain; charset=utf-8' });
+      const token = await this.accessToken?.();
+      response = await this.send(url, post, token);
+      if (response.status === 401 && token !== undefined && this.accessToken !== undefined) {
+        response = await this.send(url, post, await this.accessToken(true));
+      }
     } catch (error) {
+      if (error instanceof HolyDeckError) throw error;
       throw new HolyDeckError('server_unreachable', {
         reason: error instanceof Error ? error.message : String(error),
         url,

@@ -5,6 +5,8 @@ import type { HttpGet } from '@holydeck/core/fetcher';
 import { createPuppeteerLauncher } from '@holydeck/core/puppeteer-launcher';
 import { createClipboard } from './clipboard.js';
 import { createEditor } from './editor.js';
+import { openExternalUrl, startLoopbackCallback } from './oidc-node.js';
+import type { OidcCallbackServer } from './oidc.js';
 import type { HttpPost } from './server-client.js';
 
 export interface CliContext {
@@ -19,6 +21,8 @@ export interface CliContext {
   editor: (path: string) => Promise<'opened' | 'skipped'>;
   httpGet: HttpGet;
   httpPost: HttpPost;
+  openUrl: (url: string) => Promise<boolean>;
+  startOidcCallback: (port: number, state: string) => Promise<OidcCallbackServer>;
   /** Starts the headless browser used when browserFetch is on; tests substitute a fake. */
   browserLauncher?: BrowserLauncher;
   now: () => Date;
@@ -67,6 +71,8 @@ export function defaultContext(): CliContext {
     editor: createEditor(process.env),
     httpGet: fetchHttpGet,
     httpPost: fetchHttpPost,
+    openUrl: openExternalUrl,
+    startOidcCallback: startLoopbackCallback,
     browserLauncher: createPuppeteerLauncher(),
     now: () => new Date(),
   };
