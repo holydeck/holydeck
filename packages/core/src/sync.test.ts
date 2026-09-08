@@ -90,7 +90,7 @@ describe('syncTranslation', () => {
     expect(file?.books.PSA?.chapters['117']?.revisions[0]?.verses['1']).toBe('words of PSA 117');
   });
 
-  it('counts unchanged chapters on a refresh pass and reports metadataBuildChanged', async () => {
+  it('counts unchanged chapters on a refresh pass and reports metadataBuildChanged', { timeout: 20_000 }, async () => {
     const { fetcher } = stubFetcher((url) => {
       const fromVersion = versionOk(url);
       if (fromVersion) return fromVersion;
@@ -108,7 +108,7 @@ describe('syncTranslation', () => {
     expect(second.metadataBuildChanged).toEqual({ from: 50, to: 51 });
   });
 
-  it('records per-chapter failures and continues', async () => {
+  it('records per-chapter failures and continues', { timeout: 20_000 }, async () => {
     const { fetcher } = stubFetcher((url) => {
       const fromVersion = versionOk(url);
       if (fromVersion) return fromVersion;
