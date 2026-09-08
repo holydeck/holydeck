@@ -6,6 +6,7 @@ import { registerNew } from './commands/new.js';
 import { registerPreflight } from './commands/preflight.js';
 import { registerStats } from './commands/stats.js';
 import { registerSync } from './commands/sync.js';
+import { registerTranslations } from './commands/translations.js';
 import { errLine } from './context.js';
 import type { CliContext } from './context.js';
 import { CLI_VERSION } from './version.js';
@@ -38,6 +39,7 @@ export function buildProgram(ctx: CliContext): Command {
   registerPreflight(program, ctx);
   registerStats(program, ctx);
   registerSync(program, ctx);
+  registerTranslations(program, ctx);
 
   return program;
 }
