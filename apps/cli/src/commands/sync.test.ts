@@ -92,6 +92,27 @@ describe('sync', () => {
     expect(setup.stdout()).toContain('failed: GEN 2 (scrape_http_error)');
   });
 
+  it('stops early on an interrupt, keeping what it fetched, and says how to resume', async () => {
+    const controller = new AbortController();
+    const canned = responses();
+    const setup = makeContext({
+      env: { ...env(), HOLYDECK_SYNC_CONCURRENCY: '1' },
+      responses: canned,
+      overrides: {
+        abortSignal: controller.signal,
+        httpGet: async (url: string) => {
+          const response = canned[url];
+          if (response === undefined) throw new Error(`no canned response for GET ${url}`);
+          if (url.endsWith('GEN.1.KJV')) controller.abort();
+          return response;
+        },
+      },
+    });
+    await expect(runCli(setup.ctx, ['sync', 'KJV'])).resolves.toBe(130);
+    expect(setup.stdout()).toContain('KJV: 2 planned, 1 fetched');
+    expect(setup.stdout()).toContain('KJV: stopped early — run sync again to continue where it left off.');
+  });
+
   it('is local-only', async () => {
     const setup = makeContext({ env: env() });
     await expect(runCli(setup.ctx, ['sync', 'KJV', '--server-url', 'https://holydeck.example.com'])).resolves.toBe(1);
