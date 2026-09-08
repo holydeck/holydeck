@@ -1,7 +1,9 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { CommanderError } from 'commander';
 import { describe, expect, it } from 'vitest';
 import { HolyDeckError } from '@holydeck/core/messages';
-import { makeContext } from '../test/harness.js';
+import { makeContext, seedStore } from '../test/harness.js';
 import { reportError, runCli } from './program.js';
 import { CLI_VERSION } from './version.js';
 
@@ -27,16 +29,19 @@ describe('runCli', () => {
     expect(stderr()).toContain('definitely-not-a-command');
   });
 
-  it('honors ctx.exitCode set by a command', async () => {
-    const { ctx } = makeContext();
-    ctx.exitCode = 1;
-    // no command runs; --help resets nothing — use version parse which succeeds
-    await expect(runCli(ctx, [])).resolves.toBe(1);
+  it('honors ctx.exitCode set by a command that otherwise succeeds', async () => {
+    const { ctx, dataDir, home } = makeContext();
+    await seedStore(dataDir, 'KJV', [{ book: 'PSA', chapter: '117', verses: { '1': 'O praise the LORD.' } }]);
+    const path = join(home, 'sunday.yml');
+    writeFileSync(path, 'translations: [KJV]\nverses:\n  - book: PSA\n    chapter: 117\n    verses: 1\n');
+    ctx.exitCode = 5;
+    await expect(runCli(ctx, ['get-verses', path])).resolves.toBe(5);
   });
 
-  it('defaults to exit code 0 when no command runs and ctx.exitCode is unset', async () => {
-    const { ctx } = makeContext();
-    await expect(runCli(ctx, [])).resolves.toBe(0);
+  it('shows help and exits 1 when no command is given', async () => {
+    const { ctx, stderr } = makeContext();
+    await expect(runCli(ctx, [])).resolves.toBe(1);
+    expect(stderr()).toContain('Usage: holydeck');
   });
 });
 
