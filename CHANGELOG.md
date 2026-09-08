@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026.9.1 (2026-09-08)
+
+### Features
+
+* **cli:** accept book names wherever a book is given ([d03ce51](https://github.com/holydeck/holydeck/commit/d03ce518e0dd29d538204e2bbd0c6ec5099189b4))
+* **cli:** add --browser-fetch to route scraping through Chromium ([74378c6](https://github.com/holydeck/holydeck/commit/74378c6d2338d4b8b0c55714afc69c7453947f15))
+* **cli:** fetch passages that are not synced yet ([222380f](https://github.com/holydeck/holydeck/commit/222380f5bdf12eb51bb34c4f20b835d2d116492d))
+* **cli:** save and release the lock when a sync is interrupted ([805ef4a](https://github.com/holydeck/holydeck/commit/805ef4a3bde9eafebf73c2ac3965131c7038dfaa))
+* **cli:** show positional argument hints in zsh completion ([9f1c0a2](https://github.com/holydeck/holydeck/commit/9f1c0a203f7b36c15afc04787e06e4e63d00bcec))
+* **cli:** show progress while a command works with nothing to print ([04c886c](https://github.com/holydeck/holydeck/commit/04c886c373954c32af82bf7defd78661d77af6c6))
+* **cli:** summarise fetched chapters unless --verbose is given ([48ca181](https://github.com/holydeck/holydeck/commit/48ca18139efec5fd289b57afab7544db2876c94f))
+* **core:** accept book names in English, German and Tamil ([874862f](https://github.com/holydeck/holydeck/commit/874862ff5ae52b16adb00aa6cef8987178fd2246))
+* **core:** fetch bible.com through a headless browser ([9128e15](https://github.com/holydeck/holydeck/commit/9128e153365d809b06f9977039f36a6b78f167a6))
+* **core:** fetch chapters the datastore lacks on demand ([f87c7f2](https://github.com/holydeck/holydeck/commit/f87c7f229fd2d360b4ef97d9667b2a8ec038ef83))
+* **core:** stop a sync at the next chapter when the caller aborts ([b11984e](https://github.com/holydeck/holydeck/commit/b11984e51732499b0b3eebc16de297587e2b8fa0))
+* render citations in the translation's own book names ([a11f888](https://github.com/holydeck/holydeck/commit/a11f888df2cd03dc9a9885abb7073a4721c553d2))
+* **server:** fetch a missing chapter for verses and render ([a50f282](https://github.com/holydeck/holydeck/commit/a50f282446dc1f0ad96c78cb37d7f89aeefb1726))
+* **server:** fetch through Chromium when HOLYDECK_BROWSER_FETCH is set ([772faea](https://github.com/holydeck/holydeck/commit/772faeae7b376b80ea780c3778d79feab585c0e9))
+
+### Bug Fixes
+
+* **cli:** make --browser-fetch discoverable when a fetch is blocked ([05bff4d](https://github.com/holydeck/holydeck/commit/05bff4da8b83eea9a9834c90a747a56ee7ccb4ca))
+* **cli:** report why a sermon file could not be read ([0e8b23a](https://github.com/holydeck/holydeck/commit/0e8b23ac9559d391d8c9cbdc778bc4b997f63260))
+* **cli:** resolve completion through nested subcommands and include -h/-V flags ([70aa5a4](https://github.com/holydeck/holydeck/commit/70aa5a457ac312414f2a62870df89b9b2945cc91))
+* **core:** reclaim a datastore lock whose owning process is gone ([58348dd](https://github.com/holydeck/holydeck/commit/58348dd33066a1265293f05883c14b478be704f4))
+* **core:** stop puppeteer from handling interrupt signals ([e4a77cb](https://github.com/holydeck/holydeck/commit/e4a77cb8c5c001e12db22fea59ccfbd5374bcd77))
+
 ## 2026.9.0 (2026-09-08)
 
 ### Features
