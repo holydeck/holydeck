@@ -1,26 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { makeContext } from '../../test/harness.js';
 import { buildProgram, runCli } from '../program.js';
-import { COMMAND_NAMES } from './completion.js';
 
 // Hard-coded (not derived from the source) so dropping `.sort()` in completion.ts,
 // or editing the translation catalog, surfaces here instead of silently passing.
 const KNOWN_TRANSLATION_ABBREVIATIONS = ['AMP', 'ICL00D', 'KJV', 'NIV', 'NLT', 'NR06', 'SCH2000', 'TAOVBSI', 'VULG'];
 
 describe('completion', () => {
-  it('prints a zsh completion script', async () => {
+  it('prints a zsh completion script that fetches commands live', async () => {
     const setup = makeContext();
     await expect(runCli(setup.ctx, ['completion', 'zsh'])).resolves.toBe(0);
     expect(setup.stdout()).toContain('#compdef holydeck');
-    expect(setup.stdout()).toContain('get-verses');
-    expect(setup.stdout()).toContain('doctor');
+    expect(setup.stdout()).toContain('holydeck completion --commands');
+    // Must self-initialize compinit: dotfiles may source this before their own
+    // compinit call runs, and compdef doesn't exist until compinit has.
+    expect(setup.stdout()).toContain('autoload -Uz compinit && compinit');
   });
 
-  it('prints a bash completion script', async () => {
+  it('prints a bash completion script that fetches commands live', async () => {
     const setup = makeContext();
     await expect(runCli(setup.ctx, ['completion', 'bash'])).resolves.toBe(0);
     expect(setup.stdout()).toContain('complete -F _holydeck holydeck');
-    expect(setup.stdout()).toContain('preflight');
+    expect(setup.stdout()).toContain('holydeck completion --commands');
   });
 
   it('rejects unknown shells', async () => {
@@ -42,16 +43,106 @@ describe('completion', () => {
     expect(lines).toEqual(KNOWN_TRANSLATION_ABBREVIATIONS);
   });
 
-  it('hides --translations from help output', async () => {
+  it('hides --translations, --commands, --books and --flags from help output', async () => {
     const setup = makeContext();
     await expect(runCli(setup.ctx, ['completion', '--help'])).resolves.not.toBe(1);
     expect(setup.stdout()).not.toContain('--translations');
+    expect(setup.stdout()).not.toContain('--commands');
+    expect(setup.stdout()).not.toContain('--books');
+    expect(setup.stdout()).not.toContain('--flags');
   });
 
-  it('keeps COMMAND_NAMES in sync with the commands registered on the program', () => {
+  it('prints registered command names with descriptions with the hidden --commands flag', async () => {
+    const registered = buildProgram(makeContext().ctx).commands.map(
+      (command) => `${command.name()}:${command.description()}`,
+    );
+
     const setup = makeContext();
-    const program = buildProgram(setup.ctx);
-    const registered = program.commands.map((command) => command.name()).sort();
-    expect(registered).toEqual([...COMMAND_NAMES].sort());
+    await expect(runCli(setup.ctx, ['completion', '--commands'])).resolves.toBe(0);
+    expect(setup.stdout().trimEnd().split('\n')).toEqual(registered);
   });
+
+  it('prints USFM book codes with names with the hidden --books flag', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--books'])).resolves.toBe(0);
+    const lines = setup.stdout().trimEnd().split('\n');
+    expect(lines).toContain('GEN:Genesis');
+    expect(lines).toContain('REV:Revelation');
+    expect(lines).toHaveLength(66);
+  });
+
+  it('prints global flags with the hidden --flags option and no path', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--flags'])).resolves.toBe(0);
+    const lines = setup.stdout().trimEnd().split('\n');
+    expect(lines.some((line) => line.startsWith('--data-dir:'))).toBe(true);
+  });
+
+  it('prints a command own flags with the hidden --flags option and a command name', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--flags', 'revisions'])).resolves.toBe(0);
+    expect(setup.stdout().trimEnd().split('\n')).toEqual([
+      '--diff:diff two revisions, e.g. 1..3',
+      '--help:display help for command',
+      '-h:display help for command',
+    ]);
+  });
+
+  it('resolves --flags through a nested subcommand path', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--flags', 'config', 'init'])).resolves.toBe(0);
+    expect(setup.stdout().trimEnd().split('\n')).toEqual([
+      '--force:overwrite an existing config file',
+      '--help:display help for command',
+      '-h:display help for command',
+    ]);
+  });
+
+  it('falls back to the deepest resolvable command for --flags when a path segment is unknown', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--flags', 'revisions', 'bogus'])).resolves.toBe(0);
+    expect(setup.stdout().trimEnd().split('\n')).toEqual([
+      '--diff:diff two revisions, e.g. 1..3',
+      '--help:display help for command',
+      '-h:display help for command',
+    ]);
+  });
+
+  it('falls back to global flags for --flags when the top-level segment is unknown', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--flags', 'bogus'])).resolves.toBe(0);
+    const lines = setup.stdout().trimEnd().split('\n');
+    expect(lines.some((line) => line.startsWith('--data-dir:'))).toBe(true);
+  });
+
+  it('includes -h/--help alongside the CLI own hidden flags', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--flags', 'completion'])).resolves.toBe(0);
+    expect(setup.stdout().trimEnd().split('\n')).toEqual(['--help:display help for command', '-h:display help for command']);
+  });
+
+  it('lists nested subcommands with the hidden --commands option and a command name', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--commands', 'config'])).resolves.toBe(0);
+    expect(setup.stdout().trimEnd().split('\n')).toEqual(['init:Write a commented starter config file']);
+  });
+
+  it('prints nothing for --commands on a leaf command with no subcommands', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--commands', 'revisions'])).resolves.toBe(0);
+    expect(setup.stdout()).toBe('');
+  });
+
+  it('prints nothing for --commands when the top-level segment is unknown', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--commands', 'bogus'])).resolves.toBe(0);
+    expect(setup.stdout()).toBe('');
+  });
+
+  it('prints nothing for --commands when a nested path segment is unknown', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--commands', 'bogus', 'sub'])).resolves.toBe(0);
+    expect(setup.stdout()).toBe('');
+  });
+
 });

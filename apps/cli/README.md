@@ -58,6 +58,38 @@ holydeck get-verses --last
 
 Run `holydeck <command> --help` for the full options of any command.
 
+## Shell completion
+
+```sh
+# zsh
+echo 'source <(holydeck completion zsh)' >> ~/.zshrc
+
+# bash
+echo 'source <(holydeck completion bash)' >> ~/.bashrc
+```
+
+Restart your shell to pick it up. Completions are fetched live from the
+installed CLI, so they stay in sync automatically as commands are added —
+nothing to regenerate or update. Commands, `--flags`, and Bible book codes
+complete with a description alongside each candidate (zsh shows these
+inline; bash just completes the value).
+
+> **zsh:** `compinit` should only run once per shell, after this line runs.
+> Some tools (Docker Desktop's completion snippet, for example) add a
+> second `compinit` call later in `.zshrc`, which silently un-registers
+> completions sourced above it — move those calls earlier if completion
+> stops working.
+
+If you're running via `npx` instead of a global install, wrap it in a
+function first so `holydeck` resolves on your `$PATH`:
+
+```sh
+holydeck() { npx --yes holydeck@latest "$@"; }
+source <(holydeck completion zsh)
+```
+
+(This adds `npx` startup latency to every completion trigger.)
+
 ## Server mode
 
 Every command works against the local datastore by default. Pass
