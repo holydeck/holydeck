@@ -16,12 +16,15 @@ import { registerSync } from './commands/sync.js';
 import { registerTranslations } from './commands/translations.js';
 import { errLine } from './context.js';
 import type { CliContext } from './context.js';
+import { closeBrowsers } from './runtime.js';
 import { CLI_VERSION } from './version.js';
 
 export interface GlobalOptions {
   dataDir?: string;
   serverUrl?: string;
   json?: boolean;
+  browserFetch?: boolean;
+  verbose?: boolean;
 }
 
 export function buildProgram(ctx: CliContext): Command {
@@ -33,7 +36,12 @@ export function buildProgram(ctx: CliContext): Command {
     .option('--data-dir <dir>', 'override the data directory')
     .option('--server-url <url>', 'use a remote HolyDeck server instead of the local datastore')
     .option('--json', 'machine-readable output on informational commands')
+    .option('--verbose', 'report where every chapter of the output came from')
+    .option('--browser-fetch', 'fetch bible.com through a headless browser (needs puppeteer)')
+    .option('--no-browser-fetch', 'force plain HTTP fetching even if the config enables the browser')
     .exitOverride()
+    // Global flags apply to every command, so every command's help has to list them.
+    .configureHelp({ showGlobalOptions: true })
     .configureOutput({
       writeOut: (text) => ctx.out(text),
       writeErr: (text) => ctx.err(text),
@@ -82,5 +90,7 @@ export async function runCli(ctx: CliContext, args: string[]): Promise<number> {
     return ctx.exitCode ?? 0;
   } catch (error) {
     return reportError(ctx, Boolean(program.opts<GlobalOptions>().json), error);
+  } finally {
+    await closeBrowsers();
   }
 }

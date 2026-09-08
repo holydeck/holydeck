@@ -1,5 +1,6 @@
 import { HolyDeckError } from '@holydeck/core/messages';
 import { appendRevision, createEmptyStoreFile, validateStoreFile } from '@holydeck/core/storage';
+import type { Canon, TranslationMeta } from '@holydeck/core/canon';
 import type { TranslationStoreFile, VerseMap } from '@holydeck/core/storage';
 import type { Collection, Db } from 'mongodb';
 
@@ -99,6 +100,17 @@ export class MongoStore {
     const { record, changed, rev } = appendRevision(bookRecord.chapters[chapter], verses, canonVerseCount, this.now());
     bookRecord.chapters[chapter] = record;
     return { changed, rev };
+  }
+
+  /** Records a translation's own metadata and canon — where its localized book names come from. */
+  async putVersionMeta(abbr: string, meta: TranslationMeta, canon: Canon): Promise<void> {
+    const upper = abbr.toUpperCase();
+    await this.withLock(upper, async () => {
+      const file = (await this.load(upper)) ?? createEmptyStoreFile(upper, this.now());
+      file.meta = meta;
+      file.canon = canon;
+      await this.save(upper, file);
+    });
   }
 
   async putChapter(

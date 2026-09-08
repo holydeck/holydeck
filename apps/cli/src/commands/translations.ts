@@ -4,7 +4,7 @@ import { outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
 import type { Runtime } from '../runtime.js';
-import { createRuntime } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
 
 async function runLocal(ctx: CliContext, runtime: Runtime, json: boolean): Promise<void> {
   const rows: Array<{ abbr: string; id: number; stored: boolean }> = [];
@@ -39,7 +39,7 @@ async function runServer(ctx: CliContext, runtime: Runtime, json: boolean): Prom
 }
 
 export async function runTranslations(ctx: CliContext, globals: GlobalOptions): Promise<void> {
-  const runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
   const json = globals.json === true;
   if (runtime.mode === 'server') {
     await runServer(ctx, runtime, json);

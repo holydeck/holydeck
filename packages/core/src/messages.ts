@@ -15,6 +15,7 @@ export type MessageCode =
   | 'store_newer_schema'
   | 'store_locked'
   | 'scrape_blocked'
+  | 'browser_unavailable'
   | 'scrape_http_error'
   | 'scrape_network_error'
   | 'scrape_parse_failed'
@@ -24,6 +25,9 @@ export type MessageCode =
   | 'legacy_force_ignored'
   | 'legacy_template'
   | 'sermon_file_missing'
+  | 'sermon_file_unreadable'
+  | 'sermon_file_forbidden'
+  | 'sermon_file_forbidden_cloud'
   | 'no_last_sermon'
   | 'file_exists'
   | 'config_exists'
@@ -35,6 +39,9 @@ export type MessageCode =
   | 'deprecated_flag'
   | 'refresh_unchanged'
   | 'cache_footer'
+  | 'live_footer'
+  | 'fetch_summary'
+  | 'canon_unavailable'
   | 'clipboard_unavailable'
   | 'copied_to_clipboard'
   | 'editor_not_set'
@@ -50,7 +57,8 @@ export type MessageCode =
 
 export const messageCatalog: Record<MessageCode, string> = {
   invalid_verse_list: 'Invalid verse list "{input}". Use comma-separated numbers and ranges, e.g. "1-4,7".',
-  invalid_reference: 'Invalid reference "{input}". Use "<BOOK> <chapter>:<verses>", e.g. "PSA 118:24" or "GEN 1:5-7,9".',
+  invalid_reference:
+    'Invalid reference "{input}". Use "<book> <chapter>:<verses>", e.g. "PSA 118:24" or "Genesis 1:5-7,9".',
   unknown_translation: 'Unknown translation "{abbr}". Known: {known}.',
   invalid_translation: 'Invalid translation identifier "{abbr}"; expected 1-16 letters/digits, e.g. "KJV" or "SCH2000".',
   sermon_invalid: 'Invalid sermon file: {reason}.',
@@ -63,8 +71,13 @@ export const messageCatalog: Record<MessageCode, string> = {
   revision_not_found: 'Revision {rev} not found for {abbr} {book} {chapter} (available: {available}).',
   store_corrupt: 'Datastore file {path} is corrupt: {reason}.',
   store_newer_schema: 'Datastore file {path} has schema version {found}; this build supports up to {supported}. Update holydeck.',
-  store_locked: 'Datastore for {abbr} is locked by another holydeck process (lock file: {path}).',
-  scrape_blocked: 'bible.com answered with a bot-protection challenge instead of content. Plain HTTP cannot pass it; try again later or from another network.',
+  store_locked:
+    'Datastore for {abbr} is still locked by {owner} after waiting {waitedMs}ms (lock file: {path}). ' +
+    'Wait for that run to finish, or delete the lock file if nothing is running.',
+  scrape_blocked:
+    'bible.com answered with a bot-protection challenge instead of content. Plain HTTP cannot pass it; ' +
+    'retry with --browser-fetch (or set browserFetch: true in the config) to fetch through a headless browser.',
+  browser_unavailable: 'Could not start the headless browser used to fetch bible.com: {reason}.',
   scrape_http_error: 'bible.com request failed: HTTP {status} for {url}',
   scrape_network_error: 'Could not reach bible.com: {reason} ({url}).',
   scrape_parse_failed: 'No verse content found in the page at {url}. The bible.com markup may have changed.',
@@ -74,6 +87,15 @@ export const messageCatalog: Record<MessageCode, string> = {
   legacy_force_ignored: 'Legacy "force" flag on {reference} is ignored; use "holydeck sync --refresh" to refetch content.',
   legacy_template: 'Template uses the legacy "{0.field}" syntax; it still works, but Liquid templates are recommended.',
   sermon_file_missing: 'Sermon file {path} does not exist.',
+  sermon_file_unreadable: 'Sermon file {path} could not be read: {reason}.',
+  sermon_file_forbidden:
+    'Sermon file {path} exists but the operating system refused access ({reason}). ' +
+    'Check the permissions of the file and of every directory leading to it.',
+  sermon_file_forbidden_cloud:
+    'Sermon file {path} exists but the operating system refused access ({reason}). ' +
+    'It lives in a cloud drive, which macOS guards: the app this command runs in needs Full Disk ' +
+    'Access. Grant it in System Settings › Privacy & Security › Full Disk Access, then quit that ' +
+    'app and start it again.',
   no_last_sermon: 'No sermon file remembered yet. Run "holydeck get-verses <file>" once; after that --last works.',
   file_exists: 'File {path} already exists; refusing to overwrite.',
   config_exists: 'Config file {path} already exists; pass --force to overwrite it.',
@@ -85,6 +107,9 @@ export const messageCatalog: Record<MessageCode, string> = {
   deprecated_flag: 'Flag {oldFlag} is deprecated; use {newFlag} instead.',
   refresh_unchanged: '{abbr} {book} {chapter}: content unchanged, no new revision.',
   cache_footer: 'source: cache · revision {rev} · fetched {date} — {abbr} {book} {chapter}',
+  live_footer: 'source: live · revision {rev} · fetched just now — {abbr} {book} {chapter}',
+  fetch_summary: 'Fetched {live} of {total} chapters live; --verbose says where each one came from.',
+  canon_unavailable: 'Could not fetch the book names of {abbr} ({reason}); rendering its citations with English names.',
   clipboard_unavailable: 'Could not copy to clipboard: no clipboard tool worked (tried {tried}).',
   copied_to_clipboard: 'Copied to clipboard.',
   editor_not_set: '$EDITOR is not set; skipping editor launch.',

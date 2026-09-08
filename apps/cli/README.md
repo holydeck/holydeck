@@ -10,6 +10,8 @@ being up.
 ## Requirements
 
 - Node.js 24 or newer
+- A headless Chromium for downloading translations — installed automatically with the
+  optional `puppeteer` dependency, see [Fetching from bible.com](#fetching-from-biblecom)
 
 ## Install
 
@@ -89,6 +91,84 @@ source <(holydeck completion zsh)
 ```
 
 (This adds `npx` startup latency to every completion trigger.)
+
+## Fetching from bible.com
+
+bible.com answers plain HTTP clients with a JavaScript challenge page, so `sync`,
+`preflight` and an ad-hoc `get` of an unstored chapter need a real browser to run it.
+Pass `--browser-fetch` (or set `browserFetch: true` in the config file, or
+`HOLYDECK_BROWSER_FETCH=1`) and the fetch goes through a headless Chromium instead:
+
+```sh
+holydeck sync KJV --browser-fetch
+```
+
+The browser starts once per command and is reused for the whole run. Chromium comes
+from the optional `puppeteer` dependency; if you only render from an already-populated
+datastore you can skip the download with `npm install -g holydeck --omit=optional`.
+
+`holydeck doctor` reports which transport it reached bible.com with, so run it first
+when a sync stops returning content.
+
+## Book names
+
+A book can be named by its USFM code or by its name in English, German or Tamil —
+anywhere a book is accepted: sermon files, `get`, `revisions` and `offsets`.
+Case, spacing and punctuation do not matter, and a leading ordinal may be written
+any way you like:
+
+```sh
+holydeck get "GEN 30:5-7,9"
+holydeck get "1. Mose 30:5-7,9"
+holydeck get "2nd Samuel 1:6"     # or "2 Samuel", "II Samuel", "2. Samuel"
+holydeck get "சங்கீதம் 118:24"
+```
+
+## Passages that are not synced yet
+
+`get` and `get-verses` do not stop at a chapter the datastore lacks: they fetch it,
+store it, and render from the stored copy, so an ad-hoc reference works without syncing
+a whole translation first. A run that had to fetch says so on stderr in one line; add
+`--verbose` and every chapter names its own source instead — `source: cache` with the
+revision date, or `source: live · … · fetched just now` for one this run went and got.
+
+```sh
+holydeck get "GEN 30:5-7,9"                     # fetches GEN 30 if it is not stored yet
+holydeck get "GEN 30:5-7,9" --verbose           # names the source of every chapter
+holydeck get "GEN 30:5-7,9" --no-fetch-missing  # fails instead, leaving the datastore alone
+```
+
+Book names come from the translation's own canon, which the datastore learns on the first run
+that may fetch — so citations read in the translation's language (`3. Mose`, `லேவியராகமம்`)
+rather than in English. A store written before that, or imported without a canon, repairs
+itself the same way; a run that cannot reach bible.com says so once and renders with English
+names rather than failing.
+
+Use `--no-fetch-missing` when a run must not reach the network, or to check what the
+datastore really holds.
+
+The server behaves the same way: `GET /api/v1/translations/:abbr/verses` and
+`POST /api/v1/render` fetch a missing chapter unless the request passes
+`?fetchMissing=false`. In server mode (`--server-url`) the CLI forwards the flag, so the
+same command gives the same result wherever the data lives.
+
+## Interrupting a sync
+
+A whole translation is more than a thousand chapters, so `sync` is built to be stopped
+and picked up again. Press Ctrl-C once: the run finishes the chapters already in
+flight, saves them, releases the datastore lock and prints how far it got. Run the same
+command again to continue with what is still missing. A second Ctrl-C quits at once,
+which drops up to the last ten fetched chapters.
+
+Each translation is locked while it is being written, so a second `sync` of the same
+one waits for the first to finish rather than writing over it, and says which process
+it is waiting for. A run that is killed outright leaves its lock behind; the next run
+sees that the owning process is gone and takes the lock over, so there is nothing to
+clean up by hand.
+
+Steps with nothing to print — starting the browser, fetching the canon, waiting for a
+lock — show a spinner on a terminal, so a slow command never looks like a hung one.
+Progress and status go to stderr, leaving piped output clean.
 
 ## Server mode
 

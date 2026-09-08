@@ -1,3 +1,4 @@
+import { resolveBook } from './canon.js';
 import { HolyDeckError } from './messages.js';
 
 export interface Reference {
@@ -47,15 +48,28 @@ export function formatVerseList(verses: number[]): string {
 }
 
 export function parseReference(input: string): Reference {
-  const match = /^([1-3][A-Z]{2}|[A-Z]{3})\s+(\d+):(\S.*)$/.exec(input.trim().toUpperCase());
-  if (!match) throw new HolyDeckError('invalid_reference', { input });
-  const chapter = Number(match[2]);
+  // Split on the colon and walk back over the chapter digits rather than matching a book name
+  // with a lazy pattern: a name is free text, and "<anything> <digits>" backtracks on a string
+  // of spaces long enough to matter.
+  const trimmed = input.trim();
+  const colon = trimmed.indexOf(':');
+  const head = colon === -1 ? '' : trimmed.slice(0, colon);
+  let digits = head.length;
+  while (digits > 0 && head[digits - 1]! >= '0' && head[digits - 1]! <= '9') digits -= 1;
+  const chapterText = head.slice(digits);
+  const bookText = head.slice(0, digits).trimEnd();
+  const rest = trimmed.slice(colon + 1);
+  const separated = digits > bookText.length;
+  const valid = colon !== -1 && chapterText !== '' && bookText !== '' && separated && /^\S/.test(rest);
+  const book = valid ? resolveBook(bookText) : undefined;
+  if (book === undefined) throw new HolyDeckError('invalid_reference', { input });
+  const chapter = Number(chapterText);
   if (chapter < 1 || chapter > 150) throw new HolyDeckError('invalid_reference', { input });
   let verses: number[];
   try {
-    verses = parseVerseList(match[3]!);
+    verses = parseVerseList(rest);
   } catch {
     throw new HolyDeckError('invalid_reference', { input });
   }
-  return { book: match[1]!, chapter, verses };
+  return { book, chapter, verses };
 }

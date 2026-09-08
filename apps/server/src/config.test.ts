@@ -21,6 +21,7 @@ describe('resolveServerConfig', () => {
       logLevel: 'info',
       syncConcurrency: 2,
       syncDelayMs: 1000,
+      browserFetch: false,
     });
   });
 
@@ -34,6 +35,8 @@ describe('resolveServerConfig', () => {
         HOLYDECK_LOG_LEVEL: 'debug',
         HOLYDECK_SYNC_CONCURRENCY: '4',
         HOLYDECK_SYNC_DELAY_MS: '0',
+        HOLYDECK_BROWSER_FETCH: 'true',
+        HOLYDECK_BROWSER_EXECUTABLE: '/usr/bin/chromium',
       }),
     ).toEqual({
       host: '127.0.0.1',
@@ -43,11 +46,26 @@ describe('resolveServerConfig', () => {
       logLevel: 'debug',
       syncConcurrency: 4,
       syncDelayMs: 0,
+      browserFetch: true,
+      browserExecutablePath: '/usr/bin/chromium',
     });
   });
 
   it('treats an empty string as unset', () => {
     expect(resolveServerConfig({ HOLYDECK_PORT: '' }).port).toBe(3000);
+    expect(resolveServerConfig({ HOLYDECK_BROWSER_EXECUTABLE: '' })).not.toHaveProperty('browserExecutablePath');
+    expect(resolveServerConfig({ HOLYDECK_BROWSER_FETCH: '  ' }).browserFetch).toBe(false);
+  });
+
+  it.each([
+    ['1', true],
+    ['YES', true],
+    [' on ', true],
+    ['0', false],
+    ['false', false],
+    ['OFF', false],
+  ])('reads HOLYDECK_BROWSER_FETCH=%j as %s', (raw, expected) => {
+    expect(resolveServerConfig({ HOLYDECK_BROWSER_FETCH: raw }).browserFetch).toBe(expected);
   });
 
   it('rejects non-integer, too-small and too-large values with config_invalid_value', () => {
@@ -57,6 +75,7 @@ describe('resolveServerConfig', () => {
     expect(thrownCode({ HOLYDECK_PORT: '70000' })).toBe('config_invalid_value');
     expect(thrownCode({ HOLYDECK_SYNC_CONCURRENCY: '0' })).toBe('config_invalid_value');
     expect(thrownCode({ HOLYDECK_SYNC_DELAY_MS: '-1' })).toBe('config_invalid_value');
+    expect(thrownCode({ HOLYDECK_BROWSER_FETCH: 'maybe' })).toBe('config_invalid_value');
   });
 
   it('explains the allowed range in the error message', () => {

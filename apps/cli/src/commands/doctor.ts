@@ -10,7 +10,7 @@ import { outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
 import type { Runtime } from '../runtime.js';
-import { createRuntime } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
 import { storedAbbrs } from './stats.js';
 
 export interface DoctorCheck {
@@ -60,16 +60,26 @@ async function checkDatastore(runtime: Runtime, dataDir: string): Promise<Doctor
   return { name: 'datastore', status: 'ok', detail: `${abbrs.length} translations valid` };
 }
 
-async function checkBibleCom(ctx: CliContext): Promise<DoctorCheck> {
+/** Probes bible.com over whatever transport sync would use, so the check matches reality. */
+async function checkBibleCom(ctx: CliContext, runtime: Runtime | undefined): Promise<DoctorCheck> {
+  const browser = runtime?.browser;
+  const via = browser === undefined ? 'plain HTTP' : 'headless browser';
   try {
-    const response = await ctx.httpGet(versionUrl(1), BROWSER_HEADERS);
+    const response = await (browser?.httpGet ?? ctx.httpGet)(versionUrl(1), BROWSER_HEADERS);
     if (response.status >= 400) {
-      return { name: 'bible.com', status: 'fail', detail: `HTTP ${response.status}` };
+      return { name: 'bible.com', status: 'fail', detail: `HTTP ${response.status} via ${via}` };
     }
     if (isChallengePage(response.body)) {
-      return { name: 'bible.com', status: 'warn', detail: 'reachable but blocked by a challenge page' };
+      return {
+        name: 'bible.com',
+        status: 'warn',
+        detail:
+          browser === undefined
+            ? 'blocked by a challenge page — retry with --browser-fetch'
+            : 'blocked by a challenge page even through the browser',
+      };
     }
-    return { name: 'bible.com', status: 'ok', detail: 'reachable' };
+    return { name: 'bible.com', status: 'ok', detail: `reachable via ${via}` };
   } catch (error) {
     return { name: 'bible.com', status: 'fail', detail: String(error) };
   }
@@ -90,7 +100,7 @@ export async function runDoctor(ctx: CliContext, globals: GlobalOptions): Promis
   let runtime: Runtime | undefined;
   const configPath = configFilePath(ctx.platform);
   try {
-    runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+    runtime = await createRuntime(ctx, runtimeFlags(globals));
     checks.push({
       name: 'config',
       status: 'ok',
@@ -111,7 +121,7 @@ export async function runDoctor(ctx: CliContext, globals: GlobalOptions): Promis
         : await checkDatastore(runtime, dataDir),
     );
   }
-  checks.push(await checkBibleCom(ctx));
+  checks.push(await checkBibleCom(ctx, runtime));
   checks.push(await checkServer(runtime));
   if (globals.json === true) {
     outLine(ctx, JSON.stringify({ checks }, undefined, 2));

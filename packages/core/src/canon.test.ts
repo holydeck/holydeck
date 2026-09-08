@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { HolyDeckError } from './messages.js';
-import { bundledCanon, findBook, parseVersionMeta } from './canon.js';
+import { bundledCanon, findBook, parseVersionMeta, resolveBook } from './canon.js';
+import { BOOK_ALIASES } from './internal/book-aliases.js';
 
 const kjvPayload: unknown = JSON.parse(
   readFileSync(new URL('../test/fixtures/version-1-kjv.json', import.meta.url), 'utf8'),
@@ -119,5 +120,48 @@ describe('bundledCanon', () => {
 
   it('findBook returns undefined for unknown books', () => {
     expect(findBook(bundledCanon(), 'ZZZ')).toBeUndefined();
+  });
+});
+
+describe('resolveBook', () => {
+  it('passes USFM codes through, known or not', () => {
+    expect(resolveBook('gen')).toBe('GEN');
+    expect(resolveBook(' 1sa ')).toBe('1SA');
+    expect(resolveBook('ZZZ')).toBe('ZZZ');
+  });
+
+  it('resolves the canon name of every bundled book', () => {
+    for (const book of bundledCanon().books) {
+      expect(resolveBook(book.name), book.name).toBe(book.usfm);
+    }
+  });
+
+  it('resolves every name in the alias table, with no book stealing another book name', () => {
+    for (const [usfm, ...names] of BOOK_ALIASES) {
+      for (const name of names) expect(resolveBook(name), name).toBe(usfm);
+    }
+  });
+
+  it('reads a leading ordinal in any form', () => {
+    for (const input of ['2 Samuel', '2nd Samuel', '2. Samuel', 'II Samuel', 'Second Samuel', 'ii samuel']) {
+      expect(resolveBook(input), input).toBe('2SA');
+    }
+  });
+
+  it('accepts German names with or without their accents', () => {
+    expect(resolveBook('Römer')).toBe('ROM');
+    expect(resolveBook('romer')).toBe('ROM');
+    expect(resolveBook('Sprüche')).toBe('PRO');
+  });
+
+  it('keeps Tamil vowel signs, so numbered books stay distinct', () => {
+    expect(resolveBook('யோவான்')).toBe('JHN');
+    expect(resolveBook('1 யோவான்')).toBe('1JN');
+    expect(resolveBook('சகரியா')).toBe('ZEC');
+  });
+
+  it('returns undefined for a name it does not know', () => {
+    expect(resolveBook('Hezekiah')).toBeUndefined();
+    expect(resolveBook('...')).toBeUndefined();
   });
 });

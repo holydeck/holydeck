@@ -36,7 +36,9 @@ describe('stats', () => {
       ],
       { canon: SMALL_CANON },
     );
-    await seedStore(setup.dataDir, 'WEB', [{ book: 'PSA', chapter: '117', verses: { '1': 'c' }, canonVerseCount: 2 }]);
+    await seedStore(setup.dataDir, 'WEB', [{ book: 'PSA', chapter: '117', verses: { '1': 'c' }, canonVerseCount: 2 }], {
+      withoutCanon: true,
+    });
     const kjvBytes = statSync(storePath(setup.dataDir, 'KJV')).size;
     const webBytes = statSync(storePath(setup.dataDir, 'WEB')).size;
     await expect(runCli(setup.ctx, ['stats'])).resolves.toBe(0);
@@ -50,7 +52,9 @@ describe('stats', () => {
 
   it('limits the report to one translation with --translation', async () => {
     const setup = makeContext();
-    await seedStore(setup.dataDir, 'KJV', [{ book: 'GEN', chapter: '1', verses: { '1': 'a' }, canonVerseCount: 1 }]);
+    await seedStore(setup.dataDir, 'KJV', [{ book: 'GEN', chapter: '1', verses: { '1': 'a' }, canonVerseCount: 1 }], {
+      withoutCanon: true,
+    });
     await seedStore(setup.dataDir, 'WEB', [{ book: 'PSA', chapter: '117', verses: { '1': 'c' }, canonVerseCount: 2 }]);
     await expect(runCli(setup.ctx, ['stats', '--translation', 'kjv'])).resolves.toBe(0);
     expect(setup.stdout()).toContain('KJV: 1/? chapters');

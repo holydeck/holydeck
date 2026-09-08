@@ -16,10 +16,10 @@ async function seeded(setup: TestSetup): Promise<string> {
 }
 
 describe('get-verses', () => {
-  it('renders a sermon file, footers on stderr, and remembers it for --last', async () => {
+  it('renders a sermon file, sources on stderr with --verbose, and remembers it for --last', async () => {
     const setup = makeContext();
     const path = await seeded(setup);
-    await expect(runCli(setup.ctx, ['get-verses', path])).resolves.toBe(0);
+    await expect(runCli(setup.ctx, ['get-verses', path, '--verbose'])).resolves.toBe(0);
     expect(setup.stdout()).toContain('O praise the LORD, all ye nations.');
     expect(setup.stdout()).toContain('Psalms 117:1-2 (KJV)');
     expect(setup.stderr()).toContain('source: cache · revision 1 · fetched 2026-09-01 — KJV PSA 117');
@@ -104,7 +104,7 @@ describe('get-verses', () => {
     });
     const path = join(setup.home, 'sunday.yml');
     writeFileSync(path, SERMON);
-    await expect(runCli(setup.ctx, ['get-verses', path, '--you-version-api-url', base])).resolves.toBe(0);
+    await expect(runCli(setup.ctx, ['get-verses', path, '--you-version-api-url', base, '--verbose'])).resolves.toBe(0);
     expect(setup.stdout()).toContain('Psalms 117:1-2 (KJV)');
     expect(setup.stderr()).toContain('Flag --you-version-api-url is deprecated; use --server-url instead.');
     expect(setup.stderr()).toContain('source: cache · revision 3 · fetched 2026-09-05 — KJV PSA 117');

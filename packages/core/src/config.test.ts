@@ -37,6 +37,7 @@ describe('parseConfigFile', () => {
     expect(parseConfigFile('', 'x.yaml')).toEqual({});
     expect(parseConfigFile('serverUrl: http://localhost:3000\ntemplate: "{{ x }}"\nsyncConcurrency: 4\n', 'x.yaml'))
       .toEqual({ serverUrl: 'http://localhost:3000', template: '{{ x }}', syncConcurrency: 4 });
+    expect(parseConfigFile('browserFetch: true\n', 'x.yaml')).toEqual({ browserFetch: true });
   });
 
   it.each([
@@ -46,6 +47,7 @@ describe('parseConfigFile', () => {
     ['syncConcurrency: many', 'config_invalid_value'],
     ['syncConcurrency: 0', 'config_invalid_value'],
     ['syncDelayMs: -5', 'config_invalid_value'],
+    ['browserFetch: sometimes', 'config_invalid_value'],
     ['serverUrl: 7', 'config_invalid_value'],
     ['template: 7', 'config_invalid_value'],
     [': : :', 'config_file_unreadable'],
@@ -65,6 +67,7 @@ describe('resolveConfig', () => {
     expect(resolved.values.dataDir).toBe('/Users/pat/Library/Application Support/holydeck');
     expect(resolved.values.syncConcurrency).toBe(2);
     expect(resolved.values.syncDelayMs).toBe(1000);
+    expect(resolved.values.browserFetch).toBe(false);
     expect(resolved.values.defaultTranslations).toEqual([]);
     expect(resolved.sources.dataDir).toBe('default');
     expect(resolved.notices).toEqual([]);
@@ -128,6 +131,24 @@ describe('resolveConfig', () => {
     expect(resolved.sources.syncDelayMs).toBe('default');
     expect(resolved.values.syncConcurrency).toBe(2);
     expect(resolved.sources.syncConcurrency).toBe('default');
+  });
+
+  it.each([['1'], ['true'], ['YES'], [' on ']])('reads HOLYDECK_BROWSER_FETCH=%j as enabled', (value) => {
+    const resolved = resolveConfig({ platform: darwin, env: { HOLYDECK_BROWSER_FETCH: value } });
+    expect(resolved.values.browserFetch).toBe(true);
+    expect(resolved.sources.browserFetch).toBe('env');
+  });
+
+  it.each([['0'], ['false'], ['no'], ['OFF']])('reads HOLYDECK_BROWSER_FETCH=%j as disabled', (value) => {
+    expect(resolveConfig({ platform: darwin, env: { HOLYDECK_BROWSER_FETCH: value } }).values.browserFetch).toBe(false);
+  });
+
+  it('ignores an empty HOLYDECK_BROWSER_FETCH and rejects an unrecognised one', () => {
+    const empty = resolveConfig({ platform: darwin, env: { HOLYDECK_BROWSER_FETCH: '  ' } });
+    expect(empty.values.browserFetch).toBe(false);
+    expect(empty.sources.browserFetch).toBe('default');
+    expect(() => resolveConfig({ platform: darwin, env: { HOLYDECK_BROWSER_FETCH: 'maybe' } }))
+      .toThrowError(HolyDeckError);
   });
 
   it('rejects malformed numeric env values', () => {
