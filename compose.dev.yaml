@@ -1,0 +1,42 @@
+# Development stack: the server built from this checkout, plus the MongoDB it stores into.
+# This is for testing and development only — apps/server/compose.example.yaml is the
+# deployment example, and it pulls the published image instead of building one.
+#
+#   pnpm dev:server        # or: docker compose -f compose.dev.yaml up --build
+#   pnpm dev:server:down   # or: docker compose -f compose.dev.yaml down -v
+#
+# It builds from the working tree, so the running server is whatever the code says right now.
+# Point the CLI at it with --server-url http://localhost:3000.
+services:
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    environment:
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017
+      HOLYDECK_MONGO_DB: holydeck
+      HOLYDECK_LOG_LEVEL: debug
+      # bible.com answers plain HTTP clients with a JavaScript challenge. The image ships the
+      # Chromium that passes it, so syncing from the dev stack behaves like the real thing.
+      HOLYDECK_BROWSER_FETCH: "true"
+    ports:
+      - "3000:3000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:8
+    # Published so mongosh or Compass can look inside; change the host port if 27017 is taken.
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-dev-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  mongo-dev-data:
