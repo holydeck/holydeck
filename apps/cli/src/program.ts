@@ -3,6 +3,7 @@ import { HolyDeckError } from '@holydeck/core/messages';
 import { registerConfig } from './commands/config.js';
 import { registerGet } from './commands/get.js';
 import { registerGetVerses } from './commands/get-verses.js';
+import { registerImport } from './commands/import.js';
 import { registerInfo } from './commands/info.js';
 import { registerNew } from './commands/new.js';
 import { registerOffsets } from './commands/offsets.js';
@@ -40,6 +41,7 @@ export function buildProgram(ctx: CliContext): Command {
   registerConfig(program, ctx);
   registerGetVerses(program, ctx);
   registerGet(program, ctx);
+  registerImport(program, ctx);
   registerInfo(program, ctx);
   registerNew(program, ctx);
   registerOffsets(program, ctx);
