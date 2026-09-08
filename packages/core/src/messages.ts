@@ -22,7 +22,24 @@ export type MessageCode =
   | 'deprecated_env'
   | 'legacy_sermon_format'
   | 'legacy_force_ignored'
-  | 'legacy_template';
+  | 'legacy_template'
+  | 'sermon_file_missing'
+  | 'no_last_sermon'
+  | 'file_exists'
+  | 'config_exists'
+  | 'server_error'
+  | 'server_unreachable'
+  | 'server_bad_response'
+  | 'local_only_command'
+  | 'unknown_shell'
+  | 'deprecated_flag'
+  | 'refresh_unchanged'
+  | 'cache_footer'
+  | 'clipboard_unavailable'
+  | 'copied_to_clipboard'
+  | 'editor_not_set'
+  | 'editor_failed'
+  | 'diff_range_invalid';
 
 export const messageCatalog: Record<MessageCode, string> = {
   invalid_verse_list: 'Invalid verse list "{input}". Use comma-separated numbers and ranges, e.g. "1-4,7".',
@@ -49,6 +66,23 @@ export const messageCatalog: Record<MessageCode, string> = {
   legacy_sermon_format: 'Sermon file uses the legacy format (version/verses keys); it still works, but switch to "translations" with per-entry "offsets".',
   legacy_force_ignored: 'Legacy "force" flag on {reference} is ignored; use "holydeck sync --refresh" to refetch content.',
   legacy_template: 'Template uses the legacy "{0.field}" syntax; it still works, but Liquid templates are recommended.',
+  sermon_file_missing: 'Sermon file {path} does not exist.',
+  no_last_sermon: 'No sermon file remembered yet. Run "holydeck get-verses <file>" once; after that --last works.',
+  file_exists: 'File {path} already exists; refusing to overwrite.',
+  config_exists: 'Config file {path} already exists; pass --force to overwrite it.',
+  server_error: 'Server error (HTTP {status}) from {url}: {message}',
+  server_unreachable: 'Could not reach the HolyDeck server: {reason} ({url}).',
+  server_bad_response: 'Unexpected response from the HolyDeck server at {url}: {reason}.',
+  local_only_command: '"holydeck {command}" works on the local datastore and is not available in server mode (--server-url). Run it where the data lives.',
+  unknown_shell: 'Unknown shell "{shell}". Supported: zsh, bash.',
+  deprecated_flag: 'Flag {oldFlag} is deprecated; use {newFlag} instead.',
+  refresh_unchanged: '{abbr} {book} {chapter}: content unchanged, no new revision.',
+  cache_footer: 'source: cache · revision {rev} · fetched {date} — {abbr} {book} {chapter}',
+  clipboard_unavailable: 'Could not copy to clipboard: no clipboard tool worked (tried {tried}).',
+  copied_to_clipboard: 'Copied to clipboard.',
+  editor_not_set: '$EDITOR is not set; skipping editor launch.',
+  editor_failed: 'Editor "{editor}" exited with status {status}.',
+  diff_range_invalid: 'Invalid --diff range "{input}". Use two revision numbers like "1..3".',
 };
 
 export function formatMessage(code: MessageCode, params: Record<string, string | number> = {}): string {
