@@ -1,4 +1,3 @@
-import { bundledCanon } from './canon.js';
 import { HolyDeckError } from './messages.js';
 import { createEmptyStoreFile } from './storage.js';
 import { translationId } from './translations.js';
@@ -72,21 +71,19 @@ export async function syncTranslation(
       dryRun,
     };
 
-    if (!(dryRun && file.canon !== undefined)) {
-      const { meta, canon } = await fetcher.fetchVersionMeta(id);
+    let canon: Canon;
+    if (!dryRun || file.canon == null) {
+      const { meta, canon: fetchedCanon } = await fetcher.fetchVersionMeta(id);
       const previousBuild = file.meta?.metadataBuild;
       if (previousBuild !== undefined && previousBuild !== meta.metadataBuild) {
         report.metadataBuildChanged = { from: previousBuild, to: meta.metadataBuild };
       }
       file.meta = meta;
-      file.canon = canon;
+      file.canon = fetchedCanon;
+      canon = fetchedCanon;
+    } else {
+      canon = file.canon;
     }
-
-    // v8 ignore next -- file.canon is always set here (freshly fetched above, which always
-    // yields a non-empty canon or throws; or already present when the dry-run refetch was
-    // skipped); bundledCanon() is a defensive fallback only
-    // v8 ignore next
-    const canon = file.canon ?? bundledCanon();
     const plan = planSync(canon, file, refresh);
     report.planned = plan.length;
 
