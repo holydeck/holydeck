@@ -114,8 +114,8 @@ export function chapterHtml(book: string, chapter: string, verses: VerseMap): st
   const spans = Object.entries(verses)
     .map(
       ([verse, text]) =>
-        `<span class="ChapterContent_verse__zz1" data-usfm="${book}.${chapter}.${verse}">` +
-        `<span class="ChapterContent_content__zz2">${text}</span></span>`,
+        `<span class="ChapterContent-module__zz1__verse" data-usfm="${book}.${chapter}.${verse}">` +
+        `<span class="ChapterContent-module__zz2__content">${text}</span></span>`,
     )
     .join('');
   return `<html><body><div class="ChapterContent_chapter__zz0">${spans}</div></body></html>`;
