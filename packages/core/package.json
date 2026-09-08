@@ -76,5 +76,17 @@
     "cheerio": "^1.2.0",
     "liquidjs": "^10.29.0",
     "yaml": "^2.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/holydeck/holydeck.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/holydeck/holydeck#readme",
+  "bugs": {
+    "url": "https://github.com/holydeck/holydeck/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

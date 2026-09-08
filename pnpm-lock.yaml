@@ -129,17 +129,16 @@ importers:
         version: 8.69.0(eslint@10.10.0)(typescript@5.9.3)
 
   apps/cli:
-    dependencies:
+    devDependencies:
       '@holydeck/core':
         specifier: workspace:*
         version: link:../../packages/core
-      commander:
-        specifier: ^15.0.0
-        version: 15.0.0
-    devDependencies:
       '@vitest/coverage-v8':
         specifier: ^5.0.0
         version: 5.0.0(vitest@5.0.0)
+      commander:
+        specifier: ^15.0.0
+        version: 15.0.0
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.28)(typescript@5.9.3)(yaml@2.9.0)
