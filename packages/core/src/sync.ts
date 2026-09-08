@@ -35,6 +35,8 @@ export interface SyncReport {
   metadataBuildChanged?: { from: number; to: number };
   dryRun: boolean;
   plan?: SyncPlanItem[];
+  /** Set when the run stopped early on the caller's signal; what was fetched is still saved. */
+  aborted?: boolean;
 }
 
 export interface SyncOptions {
@@ -44,6 +46,8 @@ export interface SyncOptions {
   delayMs?: number;
   onProgress?: (done: number, total: number, item: SyncPlanItem) => void;
   sleep?: (ms: number) => Promise<void>;
+  /** Stops the run at the next chapter boundary, so the store is saved and the lock released. */
+  signal?: AbortSignal;
 }
 
 export function planSync(canon: Canon, file: TranslationStoreFile | undefined, refresh: boolean): SyncPlanItem[] {
@@ -115,7 +119,7 @@ export async function syncTranslation(
 
     const worker = async (): Promise<void> => {
       for (;;) {
-        if (blocked || nextIndex >= plan.length) return;
+        if (blocked || options.signal?.aborted === true || nextIndex >= plan.length) return;
         const item = plan[nextIndex]!;
         nextIndex += 1;
         if (firstFetchDone && delayMs > 0) await sleep(delayMs);
@@ -143,6 +147,7 @@ export async function syncTranslation(
 
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
     await store.save(upper, file);
+    if (options.signal?.aborted === true) report.aborted = true;
     return report;
   });
 }
