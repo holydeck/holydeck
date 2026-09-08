@@ -60,17 +60,16 @@ jobs:
           echo "npm $version ok"
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo build --filter=holydeck...
-      - name: Pack the publishable packages
+      # @holydeck/core is a private workspace library (bundled into the CLI),
+      # so the CLI is the only npm artifact.
+      - name: Pack the CLI
         run: |
           mkdir -p "$RUNNER_TEMP/tarballs"
-          (cd packages/core && pnpm pack --pack-destination "$RUNNER_TEMP/tarballs")
           (cd apps/cli && pnpm pack --pack-destination "$RUNNER_TEMP/tarballs")
           ls -l "$RUNNER_TEMP/tarballs"
       # No token anywhere: npm >= 11.5.1 exchanges this job's OIDC identity
       # with npmjs.com (trusted publisher: this repo + release.yml +
       # environment release) and attaches provenance automatically.
-      - name: Publish @holydeck/core to npmjs
-        run: npm publish "$RUNNER_TEMP"/tarballs/holydeck-core-*.tgz
       - name: Publish holydeck to npmjs
         run: npm publish "$RUNNER_TEMP"/tarballs/holydeck-[0-9]*.tgz
 
@@ -93,15 +92,11 @@ jobs:
         run: echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> "$HOME/.npmrc"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Mirror @holydeck/core
-        run: |
-          mkdir -p "$RUNNER_TEMP/mirror"
-          (cd packages/core && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
-          npm publish "$RUNNER_TEMP"/mirror/holydeck-core-*.tgz --registry=https://npm.pkg.github.com
       # GitHub Packages only hosts scoped packages, so the unscoped CLI
       # mirrors under the org scope as @holydeck/cli. npmjs stays canonical.
       - name: Mirror the CLI as @holydeck/cli
         run: |
+          mkdir -p "$RUNNER_TEMP/mirror"
           (cd apps/cli && npm pkg set name=@holydeck/cli && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
           npm publish "$RUNNER_TEMP"/mirror/holydeck-cli-*.tgz --registry=https://npm.pkg.github.com
 
