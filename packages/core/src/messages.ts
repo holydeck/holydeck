@@ -2,6 +2,7 @@ export type MessageCode =
   | 'invalid_verse_list'
   | 'invalid_reference'
   | 'unknown_translation'
+  | 'invalid_translation'
   | 'sermon_invalid'
   | 'config_invalid_value'
   | 'config_file_unreadable'
@@ -27,6 +28,7 @@ export const messageCatalog: Record<MessageCode, string> = {
   invalid_verse_list: 'Invalid verse list "{input}". Use comma-separated numbers and ranges, e.g. "1-4,7".',
   invalid_reference: 'Invalid reference "{input}". Use "<BOOK> <chapter>:<verses>", e.g. "PSA 118:24" or "GEN 1:5-7,9".',
   unknown_translation: 'Unknown translation "{abbr}". Known: {known}.',
+  invalid_translation: 'Invalid translation identifier "{abbr}"; expected 1-16 letters/digits, e.g. "KJV" or "SCH2000".',
   sermon_invalid: 'Invalid sermon file: {reason}.',
   config_invalid_value: 'Invalid value for {key}: "{value}" — {reason}.',
   config_file_unreadable: 'Cannot use config file {path}: {reason}.',

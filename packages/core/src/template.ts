@@ -52,7 +52,8 @@ export function renderLegacyTemplate(template: string, entries: EntryData[]): st
     .join('');
 }
 
-const liquid = new Liquid();
+// Empty root closes off include/render/layout filesystem access to user-supplied templates.
+const liquid = new Liquid({ root: [] });
 
 export async function renderOutput(
   template: string | undefined,
