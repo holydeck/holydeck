@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { HolyDeckError } from '@holydeck/core/messages';
 import { API_ENDPOINTS, errorEnvelope, statusForCode } from './errors.js';
 import { registerHealthRoute } from './routes/health.js';
+import { registerStatsRoute } from './routes/stats.js';
 import { registerSyncRoutes } from './routes/sync.js';
 import { registerTranslationsRoutes } from './routes/translations.js';
 import { registerVersesRoute } from './routes/verses.js';
@@ -56,6 +57,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       registerTranslationsRoutes(api, deps);
       registerVersesRoute(api, deps);
       registerSyncRoutes(api, deps);
+      registerStatsRoute(api, deps);
     },
     { prefix: '/api/v1' },
   );
