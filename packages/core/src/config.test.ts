@@ -119,6 +119,17 @@ describe('resolveConfig', () => {
     expect(template.notices).toHaveLength(1);
   });
 
+  it('treats an empty or whitespace-only numeric env var as unset rather than 0', () => {
+    const resolved = resolveConfig({
+      platform: darwin,
+      env: { HOLYDECK_SYNC_DELAY_MS: '', HOLYDECK_SYNC_CONCURRENCY: '   ' },
+    });
+    expect(resolved.values.syncDelayMs).toBe(1000);
+    expect(resolved.sources.syncDelayMs).toBe('default');
+    expect(resolved.values.syncConcurrency).toBe(2);
+    expect(resolved.sources.syncConcurrency).toBe('default');
+  });
+
   it('rejects malformed numeric env values', () => {
     expect(() => resolveConfig({ platform: darwin, env: { HOLYDECK_SYNC_CONCURRENCY: 'zero' } }))
       .toThrowError(HolyDeckError);
