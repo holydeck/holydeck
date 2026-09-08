@@ -1,0 +1,31 @@
+{
+  "$schema": "https://unpkg.com/release-it/schema/release-it.json",
+  "git": {
+    "requireBranch": "main",
+    "requireCleanWorkingDir": true,
+    "requireUpstream": true,
+    "commitMessage": "chore(release): v${version}",
+    "tagName": "v${version}",
+    "tagAnnotation": "v${version}",
+    "push": true
+  },
+  "npm": {
+    "publish": false
+  },
+  "github": {
+    "release": false
+  },
+  "hooks": {
+    "before:init": ["pnpm run test:release", "pnpm turbo lint typecheck test build"],
+    "after:bump": "node scripts/release/sync-versions.mjs ${version}"
+  },
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "preset": { "name": "conventionalcommits" },
+      "infile": "CHANGELOG.md",
+      "header": "# Changelog",
+      "ignoreRecommendedBump": true
+    },
+    "./scripts/release/calver-plugin.mjs": {}
+  }
+}
