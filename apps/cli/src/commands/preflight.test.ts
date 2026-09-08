@@ -1,9 +1,15 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { chapterUrl } from '@holydeck/core/scraper';
 import { chapterHtml, makeContext, seedStore } from '../../test/harness.js';
 import { runCli } from '../program.js';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual };
+});
 
 const SERMON = 'translations: [KJV]\nverses:\n  - book: PSA\n    chapter: 117\n    verses: 1-2\n';
 
@@ -172,5 +178,37 @@ describe('preflight', () => {
     const path = writeSermon(setup.home, 'version: [KJV]\nverses:\n  - book: PSA\n    chapter: 117\n    verses: 1-2\n');
     await expect(runCli(setup.ctx, ['preflight', path])).resolves.toBe(0);
     expect(setup.stderr()).toContain('legacy format');
+  });
+
+  it('marks a row failed with a stringified error when a non-HolyDeckError escapes the local check', async () => {
+    const setup = makeContext({
+      responses: {
+        [chapterUrl(1, 'KJV', 'PSA', '117')]: { status: 200, body: chapterHtml('PSA', '117', { '1': 'x', '2': 'y' }) },
+      },
+    });
+    const path = writeSermon(setup.home);
+    const error = Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    const openSpy = vi.spyOn(fsPromises, 'open').mockRejectedValueOnce(error as never);
+    await expect(runCli(setup.ctx, ['preflight', path])).resolves.toBe(1);
+    expect(setup.stdout()).toContain('failed   KJV PSA 117:1-2 — Error: permission denied');
+    openSpy.mockRestore();
+  });
+
+  it('falls back to an empty verse set when a stored chapter has no revisions', async () => {
+    const setup = makeContext();
+    const bibleDir = join(setup.dataDir, 'bibles');
+    mkdirSync(bibleDir, { recursive: true });
+    writeFileSync(
+      join(bibleDir, 'KJV.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        translation: 'KJV',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+        books: { PSA: { chapters: { '117': { canonVerseCount: 2, revisions: [] } } } },
+      }),
+    );
+    const path = writeSermon(setup.home);
+    await expect(runCli(setup.ctx, ['preflight', path])).resolves.toBe(1);
+    expect(setup.stdout()).toContain('failed   KJV PSA 117:1-2 — missing verses: 1-2');
   });
 });

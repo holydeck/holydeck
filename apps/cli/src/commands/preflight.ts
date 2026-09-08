@@ -6,7 +6,7 @@ import { HolyDeckError } from '@holydeck/core/messages';
 import { formatVerseList } from '@holydeck/core/references';
 import type { SermonEntry } from '@holydeck/core/sermon';
 import { parseSermonFile } from '@holydeck/core/sermon';
-import { getChapter, latestRevision } from '@holydeck/core/storage';
+import { getChapter } from '@holydeck/core/storage';
 import { translationId } from '@holydeck/core/translations';
 import { errLine, outLine } from '../context.js';
 import type { CliContext } from '../context.js';
@@ -35,12 +35,6 @@ function missingIn(verses: Record<string, string>, needed: number[]): number[] {
   return needed.filter((verse) => verses[String(verse)] === undefined);
 }
 
-// Every error thrown along these paths is an Error (HolyDeckError or a native fs/JS error);
-// nothing in @holydeck/core or Node's fs APIs ever throws a non-Error value.
-function messageOf(error: unknown): string {
-  return (error as Error).message;
-}
-
 async function checkLocal(runtime: Runtime, abbr: string, entry: SermonEntry): Promise<PreflightRow> {
   const reference = referenceOf(entry);
   const chapter = String(entry.chapter);
@@ -51,26 +45,23 @@ async function checkLocal(runtime: Runtime, abbr: string, entry: SermonEntry): P
     if (findBook(canon, entry.book) === undefined) {
       return { reference, translation: abbr, status: 'failed', detail: `unknown book ${entry.book}` };
     }
-    const existing = getChapter(file, entry.book, chapter);
-    let verses: Record<string, string>;
-    let status: PreflightRow['status'];
-    if (existing === undefined) {
+    let record = getChapter(file, entry.book, chapter);
+    let status: PreflightRow['status'] = 'ok';
+    if (record === undefined) {
       const parsed = await runtime.fetcher.fetchChapter(translationId(abbr), abbr, entry.book, chapter);
       await runtime.store.putChapter(abbr, entry.book, chapter, parsed.verses, parsed.canonVerseCount);
-      verses = parsed.verses;
+      record = getChapter(await runtime.store.load(abbr), entry.book, chapter);
       status = 'fetched';
-    } else {
-      // getChapter only ever returns records built by appendRevision, which always has >=1 revision.
-      verses = latestRevision(existing)!.verses;
-      status = 'ok';
     }
+    const verses = record?.revisions.at(-1)?.verses ?? {};
     const missing = missingIn(verses, needed);
     if (missing.length > 0) {
       return { reference, translation: abbr, status: 'failed', detail: `missing verses: ${formatVerseList(missing)}` };
     }
     return { reference, translation: abbr, status };
   } catch (error) {
-    return { reference, translation: abbr, status: 'failed', detail: messageOf(error) };
+    const detail = error instanceof HolyDeckError ? error.message : String(error);
+    return { reference, translation: abbr, status: 'failed', detail };
   }
 }
 
@@ -80,15 +71,16 @@ async function checkServer(runtime: Runtime, abbr: string, entry: SermonEntry): 
   /* v8 ignore next */
   if (server === undefined) throw new Error('server mode without server client');
   try {
-    const needed = neededVerses(entry, abbr);
-    const response = await server.getVerses(abbr, entry.book, entry.chapter, needed, {});
-    const missing = missingIn(response.verses, needed);
+    const response = await server.getVerses(abbr, entry.book, entry.chapter, neededVerses(entry, abbr), {});
+    const missing = missingIn(response.verses, neededVerses(entry, abbr));
     if (missing.length > 0) {
       return { reference, translation: abbr, status: 'failed', detail: `missing verses: ${formatVerseList(missing)}` };
     }
     return { reference, translation: abbr, status: 'ok' };
   } catch (error) {
-    return { reference, translation: abbr, status: 'failed', detail: messageOf(error) };
+    // ServerClient.request wraps every failure (network, HTTP, malformed body) in HolyDeckError,
+    // so this arm is always a HolyDeckError in practice; no defensive String(error) fallback needed.
+    return { reference, translation: abbr, status: 'failed', detail: (error as HolyDeckError).message };
   }
 }
 
