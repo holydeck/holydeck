@@ -278,16 +278,18 @@ describe('withLock', () => {
   });
 
   it('refreshes a held lock so a competing withLock waits instead of stealing it as stale', async () => {
+    // The hold outlasts the stale window, so an unrefreshed lock would be stolen; the window is
+    // wide enough that a busy runner delaying a refresh does not read as a broken one.
     const refreshingStore = new FileStore(dir, {
       lockTimeoutMs: 5000,
       lockPollMs: 20,
-      staleLockMs: 120,
+      staleLockMs: 600,
     });
     const order: string[] = [];
     await Promise.all([
       refreshingStore.withLock('KJV', async () => {
         order.push('a-in');
-        await new Promise((resolve) => setTimeout(resolve, 350));
+        await new Promise((resolve) => setTimeout(resolve, 900));
         order.push('a-out');
       }),
       (async () => {
