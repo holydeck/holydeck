@@ -25,6 +25,9 @@ export type MessageCode =
   | 'legacy_force_ignored'
   | 'legacy_template'
   | 'sermon_file_missing'
+  | 'sermon_file_unreadable'
+  | 'sermon_file_forbidden'
+  | 'sermon_file_forbidden_cloud'
   | 'no_last_sermon'
   | 'file_exists'
   | 'config_exists'
@@ -79,6 +82,15 @@ export const messageCatalog: Record<MessageCode, string> = {
   legacy_force_ignored: 'Legacy "force" flag on {reference} is ignored; use "holydeck sync --refresh" to refetch content.',
   legacy_template: 'Template uses the legacy "{0.field}" syntax; it still works, but Liquid templates are recommended.',
   sermon_file_missing: 'Sermon file {path} does not exist.',
+  sermon_file_unreadable: 'Sermon file {path} could not be read: {reason}.',
+  sermon_file_forbidden:
+    'Sermon file {path} exists but the operating system refused access ({reason}). ' +
+    'Check the permissions of the file and of every directory leading to it.',
+  sermon_file_forbidden_cloud:
+    'Sermon file {path} exists but the operating system refused access ({reason}). ' +
+    'It lives in a cloud drive, which macOS guards: the app this command runs in needs Full Disk ' +
+    'Access. Grant it in System Settings › Privacy & Security › Full Disk Access, then quit that ' +
+    'app and start it again.',
   no_last_sermon: 'No sermon file remembered yet. Run "holydeck get-verses <file>" once; after that --last works.',
   file_exists: 'File {path} already exists; refusing to overwrite.',
   config_exists: 'Config file {path} already exists; pass --force to overwrite it.',
