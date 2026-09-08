@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, utimesSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, utimesSync } from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileStore } from './file-store.js';
@@ -123,6 +123,117 @@ describe('withLock', () => {
     const past = (Date.now() - 120_000) / 1000;
     utimesSync(lockPath, past, past);
     expect(await store.withLock('KJV', async () => 'ran')).toBe('ran');
+  });
+
+  describe('reclaiming a lock whose owner is gone', () => {
+    const lockPath = (): string => join(dir, 'bibles', '.KJV.lock');
+    const holdLock = (contents: string): void => {
+      mkdirSync(join(dir, 'bibles'), { recursive: true });
+      writeFileSync(lockPath(), contents);
+    };
+    const storeWith = (isProcessAlive: (pid: number) => boolean): FileStore =>
+      new FileStore(dir, { lockTimeoutMs: 300, lockPollMs: 20, host: 'test-host', isProcessAlive });
+
+    it('takes a fresh lock immediately when the recorded process is dead', async () => {
+      holdLock('test-host:4242');
+      const alive = vi.fn().mockReturnValue(false);
+      expect(await storeWith(alive).withLock('KJV', async () => 'ran')).toBe('ran');
+      expect(alive).toHaveBeenCalledWith(4242);
+    });
+
+    it('tolerates a dead owner’s lock disappearing before it can be unlinked', async () => {
+      holdLock('test-host:4242');
+      const error = Object.assign(new Error('gone'), { code: 'ENOENT' });
+      const unlinkSpy = vi.spyOn(fsPromises, 'unlink').mockRejectedValueOnce(error as never);
+      expect(await storeWith(() => false).withLock('KJV', async () => 'ran')).toBe('ran');
+      unlinkSpy.mockRestore();
+    });
+
+    it('names the holder once while waiting, and again when the wait times out', async () => {
+      holdLock('test-host:4242');
+      const waits: Array<{ abbr: string; owner: string }> = [];
+      const waiting = new FileStore(dir, {
+        lockTimeoutMs: 120,
+        lockPollMs: 20,
+        host: 'test-host',
+        isProcessAlive: () => true,
+        onLockWait: (info) => waits.push(info),
+      });
+      await expect(waiting.withLock('kjv', async () => 'never')).rejects.toMatchObject({
+        code: 'store_locked',
+        params: { abbr: 'KJV', owner: 'process 4242' },
+      });
+      expect(waits).toEqual([{ abbr: 'KJV', owner: 'process 4242' }]); // announced once, not per poll
+    });
+
+    it.each([
+      ['a lock from another machine', 'other-host:4242', 'process 4242 on other-host'],
+      ['a lock with no pid', 'legacy-contents', 'another holydeck process (legacy-contents)'],
+      ['an empty lock file', '', 'another holydeck process'],
+    ])('describes %s in the timeout error', async (_case, contents, owner) => {
+      holdLock(contents);
+      const waiting = new FileStore(dir, { lockTimeoutMs: 60, lockPollMs: 20, host: 'test-host' });
+      await expect(waiting.withLock('KJV', async () => 'never')).rejects.toMatchObject({
+        code: 'store_locked',
+        params: { owner },
+      });
+    });
+
+    it('falls back to a generic holder when the lock file cannot be read', async () => {
+      holdLock('test-host:4242');
+      const readSpy = vi.spyOn(fsPromises, 'readFile').mockRejectedValue(new Error('unreadable') as never);
+      await expect(storeWith(() => true).withLock('KJV', async () => 'never')).rejects.toMatchObject({
+        params: { owner: 'another holydeck process' },
+      });
+      readSpy.mockRestore();
+    });
+
+    it('records this host and pid so another process can judge the lock', async () => {
+      const owner = await storeWith(() => true).withLock('KJV', async () => readFileSync(lockPath(), 'utf8'));
+      expect(owner).toBe(`test-host:${process.pid}`);
+    });
+
+    it('waits out a lock whose recorded process is still running', async () => {
+      holdLock(`test-host:${process.pid}`);
+      await expect(storeWith(() => true).withLock('KJV', async () => 'never')).rejects.toMatchObject({
+        code: 'store_locked',
+      });
+    });
+
+    it.each([
+      ['another machine', 'other-host:4242'],
+      ['no pid', 'test-host'],
+      ['an unparsable pid', 'test-host:not-a-pid'],
+    ])('leaves a lock owned by %s to the staleness check', async (_case, contents) => {
+      holdLock(contents);
+      const alive = vi.fn().mockReturnValue(false);
+      await expect(storeWith(alive).withLock('KJV', async () => 'never')).rejects.toMatchObject({
+        code: 'store_locked',
+      });
+      expect(alive).not.toHaveBeenCalled();
+    });
+
+    it('leaves a lock alone when its contents cannot be read', async () => {
+      holdLock('test-host:4242');
+      const readSpy = vi.spyOn(fsPromises, 'readFile').mockRejectedValue(new Error('unreadable') as never);
+      await expect(storeWith(() => false).withLock('KJV', async () => 'never')).rejects.toMatchObject({
+        code: 'store_locked',
+      });
+      readSpy.mockRestore();
+    });
+
+    it('probes real processes when no liveness check is injected', async () => {
+      const real = new FileStore(dir, { lockTimeoutMs: 100, lockPollMs: 20 });
+      holdLock(`${hostname()}:${process.pid}`);
+      await expect(real.withLock('KJV', async () => 'never')).rejects.toMatchObject({ code: 'store_locked' });
+
+      // pid 1 exists but is not ours: the EPERM answer still means "alive".
+      writeFileSync(lockPath(), `${hostname()}:1`);
+      await expect(real.withLock('KJV', async () => 'never')).rejects.toMatchObject({ code: 'store_locked' });
+
+      writeFileSync(lockPath(), `${hostname()}:4194303`);
+      expect(await real.withLock('KJV', async () => 'ran')).toBe('ran');
+    });
   });
 
   it('releases the lock even when fn throws', async () => {
