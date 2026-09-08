@@ -126,10 +126,10 @@ function envLayer(env: Record<string, string | undefined>, notices: string[]): P
       .map((item) => item.trim().toUpperCase())
       .filter((item) => item !== '');
   }
-  if (env.HOLYDECK_SYNC_CONCURRENCY !== undefined) {
+  if (env.HOLYDECK_SYNC_CONCURRENCY !== undefined && env.HOLYDECK_SYNC_CONCURRENCY.trim() !== '') {
     layer.syncConcurrency = parseIntEnv('HOLYDECK_SYNC_CONCURRENCY', env.HOLYDECK_SYNC_CONCURRENCY, 1);
   }
-  if (env.HOLYDECK_SYNC_DELAY_MS !== undefined) {
+  if (env.HOLYDECK_SYNC_DELAY_MS !== undefined && env.HOLYDECK_SYNC_DELAY_MS.trim() !== '') {
     layer.syncDelayMs = parseIntEnv('HOLYDECK_SYNC_DELAY_MS', env.HOLYDECK_SYNC_DELAY_MS, 0);
   }
   return layer;
