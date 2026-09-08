@@ -72,7 +72,9 @@ export const messageCatalog: Record<MessageCode, string> = {
   store_locked:
     'Datastore for {abbr} is still locked by {owner} after waiting {waitedMs}ms (lock file: {path}). ' +
     'Wait for that run to finish, or delete the lock file if nothing is running.',
-  scrape_blocked: 'bible.com answered with a bot-protection challenge instead of content. Plain HTTP cannot pass it; enable the browser fetch backend (see "holydeck doctor") or try again later.',
+  scrape_blocked:
+    'bible.com answered with a bot-protection challenge instead of content. Plain HTTP cannot pass it; ' +
+    'retry with --browser-fetch (or set browserFetch: true in the config) to fetch through a headless browser.',
   browser_unavailable: 'Could not start the headless browser used to fetch bible.com: {reason}.',
   scrape_http_error: 'bible.com request failed: HTTP {status} for {url}',
   scrape_network_error: 'Could not reach bible.com: {reason} ({url}).',
