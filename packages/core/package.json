@@ -2,6 +2,7 @@
   "name": "@holydeck/core",
   "version": "0.0.0",
   "description": "Core engine for HolyDeck: bible references, local datastore, scraper, sync, templating",
+  "private": true,
   "license": "MIT",
   "type": "module",
   "files": [
@@ -85,8 +86,5 @@
   "homepage": "https://github.com/holydeck/holydeck#readme",
   "bugs": {
     "url": "https://github.com/holydeck/holydeck/issues"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }
