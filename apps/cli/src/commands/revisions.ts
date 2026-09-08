@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { resolveBook } from '@holydeck/core/canon';
 import { HolyDeckError } from '@holydeck/core/messages';
 import type { ChapterRevision } from '@holydeck/core/storage';
 import { findRevision, getChapter } from '@holydeck/core/storage';
@@ -27,7 +28,7 @@ export async function runRevisions(
   const runtime = await createRuntime(ctx, runtimeFlags(globals));
   requireLocal(runtime, 'revisions');
   const abbr = abbrInput.toUpperCase();
-  const book = bookInput.toUpperCase();
+  const book = resolveBook(bookInput) ?? bookInput.toUpperCase();
   const chapter = Number(chapterInput);
   if (!Number.isInteger(chapter) || chapter < 1) {
     throw new HolyDeckError('invalid_reference', { input: `${book} ${chapterInput}` });
@@ -72,7 +73,7 @@ export function registerRevisions(program: Command, ctx: CliContext): void {
     .command('revisions')
     .description('List or diff the stored revisions of a chapter')
     .argument('<abbr>', 'translation abbreviation')
-    .argument('<book>', 'USFM book code, e.g. PSA')
+    .argument('<book>', 'USFM book code or book name, e.g. PSA or Psalms')
     .argument('<chapter>', 'chapter number')
     .option('--diff <range>', 'diff two revisions, e.g. 1..3')
     .action(

@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { resolveBook } from '@holydeck/core/canon';
 import { HolyDeckError } from '@holydeck/core/messages';
 import type { TranslationStoreFile } from '@holydeck/core/storage';
 import { outLine } from '../context.js';
@@ -72,7 +73,8 @@ export async function runOffsets(
   const abbrB = bInput.toUpperCase();
   const fileA = await loadStored(runtime, dataDir, abbrA);
   const fileB = await loadStored(runtime, dataDir, abbrB);
-  const { shared, differences } = compareCounts(fileA, fileB, bookInput?.toUpperCase());
+  const book = bookInput === undefined ? undefined : (resolveBook(bookInput) ?? bookInput.toUpperCase());
+  const { shared, differences } = compareCounts(fileA, fileB, book);
   if (globals.json === true) {
     outLine(ctx, JSON.stringify({ a: abbrA, b: abbrB, shared, differences }, undefined, 2));
     return;
@@ -95,7 +97,7 @@ export function registerOffsets(program: Command, ctx: CliContext): void {
     .description('Compare verse counts between two stored translations to find versification offsets')
     .argument('<a>', 'first translation abbreviation')
     .argument('<b>', 'second translation abbreviation')
-    .argument('[book]', 'limit the comparison to one USFM book code')
+    .argument('[book]', 'limit the comparison to one book, by USFM code or name')
     .action(async (a: string, b: string, book: string | undefined, _options: Record<string, never>, command: Command) => {
       await runOffsets(ctx, a, b, book, command.optsWithGlobals<GlobalOptions>());
     });

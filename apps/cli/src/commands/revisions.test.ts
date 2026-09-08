@@ -28,6 +28,20 @@ describe('revisions', () => {
     expect(setup.stdout()).toContain('rev 1');
   });
 
+  it('accepts a book name instead of a code', async () => {
+    const setup = makeContext();
+    await seedTwoRevisions(setup.dataDir);
+    await expect(runCli(setup.ctx, ['revisions', 'KJV', 'Psalms', '117'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('rev 1');
+  });
+
+  it('reports an unresolvable book as a chapter the datastore lacks', async () => {
+    const setup = makeContext();
+    await seedTwoRevisions(setup.dataDir);
+    await expect(runCli(setup.ctx, ['revisions', 'KJV', 'Hezekiah', '117'])).resolves.toBe(1);
+    expect(setup.stderr()).toContain('HEZEKIAH 117');
+  });
+
   it('emits JSON with --json', async () => {
     const setup = makeContext();
     await seedTwoRevisions(setup.dataDir);
