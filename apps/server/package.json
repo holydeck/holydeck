@@ -1,0 +1,29 @@
+{
+  "name": "@holydeck/server",
+  "version": "0.0.0",
+  "description": "HolyDeck HTTP server: Fastify + MongoDB shell over @holydeck/core",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --coverage",
+    "lint": "eslint src test",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@holydeck/core": "workspace:*",
+    "fastify": "^5.12.3",
+    "mongodb": "^6.21.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.0",
+    "mongodb-memory-server": "^10.4.3",
+    "tsup": "^8.5.1",
+    "vitest": "^5.0.0"
+  }
+}

@@ -7,8 +7,10 @@ import { parseVersionMeta } from './canon.js';
 import { Fetcher } from './fetcher.js';
 import type { HttpGet } from './fetcher.js';
 import { FileStore } from './file-store.js';
-import { createEmptyStoreFile } from './storage.js';
+import { appendRevision, createEmptyStoreFile } from './storage.js';
+import type { TranslationStoreFile } from './storage.js';
 import { syncTranslation } from './sync.js';
+import type { SyncStore } from './sync.js';
 
 const versionJson = readFileSync(new URL('../test/fixtures/version-1-kjv.json', import.meta.url), 'utf8');
 
@@ -214,5 +216,55 @@ describe('syncTranslation', () => {
     const { fetcher } = stubFetcher((url) => versionOk(url) ?? { status: 200, body: chapterHtml('GEN', '1', 'x') });
     vi.spyOn(fetcher, 'fetchChapter').mockRejectedValue(new Error('boom'));
     await expect(syncTranslation(store, fetcher, 'KJV', { delayMs: 0, concurrency: 1 })).rejects.toThrow('boom');
+  });
+});
+
+function memoryStore(): { store: SyncStore; files: Map<string, TranslationStoreFile>; lockLog: string[] } {
+  const files = new Map<string, TranslationStoreFile>();
+  const lockLog: string[] = [];
+  let tick = 0;
+  const store: SyncStore = {
+    now: () => `2026-09-08T13:00:${String((tick += 1) % 60).padStart(2, '0')}.000Z`,
+    load: async (abbr) => structuredClone(files.get(abbr.toUpperCase())),
+    save: async (abbr, file) => {
+      files.set(abbr.toUpperCase(), structuredClone(file));
+    },
+    withLock: async (abbr, fn) => {
+      lockLog.push(`lock:${abbr}`);
+      try {
+        return await fn();
+      } finally {
+        lockLog.push(`unlock:${abbr}`);
+      }
+    },
+    putChapterInFile: (file, book, chapter, verses, canonVerseCount) => {
+      const bookRecord = (file.books[book] ??= { chapters: {} });
+      const { record, changed, rev } = appendRevision(bookRecord.chapters[chapter], verses, canonVerseCount, store.now());
+      bookRecord.chapters[chapter] = record;
+      return { changed, rev };
+    },
+  };
+  return { store, files, lockLog };
+}
+
+describe('SyncStore contract', () => {
+  it('runs the whole engine against a non-file store implementation', async () => {
+    const { store: memory, files, lockLog } = memoryStore();
+    const { fetcher } = stubFetcher((url) => {
+      const fromVersion = versionOk(url);
+      if (fromVersion) return fromVersion;
+      const match = /bible\/1\/([A-Z1-3]+)\.(\d+)\.KJV$/.exec(url);
+      return { status: 200, body: chapterHtml(match![1]!, match![2]!, `memory ${match![1]} ${match![2]}`) };
+    });
+    const report = await syncTranslation(memory, fetcher, 'kjv', { delayMs: 0 });
+    expect(report.translation).toBe('KJV');
+    expect(report.fetched).toBe(1189);
+    expect(lockLog).toEqual(['lock:KJV', 'unlock:KJV']);
+    expect(files.get('KJV')?.books.PSA?.chapters['117']?.revisions[0]?.verses['1']).toBe('memory PSA 117');
+  });
+
+  it('FileStore satisfies SyncStore structurally (compile-time check)', () => {
+    const asSyncStore: SyncStore = store;
+    expect(asSyncStore.now()).toMatch(/^2026-/);
   });
 });
