@@ -1,4 +1,5 @@
 import { parse } from 'yaml';
+import { resolveBook } from './canon.js';
 import { asArray, asNumber, asObject, asString } from './internal/json.js';
 import { HolyDeckError, formatMessage } from './messages.js';
 import { parseVerseList } from './references.js';
@@ -17,8 +18,6 @@ export interface SermonFile {
   entries: SermonEntry[];
   notices: string[];
 }
-
-const BOOK_PATTERN = /^([1-3][A-Z]{2}|[A-Z]{3})$/;
 
 export function parseSermonFile(text: string): SermonFile {
   let raw: unknown;
@@ -127,10 +126,11 @@ function parseEntryList(value: unknown): JsonObject[] {
 }
 
 function parseEntryCore(item: JsonObject, index: number): { book: string; chapter: number; verses: number[] } {
-  const book = asString(item.book)?.trim().toUpperCase();
-  if (book === undefined || !BOOK_PATTERN.test(book)) {
+  const named = asString(item.book);
+  const book = named === undefined ? undefined : resolveBook(named);
+  if (book === undefined) {
     throw new HolyDeckError('sermon_invalid', {
-      reason: `"verses[${index}].book" must be a 3-letter USFM book code (e.g. GEN, PSA, 1SA)`,
+      reason: `"verses[${index}].book" must be a USFM code (e.g. GEN, PSA, 1SA) or a book name (e.g. "2nd Samuel", "1. Mose")`,
     });
   }
   const chapter = asNumber(item.chapter);

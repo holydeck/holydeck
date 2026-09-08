@@ -39,7 +39,23 @@ describe('parseReference', () => {
     expect(parseReference('1sa 3:1-4,9')).toEqual({ book: '1SA', chapter: 3, verses: [1, 2, 3, 4, 9] });
   });
 
-  it.each(['PSA118:24', 'PSA 118', 'PSALM 1:1', 'PSA 0:1', 'PSA 1:x'])('rejects %j', (input) => {
+  it.each([
+    ['Genesis 1:5-7,9', { book: 'GEN', chapter: 1, verses: [5, 6, 7, 9] }],
+    ['1. Mose 30:5', { book: 'GEN', chapter: 30, verses: [5] }],
+    ['1st Corinthians 15:14', { book: '1CO', chapter: 15, verses: [14] }],
+    ['psalm 118:24', { book: 'PSA', chapter: 118, verses: [24] }],
+    ['சங்கீதம் 118:24', { book: 'PSA', chapter: 118, verses: [24] }],
+  ])('parses the book name in %j', (input, expected) => {
+    expect(parseReference(input)).toEqual(expected);
+  });
+
+  it('rejects a long run of spaces instead of backtracking over it', () => {
+    // A book name is free text, so the split must stay linear; a backtracking parser would spend
+    // seconds here and time the test out rather than throwing.
+    expect(() => parseReference(`a${' '.repeat(50_000)}`)).toThrow(HolyDeckError);
+  });
+
+  it.each(['PSA118:24', 'PSA 118', 'Hallelujah 1:1', 'PSA 0:1', 'PSA 1:x'])('rejects %j', (input) => {
     try {
       parseReference(input);
       expect.unreachable();
