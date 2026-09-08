@@ -1,3 +1,4 @@
+import { BOOK_ALIASES } from './internal/book-aliases.js';
 import { asArray, asNumber, asObject, asString } from './internal/json.js';
 import { HolyDeckError } from './messages.js';
 
@@ -174,4 +175,54 @@ export function bundledCanon(): Canon {
 
 export function findBook(canon: Canon, usfm: string): CanonBook | undefined {
   return canon.books.find((book) => book.usfm === usfm.toUpperCase());
+}
+
+const USFM_PATTERN = /^([1-3][A-Z]{2}|[A-Z]{3})$/;
+
+/** Ordinals as people write them, so "2nd Samuel", "2. Samuel" and "II Samuel" all agree. */
+const ORDINALS: Record<string, string> = {
+  '1st': '1', first: '1', i: '1',
+  '2nd': '2', second: '2', ii: '2',
+  '3rd': '3', third: '3', iii: '3',
+};
+
+/** Accents on a Latin letter only, so "Römer" also answers to "Romer" and Tamil vowel signs stay. */
+const LATIN_ACCENTS = /(?<=\p{Script=Latin})\p{M}+/gu;
+
+/** "2nd Samuel", "II  Samuel." and "1. Samuel" alike become "2samuel"/"1samuel": one key per book. */
+function nameKey(input: string): string {
+  const tokens = input
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(LATIN_ACCENTS, '')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token !== '');
+  const first = tokens[0];
+  if (first !== undefined) tokens[0] = ORDINALS[first] ?? first;
+  return tokens.join('');
+}
+
+let nameIndex: Map<string, string> | undefined;
+
+function bookNames(): Map<string, string> {
+  if (nameIndex === undefined) {
+    nameIndex = new Map();
+    for (const [usfm, name] of PROTESTANT_CANON) nameIndex.set(nameKey(name), usfm);
+    for (const [usfm, ...names] of BOOK_ALIASES) {
+      for (const name of names) nameIndex.set(nameKey(name), usfm);
+    }
+  }
+  return nameIndex;
+}
+
+/**
+ * Turns whatever names a book — a USFM code, or a name in any language BOOK_ALIASES knows —
+ * into the USFM code the datastore is keyed by. Unknown three-letter codes pass through, as they
+ * always have; a name that matches nothing returns undefined.
+ */
+export function resolveBook(input: string): string | undefined {
+  const trimmed = input.trim();
+  const upper = trimmed.toUpperCase();
+  if (USFM_PATTERN.test(upper)) return upper;
+  return bookNames().get(nameKey(trimmed));
 }
