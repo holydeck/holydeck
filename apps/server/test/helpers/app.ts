@@ -12,6 +12,7 @@ export interface TestApp {
   app: FastifyInstance;
   db: Db;
   store: MongoStore;
+  fetcher: Fetcher;
   jobs: SyncJobManager;
   urls: string[];
   stop: () => Promise<void>;
@@ -60,6 +61,7 @@ export async function buildTestApp(
     app,
     db: mongo.db,
     store,
+    fetcher,
     jobs,
     urls,
     stop: async () => {
