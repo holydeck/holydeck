@@ -16,7 +16,7 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run --coverage",
-    "lint": "eslint src",
+    "lint": "eslint src test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
