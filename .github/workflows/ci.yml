@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -16,6 +20,8 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6
       - name: Set up Node 24
@@ -28,12 +34,38 @@ jobs:
         with:
           path: /home/runner/.cache/mongodb-binaries
           key: mongodb-binaries-${{ runner.os }}-8.0.4
+      - name: Cache turbo output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Test the release scripts
         run: pnpm run test:release
       - name: Lint, typecheck, test, build
-        run: pnpm turbo lint typecheck test build
+        run: |
+          declare -A pipeline_status
+          overall=0
+          for step in lint typecheck test build; do
+            if pnpm turbo run "$step"; then
+              pipeline_status[$step]=pass
+            else
+              pipeline_status[$step]=fail
+              overall=1
+            fi
+          done
+          {
+            echo '### Pipeline results'
+            echo
+            echo '| Step | Result |'
+            echo '| --- | --- |'
+            for step in lint typecheck test build; do
+              echo "| $step | ${pipeline_status[$step]} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$overall"
 
   docker:
     needs: verify

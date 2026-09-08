@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import { test } from 'node:test';
 import {
   bumpManifest,
   cliVersionModule,
+  fromRepoRoot,
   isValidVersion,
   CLI_VERSION_FILE,
   MANIFESTS,
@@ -40,4 +43,11 @@ test('the fan-out targets are the three workspace packages and the CLI constant'
     'apps/server/package.json',
   ]);
   assert.equal(CLI_VERSION_FILE, 'apps/cli/src/version.ts');
+});
+
+test('fromRepoRoot resolves against the repo root, not the working directory', () => {
+  const resolved = fromRepoRoot(CLI_VERSION_FILE);
+  assert.ok(isAbsolute(resolved));
+  assert.equal(resolved, join(dirname(dirname(import.meta.dirname)), CLI_VERSION_FILE));
+  assert.equal(existsSync(resolved), true);
 });
