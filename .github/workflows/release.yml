@@ -107,26 +107,36 @@ jobs:
       # Re-run safety follows what npm actually allows a trust token to do.
       # A version that is already live is detectable with `npm view`; a
       # staged-but-unapproved one is not, because a trust token may only run
-      # `npm publish` and `npm stage publish`, never `npm stage list`. So the
-      # duplicate-version error that re-staging raises is recognised from
-      # npm's own output and treated as "already there"; anything else — an
-      # unauthorized action, a network failure — still fails the job.
+      # `npm publish` and `npm stage publish`, never `npm stage list`. So a
+      # duplicate-version refusal is recognised from npm's own output and
+      # treated as "already there"; anything else — an unauthorized action, a
+      # registry write conflict, a network failure — still fails the job.
+      #
+      # The match below is deliberately narrow. It does not include a bare
+      # E409 (npmjs also returns 409 for "Document update conflict", a
+      # registry-side write conflict where the publish did NOT happen) nor an
+      # unanchored "already exists" (npm's own "EEXIST: file already exists"
+      # arises from cache and tmp handling mid-upload). Both would report
+      # success with nothing staged, which is the one outcome this job must
+      # never produce. A wording change npm makes later costs a red job with
+      # the full output already echoed above — cheap next to a silent pass.
       - name: Stage holydeck on npmjs
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          if npm view "holydeck@$VERSION" version --registry https://registry.npmjs.org >/dev/null 2>&1; then
+          if live="$(npm view "holydeck@$VERSION" version --registry https://registry.npmjs.org 2>&1)"; then
             echo "holydeck@$VERSION is already live on npmjs, nothing to stage"
             exit 0
           fi
+          echo "npm view says holydeck@$VERSION is not live: $live"
           if output="$(npm stage publish "$RUNNER_TEMP"/tarballs/holydeck-[0-9]*.tgz 2>&1)"; then
             echo "$output"
             echo "holydeck@$VERSION is staged, approve it to make it live (see RELEASING.md)"
             exit 0
           fi
           echo "$output"
-          if echo "$output" | grep -qiE 'cannot publish over|already (exists|staged|published)|EPUBLISHCONFLICT|E409'; then
-            echo "holydeck@$VERSION already exists as a staged version, nothing to stage"
+          if grep -qiE 'cannot publish over|EPUBLISHCONFLICT|already (staged|published)' <<<"$output"; then
+            echo "npm reported a duplicate-version conflict; treating holydeck@$VERSION as already present"
             exit 0
           fi
           exit 1
@@ -163,10 +173,11 @@ jobs:
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          if npm view "@holydeck/cli@$VERSION" version --registry https://npm.pkg.github.com >/dev/null 2>&1; then
+          if live="$(npm view "@holydeck/cli@$VERSION" version --registry https://npm.pkg.github.com 2>&1)"; then
             echo "@holydeck/cli@$VERSION is already on GitHub Packages, skipping"
             exit 0
           fi
+          echo "npm view says @holydeck/cli@$VERSION is not published yet: $live"
           mkdir -p "$RUNNER_TEMP/mirror"
           (cd apps/cli && npm pkg set name=@holydeck/cli && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
           npm publish "$RUNNER_TEMP"/mirror/holydeck-cli-*.tgz --registry=https://npm.pkg.github.com
