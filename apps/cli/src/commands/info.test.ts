@@ -4,13 +4,14 @@ import { describe, expect, it } from 'vitest';
 import { configFilePath } from '@holydeck/core/config';
 import { makeContext } from '../../test/harness.js';
 import { runCli } from '../program.js';
+import { CLI_VERSION } from '../version.js';
 
 describe('info', () => {
   it('prints version, mode, config path, and each value with its source', async () => {
     const setup = makeContext();
     await expect(runCli(setup.ctx, ['info'])).resolves.toBe(0);
     const out = setup.stdout();
-    expect(out).toContain('holydeck 0.0.0');
+    expect(out).toContain(`holydeck ${CLI_VERSION}`);
     expect(out).toContain('mode: local');
     expect(out).toContain(`config file: ${configFilePath(setup.ctx.platform)} (missing)`);
     expect(out).toContain(`dataDir: ${setup.dataDir} (env)`);
@@ -50,7 +51,7 @@ describe('info', () => {
       sources: Record<string, string>;
       lastSermonFile: string | null;
     };
-    expect(parsed.version).toBe('0.0.0');
+    expect(parsed.version).toBe(CLI_VERSION);
     expect(parsed.mode).toBe('local');
     expect(parsed.configFile.exists).toBe(false);
     expect(parsed.values['dataDir']).toBe(setup.dataDir);
