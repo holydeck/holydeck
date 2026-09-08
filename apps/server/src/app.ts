@@ -3,6 +3,7 @@ import { HolyDeckError } from '@holydeck/core/messages';
 import { API_ENDPOINTS, errorEnvelope, statusForCode } from './errors.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerTranslationsRoutes } from './routes/translations.js';
+import { registerVersesRoute } from './routes/verses.js';
 import type { FastifyError, FastifyInstance, FastifyServerOptions } from 'fastify';
 import type { Fetcher } from '@holydeck/core/fetcher';
 import type { MongoStore } from './mongo-store.js';
@@ -52,6 +53,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   void app.register(
     async (api) => {
       registerTranslationsRoutes(api, deps);
+      registerVersesRoute(api, deps);
     },
     { prefix: '/api/v1' },
   );
