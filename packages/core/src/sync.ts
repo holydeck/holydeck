@@ -3,8 +3,21 @@ import { createEmptyStoreFile } from './storage.js';
 import { translationId } from './translations.js';
 import type { Canon } from './canon.js';
 import type { Fetcher } from './fetcher.js';
-import type { FileStore } from './file-store.js';
-import type { TranslationStoreFile } from './storage.js';
+import type { TranslationStoreFile, VerseMap } from './storage.js';
+
+export interface SyncStore {
+  now: () => string;
+  load(abbr: string): Promise<TranslationStoreFile | undefined>;
+  save(abbr: string, file: TranslationStoreFile): Promise<void>;
+  withLock<T>(abbr: string, fn: () => Promise<T>): Promise<T>;
+  putChapterInFile(
+    file: TranslationStoreFile,
+    book: string,
+    chapter: string,
+    verses: VerseMap,
+    canonVerseCount: number,
+  ): { changed: boolean; rev: number };
+}
 
 export interface SyncPlanItem {
   book: string;
@@ -46,7 +59,7 @@ export function planSync(canon: Canon, file: TranslationStoreFile | undefined, r
 }
 
 export async function syncTranslation(
-  store: FileStore,
+  store: SyncStore,
   fetcher: Fetcher,
   abbr: string,
   options: SyncOptions = {},
