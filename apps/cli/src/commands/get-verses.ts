@@ -65,6 +65,7 @@ export async function runGetVerses(
     template: options.template ?? options.templateOutputFormat,
     copy: options.copy,
     output: options.output,
+    verbose: globals.verbose,
   });
 
   await writeState(runtime.config.values.dataDir, { lastSermonFile: absolutePath });

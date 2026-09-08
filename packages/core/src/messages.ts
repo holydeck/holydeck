@@ -40,6 +40,7 @@ export type MessageCode =
   | 'refresh_unchanged'
   | 'cache_footer'
   | 'live_footer'
+  | 'fetch_summary'
   | 'canon_unavailable'
   | 'clipboard_unavailable'
   | 'copied_to_clipboard'
@@ -107,6 +108,7 @@ export const messageCatalog: Record<MessageCode, string> = {
   refresh_unchanged: '{abbr} {book} {chapter}: content unchanged, no new revision.',
   cache_footer: 'source: cache · revision {rev} · fetched {date} — {abbr} {book} {chapter}',
   live_footer: 'source: live · revision {rev} · fetched just now — {abbr} {book} {chapter}',
+  fetch_summary: 'Fetched {live} of {total} chapters live; --verbose says where each one came from.',
   canon_unavailable: 'Could not fetch the book names of {abbr} ({reason}); rendering its citations with English names.',
   clipboard_unavailable: 'Could not copy to clipboard: no clipboard tool worked (tried {tried}).',
   copied_to_clipboard: 'Copied to clipboard.',

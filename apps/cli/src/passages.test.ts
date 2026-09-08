@@ -283,15 +283,37 @@ describe('renderAndDeliver', () => {
     return { runtime, sermon, data: await loadEntryData(runtime, ctx, sermon) };
   }
 
-  it('renders the default template to stdout and footers to stderr', async () => {
+  it('renders the default template to stdout and says nothing about cached sources', async () => {
     const { ctx, dataDir, stdout, stderr } = makeContext();
     const { runtime, sermon, data } = await loaded(ctx, dataDir);
     await renderAndDeliver(ctx, runtime, sermon, data);
     expect(stdout()).toContain('O praise the LORD, all ye nations.');
     expect(stdout()).toContain('Psalms 117:1-2 (KJV)');
     expect(stdout().endsWith('\n')).toBe(true);
-    expect(stderr()).toContain('source: cache · revision 1 · fetched 2026-09-01 — KJV PSA 117');
+    expect(stderr()).toBe('');
     expect(stdout()).not.toContain('source: cache');
+  });
+
+  it('lists where every chapter came from with --verbose', async () => {
+    const { ctx, dataDir, stderr } = makeContext();
+    const { runtime, sermon, data } = await loaded(ctx, dataDir);
+    await renderAndDeliver(ctx, runtime, sermon, data, { verbose: true });
+    expect(stderr()).toContain('source: cache · revision 1 · fetched 2026-09-01 — KJV PSA 117');
+  });
+
+  it('summarises a run that had to fetch instead of listing every chapter', async () => {
+    const { ctx, stderr } = makeContext({
+      responses: {
+        ...kjvVersion,
+        [chapterUrl(1, 'KJV', 'PSA', '117')]: { status: 200, body: chapterHtml('PSA', '117', psalm117) },
+      },
+    });
+    const runtime = await createRuntime(ctx);
+    const sermon = sermonWith();
+    const data = await loadEntryData(runtime, ctx, sermon);
+    await renderAndDeliver(ctx, runtime, sermon, data);
+    expect(stderr()).toContain('Fetched 1 of 1 chapters live');
+    expect(stderr()).not.toContain('source: live');
   });
 
   it('lets an explicit template beat the sermon template and pushes legacy notices to stderr', async () => {
