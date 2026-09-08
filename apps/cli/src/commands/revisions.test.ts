@@ -64,17 +64,19 @@ describe('revisions', () => {
     expect(setup.stderr().toLowerCase()).toContain('revision');
   });
 
-  it('orders multi-verse chapter text by verse number when diffing', async () => {
+  it('orders multi-verse chapter text by verse number, not lexically, when diffing', async () => {
+    // Verses '2' and '10' sort differently numerically (2, 10) vs lexically ('10' < '2'),
+    // so this positionally distinguishes a correct numeric sort from a reversed or
+    // lexical comparator: either bug would place verse 10's text before verse 2's.
     const setup = makeContext();
     await seedStore(setup.dataDir, 'KJV', [
-      { book: 'PSA', chapter: '117', verses: { '2': 'all ye peoples', '1': 'O praise the LORD' }, canonVerseCount: 2 },
+      { book: 'PSA', chapter: '117', verses: { '10': 'ten pears', '2': 'two apples' }, canonVerseCount: 10 },
     ]);
     await seedStore(setup.dataDir, 'KJV', [
-      { book: 'PSA', chapter: '117', verses: { '2': 'all ye nations', '1': 'O praise the LORD' }, canonVerseCount: 2 },
+      { book: 'PSA', chapter: '117', verses: { '10': 'ten pears', '2': 'two oranges' }, canonVerseCount: 10 },
     ]);
     await expect(runCli(setup.ctx, ['revisions', 'KJV', 'PSA', '117', '--diff', '1..2'])).resolves.toBe(0);
-    expect(setup.stdout()).toContain('1 O praise the LORD');
-    expect(setup.stdout()).toContain('[-peoples-] {+nations+}');
+    expect(setup.stdout()).toBe('2 two [-apples-] {+oranges+} 10 ten pears\n');
   });
 
   it('errors when the chapter is not stored', async () => {
