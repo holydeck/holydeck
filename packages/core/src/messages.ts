@@ -64,7 +64,9 @@ export const messageCatalog: Record<MessageCode, string> = {
   revision_not_found: 'Revision {rev} not found for {abbr} {book} {chapter} (available: {available}).',
   store_corrupt: 'Datastore file {path} is corrupt: {reason}.',
   store_newer_schema: 'Datastore file {path} has schema version {found}; this build supports up to {supported}. Update holydeck.',
-  store_locked: 'Datastore for {abbr} is locked by another holydeck process (lock file: {path}).',
+  store_locked:
+    'Datastore for {abbr} is still locked by {owner} after waiting {waitedMs}ms (lock file: {path}). ' +
+    'Wait for that run to finish, or delete the lock file if nothing is running.',
   scrape_blocked: 'bible.com answered with a bot-protection challenge instead of content. Plain HTTP cannot pass it; enable the browser fetch backend (see "holydeck doctor") or try again later.',
   browser_unavailable: 'Could not start the headless browser used to fetch bible.com: {reason}.',
   scrape_http_error: 'bible.com request failed: HTTP {status} for {url}',
