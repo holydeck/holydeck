@@ -4,8 +4,12 @@ import { dirname } from 'node:path';
 import { Command } from 'commander';
 import { configFilePath } from '@holydeck/core/config';
 import { HolyDeckError } from '@holydeck/core/messages';
+import { DEFAULT_TEMPLATE } from '@holydeck/core/template';
 import { outLine } from '../context.js';
 import type { CliContext } from '../context.js';
+
+/** The built-in template, written the way a YAML double-quoted string has to spell it. */
+export const TEMPLATE_EXAMPLE = DEFAULT_TEMPLATE.replace(/\n/g, '\\n');
 
 export function configScaffold(): string {
   return [
@@ -24,9 +28,11 @@ export function configScaffold(): string {
     '# Env: HOLYDECK_DATA_DIR',
     '# dataDir: /path/to/holydeck-data',
     '',
-    '# Default Liquid output template.',
+    '# Output template, in Liquid. "entries" holds one entry per passage of the sermon file,',
+    '# each with a "passages" list holding one passage per translation. A passage carries',
+    '# text, citation, translation, book, bookName, chapter, verses, revision and fetchedAt.',
     '# Env: HOLYDECK_TEMPLATE (deprecated alias: YOU_VERSION_CLI_TEMPLATE_OUTPUT_FORMAT)',
-    '# template: "{% for e in entries %}{{ e.citation }}\\n{{ e.passage }}\\n{% endfor %}"',
+    `# template: "${TEMPLATE_EXAMPLE}"`,
     '',
     '# Parallel chapter fetches during holydeck sync.',
     '# Env: HOLYDECK_SYNC_CONCURRENCY',
