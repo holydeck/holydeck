@@ -5,6 +5,12 @@ import { HolyDeckError, formatMessage } from './messages.js';
 export interface HolyDeckConfig {
   dataDir: string;
   serverUrl?: string;
+  oidcIssuer?: string;
+  oidcClientId?: string;
+  oidcAudience?: string;
+  oidcResource?: string;
+  oidcScope?: string;
+  oidcCallbackPort: number;
   template?: string;
   defaultTranslations: string[];
   syncConcurrency: number;
@@ -55,6 +61,18 @@ export function parseConfigFile(text: string, path: string): Partial<HolyDeckCon
   if (dataDirValue !== undefined) out.dataDir = dataDirValue;
   const serverUrlValue = stringValue(obj, 'serverUrl');
   if (serverUrlValue !== undefined) out.serverUrl = serverUrlValue;
+  const oidcIssuer = stringValue(obj, 'oidcIssuer');
+  if (oidcIssuer !== undefined) out.oidcIssuer = oidcIssuer;
+  const oidcClientId = stringValue(obj, 'oidcClientId');
+  if (oidcClientId !== undefined) out.oidcClientId = oidcClientId;
+  const oidcAudience = stringValue(obj, 'oidcAudience');
+  if (oidcAudience !== undefined) out.oidcAudience = oidcAudience;
+  const oidcResource = stringValue(obj, 'oidcResource');
+  if (oidcResource !== undefined) out.oidcResource = oidcResource;
+  const oidcScope = stringValue(obj, 'oidcScope');
+  if (oidcScope !== undefined) out.oidcScope = oidcScope;
+  const oidcCallbackPort = intValue(obj, 'oidcCallbackPort', 1);
+  if (oidcCallbackPort !== undefined) out.oidcCallbackPort = oidcCallbackPort;
   const templateValue = stringValue(obj, 'template');
   if (templateValue !== undefined) out.template = templateValue;
   if (obj.defaultTranslations !== undefined) {
@@ -139,6 +157,14 @@ function envLayer(env: Record<string, string | undefined>, notices: string[]): P
     layer.template = env.YOU_VERSION_CLI_TEMPLATE_OUTPUT_FORMAT;
   }
   if (env.HOLYDECK_SERVER_URL !== undefined) layer.serverUrl = env.HOLYDECK_SERVER_URL;
+  if (env.HOLYDECK_OIDC_ISSUER !== undefined) layer.oidcIssuer = env.HOLYDECK_OIDC_ISSUER;
+  if (env.HOLYDECK_OIDC_CLIENT_ID !== undefined) layer.oidcClientId = env.HOLYDECK_OIDC_CLIENT_ID;
+  if (env.HOLYDECK_OIDC_AUDIENCE !== undefined) layer.oidcAudience = env.HOLYDECK_OIDC_AUDIENCE;
+  if (env.HOLYDECK_OIDC_RESOURCE !== undefined) layer.oidcResource = env.HOLYDECK_OIDC_RESOURCE;
+  if (env.HOLYDECK_OIDC_SCOPE !== undefined) layer.oidcScope = env.HOLYDECK_OIDC_SCOPE;
+  if (env.HOLYDECK_OIDC_CALLBACK_PORT !== undefined && env.HOLYDECK_OIDC_CALLBACK_PORT.trim() !== '') {
+    layer.oidcCallbackPort = parseIntEnv('HOLYDECK_OIDC_CALLBACK_PORT', env.HOLYDECK_OIDC_CALLBACK_PORT, 1);
+  }
   if (env.HOLYDECK_DATA_DIR !== undefined) layer.dataDir = env.HOLYDECK_DATA_DIR;
   if (env.HOLYDECK_TEMPLATE !== undefined) layer.template = env.HOLYDECK_TEMPLATE;
   if (env.HOLYDECK_TRANSLATIONS !== undefined) {
@@ -171,10 +197,17 @@ export function resolveConfig(inputs: {
     syncConcurrency: 2,
     syncDelayMs: 1000,
     browserFetch: false,
+    oidcCallbackPort: 53682,
   };
   const sources: Record<keyof HolyDeckConfig, ConfigSource> = {
     dataDir: 'default',
     serverUrl: 'default',
+    oidcIssuer: 'default',
+    oidcClientId: 'default',
+    oidcAudience: 'default',
+    oidcResource: 'default',
+    oidcScope: 'default',
+    oidcCallbackPort: 'default',
     template: 'default',
     defaultTranslations: 'default',
     syncConcurrency: 'default',

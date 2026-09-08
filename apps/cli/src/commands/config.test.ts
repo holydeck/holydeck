@@ -33,11 +33,30 @@ describe('configScaffold', () => {
 
   it('documents every config key and its env var', () => {
     const text = configScaffold();
-    for (const key of ['serverUrl', 'dataDir', 'template', 'defaultTranslations', 'syncConcurrency', 'syncDelayMs']) {
+    for (const key of [
+      'serverUrl',
+      'oidcIssuer',
+      'oidcClientId',
+      'oidcAudience',
+      'oidcResource',
+      'oidcScope',
+      'oidcCallbackPort',
+      'dataDir',
+      'template',
+      'defaultTranslations',
+      'syncConcurrency',
+      'syncDelayMs',
+    ]) {
       expect(text).toContain(key);
     }
     for (const env of [
       'HOLYDECK_SERVER_URL',
+      'HOLYDECK_OIDC_ISSUER',
+      'HOLYDECK_OIDC_CLIENT_ID',
+      'HOLYDECK_OIDC_AUDIENCE',
+      'HOLYDECK_OIDC_RESOURCE',
+      'HOLYDECK_OIDC_SCOPE',
+      'HOLYDECK_OIDC_CALLBACK_PORT',
       'HOLYDECK_DATA_DIR',
       'HOLYDECK_TEMPLATE',
       'HOLYDECK_TRANSLATIONS',

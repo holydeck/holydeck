@@ -7,6 +7,7 @@ import { FileStore } from '@holydeck/core/file-store';
 import { HolyDeckError } from '@holydeck/core/messages';
 import { errLine } from './context.js';
 import type { CliContext } from './context.js';
+import { createAccessTokenProvider } from './oidc.js';
 import { ServerClient } from './server-client.js';
 
 export interface GlobalFlags {
@@ -14,6 +15,12 @@ export interface GlobalFlags {
   serverUrl?: string;
   translations?: string;
   browserFetch?: boolean;
+  oidcIssuer?: string;
+  oidcClientId?: string;
+  oidcAudience?: string;
+  oidcResource?: string;
+  oidcScope?: string;
+  oidcCallbackPort?: number;
 }
 
 export interface Runtime {
@@ -53,7 +60,7 @@ export function runtimeFlags(globals: {
   };
 }
 
-export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): Promise<Runtime> {
+export async function resolveRuntimeConfig(ctx: CliContext, flags: GlobalFlags = {}): Promise<ResolvedConfig> {
   const path = configFilePath(ctx.platform);
   let text: string | undefined;
   try {
@@ -66,6 +73,12 @@ export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): P
   const flagValues: Partial<HolyDeckConfig> = {};
   if (flags.dataDir !== undefined) flagValues.dataDir = flags.dataDir;
   if (flags.serverUrl !== undefined) flagValues.serverUrl = flags.serverUrl;
+  if (flags.oidcIssuer !== undefined) flagValues.oidcIssuer = flags.oidcIssuer;
+  if (flags.oidcClientId !== undefined) flagValues.oidcClientId = flags.oidcClientId;
+  if (flags.oidcAudience !== undefined) flagValues.oidcAudience = flags.oidcAudience;
+  if (flags.oidcResource !== undefined) flagValues.oidcResource = flags.oidcResource;
+  if (flags.oidcScope !== undefined) flagValues.oidcScope = flags.oidcScope;
+  if (flags.oidcCallbackPort !== undefined) flagValues.oidcCallbackPort = flags.oidcCallbackPort;
   if (flags.translations !== undefined) {
     flagValues.defaultTranslations = flags.translations
       .split(',')
@@ -76,6 +89,11 @@ export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): P
 
   const config = resolveConfig({ platform: ctx.platform, file, env: ctx.platform.env, flags: flagValues });
   for (const notice of config.notices) errLine(ctx, notice);
+  return config;
+}
+
+export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): Promise<Runtime> {
+  const config = await resolveRuntimeConfig(ctx, flags);
 
   const store = new FileStore(config.values.dataDir, {
     now: () => ctx.now().toISOString(),
@@ -97,8 +115,8 @@ export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): P
 
   const serverUrl = config.values.serverUrl;
   if (serverUrl !== undefined) {
-    // Server mode talks to HolyDeck's own API, which never needs the browser transport.
-    const server = new ServerClient(serverUrl, { httpGet: ctx.httpGet, httpPost: ctx.httpPost });
+    const accessToken = createAccessTokenProvider(ctx.platform, serverUrl, { httpPost: ctx.httpPost, now: ctx.now });
+    const server = new ServerClient(serverUrl, { httpGet: ctx.httpGet, httpPost: ctx.httpPost, accessToken });
     return { config, store, fetcher, server, mode: 'server', browser };
   }
   return { config, store, fetcher, mode: 'local', browser };

@@ -37,6 +37,7 @@ export interface TestSetup {
   copies: string[];
   edits: string[];
   requests: string[];
+  openedUrls: string[];
 }
 
 export function makeContext(options: MakeContextOptions = {}): TestSetup {
@@ -47,6 +48,7 @@ export function makeContext(options: MakeContextOptions = {}): TestSetup {
   const copies: string[] = [];
   const edits: string[] = [];
   const requests: string[] = [];
+  const openedUrls: string[] = [];
   const env: Record<string, string | undefined> = { HOLYDECK_DATA_DIR: dataDir, ...options.env };
   const responses = options.responses ?? {};
   const httpGet: HttpGet = async (url) => {
@@ -80,6 +82,15 @@ export function makeContext(options: MakeContextOptions = {}): TestSetup {
     },
     httpGet,
     httpPost,
+    openUrl: async (url) => {
+      openedUrls.push(url);
+      return true;
+    },
+    startOidcCallback: async (port, state) => ({
+      redirectUri: `http://127.0.0.1:${port}/callback`,
+      code: Promise.resolve(`code-for-${state}`),
+      close: async () => {},
+    }),
     now: () => new Date(FIXED_NOW),
     sleep: async () => {},
     ...options.overrides,
@@ -93,6 +104,7 @@ export function makeContext(options: MakeContextOptions = {}): TestSetup {
     copies,
     edits,
     requests,
+    openedUrls,
   };
 }
 

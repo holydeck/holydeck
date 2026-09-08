@@ -54,6 +54,7 @@ holydeck get-verses --last
 | `offsets` | Compare verse counts between two stored translations to find versification offsets |
 | `import` | Merge an exported translation store file into the local datastore |
 | `config` | Manage the HolyDeck config file |
+| `auth` | Log in to, inspect, or log out from an OIDC-protected server |
 | `info` | Show the effective configuration and where each value came from |
 | `doctor` | Check config, datastore, network, and server health |
 | `completion` | Print a shell completion script (zsh or bash) |
@@ -176,6 +177,52 @@ Every command works against the local datastore by default. Pass
 `--server-url <url>` (or set it in the config file) to use a self-hosted
 HolyDeck server instead — the server ships as a container image at
 `ghcr.io/holydeck/server`.
+
+If the server is protected by an OpenID Connect provider, log in once before
+using it:
+
+```sh
+holydeck --server-url https://bible.example.com auth login \
+  --issuer https://auth.example.com \
+  --client-id holydeck-cli \
+  --resource https://bible.example.com
+```
+
+HolyDeck opens the provider's login page and listens for the authorization
+callback on `127.0.0.1:53682`. The provider must allow that loopback redirect
+URI, authorization-code flow, and PKCE `S256`. The default scopes are
+`openid offline_access`. HolyDeck uses pushed authorization requests (PAR) when
+the provider advertises them and otherwise uses a regular authorization request.
+
+For a server protected by Authelia's bearer-token authorization, request its
+special scope and the server URL as a resource prefix:
+
+```sh
+holydeck --server-url https://bible.example.com auth login \
+  --issuer https://auth.example.com \
+  --client-id holydeck-cli \
+  --resource https://bible.example.com \
+  --scope "offline_access authelia.bearer.authz"
+```
+
+That Authelia client must enforce PAR, PKCE `S256`, explicit consent and
+`form_post`, and allow the server URL in its audience list. `--audience` remains
+available for providers that need an exact audience request, but Authelia's
+`resource` grant is what authorizes every API path below the server URL.
+
+The login is stored per server in the platform config directory with permissions
+limited to the current user. HolyDeck refreshes expired access tokens and retries
+one request after a `401`. Use `holydeck auth status` to inspect the login without
+printing tokens, or `holydeck auth logout` to remove it.
+
+For unattended configuration, the required login options can also be supplied as
+`HOLYDECK_OIDC_ISSUER` and `HOLYDECK_OIDC_CLIENT_ID`; optional values are
+`HOLYDECK_OIDC_AUDIENCE`, `HOLYDECK_OIDC_RESOURCE`, and
+`HOLYDECK_OIDC_SCOPE`, plus `HOLYDECK_OIDC_CALLBACK_PORT` when the default
+port is unavailable. To make later logins just `holydeck auth login`, save
+the same values as `serverUrl`, `oidcIssuer`, `oidcClientId`, `oidcAudience`,
+`oidcResource`, `oidcScope`, and `oidcCallbackPort` in `config.yaml`. Run
+`holydeck config init` to generate a commented template containing every key.
 
 ## Links
 
