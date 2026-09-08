@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { buildTestApp } from '../test/helpers/app.js';
+import { buildTestApp, seedCanon } from '../test/helpers/app.js';
 import { readVerses } from './verses-service.js';
 import type { TestApp } from '../test/helpers/app.js';
 
@@ -29,10 +29,24 @@ describe('readVerses fetchMissing', () => {
   });
 
   it('does not fetch when the chapter is already cached', async () => {
+    await seedCanon(ctx.store);
     await ctx.store.putChapter('KJV', 'PSA', '117', { '1': 'Cached one.', '2': 'Cached two.' }, 2);
     const result = await readVerses(ctx.store, ctx.fetcher, { ...base, fetchMissing: true });
     expect(result.source).toBe('cache');
     expect(result.verses[0]?.text).toBe('Cached one.');
+    expect(ctx.urls).toEqual([]);
+  });
+
+  it('learns the book names of a translation cached before they were kept', async () => {
+    await ctx.store.putChapter('KJV', 'PSA', '117', { '1': 'Cached one.' }, 2);
+    const result = await readVerses(ctx.store, ctx.fetcher, { ...base });
+
+    expect(result.source).toBe('cache');
+    expect(ctx.urls).toEqual([expect.stringContaining('/api/bible/version/')]);
+    await expect(ctx.store.load('KJV')).resolves.toMatchObject({ meta: { abbreviation: 'KJV' } });
+
+    ctx.urls.length = 0;
+    await readVerses(ctx.store, ctx.fetcher, { ...base });
     expect(ctx.urls).toEqual([]);
   });
 

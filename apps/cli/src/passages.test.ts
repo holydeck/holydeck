@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { chapterUrl } from '@holydeck/core/scraper';
+import { chapterUrl, versionUrl } from '@holydeck/core/scraper';
 import type { SermonFile } from '@holydeck/core/sermon';
-import { chapterHtml, makeContext, seedStore } from '../test/harness.js';
+import { chapterHtml, makeContext, seedStore, versionMetaJson } from '../test/harness.js';
 import { loadEntryData, renderAndDeliver } from './passages.js';
 import { createRuntime } from './runtime.js';
 
@@ -17,6 +17,14 @@ function sermonWith(overrides: Partial<SermonFile> = {}): SermonFile {
 }
 
 const psalm117 = { '1': 'O praise the LORD, all ye nations.', '2': 'For his merciful kindness is great.' };
+
+// A first fetch also asks for the translation's canon, so every fetching test answers that too.
+const kjvVersion = {
+  [versionUrl(1)]: {
+    status: 200,
+    body: versionMetaJson({ books: [{ usfm: 'PSA', name: 'Psalms', chapters: ['117', '118'] }] }),
+  },
+};
 
 describe('loadEntryData (local mode)', () => {
   it('assembles from the store and emits one cache footer per chapter', async () => {
@@ -36,9 +44,30 @@ describe('loadEntryData (local mode)', () => {
     expect(footers).toEqual(['source: cache · revision 1 · fetched 2026-09-01 — KJV PSA 117']);
   });
 
+  it('learns the book names of a store that predates them, and says so when it cannot', async () => {
+    const { ctx, dataDir, stderr } = makeContext({ responses: kjvVersion });
+    await seedStore(dataDir, 'KJV', [{ book: 'PSA', chapter: '117', verses: psalm117 }], { withoutCanon: true });
+    const runtime = await createRuntime(ctx);
+    const { entries } = await loadEntryData(runtime, ctx, sermonWith());
+    expect(entries[0]?.passages[0]?.citation).toBe('Psalms 117:1-2');
+    expect(stderr()).toBe('');
+    await expect(runtime.store.load('KJV')).resolves.toMatchObject({ meta: { abbreviation: 'KJV' } });
+  });
+
+  it('renders with English names when the book names of an old store cannot be fetched', async () => {
+    const { ctx, dataDir, stderr } = makeContext();
+    await seedStore(dataDir, 'KJV', [{ book: 'PSA', chapter: '117', verses: psalm117 }], { withoutCanon: true });
+    const runtime = await createRuntime(ctx);
+    const { entries } = await loadEntryData(runtime, ctx, sermonWith());
+    expect(entries[0]?.passages[0]?.citation).toBe('Psalms 117:1-2');
+    expect(stderr()).toContain('Could not fetch the book names of KJV');
+    expect(stderr()).toContain('rendering its citations with English names');
+  });
+
   it('fetches chapters the store lacks, reporting each one and marking its footer live', async () => {
     const { ctx, stderr } = makeContext({
       responses: {
+        ...kjvVersion,
         [chapterUrl(1, 'KJV', 'PSA', '117')]: { status: 200, body: chapterHtml('PSA', '117', psalm117) },
         [chapterUrl(1, 'KJV', 'PSA', '118')]: { status: 200, body: chapterHtml('PSA', '118', { '1': 'Give thanks.' }) },
       },
@@ -72,6 +101,7 @@ describe('loadEntryData (local mode)', () => {
   it('distinguishes a stored chapter from one it just fetched, footer by footer', async () => {
     const { ctx, dataDir } = makeContext({
       responses: {
+        ...kjvVersion,
         [chapterUrl(1, 'KJV', 'PSA', '118')]: { status: 200, body: chapterHtml('PSA', '118', { '1': 'Give thanks.' }) },
       },
     });
@@ -93,6 +123,7 @@ describe('loadEntryData (local mode)', () => {
   it('refetches with --refresh, notices unchanged content, and reports the fetch as live', async () => {
     const { ctx, dataDir, stderr } = makeContext({
       responses: {
+        ...kjvVersion,
         [chapterUrl(1, 'KJV', 'PSA', '117')]: { status: 200, body: chapterHtml('PSA', '117', psalm117) },
       },
     });
@@ -107,6 +138,7 @@ describe('loadEntryData (local mode)', () => {
     const changed = { ...psalm117, '2': 'For his merciful kindness is GREAT.' };
     const { ctx, dataDir, stderr } = makeContext({
       responses: {
+        ...kjvVersion,
         [chapterUrl(1, 'KJV', 'PSA', '117')]: { status: 200, body: chapterHtml('PSA', '117', changed) },
       },
     });

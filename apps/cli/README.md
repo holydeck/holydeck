@@ -137,6 +137,12 @@ holydeck get "GEN 30:5-7,9"                     # fetches GEN 30 if it is not st
 holydeck get "GEN 30:5-7,9" --no-fetch-missing  # fails instead, leaving the datastore alone
 ```
 
+Book names come from the translation's own canon, which the datastore learns on the first run
+that may fetch — so citations read in the translation's language (`3. Mose`, `லேவியராகமம்`)
+rather than in English. A store written before that, or imported without a canon, repairs
+itself the same way; a run that cannot reach bible.com says so once and renders with English
+names rather than failing.
+
 Use `--no-fetch-missing` when a run must not reach the network, or to check what the
 datastore really holds.
 

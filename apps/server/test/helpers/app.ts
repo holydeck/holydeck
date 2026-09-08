@@ -1,3 +1,4 @@
+import { parseVersionMeta } from '@holydeck/core/canon';
 import { Fetcher } from '@holydeck/core/fetcher';
 import { MongoStore } from '../../src/mongo-store.js';
 import { SyncJobManager } from '../../src/jobs.js';
@@ -17,6 +18,12 @@ export interface TestApp {
   urls: string[];
   stop: () => Promise<void>;
   stopMongo: () => Promise<void>;
+}
+
+/** Gives a translation the canon a real store keeps, so a cached read needs no network at all. */
+export async function seedCanon(store: MongoStore, abbr = 'KJV', payload = versionPayload()): Promise<void> {
+  const { meta, canon } = parseVersionMeta(JSON.parse(payload));
+  await store.putVersionMeta(abbr, meta, canon);
 }
 
 function defaultScrape(url: string): string {

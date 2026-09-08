@@ -1,10 +1,11 @@
 import { getChapter } from './storage.js';
-import { translationId } from './translations.js';
+import { findTranslationId, translationId } from './translations.js';
+import type { Canon, TranslationMeta } from './canon.js';
 import type { Fetcher } from './fetcher.js';
 import type { SermonFile } from './sermon.js';
 import type { TranslationStoreFile, VerseMap } from './storage.js';
 
-/** The slice of a datastore this needs: read a translation, write one chapter back. */
+/** The slice of a datastore this needs: read a translation, write a chapter or its canon back. */
 export interface ChapterStore {
   load(abbr: string): Promise<TranslationStoreFile | undefined>;
   putChapter(
@@ -14,6 +15,7 @@ export interface ChapterStore {
     verses: VerseMap,
     canonVerseCount: number,
   ): Promise<{ changed: boolean; rev: number }>;
+  putVersionMeta(abbr: string, meta: TranslationMeta, canon: Canon): Promise<void>;
 }
 
 export interface ChapterRef {
@@ -28,6 +30,8 @@ export interface EnsureChaptersOptions {
   fetchMissing?: boolean;
   /** Called before each fetch, so a caller can say which chapter it is waiting on. */
   onFetching?: (ref: ChapterRef, done: number, total: number) => void;
+  /** Called when the translation's own book names stayed out of reach, so English ones are used. */
+  onCanonUnavailable?: (reason: string) => void;
 }
 
 export interface EnsureChaptersResult {
@@ -63,9 +67,25 @@ export async function ensureChapters(
   options: EnsureChaptersOptions = {},
 ): Promise<EnsureChaptersResult> {
   const upper = abbr.toUpperCase();
-  const file = await store.load(upper);
+  let file = await store.load(upper);
   const refresh = options.refresh === true;
   const fetchMissing = options.fetchMissing !== false;
+  // A chapter carries no book names, so a translation whose canon was never stored renders its
+  // citations in the bundled canon's English. One version request buys the names it uses itself —
+  // asked before the chapters, and asked of any store that still lacks them, so one synced before
+  // this existed, or imported without a canon, repairs itself on the first run allowed to fetch.
+  // A translation bible.com has no id for is skipped: only its own store can name its books.
+  const versionId = findTranslationId(upper);
+  if (file?.canon === undefined && versionId !== undefined && (refresh || fetchMissing)) {
+    try {
+      const { meta, canon } = await fetcher.fetchVersionMeta(versionId);
+      await store.putVersionMeta(upper, meta, canon);
+      file = await store.load(upper);
+    } catch (error) {
+      // Book names are cosmetic; no render that has its verses may fail over the word "Genesis".
+      options.onCanonUnavailable?.((error as Error).message);
+    }
+  }
   const wanted = refs.filter(
     (ref) => refresh || (fetchMissing && getChapter(file, ref.book, ref.chapter) === undefined),
   );

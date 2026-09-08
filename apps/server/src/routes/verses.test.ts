@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { buildTestApp } from '../../test/helpers/app.js';
+import { buildTestApp, seedCanon } from '../../test/helpers/app.js';
+import { chapterHtml } from '../../test/helpers/scrape.js';
 import { flagParam } from './verses.js';
 import type { TestApp } from '../../test/helpers/app.js';
 
@@ -29,6 +30,7 @@ beforeEach(async () => {
 const url = '/api/v1/translations/KJV/verses';
 
 async function seed(): Promise<void> {
+  await seedCanon(ctx.store);
   await ctx.store.putChapter('KJV', 'PSA', '117', { '1': 'Cached one.', '2': 'Cached two.' }, 2);
 }
 
@@ -68,6 +70,7 @@ describe('GET /api/v1/translations/:abbr/verses', () => {
   });
 
   it('pins an older revision with ?revision=N', async () => {
+    await seedCanon(ctx.store);
     await ctx.store.putChapter('KJV', 'PSA', '117', { '1': 'Old text.', '2': 'Two.' }, 2);
     await ctx.store.putChapter('KJV', 'PSA', '117', { '1': 'New text.', '2': 'Two.' }, 2);
     const pinned = await ctx.app.inject({ method: 'GET', url: `${url}?book=PSA&chapter=117&verses=1&revision=1` });
@@ -93,6 +96,19 @@ describe('GET /api/v1/translations/:abbr/verses', () => {
     expect(refused.statusCode).toBe(404);
     expect(refused.json<{ error: { code: string } }>().error.code).toBe('chapter_not_in_store');
     expect(ctx.urls).toEqual([]);
+  });
+
+  it('still serves the verses when the translation book names cannot be fetched', async () => {
+    const offline = await buildTestApp({
+      scrape: (requestUrl) => {
+        if (requestUrl.includes('/api/bible/version/')) throw new Error('version API down');
+        return chapterHtml('PSA', '117', { '1': 'Praise verse one.' });
+      },
+    });
+    const response = await offline.app.inject({ method: 'GET', url: `${url}?book=PSA&chapter=117&verses=1` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<VersesBody>().citation).toBe('Psalms 117:1');
+    await offline.stop();
   });
 
   it('404s with revision_not_found for a revision that never existed', async () => {
