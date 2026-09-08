@@ -100,7 +100,7 @@ export async function seedStore(
   extras: { canon?: Canon; meta?: TranslationMeta } = {},
 ): Promise<void> {
   const store = new FileStore(dataDir, { now: () => SEED_TIME });
-  const file = createEmptyStoreFile(abbr, SEED_TIME);
+  const file = (await store.load(abbr)) ?? createEmptyStoreFile(abbr, SEED_TIME);
   if (extras.canon) file.canon = extras.canon;
   if (extras.meta) file.meta = extras.meta;
   for (const chapter of chapters) {

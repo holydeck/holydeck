@@ -6,6 +6,7 @@ import { registerGetVerses } from './commands/get-verses.js';
 import { registerInfo } from './commands/info.js';
 import { registerNew } from './commands/new.js';
 import { registerPreflight } from './commands/preflight.js';
+import { registerRevisions } from './commands/revisions.js';
 import { registerStats } from './commands/stats.js';
 import { registerSync } from './commands/sync.js';
 import { registerTranslations } from './commands/translations.js';
@@ -41,6 +42,7 @@ export function buildProgram(ctx: CliContext): Command {
   registerInfo(program, ctx);
   registerNew(program, ctx);
   registerPreflight(program, ctx);
+  registerRevisions(program, ctx);
   registerStats(program, ctx);
   registerSync(program, ctx);
   registerTranslations(program, ctx);
