@@ -23,7 +23,14 @@ export function createPuppeteerLauncher(options: PuppeteerLauncherOptions = {}):
         reason: `puppeteer is not installed (${(error as Error).message})`,
       });
     }
-    const config: Record<string, unknown> = { headless: options.headless ?? true };
+    // puppeteer's own signal handlers kill the browser and call process.exit, which would skip
+    // the datastore save and lock release. The caller shuts the browser down instead.
+    const config: Record<string, unknown> = {
+      headless: options.headless ?? true,
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+    };
     if (options.executablePath !== undefined) config.executablePath = options.executablePath;
     if (options.args !== undefined) config.args = options.args;
     return puppeteer.launch(config);
