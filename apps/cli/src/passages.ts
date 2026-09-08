@@ -1,16 +1,19 @@
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { assembleEntries } from '@holydeck/core/assemble';
+import { chapterRefs, ensureChapters } from '@holydeck/core/fetch-missing';
+import type { ChapterRef } from '@holydeck/core/fetch-missing';
 import { formatMessage } from '@holydeck/core/messages';
 import type { SermonFile } from '@holydeck/core/sermon';
 import { contentHash, createEmptyStoreFile, getChapter, latestRevision } from '@holydeck/core/storage';
 import type { ChapterRecord, TranslationStoreFile } from '@holydeck/core/storage';
 import type { EntryData } from '@holydeck/core/template';
 import { renderOutput } from '@holydeck/core/template';
-import { translationId } from '@holydeck/core/translations';
 import { errLine } from './context.js';
 import type { CliContext } from './context.js';
 import type { Runtime } from './runtime.js';
+import { startSpinner } from './spinner.js';
+import type { Spinner } from './spinner.js';
 
 export interface LoadedPassages {
   entries: EntryData[];
@@ -23,36 +26,23 @@ export interface DeliverOptions {
   output?: string;
 }
 
-interface ChapterRef {
-  book: string;
-  chapter: number;
-}
-
-function uniqueChapters(sermon: SermonFile): ChapterRef[] {
-  const seen = new Set<string>();
-  const chapters: ChapterRef[] = [];
-  for (const entry of sermon.entries) {
-    const key = `${entry.book}.${entry.chapter}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      chapters.push({ book: entry.book, chapter: entry.chapter });
-    }
-  }
-  return chapters;
+interface LoadOptions {
+  refresh: boolean;
+  fetchMissing: boolean;
 }
 
 function shiftedVerses(sermon: SermonFile, abbr: string, ref: ChapterRef): number[] {
   const verses = new Set<number>();
   for (const entry of sermon.entries) {
-    if (entry.book !== ref.book || entry.chapter !== ref.chapter) continue;
+    if (entry.book !== ref.book || String(entry.chapter) !== ref.chapter) continue;
     const offset = entry.offsets[abbr] ?? 0;
     for (const verse of entry.verses) verses.add(verse + offset);
   }
   return [...verses].sort((a, b) => a - b);
 }
 
-function footerFor(abbr: string, ref: ChapterRef, rev: number, fetchedAt: string): string {
-  return formatMessage('cache_footer', {
+function footerFor(abbr: string, ref: ChapterRef, rev: number, fetchedAt: string, live: boolean): string {
+  return formatMessage(live ? 'live_footer' : 'cache_footer', {
     rev,
     date: fetchedAt.slice(0, 10),
     abbr,
@@ -65,29 +55,38 @@ async function loadLocal(
   runtime: Runtime,
   ctx: CliContext,
   sermon: SermonFile,
-  refresh: boolean,
+  options: LoadOptions,
 ): Promise<LoadedPassages> {
   const storeFiles: Record<string, TranslationStoreFile | undefined> = {};
   const footers: string[] = [];
-  const chapters = uniqueChapters(sermon);
+  const chapters = chapterRefs(sermon);
   for (const abbr of sermon.translations) {
-    if (refresh) {
-      const id = translationId(abbr);
-      for (const ref of chapters) {
-        const parsed = await runtime.fetcher.fetchChapter(id, abbr, ref.book, String(ref.chapter));
-        const result = await runtime.store.putChapter(abbr, ref.book, String(ref.chapter), parsed.verses, parsed.canonVerseCount);
-        if (!result.changed) {
-          errLine(ctx, formatMessage('refresh_unchanged', { abbr, book: ref.book, chapter: ref.chapter }));
-        }
+    // Fetching a chapter can mean starting a browser, so say which one is holding things up.
+    let spinner: Spinner | undefined;
+    const { file, fetched } = await ensureChapters(runtime.store, runtime.fetcher, abbr, chapters, {
+      refresh: options.refresh,
+      fetchMissing: options.fetchMissing,
+      onFetching: (ref, done, total) => {
+        const text = `${abbr} ${ref.book} ${ref.chapter}: fetching (${done}/${total})`;
+        if (spinner === undefined) spinner = startSpinner(ctx, text);
+        else spinner.label(text);
+      },
+    }).finally(() => {
+      spinner?.stop();
+    });
+    for (const item of fetched) {
+      if (!item.changed) {
+        errLine(ctx, formatMessage('refresh_unchanged', { abbr, book: item.book, chapter: item.chapter }));
       }
     }
-    const file = await runtime.store.load(abbr);
     storeFiles[abbr] = file;
-    if (!refresh) {
-      for (const ref of chapters) {
-        const record = getChapter(file, ref.book, String(ref.chapter));
-        const revision = record ? latestRevision(record) : undefined;
-        if (revision) footers.push(footerFor(abbr, ref, revision.rev, revision.fetchedAt));
+    // Every chapter reports where its text came from; a spinner clears itself, a footer stays.
+    const live = new Set(fetched.map((item) => `${item.book}.${item.chapter}`));
+    for (const ref of chapters) {
+      const record = getChapter(file, ref.book, ref.chapter);
+      const revision = record ? latestRevision(record) : undefined;
+      if (revision) {
+        footers.push(footerFor(abbr, ref, revision.rev, revision.fetchedAt, live.has(`${ref.book}.${ref.chapter}`)));
       }
     }
   }
@@ -98,20 +97,23 @@ async function loadServer(
   runtime: Runtime,
   ctx: CliContext,
   sermon: SermonFile,
-  refresh: boolean,
+  options: LoadOptions,
 ): Promise<LoadedPassages> {
   const server = runtime.server;
   /* v8 ignore next -- loadEntryData only routes here in server mode */
   if (!server) throw new Error('loadServer requires server mode');
   const storeFiles: Record<string, TranslationStoreFile | undefined> = {};
   const footers: string[] = [];
-  const chapters = uniqueChapters(sermon);
+  const chapters = chapterRefs(sermon);
   for (const abbr of sermon.translations) {
     const file = createEmptyStoreFile(abbr, ctx.now().toISOString());
     file.canon = await server.getCanon(abbr);
     for (const ref of chapters) {
       const verses = shiftedVerses(sermon, abbr, ref);
-      const response = await server.getVerses(abbr, ref.book, ref.chapter, verses, { refresh });
+      const response = await server.getVerses(abbr, ref.book, Number(ref.chapter), verses, {
+        refresh: options.refresh,
+        fetchMissing: options.fetchMissing,
+      });
       const record: ChapterRecord = {
         canonVerseCount: Math.max(...verses),
         revisions: [
@@ -124,10 +126,8 @@ async function loadServer(
         ],
       };
       const book = (file.books[ref.book] ??= { chapters: {} });
-      book.chapters[String(ref.chapter)] = record;
-      if (response.source === 'cache') {
-        footers.push(footerFor(abbr, ref, response.revision, response.fetchedAt));
-      }
+      book.chapters[ref.chapter] = record;
+      footers.push(footerFor(abbr, ref, response.revision, response.fetchedAt, response.source === 'live'));
     }
     storeFiles[abbr] = file;
   }
@@ -138,12 +138,15 @@ export async function loadEntryData(
   runtime: Runtime,
   ctx: CliContext,
   sermon: SermonFile,
-  options: { refresh?: boolean } = {},
+  options: { refresh?: boolean; fetchMissing?: boolean } = {},
 ): Promise<LoadedPassages> {
-  const refresh = options.refresh === true;
+  const resolved: LoadOptions = {
+    refresh: options.refresh === true,
+    fetchMissing: options.fetchMissing !== false,
+  };
   return runtime.mode === 'server'
-    ? loadServer(runtime, ctx, sermon, refresh)
-    : loadLocal(runtime, ctx, sermon, refresh);
+    ? loadServer(runtime, ctx, sermon, resolved)
+    : loadLocal(runtime, ctx, sermon, resolved);
 }
 
 export async function renderAndDeliver(
