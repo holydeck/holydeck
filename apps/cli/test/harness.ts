@@ -78,6 +78,7 @@ export function makeContext(options: MakeContextOptions = {}): TestSetup {
     httpGet,
     httpPost,
     now: () => new Date(FIXED_NOW),
+    sleep: async () => {},
     ...options.overrides,
   };
   return {
