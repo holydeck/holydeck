@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { HolyDeckError } from '@holydeck/core/messages';
@@ -97,6 +98,40 @@ describe('createRuntime', () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, 'config.yaml'), 'dataDir: [not, a, string]\n');
     await expect(createRuntime(ctx)).rejects.toMatchObject({ code: expect.stringMatching(/config/) });
+  });
+});
+
+describe('lock waits', () => {
+  /** Holds KJV with a lock this machine's live process owns, so the waiter really has to poll. */
+  const holdKjv = (dataDir: string): (() => void) => {
+    const lockPath = join(dataDir, 'bibles', '.KJV.lock');
+    mkdirSync(join(dataDir, 'bibles'), { recursive: true });
+    writeFileSync(lockPath, `${hostname()}:${process.pid}`);
+    return () => rmSync(lockPath, { force: true });
+  };
+
+  it('says the datastore is busy instead of going quiet', async () => {
+    const setup = makeContext();
+    const runtime = await createRuntime(setup.ctx);
+    const release = holdKjv(runtime.store.dataDir);
+    const acquired = runtime.store.withLock('KJV', async () => 'acquired');
+    setTimeout(release, 20);
+    await expect(acquired).resolves.toBe('acquired');
+    expect(setup.stderr()).toContain(`KJV: datastore locked by process ${process.pid}`);
+    expect(setup.stderr()).toContain('waiting for it to finish');
+  });
+
+  it('retitles a running spinner rather than writing over it', async () => {
+    const setup = makeContext();
+    const runtime = await createRuntime(setup.ctx);
+    const titles: string[] = [];
+    setup.ctx.status = (text) => titles.push(text);
+    const release = holdKjv(runtime.store.dataDir);
+    const acquired = runtime.store.withLock('KJV', async () => 'acquired');
+    setTimeout(release, 20);
+    await expect(acquired).resolves.toBe('acquired');
+    expect(titles[0]).toContain('KJV: datastore locked by');
+    expect(setup.stderr()).not.toContain('datastore locked');
   });
 });
 

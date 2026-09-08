@@ -24,6 +24,10 @@ export interface CliContext {
   now: () => Date;
   /** Injectable retry backoff sleep for the core Fetcher (tests skip real delays). */
   sleep?: (ms: number) => Promise<void>;
+  /** Aborted on the first Ctrl-C so long-running commands stop and save instead of being killed. */
+  abortSignal?: AbortSignal;
+  /** Set while a spinner is running, so background waits retitle it instead of writing over it. */
+  status?: (text: string) => void;
 }
 
 export function outLine(ctx: CliContext, line: string): void {
