@@ -1,6 +1,6 @@
 {
   "name": "@holydeck/core",
-  "version": "2026.9.1",
+  "version": "2026.9.2",
   "description": "Core engine for HolyDeck: bible references, local datastore, scraper, sync, templating",
   "private": true,
   "license": "MIT",

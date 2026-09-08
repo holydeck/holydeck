@@ -1,1 +1,1 @@
-export const CLI_VERSION = '2026.9.1';
+export const CLI_VERSION = '2026.9.2';
