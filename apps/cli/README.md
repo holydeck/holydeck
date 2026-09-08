@@ -1,4 +1,4 @@
-# holydeck
+# @holydeck/cli
 
 Bible verses for sermons and presentations, from a local revisioned datastore.
 
@@ -16,9 +16,9 @@ being up.
 ## Install
 
 ```sh
-npm install -g holydeck
+npm install -g @holydeck/cli
 # or run it without installing
-npx holydeck --help
+npx @holydeck/cli --help
 ```
 
 ## Quick start
@@ -87,7 +87,7 @@ If you're running via `npx` instead of a global install, wrap it in a
 function first so `holydeck` resolves on your `$PATH`:
 
 ```sh
-holydeck() { npx --yes holydeck@latest "$@"; }
+holydeck() { npx --yes @holydeck/cli@latest "$@"; }
 source <(holydeck completion zsh)
 ```
 
@@ -106,7 +106,7 @@ holydeck sync KJV --browser-fetch
 
 The browser starts once per command and is reused for the whole run. Chromium comes
 from the optional `puppeteer` dependency; if you only render from an already-populated
-datastore you can skip the download with `npm install -g holydeck --omit=optional`.
+datastore you can skip the download with `npm install -g @holydeck/cli --omit=optional`.
 
 `holydeck doctor` reports which transport it reached bible.com with, so run it first
 when a sync stops returning content.

@@ -1,11 +1,19 @@
 // Consistency gate for the tag-triggered release workflow: a stray or
 // hand-pushed tag must never publish artifacts that disagree with the tag.
-// Checks tag format, every lockstep manifest, the CLI's embedded version
-// constant, and the changelog section — and reports every problem it finds.
+// Checks tag format, every lockstep manifest's name and version, the CLI's
+// embedded version constant, and the changelog section — and reports every
+// problem it finds.
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { CLI_VERSION_FILE, MANIFESTS, fromRepoRoot } from './sync-versions.mjs';
+
+export const EXPECTED_PACKAGE_NAMES = {
+  'package.json': 'holydeck-monorepo',
+  'packages/core/package.json': '@holydeck/core',
+  'apps/cli/package.json': '@holydeck/cli',
+  'apps/server/package.json': '@holydeck/server',
+};
 
 export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog }) {
   const match = /^v(\d+\.\d+\.\d+)$/.exec(tag ?? '');
@@ -15,9 +23,13 @@ export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog
   const version = match[1];
   const problems = [];
   for (const [path, jsonText] of Object.entries(manifests)) {
-    const found = JSON.parse(jsonText).version;
-    if (found !== version) {
-      problems.push(`${path} has version ${found}, expected ${version}`);
+    const manifest = JSON.parse(jsonText);
+    if (manifest.version !== version) {
+      problems.push(`${path} has version ${manifest.version}, expected ${version}`);
+    }
+    const expectedName = EXPECTED_PACKAGE_NAMES[path];
+    if (expectedName && manifest.name !== expectedName) {
+      problems.push(`${path} has name ${manifest.name}, expected ${expectedName}`);
     }
   }
   if (!cliVersionModule.includes(`export const CLI_VERSION = '${version}';`)) {

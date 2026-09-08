@@ -12,10 +12,11 @@ import {
 } from './sync-versions.mjs';
 
 test('bumpManifest replaces only the version and keeps key order', () => {
-  const input = '{\n  "name": "holydeck",\n  "version": "0.0.0",\n  "type": "module"\n}\n';
+  const input =
+    '{\n  "name": "@holydeck/cli",\n  "version": "0.0.0",\n  "type": "module"\n}\n';
   assert.equal(
     bumpManifest(input, '2026.9.0'),
-    '{\n  "name": "holydeck",\n  "version": "2026.9.0",\n  "type": "module"\n}\n',
+    '{\n  "name": "@holydeck/cli",\n  "version": "2026.9.0",\n  "type": "module"\n}\n',
   );
 });
 

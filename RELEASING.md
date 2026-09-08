@@ -1,12 +1,12 @@
 # Releasing HolyDeck
 
-Every release is a **lockstep release train**: `@holydeck/core`, the `holydeck`
+Every release is a **lockstep release train**: `@holydeck/core`, the `@holydeck/cli`
 CLI, and `@holydeck/server` always share one version number. One release
 produces:
 
 | Artifact | Where |
 | --- | --- |
-| `holydeck@<version>` (CLI) | npmjs (with provenance; **staged** until a maintainer approves it); mirrored to GitHub Packages as `@holydeck/cli` (GitHub Packages only hosts scoped names) |
+| `@holydeck/cli@<version>` | npmjs (with provenance; **staged** until a maintainer approves it) and GitHub Packages |
 | `ghcr.io/holydeck/server:<version>`, plus `:latest` when it is the newest release | GHCR (`@holydeck/server` is never published to a registry — it ships as this image only) |
 | GitHub Release `v<version>` | notes taken from the `CHANGELOG.md` section |
 
@@ -79,11 +79,11 @@ machine, and you are on a clean, up-to-date `main`.
    Release go live while the npmjs version is still staged.
 
 4. Approve the staged npm version — one approval, the CLI. Either run
-   `npm stage list holydeck` and then `npm stage approve <stage-id>` (needs
+   `npm stage list @holydeck/cli` and then `npm stage approve <stage-id>` (needs
    npm >= 11.15.0 locally), or open the **Staged Packages** tab on npmjs.com
    and click **Approve**. Both prompt for 2FA; that prompt is the whole point
    of staging, so it cannot be done from CI. Until you approve,
-   `npm install holydeck` still serves the previous version.
+   `npm install @holydeck/cli` still serves the previous version.
    `npm stage reject <stage-id>` discards a staged version instead — use it
    if the release turns out to be bad before it goes live.
 
@@ -106,17 +106,15 @@ machine, and you are on a clean, up-to-date `main`.
   an unauthorized action, a bad tarball, a registry write conflict, a
   network error — still fails the job, deliberately: the guard is narrow so
   that it can never report success with nothing staged. If a re-run of
-  `publish-npm` does fail on a publish conflict, run `npm stage list holydeck`
+  `publish-npm` does fail on a publish conflict, run `npm stage list @holydeck/cli`
   locally to see whether the version is already staged before doing anything
   else.
 - **Manual publish fallback** (if a re-run is impossible): from a checkout
-  of the release tag, build first (`pnpm turbo build --filter=holydeck...` —
+  of the release tag, build first (`pnpm turbo build --filter=@holydeck/cli...` —
   the CLI ships `dist/`, which is gitignored and only exists after a
   build), then run `pnpm pack` in `apps/cli` and `npm publish <tarball>` to
-  the affected registry. For the GitHub Packages mirror, run
-  `npm pkg set name=@holydeck/cli` in `apps/cli` first, before packing, and
-  leave it uncommitted — that registry only hosts scoped names. Or skip
-  manual recovery and roll forward with the next patch release instead.
+  the affected registry. Or skip manual recovery and roll forward with the
+  next patch release instead.
 - **A version shipped broken:** versions on npmjs are immutable. Ship the
   fix as the next patch release; use `npm deprecate` on the broken version
   if users must be warned.
@@ -125,7 +123,7 @@ machine, and you are on a clean, up-to-date `main`.
 
 Automated releases need one-time configuration that only a human can do:
 
-- npmjs: the `holydeck` package must exist (publish a placeholder manually
+- npmjs: the `@holydeck/cli` package must exist (publish a placeholder manually
   once — staging cannot create a brand-new package), then configure a
   **trusted publisher** for it (GitHub Actions; repository
   `holydeck/holydeck`, workflow `release.yml`, environment `release`).
@@ -143,3 +141,34 @@ Automated releases need one-time configuration that only a human can do:
   train.
 - GHCR: after the first image push, set the `server` package's visibility to
   public.
+
+## Migrating from the unscoped CLI package
+
+The scoped package replaces the former `holydeck` package on npmjs. Perform
+these steps once, before cutting the first release from the scoped manifest:
+
+1. Ensure the `holydeck` organization exists on npmjs and your account can
+   publish public packages in its scope.
+2. From the migration branch, publish the current CLI once so the scoped
+   package and its settings exist:
+
+   ```sh
+   pnpm turbo build --filter=@holydeck/cli...
+   pack_dir="$(mktemp -d)"
+   pnpm --dir apps/cli pack --pack-destination "$pack_dir"
+   npm publish "$pack_dir/holydeck-cli-2026.9.2.tgz" --access public
+   npm view @holydeck/cli version
+   ```
+
+3. Configure its trusted publisher as described above, then merge the
+   migration branch.
+4. Cut and approve the next normal release, then verify
+   `npm view @holydeck/cli version` returns that version.
+5. Stop publishing `holydeck` and deprecate its existing versions with:
+
+   ```sh
+   npm deprecate "holydeck@*" "Moved to @holydeck/cli; install with npm install -g @holydeck/cli"
+   ```
+
+Existing installations keep working at their last published version, while
+new installs receive the migration warning.
