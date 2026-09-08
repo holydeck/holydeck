@@ -46,7 +46,7 @@ export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): P
   for (const notice of config.notices) errLine(ctx, notice);
 
   const store = new FileStore(config.values.dataDir, { now: () => ctx.now().toISOString() });
-  const fetcher = new Fetcher({ httpGet: ctx.httpGet });
+  const fetcher = new Fetcher({ httpGet: ctx.httpGet, sleep: ctx.sleep });
 
   const serverUrl = config.values.serverUrl;
   if (serverUrl !== undefined) {

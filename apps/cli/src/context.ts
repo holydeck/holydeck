@@ -18,6 +18,8 @@ export interface CliContext {
   httpGet: HttpGet;
   httpPost: HttpPost;
   now: () => Date;
+  /** Injectable retry backoff sleep for the core Fetcher (tests skip real delays). */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export function outLine(ctx: CliContext, line: string): void {
