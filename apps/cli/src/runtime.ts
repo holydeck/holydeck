@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { BrowserHttpClient } from '@holydeck/core/browser-fetch';
 import { configFilePath, parseConfigFile, resolveConfig } from '@holydeck/core/config';
 import type { HolyDeckConfig, ResolvedConfig } from '@holydeck/core/config';
 import { Fetcher } from '@holydeck/core/fetcher';
@@ -12,6 +13,7 @@ export interface GlobalFlags {
   dataDir?: string;
   serverUrl?: string;
   translations?: string;
+  browserFetch?: boolean;
 }
 
 export interface Runtime {
@@ -20,6 +22,35 @@ export interface Runtime {
   fetcher: Fetcher;
   server?: ServerClient;
   mode: 'local' | 'server';
+  /** Present when fetching goes through a headless browser; close it when the command ends. */
+  browser?: BrowserHttpClient;
+}
+
+/**
+ * Browser clients opened during this process. Commands never own the browser lifecycle;
+ * runCli closes whatever was opened, so no exit path leaves a Chromium behind.
+ */
+const openBrowsers = new Set<BrowserHttpClient>();
+
+export async function closeBrowsers(): Promise<void> {
+  const clients = [...openBrowsers];
+  openBrowsers.clear();
+  await Promise.all(clients.map((client) => client.close()));
+}
+
+/** Maps the parsed global CLI options onto the flag layer createRuntime resolves config from. */
+export function runtimeFlags(globals: {
+  dataDir?: string;
+  serverUrl?: string;
+  translations?: string;
+  browserFetch?: boolean;
+}): GlobalFlags {
+  return {
+    dataDir: globals.dataDir,
+    serverUrl: globals.serverUrl,
+    translations: globals.translations,
+    browserFetch: globals.browserFetch,
+  };
 }
 
 export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): Promise<Runtime> {
@@ -41,19 +72,29 @@ export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): P
       .map((abbr) => abbr.trim())
       .filter((abbr) => abbr.length > 0);
   }
+  if (flags.browserFetch !== undefined) flagValues.browserFetch = flags.browserFetch;
 
   const config = resolveConfig({ platform: ctx.platform, file, env: ctx.platform.env, flags: flagValues });
   for (const notice of config.notices) errLine(ctx, notice);
 
   const store = new FileStore(config.values.dataDir, { now: () => ctx.now().toISOString() });
-  const fetcher = new Fetcher({ httpGet: ctx.httpGet, sleep: ctx.sleep });
+
+  let browser: BrowserHttpClient | undefined;
+  let scrapeHttpGet = ctx.httpGet;
+  if (config.values.browserFetch && ctx.browserLauncher !== undefined) {
+    browser = new BrowserHttpClient({ launch: ctx.browserLauncher });
+    openBrowsers.add(browser);
+    scrapeHttpGet = browser.httpGet;
+  }
+  const fetcher = new Fetcher({ httpGet: scrapeHttpGet, sleep: ctx.sleep });
 
   const serverUrl = config.values.serverUrl;
   if (serverUrl !== undefined) {
+    // Server mode talks to HolyDeck's own API, which never needs the browser transport.
     const server = new ServerClient(serverUrl, { httpGet: ctx.httpGet, httpPost: ctx.httpPost });
-    return { config, store, fetcher, server, mode: 'server' };
+    return { config, store, fetcher, server, mode: 'server', browser };
   }
-  return { config, store, fetcher, mode: 'local' };
+  return { config, store, fetcher, mode: 'local', browser };
 }
 
 export function requireLocal(runtime: Runtime, command: string): void {

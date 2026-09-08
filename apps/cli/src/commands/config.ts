@@ -36,6 +36,12 @@ export function configScaffold(): string {
     '# Env: HOLYDECK_SYNC_DELAY_MS',
     '# syncDelayMs: 250',
     '',
+    '# Fetch bible.com through a headless browser. Slower to start, but it runs the',
+    '# JavaScript challenge that blocks plain HTTP clients. Needs the optional',
+    '# puppeteer dependency; flag: --browser-fetch.',
+    '# Env: HOLYDECK_BROWSER_FETCH',
+    '# browserFetch: true',
+    '',
   ].join('\n');
 }
 

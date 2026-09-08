@@ -5,7 +5,7 @@ import { outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
 import type { Runtime } from '../runtime.js';
-import { createRuntime, requireLocal } from '../runtime.js';
+import { createRuntime, requireLocal, runtimeFlags } from '../runtime.js';
 import { storedAbbrs } from './stats.js';
 
 export interface OffsetRow {
@@ -65,7 +65,7 @@ export async function runOffsets(
   bookInput: string | undefined,
   globals: GlobalOptions,
 ): Promise<void> {
-  const runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
   requireLocal(runtime, 'offsets');
   const dataDir = runtime.config.values.dataDir;
   const abbrA = aInput.toUpperCase();

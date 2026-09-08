@@ -6,7 +6,7 @@ import { HolyDeckError, formatMessage } from '@holydeck/core/messages';
 import { errLine, outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
 import { writeState } from '../state.js';
 
 export function sermonFileName(name: string | undefined, today: string): string {
@@ -43,7 +43,7 @@ export async function runNew(
   options: { edit?: boolean },
   globals: GlobalOptions,
 ): Promise<void> {
-  const runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
   const today = ctx.now().toISOString().slice(0, 10);
   const path = join(ctx.cwd, sermonFileName(name, today));
   if (existsSync(path)) throw new HolyDeckError('file_exists', { path });

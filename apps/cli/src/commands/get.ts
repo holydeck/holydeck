@@ -5,7 +5,7 @@ import type { SermonFile } from '@holydeck/core/sermon';
 import type { CliContext } from '../context.js';
 import { loadEntryData, renderAndDeliver } from '../passages.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
 
 export interface GetOptions {
   translations?: string;
@@ -21,11 +21,7 @@ export async function runGet(
   globals: GlobalOptions,
 ): Promise<void> {
   const parsed = parseReference(reference);
-  const runtime = await createRuntime(ctx, {
-    dataDir: globals.dataDir,
-    serverUrl: globals.serverUrl,
-    translations: options.translations,
-  });
+  const runtime = await createRuntime(ctx, { ...runtimeFlags(globals), translations: options.translations });
   const translations = runtime.config.values.defaultTranslations;
   if (translations.length === 0) {
     throw new HolyDeckError('config_invalid_value', {

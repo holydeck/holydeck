@@ -12,7 +12,7 @@ import { errLine, outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
 import type { Runtime } from '../runtime.js';
-import { createRuntime } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
 import { readState } from '../state.js';
 
 export interface PreflightRow {
@@ -90,7 +90,7 @@ export async function runPreflight(
   options: { last?: boolean },
   globals: GlobalOptions,
 ): Promise<void> {
-  const runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
   let sermonPath = file;
   if (sermonPath === undefined && options.last === true) {
     const state = await readState(runtime.config.values.dataDir);
