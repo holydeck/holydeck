@@ -71,12 +71,13 @@ describe('spawnClipboard (real child processes)', () => {
     await expect(spawnClipboard('holydeck-no-such-binary-x9', [], 'x')).rejects.toThrow();
   });
 
-  it('swallows the stdin EPIPE from a tool that exits before reading a large write', async () => {
-    // A payload well past any OS pipe buffer forces the write to still be in
-    // flight when `false` exits and closes its read end, so stdin emits an
-    // 'error' that the adapter must swallow (the exit code decides instead).
+  it('swallows the stdin EPIPE from a tool that stops reading a large write', async () => {
+    // A payload well past any OS pipe buffer keeps the write in flight after the tool closes
+    // its read end, so stdin emits an 'error' that the adapter must swallow (the exit code
+    // decides instead). The tool lingers before exiting so the error always lands first —
+    // exiting straight away races 'close', which would resolve before the handler ever runs.
     const big = 'x'.repeat(16 * 1024 * 1024);
-    await expect(spawnClipboard('false', [], big)).resolves.toBe(1);
+    await expect(spawnClipboard('sh', ['-c', 'exec 0<&-; sleep 0.2; exit 1'], big)).resolves.toBe(1);
   });
 
   it('resolves 1 when the tool is killed by a signal (null exit code)', async () => {
