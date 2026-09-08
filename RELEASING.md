@@ -6,10 +6,16 @@ produces:
 
 | Artifact | Where |
 | --- | --- |
-| `@holydeck/core@<version>` | npmjs (with provenance) + GitHub Packages mirror |
 | `holydeck@<version>` (CLI) | npmjs (with provenance); mirrored to GitHub Packages as `@holydeck/cli` (GitHub Packages only hosts scoped names) |
 | `ghcr.io/holydeck/server:<version>` and `:latest` | GHCR (`@holydeck/server` is never published to a registry — it ships as this image only) |
 | GitHub Release `v<version>` | notes taken from the `CHANGELOG.md` section |
+
+`@holydeck/core` is deliberately **not published** to any registry: it is a
+private workspace library (`"private": true`), bundled into the CLI at build
+time and compiled into the server image. It still gets the lockstep version
+bump so the workspace stays consistent. Should an external consumer ever need
+it, publishing can be re-enabled by dropping the `private` flag and restoring
+a publish step — until then there is nothing to maintain on npm for it.
 
 ## Version scheme
 
@@ -59,8 +65,8 @@ machine, and you are on a clean, up-to-date `main`.
      manifest, the CLI constant, and the changelog all agree — a stray tag
      publishes nothing.
    - **publish-npm** waits for approval on the `release` environment
-     (approve it under the repository's Actions run). It then publishes both
-     packages to npmjs via OIDC trusted publishing — no npm token exists
+     (approve it under the repository's Actions run). It then publishes the
+     CLI to npmjs via OIDC trusted publishing — no npm token exists
      anywhere in CI.
    - **mirror-github-packages** and **docker** run next: the GitHub Packages
      mirror and the `ghcr.io/holydeck/server` image push.
@@ -70,22 +76,21 @@ machine, and you are on a clean, up-to-date `main`.
 
 - **verify fails:** the tag was cut from an inconsistent state. Fix `main`,
   delete the tag locally and remotely, and release again.
-- **A publish job fails before either package went out:** nothing
-  downstream ran. Fix the cause and re-run the failed job from the workflow
-  run page.
-- **`publish-npm` or `mirror-github-packages` fails after publishing one of
-  its two packages:** each job publishes core, then the CLI, in sequence,
-  and npm refuses to publish over an already-published version — so a
-  plain re-run dies on the first `npm publish` step and never reaches the
-  second package. Publish the missing package by hand from a checkout of
-  the release tag: build first (`pnpm turbo build --filter=holydeck...` —
-  both packages ship `dist/`, which is gitignored and only exists after a
-  build), then `pnpm pack` the package's workspace directory and
-  `npm publish <tarball>` to the affected registry. Mirroring the CLI to
-  GitHub Packages also needs `npm pkg set name=@holydeck/cli` run in
-  `apps/cli` first, uncommitted, since that registry only hosts scoped
-  names. Or skip manual recovery and roll forward with the next patch
-  release instead.
+- **A publish job fails:** `publish-npm` and `mirror-github-packages` each
+  publish exactly one artifact (the CLI), and the `npm publish` is the
+  job's last step — so a red job means that registry received nothing. Fix
+  the cause and re-run the failed job from the workflow run page. (npm
+  refuses to publish over an already-published version, so a re-run of a
+  job whose publish actually went through dies with a "cannot publish over"
+  error — that error just means there is nothing left to publish there.)
+- **Manual publish fallback** (if a re-run is impossible): from a checkout
+  of the release tag, build first (`pnpm turbo build --filter=holydeck...` —
+  the CLI ships `dist/`, which is gitignored and only exists after a
+  build), then `pnpm pack` in `apps/cli` and `npm publish <tarball>` to the
+  affected registry. Mirroring to GitHub Packages also needs
+  `npm pkg set name=@holydeck/cli` run in `apps/cli` first, uncommitted,
+  since that registry only hosts scoped names. Or skip manual recovery and
+  roll forward with the next patch release instead.
 - **A version shipped broken:** versions on npmjs are immutable. Ship the
   fix as the next patch release; use `npm deprecate` on the broken version
   if users must be warned.
@@ -94,10 +99,10 @@ machine, and you are on a clean, up-to-date `main`.
 
 Automated releases need one-time configuration that only a human can do:
 
-- npmjs: publish `@holydeck/core` manually once so the package exists, then
-  configure a **trusted publisher** for `@holydeck/core` AND `holydeck`
-  (GitHub Actions; repository `holydeck/holydeck`, workflow `release.yml`,
-  environment `release`).
+- npmjs: the `holydeck` package must exist (publish a placeholder manually
+  once), then configure a **trusted publisher** for it (GitHub Actions;
+  repository `holydeck/holydeck`, workflow `release.yml`, environment
+  `release`).
 - GitHub: create the `release` environment with a required reviewer and
   restrict it to `v*` tags; add "Repository admin" to the `main` ruleset's
   bypass list so the release commit + tag push is accepted.
