@@ -110,6 +110,24 @@ datastore you can skip the download with `npm install -g holydeck --omit=optiona
 `holydeck doctor` reports which transport it reached bible.com with, so run it first
 when a sync stops returning content.
 
+## Interrupting a sync
+
+A whole translation is more than a thousand chapters, so `sync` is built to be stopped
+and picked up again. Press Ctrl-C once: the run finishes the chapters already in
+flight, saves them, releases the datastore lock and prints how far it got. Run the same
+command again to continue with what is still missing. A second Ctrl-C quits at once,
+which drops up to the last ten fetched chapters.
+
+Each translation is locked while it is being written, so a second `sync` of the same
+one waits for the first to finish rather than writing over it, and says which process
+it is waiting for. A run that is killed outright leaves its lock behind; the next run
+sees that the owning process is gone and takes the lock over, so there is nothing to
+clean up by hand.
+
+Steps with nothing to print — starting the browser, fetching the canon, waiting for a
+lock — show a spinner on a terminal, so a slow command never looks like a hung one.
+Progress and status go to stderr, leaving piped output clean.
+
 ## Server mode
 
 Every command works against the local datastore by default. Pass
