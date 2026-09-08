@@ -2,16 +2,19 @@
 
 A full setup for Sunday — bible verses and song slides, from sermon prep to screen.
 
-> **Status: early development.** The first release is being built; nothing here is
-> usable yet.
+> **Status: early development.** The first release has shipped: the CLI is on npm as
+> [`holydeck`](https://www.npmjs.com/package/holydeck) and the server is available as
+> a container image at `ghcr.io/holydeck/server`.
 
-## What it will do
+## What it does
 
-- Turn a dated sermon file (the verses for the service) into clean, ready-to-paste
+- Turns a dated sermon file (the verses for the service) into clean, ready-to-paste
   slide text for any number of translations
-- Keep a local bible datastore, so Sunday never depends on the internet being up
-- Serve the same data through a self-hostable server
-- Present verses and song slides live (planned)
+- Keeps a local bible datastore, so Sunday never depends on the internet being up
+- Serves the same data through a self-hostable server
+- Presents verses and song slides live (planned)
+
+To get started, see the [CLI readme](apps/cli/README.md).
 
 More at [holydeck.faith](https://holydeck.faith).
 
