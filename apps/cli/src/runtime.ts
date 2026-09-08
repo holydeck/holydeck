@@ -77,7 +77,14 @@ export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): P
   const config = resolveConfig({ platform: ctx.platform, file, env: ctx.platform.env, flags: flagValues });
   for (const notice of config.notices) errLine(ctx, notice);
 
-  const store = new FileStore(config.values.dataDir, { now: () => ctx.now().toISOString() });
+  const store = new FileStore(config.values.dataDir, {
+    now: () => ctx.now().toISOString(),
+    onLockWait: ({ abbr, owner }) => {
+      const message = `${abbr}: datastore locked by ${owner} — waiting for it to finish`;
+      if (ctx.status === undefined) errLine(ctx, message);
+      else ctx.status(message);
+    },
+  });
 
   let browser: BrowserHttpClient | undefined;
   let scrapeHttpGet = ctx.httpGet;
