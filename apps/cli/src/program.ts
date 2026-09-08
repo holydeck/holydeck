@@ -3,6 +3,7 @@ import { HolyDeckError } from '@holydeck/core/messages';
 import { registerGet } from './commands/get.js';
 import { registerGetVerses } from './commands/get-verses.js';
 import { registerNew } from './commands/new.js';
+import { registerPreflight } from './commands/preflight.js';
 import { errLine } from './context.js';
 import type { CliContext } from './context.js';
 import { CLI_VERSION } from './version.js';
@@ -32,6 +33,7 @@ export function buildProgram(ctx: CliContext): Command {
   registerGetVerses(program, ctx);
   registerGet(program, ctx);
   registerNew(program, ctx);
+  registerPreflight(program, ctx);
 
   return program;
 }
