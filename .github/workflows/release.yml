@@ -1,0 +1,130 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      MONGOMS_DOWNLOAD_DIR: /home/runner/.cache/mongodb-binaries
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /home/runner/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-8.0.4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:release
+      - run: node scripts/release/verify-release-state.mjs "$GITHUB_REF_NAME"
+      - run: pnpm turbo lint typecheck test build
+      - id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+  publish-npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Check npm supports trusted publishing
+        run: |
+          version="$(npm --version)"
+          if [ "$(printf '%s\n' 11.5.1 "$version" | sort -V | head -n1)" != "11.5.1" ]; then
+            echo "npm $version cannot do OIDC trusted publishing (need >= 11.5.1)" >&2
+            exit 1
+          fi
+          echo "npm $version ok"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo build --filter=holydeck...
+      - name: Pack the publishable packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/tarballs"
+          (cd packages/core && pnpm pack --pack-destination "$RUNNER_TEMP/tarballs")
+          (cd apps/cli && pnpm pack --pack-destination "$RUNNER_TEMP/tarballs")
+          ls -l "$RUNNER_TEMP/tarballs"
+      # No token anywhere: npm >= 11.5.1 exchanges this job's OIDC identity
+      # with npmjs.com (trusted publisher: this repo + release.yml +
+      # environment release) and attaches provenance automatically.
+      - name: Publish @holydeck/core to npmjs
+        run: npm publish "$RUNNER_TEMP"/tarballs/holydeck-core-*.tgz
+      - name: Publish holydeck to npmjs
+        run: npm publish "$RUNNER_TEMP"/tarballs/holydeck-[0-9]*.tgz
+
+  mirror-github-packages:
+    needs: [verify, publish-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo build --filter=holydeck...
+      - name: Authenticate npm to GitHub Packages
+        run: echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> "$HOME/.npmrc"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Mirror @holydeck/core
+        run: |
+          mkdir -p "$RUNNER_TEMP/mirror"
+          (cd packages/core && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
+          npm publish "$RUNNER_TEMP"/mirror/holydeck-core-*.tgz --registry=https://npm.pkg.github.com
+      # GitHub Packages only hosts scoped packages, so the unscoped CLI
+      # mirrors under the org scope as @holydeck/cli. npmjs stays canonical.
+      - name: Mirror the CLI as @holydeck/cli
+        run: |
+          (cd apps/cli && npm pkg set name=@holydeck/cli && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
+          npm publish "$RUNNER_TEMP"/mirror/holydeck-cli-*.tgz --registry=https://npm.pkg.github.com
+
+  docker:
+    needs: [verify, publish-npm]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      push: true
+      version: ${{ needs.verify.outputs.version }}
+
+  github-release:
+    needs: [verify, mirror-github-packages, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Extract the changelog section
+        run: node scripts/release/extract-notes.mjs "${{ needs.verify.outputs.version }}" CHANGELOG.md "$RUNNER_TEMP/release-notes.md"
+      - name: Create the GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
+        env:
+          GH_TOKEN: ${{ github.token }}
