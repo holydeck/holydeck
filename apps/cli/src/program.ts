@@ -1,5 +1,6 @@
 import { Command, CommanderError } from 'commander';
 import { HolyDeckError } from '@holydeck/core/messages';
+import { registerAuth } from './commands/auth.js';
 import { registerCompletion } from './commands/completion.js';
 import { registerConfig } from './commands/config.js';
 import { registerDoctor } from './commands/doctor.js';
@@ -48,6 +49,7 @@ export function buildProgram(ctx: CliContext): Command {
     });
 
   // command registrations (one line appended per command task):
+  registerAuth(program, ctx);
   registerCompletion(program, ctx);
   registerConfig(program, ctx);
   registerDoctor(program, ctx);

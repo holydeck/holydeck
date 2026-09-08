@@ -41,7 +41,20 @@ export async function runInfo(ctx: CliContext, globals: GlobalOptions): Promise<
   outLine(ctx, `holydeck ${CLI_VERSION}`);
   outLine(ctx, `mode: ${runtime.mode}`);
   outLine(ctx, `config file: ${configPath}${configExists ? '' : ' (missing)'}`);
-  const keys: Array<keyof HolyDeckConfig> = ['dataDir', 'serverUrl', 'template', 'defaultTranslations', 'syncConcurrency', 'syncDelayMs'];
+  const keys: Array<keyof HolyDeckConfig> = [
+    'dataDir',
+    'serverUrl',
+    'oidcIssuer',
+    'oidcClientId',
+    'oidcAudience',
+    'oidcResource',
+    'oidcScope',
+    'oidcCallbackPort',
+    'template',
+    'defaultTranslations',
+    'syncConcurrency',
+    'syncDelayMs',
+  ];
   for (const key of keys) {
     outLine(ctx, `${key}: ${display(runtime.config.values[key])} (${runtime.config.sources[key]})`);
   }

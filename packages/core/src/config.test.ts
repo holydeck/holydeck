@@ -40,6 +40,24 @@ describe('parseConfigFile', () => {
     expect(parseConfigFile('browserFetch: true\n', 'x.yaml')).toEqual({ browserFetch: true });
   });
 
+  it('parses reusable OIDC login settings', () => {
+    expect(parseConfigFile([
+      'oidcIssuer: https://auth.example.com',
+      'oidcClientId: holydeck-cli',
+      'oidcAudience: https://api.example.com',
+      'oidcResource: https://api.example.com',
+      'oidcScope: openid offline_access',
+      'oidcCallbackPort: 4567',
+    ].join('\n'), 'x.yaml')).toEqual({
+      oidcIssuer: 'https://auth.example.com',
+      oidcClientId: 'holydeck-cli',
+      oidcAudience: 'https://api.example.com',
+      oidcResource: 'https://api.example.com',
+      oidcScope: 'openid offline_access',
+      oidcCallbackPort: 4567,
+    });
+  });
+
   it.each([
     ['[1,2]', 'config_file_unreadable'],
     ['dataDir: [nope]', 'config_invalid_value'],
@@ -48,6 +66,7 @@ describe('parseConfigFile', () => {
     ['syncConcurrency: 0', 'config_invalid_value'],
     ['syncDelayMs: -5', 'config_invalid_value'],
     ['browserFetch: sometimes', 'config_invalid_value'],
+    ['oidcCallbackPort: 0', 'config_invalid_value'],
     ['serverUrl: 7', 'config_invalid_value'],
     ['template: 7', 'config_invalid_value'],
     [': : :', 'config_file_unreadable'],
@@ -68,6 +87,7 @@ describe('resolveConfig', () => {
     expect(resolved.values.syncConcurrency).toBe(2);
     expect(resolved.values.syncDelayMs).toBe(1000);
     expect(resolved.values.browserFetch).toBe(false);
+    expect(resolved.values.oidcCallbackPort).toBe(53682);
     expect(resolved.values.defaultTranslations).toEqual([]);
     expect(resolved.sources.dataDir).toBe('default');
     expect(resolved.notices).toEqual([]);
@@ -96,12 +116,24 @@ describe('resolveConfig', () => {
         HOLYDECK_TEMPLATE: 't',
         HOLYDECK_SYNC_CONCURRENCY: '4',
         HOLYDECK_SYNC_DELAY_MS: '0',
+        HOLYDECK_OIDC_ISSUER: 'https://auth.example.com',
+        HOLYDECK_OIDC_CLIENT_ID: 'holydeck-cli',
+        HOLYDECK_OIDC_AUDIENCE: 'https://audience.example.com',
+        HOLYDECK_OIDC_RESOURCE: 'https://resource.example.com',
+        HOLYDECK_OIDC_SCOPE: 'openid offline_access',
+        HOLYDECK_OIDC_CALLBACK_PORT: '4567',
       },
     });
     expect(resolved.values.serverUrl).toBe('http://s:3000');
     expect(resolved.values.template).toBe('t');
     expect(resolved.values.syncConcurrency).toBe(4);
     expect(resolved.values.syncDelayMs).toBe(0);
+    expect(resolved.values.oidcIssuer).toBe('https://auth.example.com');
+    expect(resolved.values.oidcClientId).toBe('holydeck-cli');
+    expect(resolved.values.oidcAudience).toBe('https://audience.example.com');
+    expect(resolved.values.oidcResource).toBe('https://resource.example.com');
+    expect(resolved.values.oidcScope).toBe('openid offline_access');
+    expect(resolved.values.oidcCallbackPort).toBe(4567);
   });
 
   it('honors deprecated aliases only when the new name is unset, with a notice', () => {
@@ -125,11 +157,12 @@ describe('resolveConfig', () => {
   it('treats an empty or whitespace-only numeric env var as unset rather than 0', () => {
     const resolved = resolveConfig({
       platform: darwin,
-      env: { HOLYDECK_SYNC_DELAY_MS: '', HOLYDECK_SYNC_CONCURRENCY: '   ' },
+      env: { HOLYDECK_SYNC_DELAY_MS: '', HOLYDECK_SYNC_CONCURRENCY: '   ', HOLYDECK_OIDC_CALLBACK_PORT: '' },
     });
     expect(resolved.values.syncDelayMs).toBe(1000);
     expect(resolved.sources.syncDelayMs).toBe('default');
     expect(resolved.values.syncConcurrency).toBe(2);
+    expect(resolved.values.oidcCallbackPort).toBe(53682);
     expect(resolved.sources.syncConcurrency).toBe('default');
   });
 
@@ -155,6 +188,8 @@ describe('resolveConfig', () => {
     expect(() => resolveConfig({ platform: darwin, env: { HOLYDECK_SYNC_CONCURRENCY: 'zero' } }))
       .toThrowError(HolyDeckError);
     expect(() => resolveConfig({ platform: darwin, env: { HOLYDECK_SYNC_DELAY_MS: '-1' } }))
+      .toThrowError(HolyDeckError);
+    expect(() => resolveConfig({ platform: darwin, env: { HOLYDECK_OIDC_CALLBACK_PORT: 'zero' } }))
       .toThrowError(HolyDeckError);
   });
 

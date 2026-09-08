@@ -34,6 +34,8 @@ export type MessageCode =
   | 'server_error'
   | 'server_unreachable'
   | 'server_bad_response'
+  | 'auth_failed'
+  | 'auth_not_configured'
   | 'local_only_command'
   | 'unknown_shell'
   | 'deprecated_flag'
@@ -102,6 +104,8 @@ export const messageCatalog: Record<MessageCode, string> = {
   server_error: 'Server error (HTTP {status}) from {url}: {message}',
   server_unreachable: 'Could not reach the HolyDeck server: {reason} ({url}).',
   server_bad_response: 'Unexpected response from the HolyDeck server at {url}: {reason}.',
+  auth_failed: 'Authentication failed: {reason}.',
+  auth_not_configured: 'No OIDC login is stored for {url}. Run "holydeck --server-url {url} auth login" first.',
   local_only_command: '"holydeck {command}" works on the local datastore and is not available in server mode (--server-url). Run it where the data lives.',
   unknown_shell: 'Unknown shell "{shell}". Supported: zsh, bash.',
   deprecated_flag: 'Flag {oldFlag} is deprecated; use {newFlag} instead.',
