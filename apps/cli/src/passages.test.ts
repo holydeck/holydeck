@@ -36,13 +36,61 @@ describe('loadEntryData (local mode)', () => {
     expect(footers).toEqual(['source: cache · revision 1 · fetched 2026-09-01 — KJV PSA 117']);
   });
 
-  it('propagates chapter_not_in_store for missing chapters', async () => {
-    const { ctx } = makeContext();
+  it('fetches chapters the store lacks, reporting each one and marking its footer live', async () => {
+    const { ctx, stderr } = makeContext({
+      responses: {
+        [chapterUrl(1, 'KJV', 'PSA', '117')]: { status: 200, body: chapterHtml('PSA', '117', psalm117) },
+        [chapterUrl(1, 'KJV', 'PSA', '118')]: { status: 200, body: chapterHtml('PSA', '118', { '1': 'Give thanks.' }) },
+      },
+    });
     const runtime = await createRuntime(ctx);
-    await expect(loadEntryData(runtime, ctx, sermonWith())).rejects.toMatchObject({ code: 'chapter_not_in_store' });
+    const sermon = sermonWith({
+      entries: [
+        { book: 'PSA', chapter: 117, verses: [1, 2], offsets: {} },
+        { book: 'PSA', chapter: 118, verses: [1], offsets: {} },
+      ],
+    });
+    const { entries, footers } = await loadEntryData(runtime, ctx, sermon);
+    expect(entries[0]?.passages[0]?.text).toContain('O praise the LORD');
+    expect(entries[1]?.passages[0]?.text).toBe('Give thanks.');
+    expect(footers).toEqual([
+      'source: live · revision 1 · fetched just now — KJV PSA 117',
+      'source: live · revision 1 · fetched just now — KJV PSA 118',
+    ]);
+    expect(stderr()).toContain('KJV PSA 117: fetching (1/2)');
   });
 
-  it('refetches with --refresh, notices unchanged content, and emits no footers', async () => {
+  it('propagates chapter_not_in_store when told not to fetch what is missing', async () => {
+    const { ctx, requests } = makeContext();
+    const runtime = await createRuntime(ctx);
+    await expect(loadEntryData(runtime, ctx, sermonWith(), { fetchMissing: false })).rejects.toMatchObject({
+      code: 'chapter_not_in_store',
+    });
+    expect(requests).toEqual([]);
+  });
+
+  it('distinguishes a stored chapter from one it just fetched, footer by footer', async () => {
+    const { ctx, dataDir } = makeContext({
+      responses: {
+        [chapterUrl(1, 'KJV', 'PSA', '118')]: { status: 200, body: chapterHtml('PSA', '118', { '1': 'Give thanks.' }) },
+      },
+    });
+    await seedStore(dataDir, 'KJV', [{ book: 'PSA', chapter: '117', verses: psalm117 }]);
+    const runtime = await createRuntime(ctx);
+    const sermon = sermonWith({
+      entries: [
+        { book: 'PSA', chapter: 117, verses: [1], offsets: {} },
+        { book: 'PSA', chapter: 118, verses: [1], offsets: {} },
+      ],
+    });
+    const { footers } = await loadEntryData(runtime, ctx, sermon);
+    expect(footers).toEqual([
+      'source: cache · revision 1 · fetched 2026-09-01 — KJV PSA 117',
+      'source: live · revision 1 · fetched just now — KJV PSA 118',
+    ]);
+  });
+
+  it('refetches with --refresh, notices unchanged content, and reports the fetch as live', async () => {
     const { ctx, dataDir, stderr } = makeContext({
       responses: {
         [chapterUrl(1, 'KJV', 'PSA', '117')]: { status: 200, body: chapterHtml('PSA', '117', psalm117) },
@@ -51,7 +99,7 @@ describe('loadEntryData (local mode)', () => {
     await seedStore(dataDir, 'KJV', [{ book: 'PSA', chapter: '117', verses: psalm117 }]);
     const runtime = await createRuntime(ctx);
     const { footers } = await loadEntryData(runtime, ctx, sermonWith(), { refresh: true });
-    expect(footers).toEqual([]);
+    expect(footers).toEqual(['source: live · revision 1 · fetched just now — KJV PSA 117']);
     expect(stderr()).toContain('KJV PSA 117: content unchanged, no new revision.');
   });
 
@@ -104,7 +152,7 @@ describe('loadEntryData (server mode)', () => {
     expect(requests.some((url) => url.includes('verses=2-3'))).toBe(true);
   });
 
-  it('skips the footer for live-fetched passages and forwards refresh', async () => {
+  it('marks a live-fetched passage in its footer and forwards refresh', async () => {
     const { ctx, requests } = makeContext({
       responses: {
         [`${base}/api/v1/translations/KJV/canon`]: { status: 200, body: JSON.stringify(canon) },
@@ -122,8 +170,25 @@ describe('loadEntryData (server mode)', () => {
     });
     const runtime = await createRuntime(ctx, { serverUrl: base });
     const { footers } = await loadEntryData(runtime, ctx, sermonWith(), { refresh: true });
-    expect(footers).toEqual([]);
+    expect(footers).toEqual(['source: live · revision 8 · fetched just now — KJV PSA 117']);
     expect(requests.some((url) => url.includes('refresh=true'))).toBe(true);
+  });
+
+  it('forwards the fetch-missing opt-out so the server refuses instead of fetching', async () => {
+    const { ctx, requests } = makeContext({
+      responses: {
+        [`${base}/api/v1/translations/KJV/canon`]: { status: 200, body: JSON.stringify(canon) },
+        [`${base}/api/v1/translations/KJV/verses?book=PSA&chapter=117&verses=1-2&fetchMissing=false`]: {
+          status: 404,
+          body: JSON.stringify({ error: { code: 'chapter_not_in_store', message: 'KJV PSA 117 is not stored.' } }),
+        },
+      },
+    });
+    const runtime = await createRuntime(ctx, { serverUrl: base });
+    await expect(loadEntryData(runtime, ctx, sermonWith(), { fetchMissing: false })).rejects.toMatchObject({
+      code: 'server_error',
+    });
+    expect(requests.some((url) => url.includes('fetchMissing=false'))).toBe(true);
   });
 
   it('scopes requested verses to the matching chapter when the sermon spans multiple chapters', async () => {

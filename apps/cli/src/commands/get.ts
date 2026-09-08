@@ -10,6 +10,7 @@ import { createRuntime, runtimeFlags } from '../runtime.js';
 export interface GetOptions {
   translations?: string;
   refresh?: boolean;
+  fetchMissing?: boolean;
   template?: string;
   copy?: boolean;
 }
@@ -35,7 +36,10 @@ export async function runGet(
     entries: [{ book: parsed.book, chapter: parsed.chapter, verses: parsed.verses, offsets: {} }],
     notices: [],
   };
-  const loaded = await loadEntryData(runtime, ctx, sermon, { refresh: options.refresh });
+  const loaded = await loadEntryData(runtime, ctx, sermon, {
+    refresh: options.refresh,
+    fetchMissing: options.fetchMissing,
+  });
   await renderAndDeliver(ctx, runtime, sermon, loaded, { template: options.template, copy: options.copy });
 }
 
@@ -46,6 +50,7 @@ export function registerGet(program: Command, ctx: CliContext): void {
     .argument('<reference>', 'reference like "PSA 118:24" or "GEN 1:5-7,9"')
     .option('--translations <list>', 'comma-separated translation abbreviations')
     .option('--refresh', 'fetch fresh content before rendering')
+    .option('--no-fetch-missing', 'fail on passages the datastore lacks instead of fetching them')
     .option('--template <template>', 'override the output template')
     .option('--copy', 'copy the rendered output to the clipboard')
     .action(async (reference: string, options: GetOptions, command: Command) => {

@@ -13,6 +13,7 @@ import { readState, writeState } from '../state.js';
 export interface GetVersesOptions {
   last?: boolean;
   refresh?: boolean;
+  fetchMissing?: boolean;
   template?: string;
   copy?: boolean;
   output?: string;
@@ -63,7 +64,10 @@ export async function runGetVerses(
   const sermon = parseSermonFile(text);
   for (const notice of sermon.notices) errLine(ctx, notice);
 
-  const loaded = await loadEntryData(runtime, ctx, sermon, { refresh: options.refresh });
+  const loaded = await loadEntryData(runtime, ctx, sermon, {
+    refresh: options.refresh,
+    fetchMissing: options.fetchMissing,
+  });
   await renderAndDeliver(ctx, runtime, sermon, loaded, {
     template: options.template ?? options.templateOutputFormat,
     copy: options.copy,
@@ -80,6 +84,7 @@ export function registerGetVerses(program: Command, ctx: CliContext): void {
     .argument('[file]', 'sermon file path')
     .option('--last', 'replay the most recently rendered sermon file')
     .option('--refresh', 'fetch fresh content before rendering')
+    .option('--no-fetch-missing', 'fail on passages the datastore lacks instead of fetching them')
     .option('--template <template>', 'override the output template')
     .option('--copy', 'copy the rendered output to the clipboard')
     .option('--output <file>', 'write the rendered output to a file instead of stdout')

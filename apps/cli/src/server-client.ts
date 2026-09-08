@@ -136,10 +136,12 @@ export class ServerClient {
     book: string,
     chapter: number,
     verses: number[],
-    options: { refresh?: boolean; revision?: number } = {},
+    options: { refresh?: boolean; revision?: number; fetchMissing?: boolean } = {},
   ): Promise<ServerVersesResponse> {
     const params = new URLSearchParams({ book, chapter: String(chapter), verses: formatVerseList(verses) });
     if (options.refresh) params.set('refresh', 'true');
+    // The server fetches a missing chapter by default, so only the opt-out needs saying.
+    if (options.fetchMissing === false) params.set('fetchMissing', 'false');
     if (options.revision !== undefined) params.set('revision', String(options.revision));
     const url = `${this.baseUrl}/api/v1/translations/${encodeURIComponent(abbr)}/verses?${params.toString()}`;
     const data = asRecord(await this.request(url), url, 'not an object');

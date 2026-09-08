@@ -110,6 +110,27 @@ datastore you can skip the download with `npm install -g holydeck --omit=optiona
 `holydeck doctor` reports which transport it reached bible.com with, so run it first
 when a sync stops returning content.
 
+## Passages that are not synced yet
+
+`get` and `get-verses` do not stop at a chapter the datastore lacks: they fetch it,
+store it, and render from the stored copy, so an ad-hoc reference works without syncing
+a whole translation first. Every chapter says where its text came from in a footer on
+stderr — `source: cache` with the revision date, or `source: live · … · fetched just now`
+for one this run went and got.
+
+```sh
+holydeck get "GEN 30:5-7,9"                     # fetches GEN 30 if it is not stored yet
+holydeck get "GEN 30:5-7,9" --no-fetch-missing  # fails instead, leaving the datastore alone
+```
+
+Use `--no-fetch-missing` when a run must not reach the network, or to check what the
+datastore really holds.
+
+The server behaves the same way: `GET /api/v1/translations/:abbr/verses` and
+`POST /api/v1/render` fetch a missing chapter unless the request passes
+`?fetchMissing=false`. In server mode (`--server-url`) the CLI forwards the flag, so the
+same command gives the same result wherever the data lives.
+
 ## Interrupting a sync
 
 A whole translation is more than a thousand chapters, so `sync` is built to be stopped
