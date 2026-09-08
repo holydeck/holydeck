@@ -30,6 +30,9 @@ jobs:
       - name: Fetch the release tags
         if: inputs.push
         run: git fetch --tags --depth=1 origin
+      - name: Resolve the release commit
+        id: commit
+        run: echo "sha=$(git rev-parse "${GITHUB_SHA}^{commit}")" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
       - name: Log in to GHCR
@@ -86,12 +89,14 @@ jobs:
             org.opencontainers.image.description=HolyDeck server
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.version=${{ inputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.commit.outputs.sha }}
       - name: Record the pushed image tags
         if: inputs.push
         env:
           TAGS: ${{ steps.tags.outputs.tags }}
         run: |
           while IFS= read -r tag; do
-            [ -n "$tag" ] && echo "- $tag pushed" >> "$GITHUB_STEP_SUMMARY"
+            if [ -n "$tag" ]; then
+              echo "- $tag pushed" >> "$GITHUB_STEP_SUMMARY"
+            fi
           done <<<"$TAGS"
