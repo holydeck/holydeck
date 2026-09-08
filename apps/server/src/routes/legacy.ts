@@ -79,7 +79,7 @@ export function registerLegacyVerseRoute(api: FastifyInstance, deps: AppDeps): v
         chapter,
         verses: parseVerseList(query.verses ?? '1'),
         refresh: flagParam(query.force),
-        fetchOnMiss: true,
+        fetchMissing: true,
       });
       return await reply.code(200).send({
         citation: result.citation,
