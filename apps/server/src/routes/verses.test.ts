@@ -78,6 +78,23 @@ describe('GET /api/v1/translations/:abbr/verses', () => {
     expect(ctx.urls).toEqual([]);
   });
 
+  it('fetches a chapter nobody synced yet, and stops at 404 with ?fetchMissing=false', async () => {
+    const fetched = await ctx.app.inject({ method: 'GET', url: `${url}?book=PSA&chapter=117&verses=1` });
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.json<VersesBody>().source).toBe('live');
+    expect(ctx.urls.some((u) => u.includes('PSA.117'))).toBe(true);
+
+    await ctx.db.dropDatabase();
+    ctx.urls.length = 0;
+    const refused = await ctx.app.inject({
+      method: 'GET',
+      url: `${url}?book=PSA&chapter=117&verses=1&fetchMissing=false`,
+    });
+    expect(refused.statusCode).toBe(404);
+    expect(refused.json<{ error: { code: string } }>().error.code).toBe('chapter_not_in_store');
+    expect(ctx.urls).toEqual([]);
+  });
+
   it('404s with revision_not_found for a revision that never existed', async () => {
     await seed();
     const response = await ctx.app.inject({ method: 'GET', url: `${url}?book=PSA&chapter=117&verses=1&revision=9` });
@@ -144,5 +161,11 @@ describe('flagParam', () => {
     expect(flagParam('false')).toBe(false);
     expect(flagParam(undefined)).toBe(false);
     expect(flagParam(1)).toBe(false);
+  });
+
+  it('falls back only when the flag is absent, so an on-by-default flag can be turned off', () => {
+    expect(flagParam(undefined, true)).toBe(true);
+    expect(flagParam('false', true)).toBe(false);
+    expect(flagParam('true', true)).toBe(true);
   });
 });

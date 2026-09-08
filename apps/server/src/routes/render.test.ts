@@ -104,16 +104,20 @@ describe('POST /api/v1/render', () => {
     expect(body.notices.some((notice) => notice.toLowerCase().includes('template'))).toBe(true);
   });
 
-  it('404s with chapter_not_in_store for an unsynced translation', async () => {
+  it('fetches an unsynced translation, or 404s with chapter_not_in_store when told not to', async () => {
     const sermon = ['translations:', '  - NIV', 'verses:', '  - book: PSA', '    chapter: 117', '    verses: 1', ''].join('\n');
-    const response = await ctx.app.inject({
-      method: 'POST',
-      url,
-      headers: { 'content-type': 'text/yaml' },
-      payload: sermon,
-    });
-    expect(response.statusCode).toBe(404);
-    expect(response.json<{ error: { code: string } }>().error.code).toBe('chapter_not_in_store');
+    const headers = { 'content-type': 'text/yaml' };
+    ctx.urls.length = 0;
+
+    const refused = await ctx.app.inject({ method: 'POST', url: `${url}?fetchMissing=false`, headers, payload: sermon });
+    expect(refused.statusCode).toBe(404);
+    expect(refused.json<{ error: { code: string } }>().error.code).toBe('chapter_not_in_store');
+    expect(ctx.urls).toEqual([]);
+
+    const fetched = await ctx.app.inject({ method: 'POST', url, headers, payload: sermon });
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.json<RenderBody>().output).toContain('Psalms 117:1 (NIV)');
+    expect(ctx.urls.some((u) => u.includes('PSA.117'))).toBe(true);
   });
 
   it('400s with sermon_invalid on unparseable YAML and on a JSON null body', async () => {

@@ -1,7 +1,7 @@
 import { bundledCanon, findBook } from '@holydeck/core/canon';
+import { ensureChapters } from '@holydeck/core/fetch-missing';
 import { HolyDeckError } from '@holydeck/core/messages';
 import { findRevision, getChapter, latestRevision } from '@holydeck/core/storage';
-import { translationId } from '@holydeck/core/translations';
 import { formatVerseList } from '@holydeck/core/references';
 import type { Fetcher } from '@holydeck/core/fetcher';
 import type { MongoStore } from './mongo-store.js';
@@ -13,7 +13,8 @@ export interface VersesRequest {
   verses: number[];
   refresh: boolean;
   revision?: number;
-  fetchOnMiss?: boolean;
+  /** Fetch the chapter when the datastore lacks it. On by default; off answers with an error. */
+  fetchMissing?: boolean;
 }
 
 export interface VersesResult {
@@ -29,17 +30,13 @@ export async function readVerses(store: MongoStore, fetcher: Fetcher, request: V
   const abbr = request.abbr.toUpperCase();
   const book = request.book.toUpperCase();
   const chapter = String(request.chapter);
-  const id = translationId(abbr);
-  const file = await store.load(abbr);
+  const { file, fetched } = await ensureChapters(store, fetcher, abbr, [{ book, chapter }], {
+    refresh: request.refresh,
+    fetchMissing: request.fetchMissing,
+  });
   const canon = file?.canon ?? bundledCanon();
-  let record = getChapter(file, book, chapter);
-  let source: 'cache' | 'live' = 'cache';
-  if (request.refresh || (request.fetchOnMiss === true && record === undefined)) {
-    const fetched = await fetcher.fetchChapter(id, abbr, book, chapter);
-    await store.putChapter(abbr, book, chapter, fetched.verses, fetched.canonVerseCount);
-    record = getChapter(await store.load(abbr), book, chapter);
-    source = 'live';
-  }
+  const record = getChapter(file, book, chapter);
+  const source: 'cache' | 'live' = fetched.length > 0 ? 'live' : 'cache';
   if (record === undefined) {
     throw new HolyDeckError('chapter_not_in_store', { abbr, book, chapter });
   }

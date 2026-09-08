@@ -4,7 +4,9 @@ import type { FastifyInstance } from 'fastify';
 import type { VerseMap } from '@holydeck/core/storage';
 import type { AppDeps } from '../app.js';
 
-export function flagParam(value: unknown): boolean {
+/** A query flag: present-but-empty means on, and an absent flag falls back to the route's default. */
+export function flagParam(value: unknown, fallback = false): boolean {
+  if (value === undefined) return fallback;
   return value === true || value === 'true' || value === '';
 }
 
@@ -13,6 +15,7 @@ interface VersesQuery {
   chapter: number;
   verses: string;
   refresh?: unknown;
+  fetchMissing?: unknown;
   revision?: number;
 }
 
@@ -29,6 +32,7 @@ export function registerVersesRoute(api: FastifyInstance, deps: AppDeps): void {
             chapter: { type: 'integer', minimum: 1 },
             verses: { type: 'string', minLength: 1 },
             refresh: {},
+            fetchMissing: {},
             revision: { type: 'integer', minimum: 1 },
           },
         },
@@ -42,6 +46,7 @@ export function registerVersesRoute(api: FastifyInstance, deps: AppDeps): void {
         chapter: query.chapter,
         verses: parseVerseList(query.verses),
         refresh: flagParam(query.refresh),
+        fetchMissing: flagParam(query.fetchMissing, true),
         revision: query.revision,
       });
       const verses: VerseMap = {};
