@@ -10,6 +10,9 @@ services:
     environment:
       HOLYDECK_MONGO_URL: mongodb://mongo:27017
       HOLYDECK_MONGO_DB: holydeck
+      # bible.com answers plain HTTP clients with a JavaScript challenge. Set this to fetch
+      # through the Chromium the image ships, which runs that challenge once per sync.
+      HOLYDECK_BROWSER_FETCH: "true"
     ports:
       - "3000:3000"
     depends_on:
