@@ -44,6 +44,27 @@ gh pr create --base main
 
 Merge once every check is green.
 
+### Running the server locally
+
+`compose.dev.yaml` builds the server image from this checkout and starts it with a MongoDB, so
+the CLI can be tested against a real server without deploying anything:
+
+```sh
+pnpm dev:server        # build from the working tree, serve on http://localhost:3000
+pnpm dev:server:down   # stop it and delete the database volume
+```
+
+Every start rebuilds, so the container always runs the current code. Check it with
+`curl localhost:3000/health`, then point the CLI at it:
+
+```sh
+node apps/cli/dist/cli.js get "PSA 118:24" --server-url http://localhost:3000
+```
+
+The server syncs through the Chromium in its own image, so `POST /api/v1/translations/KJV/sync`
+works from the dev stack too. `apps/server/compose.example.yaml` is the deployment example
+instead: it pulls the published image rather than building one.
+
 ## License
 
 [MIT](LICENSE)

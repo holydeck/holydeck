@@ -1,4 +1,6 @@
-# Example stack: HolyDeck server + MongoDB.
+# Example deployment: HolyDeck server + MongoDB, from the published image.
+# For hacking on the server itself use compose.dev.yaml in the repo root, which builds
+# the image from the working tree instead of pulling it.
 #
 # The server has no auth or TLS of its own — put your reverse proxy in front
 # (e.g. https://bible.example.com -> your-proxy -> server:3000) and terminate
