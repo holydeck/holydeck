@@ -38,6 +38,8 @@ export function buildProgram(ctx: CliContext): Command {
     .option('--browser-fetch', 'fetch bible.com through a headless browser (needs puppeteer)')
     .option('--no-browser-fetch', 'force plain HTTP fetching even if the config enables the browser')
     .exitOverride()
+    // Global flags apply to every command, so every command's help has to list them.
+    .configureHelp({ showGlobalOptions: true })
     .configureOutput({
       writeOut: (text) => ctx.out(text),
       writeErr: (text) => ctx.err(text),
