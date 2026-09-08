@@ -70,10 +70,17 @@ machine, and you are on a clean, up-to-date `main`.
 
 - **verify fails:** the tag was cut from an inconsistent state. Fix `main`,
   delete the tag locally and remotely, and release again.
-- **A publish job fails:** nothing downstream ran. Fix the cause and re-run
-  the failed jobs from the workflow run page — the npm registry refuses
-  duplicate versions, so an already-published package is the signal that the
-  job half-completed; re-running the remaining jobs is safe.
+- **A publish job fails before either package went out:** nothing
+  downstream ran. Fix the cause and re-run the failed job from the workflow
+  run page.
+- **`publish-npm` or `mirror-github-packages` fails after publishing one of
+  its two packages:** each job publishes core, then the CLI, in sequence,
+  and npm refuses to publish over an already-published version — so a
+  plain re-run dies on the first `npm publish` step and never reaches the
+  second package. Publish the missing package by hand from a checkout of
+  the release tag (`pnpm pack` it from its workspace directory, then
+  `npm publish <tarball>` to the affected registry), or roll forward with
+  the next patch release instead.
 - **A version shipped broken:** versions on npmjs are immutable. Ship the
   fix as the next patch release; use `npm deprecate` on the broken version
   if users must be warned.
