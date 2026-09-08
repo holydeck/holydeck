@@ -47,7 +47,7 @@ export function registerGet(program: Command, ctx: CliContext): void {
   program
     .command('get')
     .description('Render a single reference ad hoc, e.g. holydeck get "PSA 118:24"')
-    .argument('<reference>', 'reference like "PSA 118:24" or "GEN 1:5-7,9"')
+    .argument('<reference>', 'reference like "PSA 118:24", "GEN 1:5-7,9" or "1. Mose 30:5"')
     .option('--translations <list>', 'comma-separated translation abbreviations')
     .option('--refresh', 'fetch fresh content before rendering')
     .option('--no-fetch-missing', 'fail on passages the datastore lacks instead of fetching them')

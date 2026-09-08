@@ -110,6 +110,20 @@ datastore you can skip the download with `npm install -g holydeck --omit=optiona
 `holydeck doctor` reports which transport it reached bible.com with, so run it first
 when a sync stops returning content.
 
+## Book names
+
+A book can be named by its USFM code or by its name in English, German or Tamil —
+anywhere a book is accepted: sermon files, `get`, `revisions` and `offsets`.
+Case, spacing and punctuation do not matter, and a leading ordinal may be written
+any way you like:
+
+```sh
+holydeck get "GEN 30:5-7,9"
+holydeck get "1. Mose 30:5-7,9"
+holydeck get "2nd Samuel 1:6"     # or "2 Samuel", "II Samuel", "2. Samuel"
+holydeck get "சங்கீதம் 118:24"
+```
+
 ## Passages that are not synced yet
 
 `get` and `get-verses` do not stop at a chapter the datastore lacks: they fetch it,

@@ -155,7 +155,7 @@ describe('completion', () => {
   it('prints the next expected argument with the hidden --arg-hint option', async () => {
     const setup = makeContext();
     await expect(runCli(setup.ctx, ['completion', '--arg-hint', 'get'])).resolves.toBe(0);
-    expect(setup.stdout().trimEnd()).toBe('reference:reference like "PSA 118:24" or "GEN 1:5-7,9"');
+    expect(setup.stdout().trimEnd()).toBe('reference:reference like "PSA 118:24", "GEN 1:5-7,9" or "1. Mose 30:5"');
   });
 
   it('advances the argument hint as positional values are already typed', async () => {
