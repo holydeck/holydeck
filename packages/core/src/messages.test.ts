@@ -55,3 +55,33 @@ describe('HolyDeckError', () => {
     expect(error.message).toContain('bot-protection challenge');
   });
 });
+
+describe('server message codes', () => {
+  it('formats the sync-job messages, interpolating the abbreviation twice', () => {
+    expect(formatMessage('sync_already_running', { abbr: 'KJV' })).toBe(
+      'A sync job for KJV is already running. Poll GET /api/v1/translations/KJV/sync.',
+    );
+    expect(formatMessage('sync_job_not_found', { abbr: 'KJV' })).toBe(
+      'No sync job for KJV. Start one with POST /api/v1/translations/KJV/sync.',
+    );
+    expect(formatMessage('sync_interrupted', { abbr: 'NIV' })).toBe(
+      'The sync job for NIV was interrupted by a server restart. Start it again.',
+    );
+  });
+
+  it('formats the request, route and deprecation messages', () => {
+    expect(formatMessage('request_invalid', { reason: "querystring must have required property 'book'" })).toBe(
+      "Invalid request: querystring must have required property 'book'.",
+    );
+    expect(formatMessage('route_not_found', { method: 'GET', path: '/nope' })).toBe(
+      'Unknown endpoint: GET /nope. This response lists the available endpoints.',
+    );
+    expect(
+      formatMessage('deprecated_route', {
+        oldRoute: 'GET /api/v1/verse',
+        newRoute: 'GET /api/v1/translations/:abbr/verses',
+      }),
+    ).toBe('GET /api/v1/verse is deprecated; use GET /api/v1/translations/:abbr/verses instead.');
+    expect(messageCatalog.internal_error).toBe('Unexpected server error.');
+  });
+});
