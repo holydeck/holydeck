@@ -15,6 +15,7 @@ export type MessageCode =
   | 'store_newer_schema'
   | 'store_locked'
   | 'scrape_blocked'
+  | 'browser_unavailable'
   | 'scrape_http_error'
   | 'scrape_network_error'
   | 'scrape_parse_failed'
@@ -64,7 +65,8 @@ export const messageCatalog: Record<MessageCode, string> = {
   store_corrupt: 'Datastore file {path} is corrupt: {reason}.',
   store_newer_schema: 'Datastore file {path} has schema version {found}; this build supports up to {supported}. Update holydeck.',
   store_locked: 'Datastore for {abbr} is locked by another holydeck process (lock file: {path}).',
-  scrape_blocked: 'bible.com answered with a bot-protection challenge instead of content. Plain HTTP cannot pass it; try again later or from another network.',
+  scrape_blocked: 'bible.com answered with a bot-protection challenge instead of content. Plain HTTP cannot pass it; enable the browser fetch backend (see "holydeck doctor") or try again later.',
+  browser_unavailable: 'Could not start the headless browser used to fetch bible.com: {reason}.',
   scrape_http_error: 'bible.com request failed: HTTP {status} for {url}',
   scrape_network_error: 'Could not reach bible.com: {reason} ({url}).',
   scrape_parse_failed: 'No verse content found in the page at {url}. The bible.com markup may have changed.',
