@@ -30,6 +30,20 @@ dependencies, and the server ships as a container pinned to its own Node version
 matrix would only re-test the same floor. Revisit this once Node 26 (the next LTS) enters the
 support window.
 
+`main` is protected by a ruleset: no direct pushes, no force-push, no branch deletion, commits
+must be signed, and `verify`, `docker / build`, `analyze`, `dependency-review` and `CodeQL` must
+all pass before merging (repository admins can bypass this, reserved for the release commit —
+see `RELEASING.md`). Everything else goes through a branch and a pull request:
+
+```sh
+git checkout -b my-change
+# ...make changes, commit (signed)...
+git push -u origin my-change
+gh pr create --base main
+```
+
+Merge once every check is green.
+
 ## License
 
 [MIT](LICENSE)
