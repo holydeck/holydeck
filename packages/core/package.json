@@ -53,6 +53,14 @@
       "types": "./dist/fetcher.d.ts",
       "import": "./dist/fetcher.js"
     },
+    "./browser-fetch": {
+      "types": "./dist/browser-fetch.d.ts",
+      "import": "./dist/browser-fetch.js"
+    },
+    "./puppeteer-launcher": {
+      "types": "./dist/puppeteer-launcher.d.ts",
+      "import": "./dist/puppeteer-launcher.js"
+    },
     "./sync": {
       "types": "./dist/sync.d.ts",
       "import": "./dist/sync.js"
@@ -86,5 +94,13 @@
   "homepage": "https://github.com/holydeck/holydeck#readme",
   "bugs": {
     "url": "https://github.com/holydeck/holydeck/issues"
+  },
+  "peerDependencies": {
+    "puppeteer": "^25.10.0"
+  },
+  "peerDependenciesMeta": {
+    "puppeteer": {
+      "optional": true
+    }
   }
 }
