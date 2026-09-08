@@ -5,7 +5,7 @@
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { CLI_VERSION_FILE, MANIFESTS } from './sync-versions.mjs';
+import { CLI_VERSION_FILE, MANIFESTS, fromRepoRoot } from './sync-versions.mjs';
 
 export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog }) {
   const match = /^v(\d+\.\d+\.\d+)$/.exec(tag ?? '');
@@ -32,13 +32,13 @@ export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog
 
 function main(tag) {
   const manifests = Object.fromEntries(
-    ['package.json', ...MANIFESTS].map((path) => [path, readFileSync(path, 'utf8')]),
+    ['package.json', ...MANIFESTS].map((path) => [path, readFileSync(fromRepoRoot(path), 'utf8')]),
   );
   const problems = verifyReleaseState({
     tag,
     manifests,
-    cliVersionModule: readFileSync(CLI_VERSION_FILE, 'utf8'),
-    changelog: readFileSync('CHANGELOG.md', 'utf8'),
+    cliVersionModule: readFileSync(fromRepoRoot(CLI_VERSION_FILE), 'utf8'),
+    changelog: readFileSync(fromRepoRoot('CHANGELOG.md'), 'utf8'),
   });
   if (problems.length > 0) {
     for (const problem of problems) console.error(`verify-release-state: ${problem}`);

@@ -6,7 +6,11 @@
 // commit with `git add . --update`, which picks these tracked files up.
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// Every path below is repo-relative, so resolve them against the repo root
+// rather than the caller's working directory.
+export const fromRepoRoot = (path) => fileURLToPath(new URL(`../../${path}`, import.meta.url));
 
 export const MANIFESTS = [
   'packages/core/package.json',
@@ -36,9 +40,10 @@ function main(version) {
     process.exit(1);
   }
   for (const path of MANIFESTS) {
-    writeFileSync(path, bumpManifest(readFileSync(path, 'utf8'), version));
+    const file = fromRepoRoot(path);
+    writeFileSync(file, bumpManifest(readFileSync(file, 'utf8'), version));
   }
-  writeFileSync(CLI_VERSION_FILE, cliVersionModule(version));
+  writeFileSync(fromRepoRoot(CLI_VERSION_FILE), cliVersionModule(version));
   console.log(`sync-versions: ${MANIFESTS.length} manifests and ${CLI_VERSION_FILE} set to ${version}`);
 }
 
