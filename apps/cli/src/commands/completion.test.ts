@@ -43,13 +43,14 @@ describe('completion', () => {
     expect(lines).toEqual(KNOWN_TRANSLATION_ABBREVIATIONS);
   });
 
-  it('hides --translations, --commands, --books and --flags from help output', async () => {
+  it('hides --translations, --commands, --books, --flags and --arg-hint from help output', async () => {
     const setup = makeContext();
     await expect(runCli(setup.ctx, ['completion', '--help'])).resolves.not.toBe(1);
     expect(setup.stdout()).not.toContain('--translations');
     expect(setup.stdout()).not.toContain('--commands');
     expect(setup.stdout()).not.toContain('--books');
     expect(setup.stdout()).not.toContain('--flags');
+    expect(setup.stdout()).not.toContain('--arg-hint');
   });
 
   it('prints registered command names with descriptions with the hidden --commands flag', async () => {
@@ -145,4 +146,52 @@ describe('completion', () => {
     expect(setup.stdout()).toBe('');
   });
 
+  it('prints nothing for --arg-hint with no path', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--arg-hint'])).resolves.toBe(0);
+    expect(setup.stdout()).toBe('');
+  });
+
+  it('prints the next expected argument with the hidden --arg-hint option', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--arg-hint', 'get'])).resolves.toBe(0);
+    expect(setup.stdout().trimEnd()).toBe('reference:reference like "PSA 118:24" or "GEN 1:5-7,9"');
+  });
+
+  it('advances the argument hint as positional values are already typed', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--arg-hint', 'revisions', 'SCH2000', 'PSA'])).resolves.toBe(0);
+    expect(setup.stdout().trimEnd()).toBe('chapter:chapter number');
+  });
+
+  it('prints nothing once every positional argument has already been typed', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--arg-hint', 'revisions', 'SCH2000', 'PSA', '3'])).resolves.toBe(0);
+    expect(setup.stdout()).toBe('');
+  });
+
+  it('keeps hinting a variadic argument past its first value', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--arg-hint', 'sync', 'KJV', 'NIV'])).resolves.toBe(0);
+    expect(setup.stdout().trimEnd()).toBe('abbr:translation abbreviations (default: configured translations)');
+  });
+
+  it('resolves --arg-hint through a nested subcommand path', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--arg-hint', 'config', 'init'])).resolves.toBe(0);
+    expect(setup.stdout()).toBe('');
+  });
+
+  it('prints nothing for --arg-hint on a command with no positional arguments', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', '--arg-hint', 'doctor'])).resolves.toBe(0);
+    expect(setup.stdout()).toBe('');
+  });
+
+  it('includes an arg-hint lookup and _message in the zsh script', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', 'zsh'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('holydeck completion --arg-hint');
+    expect(setup.stdout()).toContain('_message');
+  });
 });

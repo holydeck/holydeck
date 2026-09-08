@@ -26,6 +26,15 @@ function zshScript(): string {
     '    _describe "command" commands',
     '    return',
     '  fi',
+    '  _hint_or_files() {',
+    '    local hint',
+    '    hint="$(holydeck completion --arg-hint $words[2,CURRENT-1] 2>/dev/null)"',
+    '    if [[ -n "$hint" ]]; then',
+    '      _message -r "${hint/:/ — }"',
+    '    else',
+    '      _files',
+    '    fi',
+    '  }',
     '  case "$words[2]" in',
     '    sync)',
     '      translations=($(holydeck completion --translations 2>/dev/null))',
@@ -39,7 +48,7 @@ function zshScript(): string {
     '        books=("${(@f)$(holydeck completion --books 2>/dev/null)}")',
     '        _describe "book" books',
     '      else',
-    '        _files',
+    '        _hint_or_files',
     '      fi',
     '      ;;',
     '    offsets)',
@@ -50,11 +59,11 @@ function zshScript(): string {
     '        books=("${(@f)$(holydeck completion --books 2>/dev/null)}")',
     '        _describe "book" books',
     '      else',
-    '        _files',
+    '        _hint_or_files',
     '      fi',
     '      ;;',
     '    *)',
-    '      _files',
+    '      _hint_or_files',
     '      ;;',
     '  esac',
     '}',
@@ -114,6 +123,7 @@ export interface CompletionOptions {
   commands?: boolean | string[];
   books?: boolean;
   flags?: boolean | string[];
+  argHint?: boolean | string[];
 }
 
 /** Walks a strict subcommand-name path; undefined as soon as a segment doesn't match. */
@@ -123,15 +133,23 @@ function findCommand(program: Command, path: string[]): Command | undefined {
   return current;
 }
 
+interface DeepestMatch {
+  command: Command;
+  /** How many leading path segments were consumed as subcommand names; the rest are argument values. */
+  consumed: number;
+}
+
 /** Walks as far as consecutive subcommand names match, then stops — never undefined. */
-function findDeepestCommand(program: Command, path: string[]): Command {
+function findDeepestCommand(program: Command, path: string[]): DeepestMatch {
   let command = program;
+  let consumed = 0;
   for (const segment of path) {
     const next = command.commands.find((c) => c.name() === segment);
     if (next === undefined) break;
     command = next;
+    consumed += 1;
   }
-  return command;
+  return { command, consumed };
 }
 
 export function runCompletion(
@@ -156,11 +174,20 @@ export function runCompletion(
   }
   if (options.flags !== undefined) {
     const path = Array.isArray(options.flags) ? options.flags : [];
-    const command = findDeepestCommand(program, path);
+    const { command } = findDeepestCommand(program, path);
     for (const option of command.createHelp().visibleOptions(command)) {
       outLine(ctx, `${option.long}:${option.description}`);
       if (option.short) outLine(ctx, `${option.short}:${option.description}`);
     }
+    return;
+  }
+  if (options.argHint !== undefined) {
+    const path = Array.isArray(options.argHint) ? options.argHint : [];
+    const { command, consumed } = findDeepestCommand(program, path);
+    const args = command.registeredArguments;
+    const lastArg = args[args.length - 1];
+    const arg = args[path.length - consumed] ?? (lastArg?.variadic === true ? lastArg : undefined);
+    if (arg !== undefined) outLine(ctx, `${arg.name()}:${arg.description}`);
     return;
   }
   if (shell === 'zsh') {
@@ -183,6 +210,7 @@ export function registerCompletion(program: Command, ctx: CliContext): void {
     .addOption(new Option('--commands [path...]', 'print subcommand names for a command path (or top-level if omitted)').hideHelp())
     .addOption(new Option('--books', 'print USFM book codes').hideHelp())
     .addOption(new Option('--flags [path...]', 'print option flags for a command path (or global flags if omitted)').hideHelp())
+    .addOption(new Option('--arg-hint [path...]', 'print the name and description of the next expected positional argument for a command path').hideHelp())
     .action((shell: string | undefined, options: CompletionOptions) => {
       runCompletion(ctx, program, shell, options);
     });
