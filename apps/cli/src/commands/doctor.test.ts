@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { configFilePath } from '@holydeck/core/config';
 import { versionUrl } from '@holydeck/core/scraper';
-import { makeContext, seedStore, versionMetaJson } from '../../test/harness.js';
+import { fakeLauncher, makeContext, seedStore, versionMetaJson } from '../../test/harness.js';
 import { runCli } from '../program.js';
 
 const BIBLE_OK = { [versionUrl(1)]: { status: 200, body: versionMetaJson({}) } };
@@ -99,11 +99,23 @@ describe('doctor', () => {
       responses: { [versionUrl(1)]: { status: 200, body: '<html><title>Client Challenge</title></html>' } },
     });
     await expect(runCli(challenged.ctx, ['doctor'])).resolves.toBe(0);
-    expect(challenged.stdout()).toContain('warn    bible.com — reachable but blocked');
+    expect(challenged.stdout()).toContain('warn    bible.com — blocked by a challenge page — retry with --browser-fetch');
 
     const down = makeContext({ responses: { [versionUrl(1)]: { status: 503, body: 'nope' } } });
     await expect(runCli(down.ctx, ['doctor'])).resolves.toBe(1);
     expect(down.stdout()).toContain('fail    bible.com —');
+  });
+
+  it('probes bible.com through the browser when --browser-fetch is on', async () => {
+    const reachable = makeContext({ overrides: { browserLauncher: fakeLauncher(versionMetaJson({})) } });
+    await expect(runCli(reachable.ctx, ['doctor', '--browser-fetch'])).resolves.toBe(0);
+    expect(reachable.stdout()).toContain('ok      bible.com — reachable via headless browser');
+
+    const challenged = makeContext({
+      overrides: { browserLauncher: fakeLauncher('<html><title>Client Challenge</title></html>') },
+    });
+    await expect(runCli(challenged.ctx, ['doctor', '--browser-fetch'])).resolves.toBe(0);
+    expect(challenged.stdout()).toContain('warn    bible.com — blocked by a challenge page even through the browser');
   });
 
   it('fails the bible.com check when the request throws', async () => {

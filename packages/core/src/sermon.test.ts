@@ -28,6 +28,19 @@ describe('parseSermonFile (modern format)', () => {
     expect(sermon.notices).toEqual([]);
   });
 
+  it('accepts book names as well as USFM codes', () => {
+    const sermon = parseSermonFile(
+      [
+        'translations: [SCH2000, TAOVBSI]',
+        'verses:',
+        '  - {book: "2nd Samuel", chapter: 1, verses: 6}',
+        '  - {book: "1. Mose", chapter: 30, verses: 5}',
+        '  - {book: "சங்கீதம்", chapter: 118, verses: 24}',
+      ].join('\n'),
+    );
+    expect(sermon.entries.map((entry) => entry.book)).toEqual(['2SA', 'GEN', 'PSA']);
+  });
+
   it.each([
     ['not yaml: [', 'not valid YAML'],
     ['- just\n- a list', 'top level'],
@@ -36,7 +49,8 @@ describe('parseSermonFile (modern format)', () => {
     ['translations: [KJV]\ntemplate: 9\nverses: [{book: PSA, chapter: 1, verses: 1}]', 'template'],
     ['translations: [KJV]\nverses: []', 'verses'],
     ['translations: [KJV]\nverses: [7]', 'verses[0]'],
-    ['translations: [KJV]\nverses: [{book: PSALM, chapter: 1, verses: 1}]', 'book'],
+    ['translations: [KJV]\nverses: [{book: Hezekiah, chapter: 1, verses: 1}]', 'book'],
+    ['translations: [KJV]\nverses: [{book: 7, chapter: 1, verses: 1}]', 'book'],
     ['translations: [KJV]\nverses: [{book: PSA, chapter: 0, verses: 1}]', 'chapter'],
     ['translations: [KJV]\nverses: [{book: PSA, chapter: 1}]', 'verses'],
     ['translations: [KJV]\nverses: [{book: PSA, chapter: 1, verses: [1]}]', 'verses'],

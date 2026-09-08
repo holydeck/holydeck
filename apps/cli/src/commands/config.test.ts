@@ -2,14 +2,33 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { configFilePath, parseConfigFile } from '@holydeck/core/config';
+import { renderOutput } from '@holydeck/core/template';
 import { makeContext } from '../../test/harness.js';
 import { runCli } from '../program.js';
-import { configScaffold } from './config.js';
+import { TEMPLATE_EXAMPLE, configScaffold } from './config.js';
 
 describe('configScaffold', () => {
   it('parses as a config file with KJV as the only active value', () => {
     const parsed = parseConfigFile(configScaffold(), 'scaffold');
     expect(parsed).toEqual({ defaultTranslations: ['KJV'] });
+  });
+
+  it('offers a template example that YAML and Liquid both accept', async () => {
+    const parsed = parseConfigFile(`template: "${TEMPLATE_EXAMPLE}"`, 'scaffold');
+    const passage = {
+      translation: 'KJV',
+      book: 'GEN',
+      bookName: 'Genesis',
+      chapter: 1,
+      verses: '1',
+      text: 'In the beginning God created the heaven and the earth.',
+      citation: 'Genesis 1:1',
+      revision: 1,
+      fetchedAt: '2026-09-08',
+    };
+    const output = await renderOutput(parsed.template, [{ reference: 'GEN 1:1', passages: [passage] }]);
+    expect(output).toBe('In the beginning God created the heaven and the earth.\nGenesis 1:1 (KJV)\n\n');
+    expect(configScaffold()).toContain(`# template: "${TEMPLATE_EXAMPLE}"`);
   });
 
   it('documents every config key and its env var', () => {

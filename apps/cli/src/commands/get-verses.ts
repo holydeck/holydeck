@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { Command, Option } from 'commander';
 import { HolyDeckError, formatMessage } from '@holydeck/core/messages';
 import { parseSermonFile } from '@holydeck/core/sermon';
@@ -7,12 +5,14 @@ import { errLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import { loadEntryData, renderAndDeliver } from '../passages.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
+import { readSermonFile } from '../sermon-file.js';
 import { readState, writeState } from '../state.js';
 
 export interface GetVersesOptions {
   last?: boolean;
   refresh?: boolean;
+  fetchMissing?: boolean;
   template?: string;
   copy?: boolean;
   output?: string;
@@ -38,7 +38,7 @@ export async function runGetVerses(
   }
 
   const runtime = await createRuntime(ctx, {
-    dataDir: globals.dataDir,
+    ...runtimeFlags(globals),
     serverUrl: globals.serverUrl ?? options.youVersionApiUrl,
   });
 
@@ -52,22 +52,20 @@ export async function runGetVerses(
     throw new HolyDeckError('sermon_invalid', { reason: 'no sermon file given (pass a path or --last)' });
   }
 
-  const absolutePath = resolve(ctx.cwd, sermonPath);
-  let text: string;
-  try {
-    text = await readFile(absolutePath, 'utf8');
-  } catch {
-    throw new HolyDeckError('sermon_file_missing', { path: absolutePath });
-  }
+  const { path: absolutePath, text } = await readSermonFile(ctx, sermonPath);
 
   const sermon = parseSermonFile(text);
   for (const notice of sermon.notices) errLine(ctx, notice);
 
-  const loaded = await loadEntryData(runtime, ctx, sermon, { refresh: options.refresh });
+  const loaded = await loadEntryData(runtime, ctx, sermon, {
+    refresh: options.refresh,
+    fetchMissing: options.fetchMissing,
+  });
   await renderAndDeliver(ctx, runtime, sermon, loaded, {
     template: options.template ?? options.templateOutputFormat,
     copy: options.copy,
     output: options.output,
+    verbose: globals.verbose,
   });
 
   await writeState(runtime.config.values.dataDir, { lastSermonFile: absolutePath });
@@ -80,6 +78,7 @@ export function registerGetVerses(program: Command, ctx: CliContext): void {
     .argument('[file]', 'sermon file path')
     .option('--last', 'replay the most recently rendered sermon file')
     .option('--refresh', 'fetch fresh content before rendering')
+    .option('--no-fetch-missing', 'fail on passages the datastore lacks instead of fetching them')
     .option('--template <template>', 'override the output template')
     .option('--copy', 'copy the rendered output to the clipboard')
     .option('--output <file>', 'write the rendered output to a file instead of stdout')

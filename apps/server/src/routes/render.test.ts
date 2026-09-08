@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildTestApp } from '../../test/helpers/app.js';
+import { chapterHtml } from '../../test/helpers/scrape.js';
 import type { TestApp } from '../../test/helpers/app.js';
 
 interface RenderBody {
@@ -104,16 +105,40 @@ describe('POST /api/v1/render', () => {
     expect(body.notices.some((notice) => notice.toLowerCase().includes('template'))).toBe(true);
   });
 
-  it('404s with chapter_not_in_store for an unsynced translation', async () => {
+  it('fetches an unsynced translation, or 404s with chapter_not_in_store when told not to', async () => {
     const sermon = ['translations:', '  - NIV', 'verses:', '  - book: PSA', '    chapter: 117', '    verses: 1', ''].join('\n');
-    const response = await ctx.app.inject({
+    const headers = { 'content-type': 'text/yaml' };
+    ctx.urls.length = 0;
+
+    const refused = await ctx.app.inject({ method: 'POST', url: `${url}?fetchMissing=false`, headers, payload: sermon });
+    expect(refused.statusCode).toBe(404);
+    expect(refused.json<{ error: { code: string } }>().error.code).toBe('chapter_not_in_store');
+    expect(ctx.urls).toEqual([]);
+
+    const fetched = await ctx.app.inject({ method: 'POST', url, headers, payload: sermon });
+    expect(fetched.statusCode).toBe(200);
+    expect(fetched.json<RenderBody>().output).toContain('Psalms 117:1 (NIV)');
+    expect(ctx.urls.some((u) => u.includes('PSA.117'))).toBe(true);
+  });
+
+  it('renders with English book names and says so when the real ones cannot be fetched', async () => {
+    const offline = await buildTestApp({
+      scrape: (requestUrl) => {
+        if (requestUrl.includes('/api/bible/version/')) throw new Error('version API down');
+        return chapterHtml('PSA', '117', { '1': 'O praise the LORD, all ye nations.', '2': 'Praise him, all ye people.' });
+      },
+    });
+    const response = await offline.app.inject({
       method: 'POST',
       url,
       headers: { 'content-type': 'text/yaml' },
-      payload: sermon,
+      payload: modernSermon,
     });
-    expect(response.statusCode).toBe(404);
-    expect(response.json<{ error: { code: string } }>().error.code).toBe('chapter_not_in_store');
+    expect(response.statusCode).toBe(200);
+    const body = response.json<RenderBody>();
+    expect(body.output).toContain('Psalms 117:1-2 (KJV)');
+    expect(body.notices.some((notice) => notice.includes('book names of KJV'))).toBe(true);
+    await offline.stop();
   });
 
   it('400s with sermon_invalid on unparseable YAML and on a JSON null body', async () => {

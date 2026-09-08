@@ -1,4 +1,6 @@
 FROM node:24-slim AS build
+# The image ships Debian's chromium; puppeteer must not download a second copy.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 WORKDIR /repo
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json eslint.config.js ./
@@ -9,7 +11,13 @@ RUN pnpm turbo build --filter=@holydeck/server...
 RUN pnpm --filter @holydeck/server deploy --legacy --prod /out
 
 FROM node:24-slim
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    PUPPETEER_SKIP_DOWNLOAD=true \
+    HOLYDECK_BROWSER_EXECUTABLE=/usr/bin/chromium
+# Chromium backs HOLYDECK_BROWSER_FETCH=true; without it the server can only fetch over plain HTTP.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /out ./
 USER node

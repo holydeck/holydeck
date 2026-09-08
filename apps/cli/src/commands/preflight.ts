@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { Command } from 'commander';
 import { bundledCanon, findBook } from '@holydeck/core/canon';
 import { HolyDeckError } from '@holydeck/core/messages';
@@ -12,7 +10,9 @@ import { errLine, outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
 import type { Runtime } from '../runtime.js';
-import { createRuntime } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
+import { readSermonFile } from '../sermon-file.js';
+import { startSpinner } from '../spinner.js';
 import { readState } from '../state.js';
 
 export interface PreflightRow {
@@ -90,7 +90,7 @@ export async function runPreflight(
   options: { last?: boolean },
   globals: GlobalOptions,
 ): Promise<void> {
-  const runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
   let sermonPath = file;
   if (sermonPath === undefined && options.last === true) {
     const state = await readState(runtime.config.values.dataDir);
@@ -100,22 +100,24 @@ export async function runPreflight(
   if (sermonPath === undefined) {
     throw new HolyDeckError('sermon_invalid', { reason: 'no sermon file given (pass a path or --last)' });
   }
-  const absolutePath = resolve(ctx.cwd, sermonPath);
-  let text: string;
-  try {
-    text = await readFile(absolutePath, 'utf8');
-  } catch {
-    throw new HolyDeckError('sermon_file_missing', { path: absolutePath });
-  }
+  const { text } = await readSermonFile(ctx, sermonPath);
   const sermon = parseSermonFile(text);
   for (const notice of sermon.notices) errLine(ctx, notice);
   const rows: PreflightRow[] = [];
-  for (const abbr of sermon.translations) {
-    for (const entry of sermon.entries) {
-      rows.push(
-        runtime.mode === 'server' ? await checkServer(runtime, abbr, entry) : await checkLocal(runtime, abbr, entry),
-      );
+  // Missing passages are fetched here, which can mean starting a browser: report the progress
+  // rather than printing nothing until the whole table is ready.
+  const spinner = startSpinner(ctx, 'preflight: checking passages');
+  try {
+    for (const abbr of sermon.translations) {
+      for (const entry of sermon.entries) {
+        spinner.label(`preflight: ${abbr} ${referenceOf(entry)}`);
+        rows.push(
+          runtime.mode === 'server' ? await checkServer(runtime, abbr, entry) : await checkLocal(runtime, abbr, entry),
+        );
+      }
     }
+  } finally {
+    spinner.stop();
   }
   const failed = rows.filter((row) => row.status === 'failed').length;
   if (globals.json === true) {

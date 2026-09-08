@@ -1,10 +1,13 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { vi } from 'vitest';
+import type { BrowserLauncher, BrowserSession } from '@holydeck/core/browser-fetch';
 import type { HttpGet } from '@holydeck/core/fetcher';
 import { FileStore } from '@holydeck/core/file-store';
 import { createEmptyStoreFile } from '@holydeck/core/storage';
 import type { VerseMap } from '@holydeck/core/storage';
+import { bundledCanon } from '@holydeck/core/canon';
 import type { Canon, TranslationMeta } from '@holydeck/core/canon';
 import type { CliContext } from '../src/context.js';
 import type { HttpPost } from '../src/server-client.js';
@@ -93,16 +96,32 @@ export function makeContext(options: MakeContextOptions = {}): TestSetup {
   };
 }
 
+/** A browser launcher whose page answers every in-page fetch with the same canned body. */
+export function fakeLauncher(body: string): BrowserLauncher & { closed: () => number } {
+  const close = vi.fn().mockResolvedValue(undefined);
+  const page = {
+    setUserAgent: vi.fn().mockResolvedValue(undefined),
+    goto: vi.fn().mockResolvedValue(undefined),
+    evaluate: vi.fn().mockResolvedValue({ status: 200, body }),
+  };
+  const session = { newPage: vi.fn().mockResolvedValue(page), close } as unknown as BrowserSession;
+  const launcher = async (): Promise<BrowserSession> => session;
+  return Object.assign(launcher, { closed: () => close.mock.calls.length });
+}
+
 /** Seed the local datastore with synthetic chapters (fetchedAt = SEED_TIME). */
 export async function seedStore(
   dataDir: string,
   abbr: string,
   chapters: Array<{ book: string; chapter: string; verses: VerseMap; canonVerseCount?: number }>,
-  extras: { canon?: Canon; meta?: TranslationMeta } = {},
+  extras: { canon?: Canon; meta?: TranslationMeta; withoutCanon?: boolean } = {},
 ): Promise<void> {
   const store = new FileStore(dataDir, { now: () => SEED_TIME });
   const file = (await store.load(abbr)) ?? createEmptyStoreFile(abbr, SEED_TIME);
-  if (extras.canon) file.canon = extras.canon;
+  // A synced translation carries its own canon, so a seeded one does too: without it a render
+  // would go and fetch the book names, which no canned response answers. withoutCanon seeds the
+  // store an older version left behind, which is what teaches this one to repair itself.
+  if (extras.withoutCanon !== true) file.canon = extras.canon ?? bundledCanon();
   if (extras.meta) file.meta = extras.meta;
   for (const chapter of chapters) {
     store.putChapterInFile(file, chapter.book, chapter.chapter, chapter.verses, chapter.canonVerseCount ?? Object.keys(chapter.verses).length);

@@ -212,6 +212,55 @@ describe('syncTranslation', () => {
     expect(report.fetched).toBe(2);
   });
 
+  it('stops at the next chapter when the signal aborts, saving and unlocking on the way out', async () => {
+    const controller = new AbortController();
+    const { fetcher } = stubFetcher((url) => {
+      const fromVersion = versionOk(url);
+      if (fromVersion) return fromVersion;
+      const match = /bible\/1\/([A-Z1-3]+)\.(\d+)\.KJV$/.exec(url)!;
+      controller.abort();
+      return { status: 200, body: chapterHtml(match[1]!, match[2]!, 'x') };
+    });
+    const report = await syncTranslation(store, fetcher, 'KJV', {
+      concurrency: 1,
+      delayMs: 0,
+      signal: controller.signal,
+    });
+    expect(report.aborted).toBe(true);
+    expect(report.planned).toBe(1189);
+    expect(report.fetched).toBe(1);
+    // the interrupted chapter is on disk and the lock is free for the next run
+    const saved = await store.load('KJV');
+    expect(saved?.books['GEN']?.chapters['1']).toBeDefined();
+    expect(await store.withLock('KJV', async () => 'free')).toBe('free');
+  });
+
+  it('leaves aborted unset on a run that finishes on its own', async () => {
+    const { meta, canon } = parseVersionMeta(JSON.parse(versionJson));
+    const file = createEmptyStoreFile('KJV', store.now());
+    file.meta = meta;
+    file.canon = canon;
+    for (const book of canon.books) {
+      file.books[book.usfm] = { chapters: {} };
+      for (const chapter of book.chapters) {
+        if (book.usfm === 'GEN' && chapter.id === '1') continue;
+        file.books[book.usfm]!.chapters[chapter.id] = {
+          canonVerseCount: 1,
+          revisions: [{ rev: 1, fetchedAt: store.now(), contentHash: 'seed', verses: { '1': 'seed' } }],
+        };
+      }
+    }
+    await store.save('KJV', file);
+    const { fetcher } = stubFetcher((url) => versionOk(url) ?? { status: 200, body: chapterHtml('GEN', '1', 'x') });
+    const report = await syncTranslation(store, fetcher, 'KJV', {
+      concurrency: 1,
+      delayMs: 0,
+      signal: new AbortController().signal,
+    });
+    expect(report.planned).toBe(1);
+    expect(report.aborted).toBeUndefined();
+  });
+
   it('rethrows a non-HolyDeckError raised while fetching a chapter', async () => {
     const { fetcher } = stubFetcher((url) => versionOk(url) ?? { status: 200, body: chapterHtml('GEN', '1', 'x') });
     vi.spyOn(fetcher, 'fetchChapter').mockRejectedValue(new Error('boom'));

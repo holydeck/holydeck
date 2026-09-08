@@ -46,6 +46,20 @@ describe('offsets', () => {
     expect(setup.stdout()).not.toContain('JHN');
   });
 
+  it('accepts a book name as the filter', async () => {
+    const setup = makeContext();
+    await seedPair(setup.dataDir);
+    await expect(runCli(setup.ctx, ['offsets', 'KJV', 'WEB', 'Psalms'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('PSA 3');
+  });
+
+  it('matches nothing when the filter names no known book', async () => {
+    const setup = makeContext();
+    await seedPair(setup.dataDir);
+    await expect(runCli(setup.ctx, ['offsets', 'KJV', 'WEB', 'Hezekiah'])).resolves.toBe(0);
+    expect(setup.stdout()).not.toContain('PSA 3');
+  });
+
   it('errors when a translation is not stored locally', async () => {
     const setup = makeContext();
     await seedStore(setup.dataDir, 'KJV', [{ book: 'PSA', chapter: '117', verses: { '1': 'a' }, canonVerseCount: 2 }]);

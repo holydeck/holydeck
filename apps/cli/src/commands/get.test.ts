@@ -11,6 +11,13 @@ describe('get', () => {
     await expect(runCli(setup.ctx, ['get', 'PSA 118:24', '--translations', 'KJV'])).resolves.toBe(0);
     expect(setup.stdout()).toContain('This is the day which the LORD hath made.');
     expect(setup.stdout()).toContain('Psalms 118:24 (KJV)');
+    expect(setup.stderr()).toBe('');
+  });
+
+  it('names the source of every chapter with --verbose', async () => {
+    const setup = makeContext();
+    await seedStore(setup.dataDir, 'KJV', [{ book: 'PSA', chapter: '118', verses: psalm118, canonVerseCount: 29 }]);
+    await expect(runCli(setup.ctx, ['get', 'PSA 118:24', '--translations', 'KJV', '--verbose'])).resolves.toBe(0);
     expect(setup.stderr()).toContain('source: cache · revision 1 · fetched 2026-09-01 — KJV PSA 118');
   });
 

@@ -9,6 +9,8 @@ export interface HolyDeckConfig {
   defaultTranslations: string[];
   syncConcurrency: number;
   syncDelayMs: number;
+  /** Fetch bible.com through a headless browser, which can pass its bot-protection challenge. */
+  browserFetch: boolean;
 }
 
 export type ConfigSource = 'default' | 'file' | 'env' | 'flag';
@@ -69,7 +71,18 @@ export function parseConfigFile(text: string, path: string): Partial<HolyDeckCon
   if (concurrency !== undefined) out.syncConcurrency = concurrency;
   const delay = intValue(obj, 'syncDelayMs', 0);
   if (delay !== undefined) out.syncDelayMs = delay;
+  const browserFetchValue = boolValue(obj, 'browserFetch');
+  if (browserFetchValue !== undefined) out.browserFetch = browserFetchValue;
   return out;
+}
+
+function boolValue(obj: Record<string, unknown>, key: string): boolean | undefined {
+  const value = obj[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new HolyDeckError('config_invalid_value', { key, value: String(value), reason: 'expected true or false' });
+  }
+  return value;
 }
 
 function stringValue(obj: Record<string, unknown>, key: string): string | undefined {
@@ -106,6 +119,13 @@ function parseIntEnv(key: string, value: string, minimum: number): number {
   return parsed;
 }
 
+function parseBoolEnv(key: string, value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  throw new HolyDeckError('config_invalid_value', { key, value, reason: 'expected true or false' });
+}
+
 function envLayer(env: Record<string, string | undefined>, notices: string[]): Partial<HolyDeckConfig> {
   const layer: Partial<HolyDeckConfig> = {};
   if (env.YOU_VERSION_CLI_API_URL !== undefined && env.HOLYDECK_SERVER_URL === undefined) {
@@ -132,6 +152,9 @@ function envLayer(env: Record<string, string | undefined>, notices: string[]): P
   if (env.HOLYDECK_SYNC_DELAY_MS !== undefined && env.HOLYDECK_SYNC_DELAY_MS.trim() !== '') {
     layer.syncDelayMs = parseIntEnv('HOLYDECK_SYNC_DELAY_MS', env.HOLYDECK_SYNC_DELAY_MS, 0);
   }
+  if (env.HOLYDECK_BROWSER_FETCH !== undefined && env.HOLYDECK_BROWSER_FETCH.trim() !== '') {
+    layer.browserFetch = parseBoolEnv('HOLYDECK_BROWSER_FETCH', env.HOLYDECK_BROWSER_FETCH);
+  }
   return layer;
 }
 
@@ -147,6 +170,7 @@ export function resolveConfig(inputs: {
     defaultTranslations: [],
     syncConcurrency: 2,
     syncDelayMs: 1000,
+    browserFetch: false,
   };
   const sources: Record<keyof HolyDeckConfig, ConfigSource> = {
     dataDir: 'default',
@@ -155,6 +179,7 @@ export function resolveConfig(inputs: {
     defaultTranslations: 'default',
     syncConcurrency: 'default',
     syncDelayMs: 'default',
+    browserFetch: 'default',
   };
   const apply = (layer: Partial<HolyDeckConfig>, source: ConfigSource): void => {
     for (const key of Object.keys(layer) as Array<keyof HolyDeckConfig>) {

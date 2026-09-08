@@ -5,7 +5,7 @@ import type { HolyDeckConfig } from '@holydeck/core/config';
 import { outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
 import { readState } from '../state.js';
 import { CLI_VERSION } from '../version.js';
 
@@ -16,7 +16,7 @@ function display(value: HolyDeckConfig[keyof HolyDeckConfig]): string {
 }
 
 export async function runInfo(ctx: CliContext, globals: GlobalOptions): Promise<void> {
-  const runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
   const configPath = configFilePath(ctx.platform);
   const configExists = existsSync(configPath);
   const state = await readState(runtime.config.values.dataDir);

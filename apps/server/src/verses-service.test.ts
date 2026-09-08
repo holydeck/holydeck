@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { buildTestApp } from '../test/helpers/app.js';
+import { buildTestApp, seedCanon } from '../test/helpers/app.js';
 import { readVerses } from './verses-service.js';
 import type { TestApp } from '../test/helpers/app.js';
 
@@ -20,27 +20,42 @@ beforeEach(async () => {
 
 const base = { abbr: 'KJV', book: 'PSA', chapter: 117, verses: [1], refresh: false };
 
-describe('readVerses fetchOnMiss', () => {
-  it('fetches a missing chapter live when fetchOnMiss is set', async () => {
-    const result = await readVerses(ctx.store, ctx.fetcher, { ...base, fetchOnMiss: true });
+describe('readVerses fetchMissing', () => {
+  it('fetches a missing chapter live by default', async () => {
+    const result = await readVerses(ctx.store, ctx.fetcher, { ...base });
     expect(result.source).toBe('live');
     expect(result.verses).toEqual([{ verse: 1, text: 'Praise verse one.' }]);
     expect(ctx.urls.some((url) => url.includes('PSA.117'))).toBe(true);
   });
 
   it('does not fetch when the chapter is already cached', async () => {
+    await seedCanon(ctx.store);
     await ctx.store.putChapter('KJV', 'PSA', '117', { '1': 'Cached one.', '2': 'Cached two.' }, 2);
-    const result = await readVerses(ctx.store, ctx.fetcher, { ...base, fetchOnMiss: true });
+    const result = await readVerses(ctx.store, ctx.fetcher, { ...base, fetchMissing: true });
     expect(result.source).toBe('cache');
     expect(result.verses[0]?.text).toBe('Cached one.');
     expect(ctx.urls).toEqual([]);
   });
 
-  it('reports 404 chapter_not_in_store without fetchOnMiss or refresh', async () => {
-    await expect(readVerses(ctx.store, ctx.fetcher, { ...base })).rejects.toMatchObject({
+  it('learns the book names of a translation cached before they were kept', async () => {
+    await ctx.store.putChapter('KJV', 'PSA', '117', { '1': 'Cached one.' }, 2);
+    const result = await readVerses(ctx.store, ctx.fetcher, { ...base });
+
+    expect(result.source).toBe('cache');
+    expect(ctx.urls).toEqual([expect.stringContaining('/api/bible/version/')]);
+    await expect(ctx.store.load('KJV')).resolves.toMatchObject({ meta: { abbreviation: 'KJV' } });
+
+    ctx.urls.length = 0;
+    await readVerses(ctx.store, ctx.fetcher, { ...base });
+    expect(ctx.urls).toEqual([]);
+  });
+
+  it('reports 404 chapter_not_in_store with fetchMissing off and no refresh', async () => {
+    await expect(readVerses(ctx.store, ctx.fetcher, { ...base, fetchMissing: false })).rejects.toMatchObject({
       code: 'chapter_not_in_store',
       params: { abbr: 'KJV', book: 'PSA', chapter: '117' },
     });
+    expect(ctx.urls).toEqual([]);
   });
 
   it('treats a chapter record with zero revisions as not in store', async () => {
