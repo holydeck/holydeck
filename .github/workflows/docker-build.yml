@@ -87,3 +87,11 @@ jobs:
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.version=${{ inputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
+      - name: Record the pushed image tags
+        if: inputs.push
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && echo "- $tag pushed" >> "$GITHUB_STEP_SUMMARY"
+          done <<<"$TAGS"
