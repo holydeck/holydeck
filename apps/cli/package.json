@@ -1,6 +1,6 @@
 {
   "name": "holydeck",
-  "version": "0.0.0",
+  "version": "2026.9.0",
   "description": "HolyDeck CLI: bible verses for sermons and presentations, from a local revisioned datastore",
   "license": "MIT",
   "type": "module",
