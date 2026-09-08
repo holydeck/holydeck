@@ -90,7 +90,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build the CLI bundle
-        run: pnpm turbo build --filter=holydeck...
+        run: pnpm turbo build --filter=@holydeck/cli...
       # @holydeck/core is a private workspace library (bundled into the CLI),
       # so the CLI is the only npm artifact.
       - name: Pack the CLI
@@ -120,26 +120,26 @@ jobs:
       # success with nothing staged, which is the one outcome this job must
       # never produce. A wording change npm makes later costs a red job with
       # the full output already echoed above — cheap next to a silent pass.
-      - name: Stage holydeck on npmjs
+      - name: Stage @holydeck/cli on npmjs
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          if live="$(npm view "holydeck@$VERSION" version --registry https://registry.npmjs.org 2>&1)"; then
-            echo "holydeck@$VERSION is already live on npmjs, nothing to stage"
-            echo "- holydeck@$VERSION already live on npmjs (nothing to stage)" >> "$GITHUB_STEP_SUMMARY"
+          if live="$(npm view "@holydeck/cli@$VERSION" version --registry https://registry.npmjs.org 2>&1)"; then
+            echo "@holydeck/cli@$VERSION is already live on npmjs, nothing to stage"
+            echo "- @holydeck/cli@$VERSION already live on npmjs (nothing to stage)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          echo "npm view says holydeck@$VERSION is not live: $live"
-          if output="$(npm stage publish "$RUNNER_TEMP"/tarballs/holydeck-[0-9]*.tgz 2>&1)"; then
+          echo "npm view says @holydeck/cli@$VERSION is not live: $live"
+          if output="$(npm stage publish "$RUNNER_TEMP"/tarballs/holydeck-cli-[0-9]*.tgz 2>&1)"; then
             echo "$output"
-            echo "holydeck@$VERSION is staged, approve it to make it live (see RELEASING.md)"
-            echo "- holydeck@$VERSION → staged on npmjs (awaiting approval)" >> "$GITHUB_STEP_SUMMARY"
+            echo "@holydeck/cli@$VERSION is staged, approve it to make it live (see RELEASING.md)"
+            echo "- @holydeck/cli@$VERSION → staged on npmjs (awaiting approval)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "$output"
           if grep -qiE 'cannot publish over|EPUBLISHCONFLICT|already (staged|published)' <<<"$output"; then
-            echo "npm reported a duplicate-version conflict; treating holydeck@$VERSION as already present"
-            echo "- holydeck@$VERSION already staged or live on npmjs (skipped)" >> "$GITHUB_STEP_SUMMARY"
+            echo "npm reported a duplicate-version conflict; treating @holydeck/cli@$VERSION as already present"
+            echo "- @holydeck/cli@$VERSION already staged or live on npmjs (skipped)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           exit 1
@@ -165,14 +165,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build the CLI bundle
-        run: pnpm turbo build --filter=holydeck...
+        run: pnpm turbo build --filter=@holydeck/cli...
       - name: Authenticate npm to GitHub Packages
         run: echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> "$HOME/.npmrc"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # GitHub Packages only hosts scoped packages, so the unscoped CLI
-      # mirrors under the org scope as @holydeck/cli. npmjs stays canonical.
-      - name: Mirror the CLI as @holydeck/cli
+      - name: Mirror @holydeck/cli
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
@@ -183,7 +181,7 @@ jobs:
           fi
           echo "npm view says @holydeck/cli@$VERSION is not published yet: $live"
           mkdir -p "$RUNNER_TEMP/mirror"
-          (cd apps/cli && npm pkg set name=@holydeck/cli && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
+          (cd apps/cli && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
           npm publish "$RUNNER_TEMP"/mirror/holydeck-cli-*.tgz --registry=https://npm.pkg.github.com
           echo "- @holydeck/cli@$VERSION → published to GitHub Packages" >> "$GITHUB_STEP_SUMMARY"
 
