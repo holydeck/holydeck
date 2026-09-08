@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { BrowserHttpClient } from '@holydeck/core/browser-fetch';
 import { Fetcher } from '@holydeck/core/fetcher';
+import { createPuppeteerLauncher } from '@holydeck/core/puppeteer-launcher';
 import { MongoClient } from 'mongodb';
 import { buildApp } from './app.js';
 import { resolveServerConfig } from './config.js';
@@ -16,7 +18,18 @@ await client.connect();
 const db = client.db(config.mongoDb);
 
 const store = new MongoStore(db);
-const fetcher = new Fetcher({});
+
+// Containers have no sandbox namespaces and a small default /dev/shm; both flags are needed
+// for Chromium to start under the image's unprivileged user.
+const browser = config.browserFetch
+  ? new BrowserHttpClient({
+      launch: createPuppeteerLauncher({
+        ...(config.browserExecutablePath === undefined ? {} : { executablePath: config.browserExecutablePath }),
+        args: ['--no-sandbox', '--disable-dev-shm-usage'],
+      }),
+    })
+  : undefined;
+const fetcher = new Fetcher(browser === undefined ? {} : { httpGet: browser.httpGet });
 const jobs = new SyncJobManager(store, fetcher, db, {
   concurrency: config.syncConcurrency,
   delayMs: config.syncDelayMs,
@@ -33,6 +46,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     void app
       .close()
+      .then(() => browser?.close())
       .then(() => client.close())
       .then(() => process.exit(0));
   });
