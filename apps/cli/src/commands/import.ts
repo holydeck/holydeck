@@ -6,10 +6,10 @@ import { validateStoreFile } from '@holydeck/core/storage';
 import { outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime, requireLocal } from '../runtime.js';
+import { createRuntime, requireLocal, runtimeFlags } from '../runtime.js';
 
 export async function runImport(ctx: CliContext, file: string, globals: GlobalOptions): Promise<void> {
-  const runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
   requireLocal(runtime, 'import');
   const path = resolve(ctx.cwd, file);
   let parsed: unknown;

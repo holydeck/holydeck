@@ -3,7 +3,7 @@ import { HolyDeckError } from '@holydeck/core/messages';
 import { errLine, outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime, requireLocal } from '../runtime.js';
+import { createRuntime, requireLocal, runtimeFlags } from '../runtime.js';
 import { syncTranslation } from '@holydeck/core/sync';
 
 export async function runSync(
@@ -12,7 +12,7 @@ export async function runSync(
   options: { refresh?: boolean; dryRun?: boolean },
   globals: GlobalOptions,
 ): Promise<void> {
-  const runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
   requireLocal(runtime, 'sync');
   const targets = abbrs.length > 0 ? abbrs : runtime.config.values.defaultTranslations;
   if (targets.length === 0) {

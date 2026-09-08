@@ -1,6 +1,8 @@
 import { homedir } from 'node:os';
+import type { BrowserLauncher } from '@holydeck/core/browser-fetch';
 import type { PlatformInfo } from '@holydeck/core/config';
 import type { HttpGet } from '@holydeck/core/fetcher';
+import { createPuppeteerLauncher } from '@holydeck/core/puppeteer-launcher';
 import { createClipboard } from './clipboard.js';
 import { createEditor } from './editor.js';
 import type { HttpPost } from './server-client.js';
@@ -17,6 +19,8 @@ export interface CliContext {
   editor: (path: string) => Promise<'opened' | 'skipped'>;
   httpGet: HttpGet;
   httpPost: HttpPost;
+  /** Starts the headless browser used when browserFetch is on; tests substitute a fake. */
+  browserLauncher?: BrowserLauncher;
   now: () => Date;
   /** Injectable retry backoff sleep for the core Fetcher (tests skip real delays). */
   sleep?: (ms: number) => Promise<void>;
@@ -59,6 +63,7 @@ export function defaultContext(): CliContext {
     editor: createEditor(process.env),
     httpGet: fetchHttpGet,
     httpPost: fetchHttpPost,
+    browserLauncher: createPuppeteerLauncher(),
     now: () => new Date(),
   };
 }

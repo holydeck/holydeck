@@ -7,7 +7,7 @@ import { errLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import { loadEntryData, renderAndDeliver } from '../passages.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
 import { readState, writeState } from '../state.js';
 
 export interface GetVersesOptions {
@@ -38,7 +38,7 @@ export async function runGetVerses(
   }
 
   const runtime = await createRuntime(ctx, {
-    dataDir: globals.dataDir,
+    ...runtimeFlags(globals),
     serverUrl: globals.serverUrl ?? options.youVersionApiUrl,
   });
 

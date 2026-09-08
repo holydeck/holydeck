@@ -2,8 +2,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { HolyDeckError } from '@holydeck/core/messages';
-import { FIXED_NOW, makeContext } from '../test/harness.js';
-import { createRuntime, requireLocal } from './runtime.js';
+import { FIXED_NOW, fakeLauncher, makeContext } from '../test/harness.js';
+import { closeBrowsers, createRuntime, requireLocal, runtimeFlags } from './runtime.js';
 
 describe('createRuntime', () => {
   it('builds a local runtime from env defaults', async () => {
@@ -56,6 +56,39 @@ describe('createRuntime', () => {
     const runtime = await createRuntime(ctx, { dataDir: join(home, 'elsewhere') });
     expect(runtime.config.values.dataDir).toBe(join(home, 'elsewhere'));
     expect(runtime.config.sources.dataDir).toBe('flag');
+  });
+
+  it('routes scrape traffic through the browser when browserFetch is on', async () => {
+    const launcher = fakeLauncher('<html>from the browser</html>');
+    const { ctx } = makeContext({ overrides: { browserLauncher: launcher } });
+    const runtime = await createRuntime(ctx, { browserFetch: true });
+
+    expect(runtime.browser).toBeDefined();
+    // The harness has no canned HTTP response, so a plain-HTTP fetcher would have thrown.
+    expect(await runtime.fetcher.get('https://www.bible.com/anything')).toBe('<html>from the browser</html>');
+
+    await closeBrowsers();
+    expect(launcher.closed()).toBe(1);
+    await expect(closeBrowsers()).resolves.toBeUndefined();
+  });
+
+  it('leaves fetching on plain HTTP when browserFetch is off or no launcher exists', async () => {
+    const { ctx: withLauncher } = makeContext({ overrides: { browserLauncher: fakeLauncher('x') } });
+    expect((await createRuntime(withLauncher)).browser).toBeUndefined();
+
+    const { ctx: noLauncher } = makeContext();
+    expect((await createRuntime(noLauncher, { browserFetch: true })).browser).toBeUndefined();
+  });
+
+  it('maps the global options onto the flag layer', () => {
+    expect(runtimeFlags({ dataDir: '/d', serverUrl: 'https://s', translations: 'KJV', browserFetch: true }))
+      .toEqual({ dataDir: '/d', serverUrl: 'https://s', translations: 'KJV', browserFetch: true });
+    expect(runtimeFlags({})).toEqual({
+      dataDir: undefined,
+      serverUrl: undefined,
+      translations: undefined,
+      browserFetch: undefined,
+    });
   });
 
   it('propagates config file errors', async () => {

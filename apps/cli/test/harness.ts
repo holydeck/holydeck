@@ -1,6 +1,8 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { vi } from 'vitest';
+import type { BrowserLauncher, BrowserSession } from '@holydeck/core/browser-fetch';
 import type { HttpGet } from '@holydeck/core/fetcher';
 import { FileStore } from '@holydeck/core/file-store';
 import { createEmptyStoreFile } from '@holydeck/core/storage';
@@ -91,6 +93,19 @@ export function makeContext(options: MakeContextOptions = {}): TestSetup {
     edits,
     requests,
   };
+}
+
+/** A browser launcher whose page answers every in-page fetch with the same canned body. */
+export function fakeLauncher(body: string): BrowserLauncher & { closed: () => number } {
+  const close = vi.fn().mockResolvedValue(undefined);
+  const page = {
+    setUserAgent: vi.fn().mockResolvedValue(undefined),
+    goto: vi.fn().mockResolvedValue(undefined),
+    evaluate: vi.fn().mockResolvedValue({ status: 200, body }),
+  };
+  const session = { newPage: vi.fn().mockResolvedValue(page), close } as unknown as BrowserSession;
+  const launcher = async (): Promise<BrowserSession> => session;
+  return Object.assign(launcher, { closed: () => close.mock.calls.length });
 }
 
 /** Seed the local datastore with synthetic chapters (fetchedAt = SEED_TIME). */

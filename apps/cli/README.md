@@ -10,6 +10,8 @@ being up.
 ## Requirements
 
 - Node.js 24 or newer
+- A headless Chromium for downloading translations — installed automatically with the
+  optional `puppeteer` dependency, see [Fetching from bible.com](#fetching-from-biblecom)
 
 ## Install
 
@@ -89,6 +91,24 @@ source <(holydeck completion zsh)
 ```
 
 (This adds `npx` startup latency to every completion trigger.)
+
+## Fetching from bible.com
+
+bible.com answers plain HTTP clients with a JavaScript challenge page, so `sync`,
+`preflight` and an ad-hoc `get` of an unstored chapter need a real browser to run it.
+Pass `--browser-fetch` (or set `browserFetch: true` in the config file, or
+`HOLYDECK_BROWSER_FETCH=1`) and the fetch goes through a headless Chromium instead:
+
+```sh
+holydeck sync KJV --browser-fetch
+```
+
+The browser starts once per command and is reused for the whole run. Chromium comes
+from the optional `puppeteer` dependency; if you only render from an already-populated
+datastore you can skip the download with `npm install -g holydeck --omit=optional`.
+
+`holydeck doctor` reports which transport it reached bible.com with, so run it first
+when a sync stops returning content.
 
 ## Server mode
 

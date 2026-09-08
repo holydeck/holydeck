@@ -5,7 +5,7 @@ import { findRevision, getChapter } from '@holydeck/core/storage';
 import { outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime, requireLocal } from '../runtime.js';
+import { createRuntime, requireLocal, runtimeFlags } from '../runtime.js';
 import { diffWords, renderDiff } from '../word-diff.js';
 
 function chapterText(revision: ChapterRevision): string {
@@ -24,7 +24,7 @@ export async function runRevisions(
   options: { diff?: string },
   globals: GlobalOptions,
 ): Promise<void> {
-  const runtime = await createRuntime(ctx, { dataDir: globals.dataDir, serverUrl: globals.serverUrl });
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
   requireLocal(runtime, 'revisions');
   const abbr = abbrInput.toUpperCase();
   const book = bookInput.toUpperCase();
