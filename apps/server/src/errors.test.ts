@@ -29,6 +29,10 @@ describe('statusForCode', () => {
     expect(statusForCode('version_meta_invalid')).toBe(502);
   });
 
+  it('maps rate limiting to 429', () => {
+    expect(statusForCode('rate_limit_exceeded')).toBe(429);
+  });
+
   it('defaults unmapped codes to 500', () => {
     expect(statusForCode('internal_error')).toBe(500);
     expect(statusForCode('store_corrupt')).toBe(500);
