@@ -35,7 +35,7 @@ export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog
   if (!cliVersionModule.includes(`export const CLI_VERSION = '${version}';`)) {
     problems.push(`${CLI_VERSION_FILE} does not pin CLI_VERSION to ${version}`);
   }
-  const heading = new RegExp(`^#{1,3} \\[?${version.replaceAll('.', '\\.')}[\\]\\s(]`, 'm');
+  const heading = new RegExp(`^#{1,3} \\[?${RegExp.escape(version)}[\\]\\s(]`, 'm');
   if (!heading.test(changelog)) {
     problems.push(`CHANGELOG.md has no section heading for ${version}`);
   }

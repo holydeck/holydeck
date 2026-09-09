@@ -38,6 +38,10 @@ test('returns null for a version with no section', () => {
   assert.equal(extractNotes(changelog, '2026.8.0'), null);
 });
 
+test('treats regex metacharacters in a version as literal text', () => {
+  assert.equal(extractNotes(changelog, '2026.9.1.*'), null);
+});
+
 test('an empty section body yields an empty string', () => {
   const sparse = '# Changelog\n\n## 2026.9.1 (2026-09-20)\n\n## 2026.9.0 (2026-09-08)\n\n* note\n';
   assert.equal(extractNotes(sparse, '2026.9.1'), '');

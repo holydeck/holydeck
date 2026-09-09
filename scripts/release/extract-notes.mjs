@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 const NEXT_VERSION_HEADING = /^#{1,3} \[?\d+\.\d+\.\d+[\]\s(]/m;
 
 export function extractNotes(changelog, version) {
-  const escaped = version.replaceAll('.', '\\.');
+  const escaped = RegExp.escape(version);
   const heading = new RegExp(`^#{1,3} \\[?${escaped}[\\]\\s(]`, 'm').exec(changelog);
   if (!heading) return null;
   const bodyStart = changelog.indexOf('\n', heading.index);
