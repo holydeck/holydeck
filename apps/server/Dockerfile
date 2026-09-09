@@ -1,4 +1,4 @@
-FROM node:24-slim AS build
+FROM node:24.20.0-slim AS build
 # The image ships Debian's chromium; puppeteer must not download a second copy.
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 WORKDIR /repo
@@ -10,7 +10,7 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm turbo build --filter=@holydeck/server...
 RUN pnpm --filter @holydeck/server deploy --legacy --prod /out
 
-FROM node:24-slim
+FROM node:24.20.0-slim
 ENV NODE_ENV=production \
     PUPPETEER_SKIP_DOWNLOAD=true \
     HOLYDECK_BROWSER_EXECUTABLE=/usr/bin/chromium

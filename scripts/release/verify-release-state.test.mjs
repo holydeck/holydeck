@@ -2,15 +2,21 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { verifyReleaseState } from './verify-release-state.mjs';
 
-const manifest = (version) => JSON.stringify({ name: 'x', version });
+const packageNames = {
+  'package.json': 'holydeck-monorepo',
+  'packages/core/package.json': '@holydeck/core',
+  'apps/cli/package.json': '@holydeck/cli',
+  'apps/server/package.json': '@holydeck/server',
+};
+const manifest = (path, version) => JSON.stringify({ name: packageNames[path], version });
 
 const consistent = {
   tag: 'v2026.9.0',
   manifests: {
-    'package.json': manifest('2026.9.0'),
-    'packages/core/package.json': manifest('2026.9.0'),
-    'apps/cli/package.json': manifest('2026.9.0'),
-    'apps/server/package.json': manifest('2026.9.0'),
+    'package.json': manifest('package.json', '2026.9.0'),
+    'packages/core/package.json': manifest('packages/core/package.json', '2026.9.0'),
+    'apps/cli/package.json': manifest('apps/cli/package.json', '2026.9.0'),
+    'apps/server/package.json': manifest('apps/server/package.json', '2026.9.0'),
   },
   cliVersionModule: "export const CLI_VERSION = '2026.9.0';\n",
   changelog: '# Changelog\n\n## 2026.9.0 (2026-09-08)\n\n### Features\n\n* first release\n',
@@ -35,10 +41,26 @@ test('a malformed tag is the only reported problem', () => {
 test('a lagging manifest is reported by path', () => {
   const state = {
     ...consistent,
-    manifests: { ...consistent.manifests, 'apps/server/package.json': manifest('2026.8.9') },
+    manifests: {
+      ...consistent.manifests,
+      'apps/server/package.json': manifest('apps/server/package.json', '2026.8.9'),
+    },
   };
   assert.deepEqual(verifyReleaseState(state), [
     'apps/server/package.json has version 2026.8.9, expected 2026.9.0',
+  ]);
+});
+
+test('a wrong package name is reported by path', () => {
+  const state = {
+    ...consistent,
+    manifests: {
+      ...consistent.manifests,
+      'apps/cli/package.json': JSON.stringify({ name: 'holydeck', version: '2026.9.0' }),
+    },
+  };
+  assert.deepEqual(verifyReleaseState(state), [
+    'apps/cli/package.json has name holydeck, expected @holydeck/cli',
   ]);
 });
 
