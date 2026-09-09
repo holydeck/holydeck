@@ -108,6 +108,25 @@ describe('content types', () => {
   });
 });
 
+describe('rate limiting', () => {
+  it('limits datastore reads per route and preserves the API error envelope', async () => {
+    for (let request = 0; request < 60; request += 1) {
+      const response = await ctx.app.inject({ method: 'GET', url: '/api/v1/stats' });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const limited = await ctx.app.inject({ method: 'GET', url: '/api/v1/stats' });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers['retry-after']).toBeDefined();
+    expect(limited.json()).toEqual({
+      error: { code: 'rate_limit_exceeded', message: 'Rate limit exceeded. Try again later.' },
+    });
+
+    const separateRoute = await ctx.app.inject({ method: 'GET', url: '/api/v1/translations' });
+    expect(separateRoute.statusCode).toBe(200);
+  });
+});
+
 describe('degraded store', () => {
   it('still answers 200 with degraded status when mongo is down', async () => {
     const dedicated = await buildTestApp();

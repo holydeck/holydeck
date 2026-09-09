@@ -83,5 +83,6 @@ describe('server message codes', () => {
       }),
     ).toBe('GET /api/v1/verse is deprecated; use GET /api/v1/translations/:abbr/verses instead.');
     expect(messageCatalog.internal_error).toBe('Unexpected server error.');
+    expect(messageCatalog.rate_limit_exceeded).toBe('Rate limit exceeded. Try again later.');
   });
 });

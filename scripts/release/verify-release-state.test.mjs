@@ -38,6 +38,12 @@ test('a malformed tag is the only reported problem', () => {
   ]);
 });
 
+test('rejects regex metacharacters in a tag', () => {
+  assert.deepEqual(verifyReleaseState({ ...consistent, tag: 'v2026.9.0.*' }), [
+    "tag 'v2026.9.0.*' does not match v<major>.<minor>.<patch>",
+  ]);
+});
+
 test('a lagging manifest is reported by path', () => {
   const state = {
     ...consistent,

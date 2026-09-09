@@ -13,7 +13,7 @@ function idOf(abbr: string): number {
 }
 
 export function registerTranslationsRoutes(api: FastifyInstance, deps: AppDeps): void {
-  api.get('/translations', async () => {
+  api.get('/translations', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async () => {
     const files = await deps.store.loadAll();
     const byAbbr = new Map(files.map((file) => [file.translation, file]));
     const abbrs = [...new Set([...Object.keys(knownTranslations), ...byAbbr.keys()])].sort();

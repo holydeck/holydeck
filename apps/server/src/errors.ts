@@ -20,6 +20,7 @@ const STATUS_BY_CODE: Partial<Record<MessageCode, number>> = {
   template_invalid: 400,
   template_index_out_of_range: 400,
   request_invalid: 400,
+  rate_limit_exceeded: 429,
   unknown_translation: 404,
   chapter_not_in_store: 404,
   verse_not_in_store: 404,
