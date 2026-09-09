@@ -25,10 +25,9 @@ More at [holydeck.faith](https://holydeck.faith).
 
 ## Development
 
-CI runs a single Node 24 lane: `engines` demands Node >= 24 everywhere, the CLI bundles its
-dependencies, and the server ships as a container pinned to its own Node version, so a version
-matrix would only re-test the same floor. Revisit this once Node 26 (the next LTS) enters the
-support window.
+Development, CI, releases, and the server image use Node 24.20.0. Run `nvm use` to select the
+version pinned in `.nvmrc`. The published CLI supports Node >= 24.20.0 and < 25; revisit this
+when Node 26 (the next LTS) enters the support window.
 
 `main` is protected by a ruleset: no direct pushes, no force-push, no branch deletion, commits
 must be signed, and `verify`, `docker / build`, `analyze`, `dependency-review` and `CodeQL` must

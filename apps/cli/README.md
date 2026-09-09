@@ -9,7 +9,7 @@ being up.
 
 ## Requirements
 
-- Node.js 24 or newer
+- Node.js >= 24.20.0 and < 25
 - A headless Chromium for downloading translations — installed automatically with the
   optional `puppeteer` dependency, see [Fetching from bible.com](#fetching-from-biblecom)
 
