@@ -2,13 +2,13 @@
 
 [![CI](https://github.com/holydeck/holydeck/actions/workflows/ci.yml/badge.svg)](https://github.com/holydeck/holydeck/actions/workflows/ci.yml)
 [![Release](https://github.com/holydeck/holydeck/actions/workflows/release.yml/badge.svg)](https://github.com/holydeck/holydeck/actions/workflows/release.yml)
-[![npm version](https://img.shields.io/npm/v/holydeck)](https://www.npmjs.com/package/holydeck)
+[![npm version](https://img.shields.io/npm/v/%40holydeck%2Fcli)](https://www.npmjs.com/package/@holydeck/cli)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A full setup for Sunday — bible verses and song slides, from sermon prep to screen.
 
 > **Status: early development.** The first release has shipped: the CLI is on npm as
-> [`holydeck`](https://www.npmjs.com/package/holydeck) and the server is available as
+> [`@holydeck/cli`](https://www.npmjs.com/package/@holydeck/cli) and the server is available as
 > a container image at `ghcr.io/holydeck/server`.
 
 ## What it does
@@ -25,10 +25,9 @@ More at [holydeck.faith](https://holydeck.faith).
 
 ## Development
 
-CI runs a single Node 24 lane: `engines` demands Node >= 24 everywhere, the CLI bundles its
-dependencies, and the server ships as a container pinned to its own Node version, so a version
-matrix would only re-test the same floor. Revisit this once Node 26 (the next LTS) enters the
-support window.
+Development, CI, releases, and the server image use Node 24.20.0. Run `nvm use` to select the
+version pinned in `.nvmrc`. The published CLI supports Node >= 24.20.0 and < 25; revisit this
+when Node 26 (the next LTS) enters the support window.
 
 `main` is protected by a ruleset: no direct pushes, no force-push, no branch deletion, commits
 must be signed, and `verify`, `docker / build`, `analyze`, `dependency-review` and `CodeQL` must

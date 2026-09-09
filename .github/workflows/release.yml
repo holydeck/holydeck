@@ -38,10 +38,10 @@ jobs:
           echo "$GITHUB_REF_NAME is on main"
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6
-      - name: Set up Node 24
+      - name: Set up Node 24.20.0
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: pnpm
       - name: Cache the MongoDB test binaries
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -74,23 +74,23 @@ jobs:
           persist-credentials: false
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6
-      - name: Set up Node 24
+      - name: Set up Node 24.20.0
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: pnpm
-      - name: Check npm supports staged trusted publishing
+      - name: Check npm supports trusted publishing
         run: |
           version="$(npm --version)"
-          if [ "$(printf '%s\n' 11.15.0 "$version" | sort -V | head -n1)" != "11.15.0" ]; then
-            echo "npm $version cannot do staged OIDC publishing (need >= 11.15.0)" >&2
+          if [ "$(printf '%s\n' 11.5.1 "$version" | sort -V | head -n1)" != "11.5.1" ]; then
+            echo "npm $version cannot do OIDC trusted publishing (need >= 11.5.1)" >&2
             exit 1
           fi
           echo "npm $version ok"
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build the CLI bundle
-        run: pnpm turbo build --filter=holydeck...
+        run: pnpm turbo build --filter=@holydeck/cli...
       # @holydeck/core is a private workspace library (bundled into the CLI),
       # so the CLI is the only npm artifact.
       - name: Pack the CLI
@@ -100,46 +100,43 @@ jobs:
           ls -l "$RUNNER_TEMP/tarballs"
       # No token anywhere: npm exchanges this job's OIDC identity with
       # npmjs.com (trusted publisher: this repo + release.yml + environment
-      # release) and attaches provenance automatically. Staging rather than
-      # publishing means the version lands invisible until a maintainer
-      # approves it with 2FA — see RELEASING.md.
+      # release) and attaches provenance automatically. npm scans the upload
+      # before making it available — see RELEASING.md.
       #
-      # Re-run safety follows what npm actually allows a trust token to do.
-      # A version that is already live is detectable with `npm view`; a
-      # staged-but-unapproved one is not, because a trust token may only run
-      # `npm publish` and `npm stage publish`, never `npm stage list`. So a
-      # duplicate-version refusal is recognised from npm's own output and
-      # treated as "already there"; anything else — an unauthorized action, a
-      # registry write conflict, a network failure — still fails the job.
+      # Re-run safety checks for a live version first. An upload still being
+      # scanned is not visible to `npm view`, so a duplicate-version refusal
+      # is also recognised from npm's output and treated as "already there".
+      # Anything else — an unauthorized action, registry write conflict, or
+      # network failure — still fails the job.
       #
       # The match below is deliberately narrow. It does not include a bare
       # E409 (npmjs also returns 409 for "Document update conflict", a
       # registry-side write conflict where the publish did NOT happen) nor an
       # unanchored "already exists" (npm's own "EEXIST: file already exists"
       # arises from cache and tmp handling mid-upload). Both would report
-      # success with nothing staged, which is the one outcome this job must
+      # success with nothing uploaded, which is the one outcome this job must
       # never produce. A wording change npm makes later costs a red job with
       # the full output already echoed above — cheap next to a silent pass.
-      - name: Stage holydeck on npmjs
+      - name: Publish @holydeck/cli on npmjs
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          if live="$(npm view "holydeck@$VERSION" version --registry https://registry.npmjs.org 2>&1)"; then
-            echo "holydeck@$VERSION is already live on npmjs, nothing to stage"
-            echo "- holydeck@$VERSION already live on npmjs (nothing to stage)" >> "$GITHUB_STEP_SUMMARY"
+          if live="$(npm view "@holydeck/cli@$VERSION" version --registry https://registry.npmjs.org 2>&1)"; then
+            echo "@holydeck/cli@$VERSION is already live on npmjs, nothing to publish"
+            echo "- @holydeck/cli@$VERSION already live on npmjs (nothing to publish)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          echo "npm view says holydeck@$VERSION is not live: $live"
-          if output="$(npm stage publish "$RUNNER_TEMP"/tarballs/holydeck-[0-9]*.tgz 2>&1)"; then
+          echo "npm view says @holydeck/cli@$VERSION is not live: $live"
+          if output="$(npm publish "$RUNNER_TEMP"/tarballs/holydeck-cli-[0-9]*.tgz 2>&1)"; then
             echo "$output"
-            echo "holydeck@$VERSION is staged, approve it to make it live (see RELEASING.md)"
-            echo "- holydeck@$VERSION → staged on npmjs (awaiting approval)" >> "$GITHUB_STEP_SUMMARY"
+            echo "@holydeck/cli@$VERSION was uploaded to npmjs"
+            echo "- @holydeck/cli@$VERSION → uploaded to npmjs" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "$output"
-          if grep -qiE 'cannot publish over|EPUBLISHCONFLICT|already (staged|published)' <<<"$output"; then
-            echo "npm reported a duplicate-version conflict; treating holydeck@$VERSION as already present"
-            echo "- holydeck@$VERSION already staged or live on npmjs (skipped)" >> "$GITHUB_STEP_SUMMARY"
+          if grep -qiE 'cannot publish over|EPUBLISHCONFLICT|already published|previously published' <<<"$output"; then
+            echo "npm reported a duplicate-version conflict; treating @holydeck/cli@$VERSION as already present"
+            echo "- @holydeck/cli@$VERSION already uploaded or live on npmjs (skipped)" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           exit 1
@@ -157,22 +154,20 @@ jobs:
           persist-credentials: false
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6
-      - name: Set up Node 24
+      - name: Set up Node 24.20.0
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build the CLI bundle
-        run: pnpm turbo build --filter=holydeck...
+        run: pnpm turbo build --filter=@holydeck/cli...
       - name: Authenticate npm to GitHub Packages
         run: echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> "$HOME/.npmrc"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # GitHub Packages only hosts scoped packages, so the unscoped CLI
-      # mirrors under the org scope as @holydeck/cli. npmjs stays canonical.
-      - name: Mirror the CLI as @holydeck/cli
+      - name: Mirror @holydeck/cli
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
@@ -183,7 +178,7 @@ jobs:
           fi
           echo "npm view says @holydeck/cli@$VERSION is not published yet: $live"
           mkdir -p "$RUNNER_TEMP/mirror"
-          (cd apps/cli && npm pkg set name=@holydeck/cli && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
+          (cd apps/cli && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
           npm publish "$RUNNER_TEMP"/mirror/holydeck-cli-*.tgz --registry=https://npm.pkg.github.com
           echo "- @holydeck/cli@$VERSION → published to GitHub Packages" >> "$GITHUB_STEP_SUMMARY"
 
