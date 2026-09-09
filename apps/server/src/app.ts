@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { HolyDeckError } from '@holydeck/core/messages';
 import { API_ENDPOINTS, errorEnvelope, statusForCode } from './errors.js';
 import { registerHealthRoute } from './routes/health.js';
@@ -23,6 +24,12 @@ export interface AppDeps {
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const app = Fastify({ logger: deps.logger ?? false });
+
+  void app.register(rateLimit, {
+    global: false,
+    errorResponseBuilder: (_request, context) =>
+      Object.assign(new HolyDeckError('rate_limit_exceeded'), { statusCode: context.statusCode }),
+  });
 
   app.addContentTypeParser(
     ['application/yaml', 'application/x-yaml', 'text/yaml', 'text/plain'],

@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppDeps } from '../app.js';
 
 export function registerStatsRoute(api: FastifyInstance, deps: AppDeps): void {
-  api.get('/stats', async () => {
+  api.get('/stats', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async () => {
     const files = await deps.store.loadAll();
     const translations = files.map((file) => ({
       abbr: file.translation,
