@@ -140,13 +140,15 @@ these steps once, before cutting the first release from the scoped manifest:
 
 3. Configure its trusted publisher for direct publishing as described above,
    then merge the migration branch.
-4. Cut the next normal release, then verify
-   `npm view @holydeck/cli version` returns that version.
-5. Stop publishing `holydeck` and deprecate its existing versions with:
+4. Immediately after merging, stop publishing `holydeck` and deprecate all
+   existing versions with:
 
    ```sh
    npm deprecate "holydeck@*" "Moved to @holydeck/cli; install with npm install -g @holydeck/cli"
    ```
+
+5. Cut the next normal release, then verify
+   `npm view @holydeck/cli version` returns that version.
 
 Existing installations keep working at their last published version, while
 new installs receive the migration warning.
