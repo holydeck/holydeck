@@ -1,9 +1,20 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { MongoClient } from 'mongodb';
+
 import { buildApp } from './app.js';
-import { checkCorpusBoundary, checkCorpusIsClosed, checkReleasedContracts, readSettingsText } from './boot.js';
+import {
+  checkCorpusBoundary,
+  checkCorpusIsClosed,
+  checkReleasedContracts,
+  checkSchema,
+  readSettingsText,
+} from './boot.js';
+import { systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
+import { schemaStatus } from './migrations.js';
+import { repositoryDb } from './repositories.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
@@ -22,6 +33,15 @@ checkCorpusBoundary(corpus);
 // anything else that can reach it too, and that is not a deployment to start serving through.
 checkCorpusIsClosed(await probeCorpusIsClosed(corpus, fetch));
 
+// Durable records are optional until a deployment keeps any, and the presentation milestone keeps none.
+// Where a store is configured, the schema it is at is graded before anything is served from it.
+let store: MongoClient | undefined;
+if (settings.values.mongoUrl !== '') {
+  store = new MongoClient(settings.values.mongoUrl);
+  await store.connect();
+  checkSchema(await schemaStatus(repositoryDb(store.db()), systemContext(`boot:${process.pid}`)));
+}
+
 // Shipped in the same image as this service, at the same relative path the repository has.
 const web = readWebBuild(fileURLToPath(new URL('../../web/dist/', import.meta.url)));
 
@@ -38,7 +58,10 @@ for (const [key, source] of Object.entries(settings.sources)) {
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
-    void app.close().then(() => process.exit(0));
+    void app
+      .close()
+      .then(() => store?.close())
+      .then(() => process.exit(0));
   });
 }
 

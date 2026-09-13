@@ -20,6 +20,7 @@ const sources: LoadedSettings['sources'] = {
   locale: 'file',
   corpusUrl: 'default',
   corpusToken: 'default',
+  mongoUrl: 'default',
 };
 
 const settings: LoadedSettings = {

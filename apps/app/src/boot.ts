@@ -4,6 +4,7 @@ import { MESSAGE_CODES, REMOVED_CODES, messageCodeProblems } from '@holydeck/con
 import { corpusBoundaryFor, corpusProbeProblems } from './corpus.js';
 
 import type { CorpusProbe, CorpusSettings } from './corpus.js';
+import type { SchemaStatus } from './migrations.js';
 
 /** Reads the settings file if it is there. A fresh install has none, and that is not a fault. */
 export function readSettingsText(read: (path: string) => string, path: string): string | undefined {
@@ -45,6 +46,34 @@ const refuseToStart = (reason: string, problems: readonly string[]): void => {
 export function checkCorpusBoundary(corpus: CorpusSettings): void {
   if (corpus.url === '') return;
   refuseToStart('the corpus boundary is not one this application will cross', corpusBoundaryProblems(corpusBoundaryFor(corpus)));
+}
+
+/**
+ * Grades the database against the version this build was written for. Serving a database a migration has
+ * not been run against, or one a newer build has already migrated, means reading records under a shape
+ * they were not written in; a half-finished run means the schema is neither version. All three refuse to
+ * start, and the migration itself is a separate command rather than something a start-up does quietly.
+ */
+export function checkSchema(status: SchemaStatus): void {
+  const blocked = status.blocked;
+  if (blocked !== undefined) {
+    throw new Error(
+      `the database is half migrated: version ${blocked.version} (${blocked.direction}, attempt ${blocked.attempt}) ` +
+        'never finished. Roll it back with `node dist/migrate.js --rollback` before starting.',
+    );
+  }
+  if (status.pending.length > 0) {
+    throw new Error(
+      `the database is at schema version ${status.recorded} and this build needs ${status.required}. ` +
+        'Run `node dist/migrate.js` before starting.',
+    );
+  }
+  if (status.recorded > status.required) {
+    throw new Error(
+      `the database is at schema version ${status.recorded} and this build was written for ${status.required}: ` +
+        'deploy the newer build, or roll the database back to the version this one knows.',
+    );
+  }
 }
 
 /** A corpus that answers anyone who can reach it is a deployment fault, not something to serve through. */

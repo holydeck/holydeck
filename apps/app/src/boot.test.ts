@@ -1,7 +1,9 @@
 import { MESSAGE_CODES, REMOVED_CODES } from '@holydeck/contracts/http';
 import { describe, expect, it } from 'vitest';
 
-import { checkCorpusBoundary, checkCorpusIsClosed, checkReleasedContracts, readSettingsText } from './boot.js';
+import { checkCorpusBoundary, checkCorpusIsClosed, checkReleasedContracts, checkSchema, readSettingsText } from './boot.js';
+
+import type { SchemaStatus } from './migrations.js';
 
 const enoent = (path: string): never => {
   throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
@@ -81,5 +83,26 @@ describe('proving the corpus is closed before serving', () => {
   it('refuses to start when the library answers anyone who can reach it, quoting what it found', () => {
     expect(() => checkCorpusIsClosed({ reached: true, closed: false, detail: 'answered with 200' }))
       .toThrow(/answered with 200/u);
+  });
+});
+
+describe('grading the schema before serving', () => {
+  const status = (over: Partial<SchemaStatus>): SchemaStatus => ({ recorded: 1, required: 1, pending: [], ...over });
+
+  it('starts when the database is at the version this build was written against', () => {
+    expect(() => checkSchema(status({}))).not.toThrow();
+  });
+
+  it('refuses to serve a database a migration has not been run against', () => {
+    expect(() => checkSchema(status({ recorded: 0, pending: [1] }))).toThrow(/dist\/migrate\.js/u);
+  });
+
+  it('refuses to serve a database a newer build has already migrated', () => {
+    expect(() => checkSchema(status({ recorded: 2, pending: [] }))).toThrow(/schema version 2/u);
+  });
+
+  it('refuses to serve a database a failed run left half migrated', () => {
+    const blocked = { version: 1, direction: 'up', attempt: 1, phase: 'failed' } as const;
+    expect(() => checkSchema(status({ recorded: 0, pending: [], blocked }))).toThrow(/roll/u);
   });
 });

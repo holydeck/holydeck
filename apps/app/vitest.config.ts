@@ -10,9 +10,9 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      // main.ts is the process entry: it reads argv and the environment, binds a port and never
-      // returns, so it is covered by running the service rather than by a unit test.
-      exclude: ['src/**/*.test.ts', 'src/main.ts'],
+      // main.ts and migrate.ts are process entries: they read the environment, open connections and
+      // either never return or exit, so they are covered by running them rather than by a unit test.
+      exclude: ['src/**/*.test.ts', 'src/main.ts', 'src/migrate.ts'],
       thresholds: coverage100,
     },
   },

@@ -79,14 +79,17 @@ function isPrivateAddress(host: string): boolean {
   return first === 10 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168);
 }
 
-/** The documented binding an address belongs to, or the host itself when it belongs to none. */
-export function corpusBinding(url: string): string {
-  const { hostname } = new URL(url);
+/** The documented binding a host belongs to, or the host itself when it belongs to none. */
+export function bindingOf(hostname: string): string {
   if (LOOPBACK.includes(hostname)) return 'loopback';
   // A name with no dots is a name only this deployment's network resolves, which is what a compose
   // service or a cluster service is; anything else is a name the rest of the world can resolve too.
   if (!hostname.includes('.') || isPrivateAddress(hostname)) return 'internal-network';
   return hostname;
+}
+
+export function corpusBinding(url: string): string {
+  return bindingOf(new URL(url).hostname);
 }
 
 /** The boundary packet this deployment presents, for the documented check to grade. */

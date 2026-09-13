@@ -36,6 +36,7 @@ describe('precedence', () => {
       locale: 'default',
       corpusUrl: 'default',
       corpusToken: 'default',
+      mongoUrl: 'default',
     });
     expect(loaded.path).toBe(CANONICAL_SETTINGS_PATH);
   });
@@ -52,6 +53,7 @@ describe('precedence', () => {
       locale: 'file',
       corpusUrl: 'default',
       corpusToken: 'default',
+      mongoUrl: 'default',
     });
   });
 
@@ -71,6 +73,7 @@ describe('precedence', () => {
       HOLYDECK_LOCALE: 'ta',
       HOLYDECK_CORPUS_URL: 'http://corpus:8080',
       HOLYDECK_CORPUS_TOKEN: 'c'.repeat(24),
+      HOLYDECK_MONGO_URL: 'mongodb://mongo:27017/holydeck',
     });
     expect(loaded.values).toEqual({
       port: 8080,
@@ -79,8 +82,9 @@ describe('precedence', () => {
       locale: 'ta',
       corpusUrl: 'http://corpus:8080',
       corpusToken: 'c'.repeat(24),
+      mongoUrl: 'mongodb://mongo:27017/holydeck',
     });
-    expect(Object.values(loaded.sources)).toEqual(['env', 'env', 'env', 'env', 'env', 'env']);
+    expect(Object.values(loaded.sources)).toEqual(['env', 'env', 'env', 'env', 'env', 'env', 'env']);
   });
 });
 
@@ -202,5 +206,71 @@ describe('the library this deployment reads scripture from', () => {
   it('refuses an address with no credential, and a credential with no address', () => {
     expect(problemsOf(undefined, { HOLYDECK_CORPUS_URL: 'http://corpus:8080' })).toEqual([both]);
     expect(problemsOf(undefined, { HOLYDECK_CORPUS_TOKEN: token })).toEqual([both]);
+  });
+});
+
+describe('the durable store address', () => {
+  const mongo = (raw: string): string => load(undefined, { HOLYDECK_MONGO_URL: raw }).values.mongoUrl;
+
+  it('is empty until a deployment keeps durable records, which the presentation milestone does not', () => {
+    expect(load().values.mongoUrl).toBe('');
+    expect(mongo('')).toBe('');
+  });
+
+  it('accepts a service only this deployment can resolve', () => {
+    expect(mongo('mongodb://mongo:27017/holydeck')).toBe('mongodb://mongo:27017/holydeck');
+    expect(mongo('mongodb+srv://mongo/holydeck')).toBe('mongodb+srv://mongo/holydeck');
+  });
+
+  it('accepts a replica set, which names more than one host', () => {
+    const url = 'mongodb://mongo-a:27017,mongo-b:27017,mongo-c:27017/holydeck?replicaSet=rs0';
+    expect(mongo(url)).toBe(url);
+  });
+
+  it('refuses a store the rest of the world can reach, naming only the host that is wrong', () => {
+    expect(problemsOf(undefined, { HOLYDECK_MONGO_URL: 'mongodb://mongo-a:27017,store.example.com:27017/db' })).toEqual([
+      'HOLYDECK_MONGO_URL: expected an address inside this deployment, got store.example.com',
+    ]);
+  });
+
+  it('never repeats the address back, because it may carry a credential', () => {
+    const problems = problemsOf(undefined, { HOLYDECK_MONGO_URL: 'postgres://operator:hunter2@mongo:5432/holydeck' });
+    expect(problems).toEqual(['HOLYDECK_MONGO_URL: expected a mongodb:// or mongodb+srv:// address']);
+    expect(JSON.stringify(problems)).not.toContain('hunter2');
+  });
+
+  it('refuses an address that names no database, which the driver would otherwise choose', () => {
+    expect(problemsOf(undefined, { HOLYDECK_MONGO_URL: 'mongodb://mongo:27017' })).toEqual([
+      'HOLYDECK_MONGO_URL: expected the address to name a database',
+    ]);
+    expect(problemsOf(undefined, { HOLYDECK_MONGO_URL: 'mongodb://mongo:27017/?replicaSet=rs0' })).toEqual([
+      'HOLYDECK_MONGO_URL: expected the address to name a database',
+    ]);
+  });
+
+  it('refuses an address that names no host at all', () => {
+    expect(problemsOf(undefined, { HOLYDECK_MONGO_URL: 'mongodb:///holydeck' })).toEqual([
+      'HOLYDECK_MONGO_URL: expected a mongodb:// or mongodb+srv:// address',
+    ]);
+  });
+
+  it('reads the credentials past an at sign rather than as a host', () => {
+    const url = 'mongodb://operator:hunter2@mongo:27017/holydeck';
+    expect(mongo(url)).toBe(url);
+  });
+
+  it('accepts a store on this machine, however the address writes the loopback host', () => {
+    expect(mongo('mongodb://[::1]:27017/holydeck')).toBe('mongodb://[::1]:27017/holydeck');
+    expect(mongo('mongodb://127.0.0.1:27017/holydeck')).toBe('mongodb://127.0.0.1:27017/holydeck');
+  });
+
+  it('refuses an address the file writes as something other than text', () => {
+    expect(problemsOf('mongoUrl: 27017\n')).toEqual([
+      'mongoUrl: expected a mongodb:// or mongodb+srv:// address',
+    ]);
+  });
+
+  it('refuses a setting the file names but nothing reads under another name', () => {
+    expect(load('mongoUrl: mongodb://mongo:27017/holydeck\n').sources.mongoUrl).toBe('file');
   });
 });

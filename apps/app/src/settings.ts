@@ -8,7 +8,7 @@ import { INTERNAL_BINDINGS, MINIMUM_CORPUS_TOKEN_LENGTH } from '@holydeck/contra
 import { LOCALES, type Locale } from '@holydeck/localization/locales';
 import { parse } from 'yaml';
 
-import { corpusBinding } from './corpus.js';
+import { bindingOf, corpusBinding } from './corpus.js';
 
 export const CANONICAL_SETTINGS_PATH = '/data/holydeck/config/settings.yaml';
 
@@ -21,6 +21,8 @@ export interface Settings {
   corpusUrl: string;
   /** The credential the corpus requires. Empty only alongside an empty address. */
   corpusToken: string;
+  /** Where the durable records live. Empty means this deployment keeps none yet. */
+  mongoUrl: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   locale: 'en',
   corpusUrl: '',
   corpusToken: '',
+  mongoUrl: '',
 };
 
 export type SettingsSource = 'default' | 'file' | 'env';
@@ -58,6 +61,7 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   locale: 'HOLYDECK_LOCALE',
   corpusUrl: 'HOLYDECK_CORPUS_URL',
   corpusToken: 'HOLYDECK_CORPUS_TOKEN',
+  mongoUrl: 'HOLYDECK_MONGO_URL',
 };
 
 export function settingsPath(env: Record<string, string | undefined>): string {
@@ -116,6 +120,37 @@ const parseCorpusToken = (raw: unknown): Parsed<string> => {
   if (typeof raw === 'string' && value === '') return { ok: true, value: '' };
   if (typeof raw !== 'string' || value.length < MINIMUM_CORPUS_TOKEN_LENGTH) {
     return { ok: false, problem: `expected a credential of at least ${MINIMUM_CORPUS_TOKEN_LENGTH} characters` };
+  }
+  return { ok: true, value };
+};
+
+// A store address is read by hand rather than by `new URL`, which cannot hold the comma-separated host
+// list a replica set is written as. The problem never carries the value: the address usually carries a
+// credential, and a settings error ends up in a log.
+const MONGO_SCHEME = /^mongodb(?:\+srv)?:\/\//u;
+
+const hostIn = (authority: string): string =>
+  authority.replace(/^\[([^\]]*)\].*$/u, '$1').replace(/:\d+$/u, '');
+
+const parseMongoUrl = (raw: unknown): Parsed<string> => {
+  const rejected = { ok: false, problem: 'expected a mongodb:// or mongodb+srv:// address' } as const;
+  if (typeof raw !== 'string') return rejected;
+  const value = raw.trim();
+  if (value === '') return { ok: true, value: '' };
+  const scheme = MONGO_SCHEME.exec(value);
+  if (scheme === null) return rejected;
+  const authority = value.slice(scheme[0].length).replace(/[/?#].*$/su, '');
+  // Everything up to the last at sign is the credential, and a credential is not a host.
+  const hosts = authority.slice(authority.lastIndexOf('@') + 1).split(',').filter((host) => host !== '');
+  if (hosts.length === 0) return rejected;
+  // Without a database name the driver picks one of its own, and records land somewhere nobody looks.
+  const database = value.slice(scheme[0].length + authority.length).replace(/^\//u, '').replace(/[?#].*$/su, '');
+  if (database === '') return { ok: false, problem: 'expected the address to name a database' };
+  for (const host of hosts) {
+    const hostname = hostIn(host);
+    if (!INTERNAL_BINDINGS.some((internal) => internal === bindingOf(hostname))) {
+      return { ok: false, problem: `expected an address inside this deployment, got ${hostname}` };
+    }
   }
   return { ok: true, value };
 };
@@ -197,6 +232,8 @@ export function loadSettings(input: {
     problems.push('corpusUrl and corpusToken: set both or neither, so the library is never read without a credential');
   }
 
+  const mongoUrl = resolve('mongoUrl', DEFAULT_SETTINGS.mongoUrl, parseMongoUrl, layers);
+
   if (problems.length > 0) throw new SettingsError(problems);
 
   return {
@@ -207,6 +244,7 @@ export function loadSettings(input: {
       locale: locale.value,
       corpusUrl: corpusUrl.value,
       corpusToken: corpusToken.value,
+      mongoUrl: mongoUrl.value,
     },
     sources: {
       port: port.source,
@@ -215,6 +253,7 @@ export function loadSettings(input: {
       locale: locale.source,
       corpusUrl: corpusUrl.source,
       corpusToken: corpusToken.source,
+      mongoUrl: mongoUrl.source,
     },
     path,
   };
