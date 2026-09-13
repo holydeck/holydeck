@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run --coverage",
-    "lint": "eslint src",
+    "lint": "eslint src test",
     "typecheck": "tsc --noEmit",
     "start": "node dist/main.js"
   },
@@ -29,10 +29,12 @@
     "@holydeck/contracts": "workspace:*",
     "@holydeck/localization": "workspace:*",
     "fastify": "^5.12.3",
+    "mongodb": "^6.21.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.0",
+    "mongodb-memory-server": "^10.4.3",
     "tsup": "^8.5.1",
     "vitest": "^5.0.0"
   }

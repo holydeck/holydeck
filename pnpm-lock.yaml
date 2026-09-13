@@ -151,6 +151,9 @@ importers:
       fastify:
         specifier: ^5.12.3
         version: 5.12.3
+      mongodb:
+        specifier: ^6.21.0
+        version: 6.21.0(socks@2.8.10)
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -158,6 +161,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^5.0.0
         version: 5.0.0(vitest@5.0.0)
+      mongodb-memory-server:
+        specifier: ^10.4.3
+        version: 10.4.3(socks@2.8.10)
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.28)(typescript@5.9.3)(yaml@2.9.0)
