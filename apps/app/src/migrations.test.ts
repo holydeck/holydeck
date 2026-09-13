@@ -12,6 +12,7 @@ import {
   schemaStatus,
   statusFrom,
 } from './migrations.js';
+import { QUEUE_INDEXES } from './queue.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { FakeDb } from '../test/helpers/fake-db.js';
@@ -83,13 +84,22 @@ describe('the shipped migrations', () => {
     expect([...created.keys()].sort()).toEqual([
       'audit_events',
       'content_revisions',
+      'jobs',
       'prepared_snapshots',
       'run_events',
       'schema_migrations',
     ]);
 
-    await rollback(db, CONTEXT, { now: clock });
+    for (let step = SCHEMA_VERSION; step > 0; step -= 1) await rollback(db, CONTEXT, { now: clock });
     expect([...db.indexes.values()].flat()).toEqual([]);
+  });
+
+  // The queue is claimed by a query, and a claim that scans is a claim that slows down as the queue
+  // grows, so the indexes it needs ship as a version rather than as something a deployment sets up.
+  test('build the queue the indexes a claim is served by, under the names the queue declares', async () => {
+    const db = fakeDb();
+    await migrate(db, CONTEXT, { now: clock });
+    expect(db.indexes.get('jobs')).toEqual(QUEUE_INDEXES.map((index) => index.name));
   });
 });
 
@@ -103,7 +113,7 @@ describe('replaying the ledger', () => {
   });
 
   test('counts a version as applied once its run finished', () => {
-    expect(statusFrom([entry({ phase: 'start' }), entry()])).toMatchObject({ recorded: 1, pending: [] });
+    expect(statusFrom([entry({ phase: 'start' }), entry()], 1)).toMatchObject({ recorded: 1, pending: [] });
   });
 
   test('leaves the version unadvanced while a run is unfinished', () => {
@@ -122,17 +132,17 @@ describe('replaying the ledger', () => {
 
   test('takes the newest attempt even when the ledger is read out of order', () => {
     const entries = [entry({ direction: 'down', attempt: 2 }), entry({ attempt: 1 })];
-    expect(statusFrom(entries)).toMatchObject({ recorded: 0, pending: [1] });
+    expect(statusFrom(entries, 1)).toMatchObject({ recorded: 0, pending: [1] });
   });
 
   test('takes a later rollback over an earlier run of the same version', () => {
     const entries = [entry(), entry({ direction: 'down', attempt: 2 })];
-    expect(statusFrom(entries)).toMatchObject({ recorded: 0, pending: [1] });
+    expect(statusFrom(entries, 1)).toMatchObject({ recorded: 0, pending: [1] });
   });
 
   test('takes a re-run over an earlier rollback of the same version', () => {
     const entries = [entry(), entry({ direction: 'down', attempt: 2 }), entry({ attempt: 3 })];
-    expect(statusFrom(entries)).toMatchObject({ recorded: 1, pending: [] });
+    expect(statusFrom(entries, 1)).toMatchObject({ recorded: 1, pending: [] });
   });
 
   test('names the oldest unfinished version, because that is the one that has to be undone first', () => {
@@ -141,11 +151,11 @@ describe('replaying the ledger', () => {
   });
 
   test('stops counting at the first version that never ran', () => {
-    expect(statusFrom([entry({ version: 2 })])).toMatchObject({ recorded: 0, pending: [1] });
+    expect(statusFrom([entry({ version: 2 })], 1)).toMatchObject({ recorded: 0, pending: [1] });
   });
 
   test('reports a database that ran a version this deployment does not ship', () => {
-    expect(statusFrom([entry(), entry({ version: 2 })])).toMatchObject({ recorded: 2, pending: [] });
+    expect(statusFrom([entry(), entry({ version: 2 })], 1)).toMatchObject({ recorded: 2, pending: [] });
   });
 });
 
@@ -377,7 +387,13 @@ describe('rolling back', () => {
 
 describe('what a migration is handed', () => {
   test('offers the repositories and the index calls, and nothing that could rewrite history', () => {
-    expect(Object.keys(migrationApi(fakeDb())).sort()).toEqual(['createIndex', 'dropIndex', 'repositories']);
+    expect(Object.keys(migrationApi(fakeDb())).sort()).toEqual([
+      'createIndex',
+      'createQueueIndex',
+      'dropIndex',
+      'dropQueueIndex',
+      'repositories',
+    ]);
   });
 
   test('writes a record through the same guards every other caller goes through', async () => {

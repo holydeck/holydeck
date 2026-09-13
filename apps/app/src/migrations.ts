@@ -6,9 +6,11 @@
 // recorded version exactly where it was and the next boot refuses to serve until it is rolled back, which
 // is the promise ADR 0009 makes: the version moves forward, and a rollback restores the one before it.
 
+import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { createIndexOn, dropIndexOn, repositoriesOn, RepositoryError } from './repositories.js';
 
 import type { RequestContext } from './context.js';
+import type { QueueIndex } from './queue.js';
 import type { RecordName } from './records.js';
 import type { Document, Repository, RepositoryDb } from './repositories.js';
 
@@ -47,6 +49,9 @@ export interface MigrationApi {
     options: Readonly<Record<string, unknown>>,
   ): Promise<string>;
   dropIndex(name: RecordName, index: string): Promise<void>;
+  /** The queue is not a record class, so its indexes are named by the queue and built through it. */
+  createQueueIndex(index: QueueIndex): Promise<string>;
+  dropQueueIndex(name: string): Promise<void>;
 }
 
 export interface SchemaMigration {
@@ -99,6 +104,16 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...INDEXES].reverse()) await api.dropIndex(index.record, index.name);
+    },
+  },
+  {
+    version: 2,
+    name: 'the indexes the leased job queue is claimed by',
+    async up(api) {
+      for (const index of QUEUE_INDEXES) await api.createQueueIndex(index);
+    },
+    async down(api) {
+      for (const index of [...QUEUE_INDEXES].reverse()) await api.dropQueueIndex(index.name);
     },
   },
 ]);
@@ -187,6 +202,8 @@ export function migrationApi(db: RepositoryDb): MigrationApi {
     createIndex: (name: RecordName, keys: Readonly<Record<string, 1 | -1>>, options: Readonly<Record<string, unknown>>) =>
       createIndexOn(db, name, keys, options),
     dropIndex: (name: RecordName, index: string) => dropIndexOn(db, name, index),
+    createQueueIndex: (index: QueueIndex) => createQueueIndexOn(db, index),
+    dropQueueIndex: (name: string) => dropQueueIndexOn(db, name),
   });
 }
 
