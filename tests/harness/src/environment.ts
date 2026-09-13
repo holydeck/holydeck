@@ -54,10 +54,11 @@ export function corpusEnvironment({ corpusPort, mongoBase }: Addresses): Record<
   };
 }
 
-export function workerEnvironment({ dataDir }: Addresses): Record<string, string> {
+export function workerEnvironment({ dataDir, mongoBase }: Addresses): Record<string, string> {
   return {
     HOLYDECK_DATA_DIR: dataDir,
     HOLYDECK_MEDIA_ROOT: mediaRoot(dataDir),
+    HOLYDECK_MONGO_URL: applicationMongoUrl(mongoBase),
     HOLYDECK_SETTINGS_PATH: settingsPath(dataDir),
     HOLYDECK_LOG_LEVEL: LOG_LEVEL,
   };

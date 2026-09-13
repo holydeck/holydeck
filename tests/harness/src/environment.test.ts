@@ -43,13 +43,19 @@ describe('the environment each service in the harness stack is started with', ()
     });
   });
 
-  it('gives the worker the mounts it owns and no port at all', () => {
+  // The worker serves nothing, so it gets no port; it claims jobs out of the same database the
+  // application writes them to, so it gets that address and it has to be the same one.
+  it('gives the worker the mounts it owns, the application database, and no port at all', () => {
     expect(workerEnvironment(ADDRESSES)).toEqual({
       HOLYDECK_DATA_DIR: '/tmp/holydeck-harness-test',
       HOLYDECK_MEDIA_ROOT: '/tmp/holydeck-harness-test/media',
+      HOLYDECK_MONGO_URL: `mongodb://127.0.0.1:27017/${APP_DATABASE}`,
       HOLYDECK_SETTINGS_PATH: '/tmp/holydeck-harness-test/config/settings.yaml',
       HOLYDECK_LOG_LEVEL: 'warn',
     });
+    expect(workerEnvironment(ADDRESSES)['HOLYDECK_MONGO_URL']).toBe(
+      applicationEnvironment(ADDRESSES)['HOLYDECK_MONGO_URL'],
+    );
   });
 
   // Exact rather than partial on purpose: a HOLYDECK_ variable left over in the shell that started the
