@@ -8,16 +8,28 @@ import { FIELD_CODES, type FieldReader, type Parsed, parseObject } from './probl
 export const JOB_STATES = ['queued', 'leased', 'succeeded', 'failed'] as const;
 export type JobState = (typeof JOB_STATES)[number];
 
-/** The fields an administrator is shown for a job, so a failure is never invisible. */
-export const ADMIN_VISIBLE_FIELDS = [
+/** Every field a job carries, in the order a record reads. Nothing about a job lives outside this list. */
+export const JOB_FIELDS = [
   'id',
+  'kind',
+  'idempotencyKey',
   'state',
   'attempt',
   'retryLimit',
-  'lastError',
+  'queuedAt',
+  'workers',
   'leaseExpiresAt',
   'heartbeatAt',
+  'lastError',
 ] as const;
+
+export type JobField = (typeof JOB_FIELDS)[number];
+
+// An administrator is shown the whole record rather than a chosen part of it: the queue decision asks the
+// operator screen to answer which worker holds a job and which work it is, and a projection that dropped
+// the kind or the lease holder answered neither. A job holds no secret — its key names work, not a person
+// — so there is nothing here to withhold, and one list means a field added later cannot arrive invisible.
+export const ADMIN_VISIBLE_FIELDS = JOB_FIELDS;
 
 type JobFields = {
   readonly id: string;

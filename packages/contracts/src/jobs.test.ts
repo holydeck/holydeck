@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ADMIN_VISIBLE_FIELDS, JOB_STATES, parseJobRecord } from './jobs.js';
+import { ADMIN_VISIBLE_FIELDS, JOB_FIELDS, JOB_STATES, parseJobRecord } from './jobs.js';
 import { FIELD_CODES } from './problems.js';
 
 // The jobs recorded in contracts/fixtures/jobs.v1.json, written out here because the product repository
@@ -47,20 +47,31 @@ describe('what a queue is allowed to hold', () => {
     expect(JOB_STATES).toEqual(['queued', 'leased', 'succeeded', 'failed']);
   });
 
-  it('exposes every field an administrator is shown, and a record carries all of them', () => {
-    expect(ADMIN_VISIBLE_FIELDS).toEqual([
+  it('names every field a job carries, so a reader of one has the whole list', () => {
+    expect(JOB_FIELDS).toEqual([
       'id',
+      'kind',
+      'idempotencyKey',
       'state',
       'attempt',
       'retryLimit',
-      'lastError',
+      'queuedAt',
+      'workers',
       'leaseExpiresAt',
       'heartbeatAt',
+      'lastError',
     ]);
-    const parsed = parseJobRecord(leased());
-    expect(parsed.ok).toBe(true);
-    const record = parsed.ok ? parsed.value : {};
-    for (const field of ADMIN_VISIBLE_FIELDS) expect(Object.keys(record)).toContain(field);
+  });
+
+  // An operator screen that hides part of a job is a screen a failure can hide behind: the kind names
+  // which work is stuck and the worker list names what to restart, and neither is inferable from the rest.
+  it('shows an administrator every field a job carries, and a record carries exactly those', () => {
+    expect(ADMIN_VISIBLE_FIELDS).toEqual(JOB_FIELDS);
+    for (const record of [queued(), leased()]) {
+      const parsed = parseJobRecord(record);
+      expect(parsed.ok).toBe(true);
+      expect(Object.keys(parsed.ok ? parsed.value : {}).sort()).toEqual([...JOB_FIELDS].sort());
+    }
   });
 });
 
