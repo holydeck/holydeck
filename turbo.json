@@ -3,6 +3,7 @@
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
     "test": { "dependsOn": ["^build"], "outputs": ["coverage/**"] },
+    "test:e2e": { "dependsOn": ["^build"], "outputs": ["playwright-report/**"] },
     "lint": {},
     "typecheck": { "dependsOn": ["^build"] }
   }

@@ -335,6 +335,9 @@ importers:
       '@holydeck/corpus':
         specifier: workspace:*
         version: link:../../apps/corpus
+      '@holydeck/localization':
+        specifier: workspace:*
+        version: link:../../packages/localization
       '@holydeck/web':
         specifier: workspace:*
         version: link:../../apps/web

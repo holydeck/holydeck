@@ -1,0 +1,9 @@
+{
+  "$comment": "The browser suite is the one place in this repository that types the DOM: the code inside page.evaluate runs in a browser, not here. Keeping it in its own project is what keeps the DOM out of every Node-side file, which is the same rule the shipped client is held to.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  "include": ["e2e", "playwright.config.ts"]
+}

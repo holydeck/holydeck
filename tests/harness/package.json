@@ -9,13 +9,14 @@
     "build": "node build.mjs",
     "test": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "lint": "eslint src integration build.mjs",
-    "typecheck": "tsc --noEmit"
+    "lint": "eslint src integration e2e build.mjs playwright.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json"
   },
   "devDependencies": {
     "@holydeck/app": "workspace:*",
     "@holydeck/contracts": "workspace:*",
     "@holydeck/corpus": "workspace:*",
+    "@holydeck/localization": "workspace:*",
     "@holydeck/web": "workspace:*",
     "@holydeck/worker": "workspace:*",
     "@playwright/test": "^1.63.0",
