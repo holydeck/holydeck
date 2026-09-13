@@ -42,32 +42,38 @@ jobs:
           restore-keys: turbo-${{ runner.os }}-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # One step per check in scripts/verify/gate.mjs, in the gate's own order, and none of them stops
+      # the run: someone reading a red build should see every check that failed, not only the first.
       - name: Test the release scripts
+        if: ${{ !cancelled() }}
         run: pnpm run test:release
-      - name: Test the workspace pipeline
+      - name: Test the workspace census
+        if: ${{ !cancelled() }}
         run: pnpm run test:workspaces
-      - name: Lint, typecheck, test, build
-        run: |
-          declare -A pipeline_status
-          overall=0
-          for step in lint typecheck test build; do
-            if pnpm turbo run "$step"; then
-              pipeline_status[$step]=pass
-            else
-              pipeline_status[$step]=fail
-              overall=1
-            fi
-          done
-          {
-            echo '### Pipeline results'
-            echo
-            echo '| Step | Result |'
-            echo '| --- | --- |'
-            for step in lint typecheck test build; do
-              echo "| $step | ${pipeline_status[$step]} |"
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit "$overall"
+      - name: Test the verification gate and the hooks
+        if: ${{ !cancelled() }}
+        run: pnpm run test:verify
+      - name: Verify the compose stacks
+        if: ${{ !cancelled() }}
+        run: pnpm run verify:compose
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: pnpm turbo run lint
+      - name: Typecheck
+        if: ${{ !cancelled() }}
+        run: pnpm turbo run typecheck
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: pnpm turbo run test
+      - name: Build
+        if: ${{ !cancelled() }}
+        run: pnpm turbo run build
+      - name: Install the browser the end-to-end suite drives
+        if: ${{ !cancelled() }}
+        run: pnpm --filter @holydeck/harness exec playwright install --with-deps chromium
+      - name: Test in the browser
+        if: ${{ !cancelled() }}
+        run: pnpm turbo run test:e2e
 
   docker:
     needs: verify

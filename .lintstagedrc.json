@@ -1,0 +1,4 @@
+{
+  "*.{ts,mts,mjs,js}": ["eslint --fix --no-warn-ignored"],
+  "*.{json,yaml,yml}": ["node scripts/verify/readable.mjs"]
+}

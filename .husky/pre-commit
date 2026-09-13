@@ -1,0 +1,3 @@
+# Fast, and only about what is being committed: the checks that read staged files, with lint-staged
+# keeping whatever was left unstaged out of their way and putting it back afterwards.
+pnpm exec lint-staged

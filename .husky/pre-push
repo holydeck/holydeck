@@ -1,0 +1,2 @@
+# Everything a push has to pass, from the one list the workflow reads too.
+node scripts/verify/gate.mjs
