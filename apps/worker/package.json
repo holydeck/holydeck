@@ -1,0 +1,26 @@
+{
+  "name": "@holydeck/worker",
+  "version": "2026.9.2",
+  "description": "HolyDeck background worker: the application image run with a different command",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@holydeck/app": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.0",
+    "tsup": "^8.5.1",
+    "vitest": "^5.0.0"
+  }
+}

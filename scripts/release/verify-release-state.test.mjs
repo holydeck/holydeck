@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { verifyReleaseState } from './verify-release-state.mjs';
+import { WORKSPACES } from '../workspace/pipeline.mjs';
+import { MANIFESTS } from './sync-versions.mjs';
+import { EXPECTED_PACKAGE_NAMES, verifyReleaseState } from './verify-release-state.mjs';
 
 const packageNames = {
   'package.json': 'holydeck-monorepo',
@@ -97,4 +99,22 @@ test('a missing changelog section is reported', () => {
   assert.deepEqual(verifyReleaseState(state), [
     'CHANGELOG.md has no section heading for 2026.9.0',
   ]);
+});
+
+// A workspace the release scripts do not know keeps its old version forever: the tag says one thing
+// and the package another, and nothing in the release run notices.
+test('every workspace in the root pipeline is versioned in lockstep', () => {
+  assert.deepEqual(
+    WORKSPACES.filter((workspace) => !MANIFESTS.includes(`${workspace}/package.json`)),
+    [],
+  );
+});
+
+test('every workspace in the root pipeline is named in the release gate', () => {
+  assert.deepEqual(
+    WORKSPACES.filter(
+      (workspace) => EXPECTED_PACKAGE_NAMES[`${workspace}/package.json`] === undefined,
+    ),
+    [],
+  );
 });

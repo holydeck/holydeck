@@ -11,8 +11,11 @@ import { CLI_VERSION_FILE, MANIFESTS, fromRepoRoot } from './sync-versions.mjs';
 export const EXPECTED_PACKAGE_NAMES = {
   'package.json': 'holydeck-monorepo',
   'packages/core/package.json': '@holydeck/core',
+  'apps/app/package.json': '@holydeck/app',
   'apps/cli/package.json': '@holydeck/cli',
   'apps/corpus/package.json': '@holydeck/corpus',
+  'apps/web/package.json': '@holydeck/web',
+  'apps/worker/package.json': '@holydeck/worker',
 };
 
 export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog }) {

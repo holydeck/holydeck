@@ -1,0 +1,6 @@
+# HolyDeck supported targets. Kept in step with the hardware survey that chose them; the web build
+# derives its esbuild targets from this file, so lowering a target here lowers it everywhere.
+last 2 Chrome versions
+last 3 iOS versions
+last 2 ChromeAndroid versions
+not dead

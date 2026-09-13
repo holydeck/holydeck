@@ -37,11 +37,14 @@ test('isValidVersion accepts calver and plain semver, rejects garbage', () => {
   assert.equal(isValidVersion(''), false);
 });
 
-test('the fan-out targets are the three workspace packages and the CLI constant', () => {
+test('the fan-out targets are every workspace package and the CLI constant', () => {
   assert.deepEqual(MANIFESTS, [
     'packages/core/package.json',
+    'apps/app/package.json',
     'apps/cli/package.json',
     'apps/corpus/package.json',
+    'apps/web/package.json',
+    'apps/worker/package.json',
   ]);
   assert.equal(CLI_VERSION_FILE, 'apps/cli/src/version.ts');
 });

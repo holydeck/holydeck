@@ -11,6 +11,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test:release": "node --test \"scripts/release/**/*.test.mjs\"",
+    "test:workspaces": "node --test \"scripts/workspace/**/*.test.mjs\"",
     "dev:server": "docker compose -f compose.dev.yaml up --build",
     "dev:server:down": "docker compose -f compose.dev.yaml down -v",
     "release": "release-it"
@@ -21,6 +22,7 @@
     "@release-it/conventional-changelog": "^12.0.0",
     "@types/node": "^26.4.1",
     "eslint": "^10.10.0",
+    "globals": "^17.12.0",
     "release-it": "^21.0.2",
     "turbo": "^2.10.12",
     "typescript": "^5.9.3",

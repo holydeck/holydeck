@@ -1,0 +1,23 @@
+{
+  "name": "@holydeck/web",
+  "version": "2026.9.2",
+  "description": "HolyDeck web client: an installable progressive web app served same-origin by the application",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run --coverage",
+    "lint": "eslint src build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.0",
+    "browserslist": "^4.28.9",
+    "esbuild": "^0.28.2",
+    "vitest": "^5.0.0"
+  }
+}

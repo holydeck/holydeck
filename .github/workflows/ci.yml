@@ -44,6 +44,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test the release scripts
         run: pnpm run test:release
+      - name: Test the workspace pipeline
+        run: pnpm run test:workspaces
       - name: Lint, typecheck, test, build
         run: |
           declare -A pipeline_status

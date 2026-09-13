@@ -1,4 +1,5 @@
-# Development stack: the server built from this checkout, plus the MongoDB it stores into.
+# Development stack: the corpus server, the application, the worker and the MongoDB they store into,
+# all built from this checkout.
 # This is for testing and development only — apps/corpus/compose.example.yaml is the
 # deployment example, and it pulls the published image instead of building one.
 #
@@ -25,6 +26,35 @@ services:
       mongo:
         condition: service_healthy
 
+  # The application and the worker are the same image with different commands; that is the point of
+  # running both here. The application answers on 3100 so it does not collide with the corpus server.
+  app:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    environment:
+      HOLYDECK_PORT: "3100"
+      HOLYDECK_LOG_LEVEL: debug
+    ports:
+      - "3100:3100"
+    volumes:
+      - holydeck-dev-data:/data/holydeck
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    command: ["node", "/srv/worker/dist/main.js"]
+    environment:
+      HOLYDECK_LOG_LEVEL: debug
+    volumes:
+      - holydeck-dev-data:/data/holydeck
+
   mongo:
     image: mongo:8
     # Published so mongosh or Compass can look inside; change the host port if 27017 is taken.
@@ -39,4 +69,5 @@ services:
       retries: 12
 
 volumes:
+  holydeck-dev-data:
   mongo-dev-data:

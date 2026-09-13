@@ -1,0 +1,37 @@
+{
+  "name": "@holydeck/app",
+  "version": "2026.9.2",
+  "description": "HolyDeck application backend: validated settings, same-origin web delivery, and the corpus client",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./boot": {
+      "types": "./dist/boot.d.ts",
+      "import": "./dist/boot.js"
+    },
+    "./settings": {
+      "types": "./dist/settings.d.ts",
+      "import": "./dist/settings.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "fastify": "^5.12.3",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.0",
+    "tsup": "^8.5.1",
+    "vitest": "^5.0.0"
+  }
+}
