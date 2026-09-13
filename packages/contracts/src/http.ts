@@ -1,0 +1,214 @@
+// The HTTP envelopes every response takes, and the registry of message codes a client is allowed to
+// depend on. The rule the contract states is that a released code keeps its meaning and its status
+// for the life of the major version: codes may be added and deprecated, never removed or repurposed.
+// `messageCodeProblems` is that rule as something that can fail, and the registry below is checked
+// against it by this package's own tests and by the application at boot.
+
+import {
+  type Parsed,
+  type Problem,
+  FieldReader,
+  isRecord,
+  parseObject,
+} from './problems.js';
+
+export type MessageCode = {
+  readonly code: string;
+  readonly status: number;
+  readonly stable: boolean;
+  readonly since: number;
+};
+
+export const VALIDATION_FAILED = 'request.validation_failed';
+export const UPDATE_REQUIRED = 'client.update_required';
+export const STALE_STATE_REVISION = 'command.stale_state_revision';
+
+export const MESSAGE_CODES: readonly MessageCode[] = [
+  { code: VALIDATION_FAILED, status: 422, stable: true, since: 1 },
+  { code: 'auth.session.expired', status: 401, stable: true, since: 1 },
+  { code: 'auth.forbidden', status: 403, stable: true, since: 1 },
+  { code: 'resource.not_found', status: 404, stable: true, since: 1 },
+  { code: UPDATE_REQUIRED, status: 426, stable: true, since: 1 },
+  { code: STALE_STATE_REVISION, status: 409, stable: true, since: 1 },
+];
+
+/** Codes withdrawn from the registry. A released code is deprecated in documentation, never removed. */
+export const REMOVED_CODES: readonly string[] = [];
+
+export const ENVELOPE_CODES = {
+  mixed: 'envelope.mixed',
+  unstableCode: 'envelope.unstable_code',
+  noFields: 'envelope.no_fields',
+} as const;
+
+export type FieldProblem = { readonly path: string; readonly code: string; readonly message: string };
+
+export type SuccessEnvelope<T> = {
+  readonly data: T;
+  readonly meta: { readonly requestId: string; readonly version?: number };
+};
+
+export type ErrorEnvelope = {
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+    readonly requestId: string;
+    readonly fields?: readonly FieldProblem[];
+  };
+};
+
+export const VALIDATION_MESSAGE = 'The request could not be accepted.';
+
+export function statusForCode(code: string): number | undefined {
+  return MESSAGE_CODES.find((entry) => entry.code === code)?.status;
+}
+
+export function successEnvelope<T>(data: T, requestId: string, version?: number): SuccessEnvelope<T> {
+  return { data, meta: version === undefined ? { requestId } : { requestId, version } };
+}
+
+export function errorEnvelope(
+  code: string,
+  message: string,
+  requestId: string,
+  fields?: readonly FieldProblem[],
+): ErrorEnvelope {
+  return { error: fields === undefined ? { code, message, requestId } : { code, message, requestId, fields } };
+}
+
+/** The one envelope a rejected payload takes: the stable code, and every field that was refused. */
+export function validationFailure(requestId: string, problems: readonly Problem[]): ErrorEnvelope {
+  return errorEnvelope(
+    VALIDATION_FAILED,
+    VALIDATION_MESSAGE,
+    requestId,
+    problems.map((problem) => ({ path: problem.path, code: problem.code, message: problem.message })),
+  );
+}
+
+const parseFieldProblem = (value: unknown, path: string): Parsed<FieldProblem> =>
+  parseObject(value, path, (reader) => ({
+    path: reader.text('path'),
+    code: reader.text('code'),
+    message: reader.text('message'),
+  }));
+
+const readMeta = (reader: FieldReader) => ({
+  requestId: reader.text('requestId'),
+  version: reader.optionalWholeNumber('version', 1),
+});
+
+export function parseSuccessEnvelope(value: unknown, path = 'success'): Parsed<SuccessEnvelope<unknown>> {
+  return parseObject(value, path, (reader) => ({
+    data: reader.present('data'),
+    meta: reader.parsed('meta', (raw, at) => parseObject(raw, at, readMeta), { requestId: '', version: undefined }),
+  }));
+}
+
+const readErrorBody = (reader: FieldReader) => ({
+  code: reader.text('code'),
+  message: reader.text('message'),
+  requestId: reader.text('requestId'),
+  fields: reader.optionalParsedList('fields', parseFieldProblem),
+});
+
+export function parseErrorEnvelope(value: unknown, path = 'error'): Parsed<ErrorEnvelope> {
+  return parseObject(value, path, (reader) => {
+    reader.absent('data', ENVELOPE_CODES.mixed, 'must not carry data as well as an error');
+    return {
+      error: reader.parsed('error', (raw, at) => parseObject(raw, at, readErrorBody), {
+        code: '',
+        message: '',
+        requestId: '',
+        fields: undefined,
+      }),
+    };
+  });
+}
+
+const readValidationBody = (reader: FieldReader) => {
+  const code = reader.text('code');
+  const message = reader.text('message');
+  const requestId = reader.text('requestId');
+  if (code !== '' && code !== VALIDATION_FAILED) {
+    reader.reject('code', ENVELOPE_CODES.unstableCode, `must be ${VALIDATION_FAILED}`);
+  }
+  const before = reader.problems.length;
+  const fields = reader.parsedList('fields', parseFieldProblem);
+  if (fields.length === 0 && reader.problems.length === before) {
+    reader.reject('fields', ENVELOPE_CODES.noFields, 'must name at least one field');
+  }
+  return { code, message, requestId, fields };
+};
+
+export function parseValidationFailure(value: unknown, path = 'validationFailure'): Parsed<ErrorEnvelope> {
+  return parseObject(value, path, (reader) => ({
+    error: reader.parsed('error', (raw, at) => parseObject(raw, at, readValidationBody), {
+      code: '',
+      message: '',
+      requestId: '',
+      fields: [],
+    }),
+  }));
+}
+
+const CODE_ENTRY = (value: unknown, path: string): Parsed<MessageCode> =>
+  parseObject(value, path, (reader) => ({
+    code: reader.text('code'),
+    status: reader.wholeNumber('status', 100),
+    stable: reader.flag('stable'),
+    since: reader.wholeNumber('since', 1),
+  }));
+
+/** Grades a message-code registry against the compatibility rule the contract states. */
+export function messageCodeProblems(codes: unknown, removedCodes: unknown): readonly string[] {
+  const problems: string[] = [];
+  const reader = new FieldReader({ codes, removedCodes }, '');
+  const entries = reader.parsedList('codes', CODE_ENTRY);
+  const removed = reader.textList('removedCodes');
+  if (reader.problems.length > 0) return reader.problems.map((problem) => `${problem.path}: ${problem.message}`);
+
+  if (entries.length === 0) problems.push('message codes: the registry is empty');
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.stable) problems.push(`message code ${entry.code}: is not marked stable`);
+    if (seen.has(entry.code)) problems.push(`message code ${entry.code}: declared twice`);
+    seen.add(entry.code);
+  }
+  for (const code of removed) problems.push(`message code ${code}: was removed rather than deprecated`);
+  return problems;
+}
+
+const CONTRACT_DIAGNOSTICS: Readonly<Record<string, string>> = {
+  'success.data': 'success envelope: has no data',
+  'success.meta.requestId': 'success envelope: has no request id',
+  'error.data': 'error envelope: carries data as well as an error',
+  'error.error.code': 'error envelope: has no code',
+  'validationFailure.error.code': 'validation failure: does not use the stable validation code',
+  'validationFailure.error.fields': 'validation failure: names no field',
+};
+
+const VALIDATION_FIELD_PATH = /^validationFailure\.error\.fields\.\d+\.path$/u;
+
+const describeProblem = (problem: Problem): string => {
+  if (VALIDATION_FIELD_PATH.test(problem.path)) return 'validation field ?: has no path';
+  return CONTRACT_DIAGNOSTICS[problem.path] ?? `${problem.path}: ${problem.message}`;
+};
+
+/**
+ * Grades a whole HTTP contract recording — the two envelopes, the validation failure, and the code
+ * registry — and reports it in the words the contract's own acceptance criterion uses.
+ */
+export function httpContractProblems(packet: unknown): readonly string[] {
+  if (!isRecord(packet)) return ['http contract: must be an object'];
+  const problems: string[] = [];
+  const envelopes = [
+    parseSuccessEnvelope(packet['success']),
+    parseErrorEnvelope(packet['error']),
+    parseValidationFailure(packet['validationFailure']),
+  ];
+  for (const parsed of envelopes) {
+    if (!parsed.ok) problems.push(...parsed.problems.map(describeProblem));
+  }
+  return [...problems, ...messageCodeProblems(packet['codes'], packet['removedCodes'])];
+}

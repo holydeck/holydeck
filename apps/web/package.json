@@ -14,6 +14,9 @@
     "lint": "eslint src build.mjs",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@holydeck/contracts": "workspace:*"
+  },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.0",
     "browserslist": "^4.28.9",

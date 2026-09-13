@@ -16,7 +16,8 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@holydeck/app": "workspace:*"
+    "@holydeck/app": "workspace:*",
+    "@holydeck/contracts": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.0",

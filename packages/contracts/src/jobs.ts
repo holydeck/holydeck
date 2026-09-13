@@ -1,0 +1,111 @@
+// One job record, as the queue stores it and a worker reads it back. The lifecycle rules that can be
+// judged from a single record are enforced here — a leased job has something to expire and something to
+// prove it is alive, a lease belongs to one worker, an attempt never passes its own retry limit — while
+// claiming, reclaiming and retrying are the queue's behaviour and belong with it.
+
+import { FIELD_CODES, type FieldReader, type Parsed, parseObject } from './problems.js';
+
+export const JOB_STATES = ['queued', 'leased', 'succeeded', 'failed'] as const;
+export type JobState = (typeof JOB_STATES)[number];
+
+/** The fields an administrator is shown for a job, so a failure is never invisible. */
+export const ADMIN_VISIBLE_FIELDS = [
+  'id',
+  'state',
+  'attempt',
+  'retryLimit',
+  'lastError',
+  'leaseExpiresAt',
+  'heartbeatAt',
+] as const;
+
+type JobFields = {
+  readonly id: string;
+  readonly kind: string;
+  readonly idempotencyKey: string;
+  readonly attempt: number;
+  readonly retryLimit: number;
+  readonly queuedAt: string;
+  readonly workers: readonly string[];
+  readonly lastError: string | undefined;
+};
+
+/** A leased job has something for its lease to expire at and something to prove it is still alive. */
+export type LeasedJob = JobFields & {
+  readonly state: 'leased';
+  readonly leaseExpiresAt: string;
+  readonly heartbeatAt: string;
+};
+
+export type UnleasedJob = JobFields & {
+  readonly state: Exclude<JobState, 'leased'>;
+  readonly leaseExpiresAt: string | undefined;
+  readonly heartbeatAt: string | undefined;
+};
+
+// The two shapes are separate types rather than one with optional fields, so a caller that has already
+// checked the state does not have to defend against an expiry the parser guaranteed is there.
+export type JobRecord = LeasedJob | UnleasedJob;
+
+const KIND = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+
+const readKind = (reader: FieldReader): string => {
+  const kind = reader.text('kind');
+  if (kind !== '' && !KIND.test(kind)) {
+    reader.reject('kind', FIELD_CODES.notAllowed, 'must be a lower-case name in words joined by hyphens');
+  }
+  return kind;
+};
+
+// The key names the work it is a key for, so a key copied from another kind of job cannot silently
+// suppress the work this one exists to do.
+const readIdempotencyKey = (reader: FieldReader, kind: string): string => {
+  const key = reader.text('idempotencyKey');
+  if (key !== '' && !key.startsWith(`${kind}:`)) {
+    reader.reject('idempotencyKey', FIELD_CODES.notAllowed, `must begin with ${kind}:`);
+  }
+  return key;
+};
+
+export function parseJobRecord(value: unknown): Parsed<JobRecord> {
+  return parseObject(value, 'job', (reader) => {
+    const id = reader.text('id');
+    const kind = readKind(reader);
+    const idempotencyKey = readIdempotencyKey(reader, kind);
+    const state = reader.choice('state', JOB_STATES);
+    const attempt = reader.wholeNumber('attempt', 1);
+    const retryLimit = reader.wholeNumber('retryLimit', 1);
+    if (attempt > retryLimit) {
+      reader.reject('attempt', FIELD_CODES.notAllowed, `must not be past the retry limit of ${retryLimit}`);
+    }
+    const queuedAt = reader.time('queuedAt');
+    const workers = reader.textList('workers');
+    if (workers.length > 1) {
+      reader.reject('workers', FIELD_CODES.notAllowed, `must be at most one worker, not ${workers.length}`);
+    }
+    const fields: JobFields = {
+      id,
+      kind,
+      idempotencyKey,
+      attempt,
+      retryLimit,
+      queuedAt,
+      workers,
+      lastError: reader.optionalText('lastError'),
+    };
+    if (state === 'leased') {
+      return {
+        ...fields,
+        state,
+        leaseExpiresAt: reader.time('leaseExpiresAt'),
+        heartbeatAt: reader.time('heartbeatAt'),
+      };
+    }
+    return {
+      ...fields,
+      state,
+      leaseExpiresAt: reader.optionalTime('leaseExpiresAt'),
+      heartbeatAt: reader.optionalTime('heartbeatAt'),
+    };
+  });
+}

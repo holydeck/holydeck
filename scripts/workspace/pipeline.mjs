@@ -16,6 +16,7 @@ export const PIPELINE_TASKS = ['build', 'test', 'lint', 'typecheck'];
 
 export const WORKSPACES = [
   'packages/core',
+  'packages/contracts',
   'apps/cli',
   'apps/corpus',
   'apps/app',

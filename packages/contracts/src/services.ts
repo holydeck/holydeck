@@ -1,0 +1,120 @@
+// The domain payloads a service is written in: the service itself, its ordered sections, the items in
+// them, and the references by which an item pins one immutable revision of reusable content.
+
+import { FIELD_CODES, type ParseFn, type Parsed, parseObject } from './problems.js';
+
+export const SERVICE_STATES = ['upcoming', 'presenting', 'completed', 'archived'] as const;
+export type ServiceState = (typeof SERVICE_STATES)[number];
+
+/** The words the product calls each state by. The wire carries the code; people read the label. */
+export const SERVICE_STATE_LABELS: Record<ServiceState, string> = {
+  upcoming: 'Upcoming',
+  presenting: 'Presenting',
+  completed: 'Completed',
+  archived: 'Archived',
+};
+
+export const ITEM_KINDS = ['song', 'sermon', 'reading', 'media', 'slide-group', 'custom-slide'] as const;
+export type ItemKind = (typeof ITEM_KINDS)[number];
+
+/** The one kind of item that carries its own slides instead of referencing reusable content. */
+const AUTHORED_IN_PLACE: ItemKind = 'custom-slide';
+
+export type RevisionRef = {
+  readonly id: string;
+  readonly revision: string;
+  readonly hash: string | undefined;
+};
+
+export type ServiceItem = {
+  readonly id: string;
+  readonly kind: ItemKind;
+  readonly title: string;
+  readonly content: RevisionRef | undefined;
+};
+
+export type ServiceSection = {
+  readonly id: string;
+  readonly name: string;
+  readonly items: readonly ServiceItem[];
+};
+
+export type Service = {
+  readonly id: string;
+  readonly title: string;
+  readonly date: string;
+  readonly site: string;
+  readonly state: ServiceState;
+  readonly sections: readonly ServiceSection[];
+};
+
+// A digest names the algorithm that produced it, so a stored hash stays readable when the algorithm
+// changes and two digests of different algorithms can never be compared as if they were the same thing.
+const HASH = /^[a-z][a-z0-9]*-[0-9a-f]{8,64}$/u;
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/u;
+
+// A service is dated by the day it is held on, not by an instant, and the day has to exist: the built-in
+// parser rolls a 31st of September over into October rather than refusing it, so the day is read back.
+const isCalendarDay = (value: string): boolean => {
+  if (!DAY.test(value)) return false;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return !Number.isNaN(time) && new Date(time).toISOString().startsWith(value);
+};
+
+export const parseRevisionRef: ParseFn<RevisionRef> = (value, path) =>
+  parseObject(value, path, (reader) => {
+    const hash = reader.optionalText('hash');
+    if (hash !== undefined && !HASH.test(hash)) {
+      reader.reject('hash', FIELD_CODES.notAllowed, 'must name the algorithm that produced it, such as fnv1a-6fe1d1e9');
+    }
+    return { id: reader.text('id'), revision: reader.text('revision'), hash };
+  });
+
+const itemParser = (seenItems: Set<string>): ParseFn<ServiceItem> => (value, path) =>
+  parseObject(value, path, (reader) => {
+    const id = reader.text('id');
+    if (id !== '' && seenItems.has(id)) {
+      reader.reject('id', FIELD_CODES.notAllowed, 'must not repeat an item already in this service');
+    }
+    seenItems.add(id);
+    const kind = reader.choice('kind', ITEM_KINDS);
+    const title = reader.text('title');
+    // Reusable content is pinned to an explicit revision; a custom slide has no reusable content to pin,
+    // and one that claims to would leave two sources for what a slide shows.
+    if (kind === AUTHORED_IN_PLACE) {
+      reader.absent('content', FIELD_CODES.notAllowed, 'must not be pinned by a custom slide');
+      return { id, kind, title, content: undefined };
+    }
+    return { id, kind, title, content: reader.parsed('content', parseRevisionRef, undefined) };
+  });
+
+const sectionParser = (seenSections: Set<string>, seenItems: Set<string>): ParseFn<ServiceSection> =>
+  (value, path) =>
+    parseObject(value, path, (reader) => {
+      const id = reader.text('id');
+      if (id !== '' && seenSections.has(id)) {
+        reader.reject('id', FIELD_CODES.notAllowed, 'must not repeat a section already in this service');
+      }
+      seenSections.add(id);
+      return { id, name: reader.text('name'), items: reader.parsedList('items', itemParser(seenItems)) };
+    });
+
+export function parseService(value: unknown): Parsed<Service> {
+  return parseObject(value, 'service', (reader) => {
+    const id = reader.text('id');
+    const title = reader.text('title');
+    const date = reader.text('date');
+    if (date !== '' && !isCalendarDay(date)) {
+      reader.reject('date', FIELD_CODES.notAllowed, 'must be a calendar day such as 2026-09-13');
+    }
+    return {
+      id,
+      title,
+      date,
+      site: reader.text('site'),
+      state: reader.choice('state', SERVICE_STATES),
+      sections: reader.parsedList('sections', sectionParser(new Set(), new Set())),
+    };
+  });
+}

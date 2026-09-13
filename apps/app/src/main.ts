@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
 
 import { buildApp } from './app.js';
-import { readSettingsText } from './boot.js';
+import { checkReleasedContracts, readSettingsText } from './boot.js';
 import { loadSettings, settingsPath } from './settings.js';
+
+checkReleasedContracts();
 
 const path = settingsPath(process.env);
 const settings = loadSettings({

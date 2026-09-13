@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const fromRepoRoot = (path) => fileURLToPath(new URL(`../../${path}`, import.meta.url));
 
 export const MANIFESTS = [
+  'packages/contracts/package.json',
   'packages/core/package.json',
   'apps/app/package.json',
   'apps/cli/package.json',

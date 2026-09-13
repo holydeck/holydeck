@@ -142,6 +142,9 @@ importers:
 
   apps/app:
     dependencies:
+      '@holydeck/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       fastify:
         specifier: ^5.12.3
         version: 5.12.3
@@ -214,6 +217,10 @@ importers:
         version: 25.10.0(proxy-agent@8.0.2)(yauzl@3.4.0)
 
   apps/web:
+    dependencies:
+      '@holydeck/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^5.0.0
@@ -233,6 +240,21 @@ importers:
       '@holydeck/app':
         specifier: workspace:*
         version: link:../app
+      '@holydeck/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+    devDependencies:
+      '@vitest/coverage-v8':
+        specifier: ^5.0.0
+        version: 5.0.0(vitest@5.0.0)
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.28)(typescript@5.9.3)(yaml@2.9.0)
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@26.4.1)(@vitest/coverage-v8@5.0.0)(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
+
+  packages/contracts:
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^5.0.0

@@ -10,6 +10,7 @@ import { CLI_VERSION_FILE, MANIFESTS, fromRepoRoot } from './sync-versions.mjs';
 
 export const EXPECTED_PACKAGE_NAMES = {
   'package.json': 'holydeck-monorepo',
+  'packages/contracts/package.json': '@holydeck/contracts',
   'packages/core/package.json': '@holydeck/core',
   'apps/app/package.json': '@holydeck/app',
   'apps/cli/package.json': '@holydeck/cli',

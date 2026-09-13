@@ -26,6 +26,7 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
+    "@holydeck/contracts": "workspace:*",
     "fastify": "^5.12.3",
     "yaml": "^2.9.0"
   },
