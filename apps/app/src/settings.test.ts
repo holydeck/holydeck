@@ -1,3 +1,4 @@
+import { LOCALES } from '@holydeck/localization/locales';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -94,6 +95,17 @@ describe('zero configuration', () => {
 });
 
 describe('validation', () => {
+  // The application accepts the locales the product ships and no others: a locale it would accept and
+  // nothing translates is a deployment configured for copy that does not exist.
+  it('accepts every locale the product ships, and nothing beyond them', () => {
+    for (const locale of LOCALES) {
+      expect(load(`locale: ${locale}\n`).values.locale).toBe(locale);
+    }
+    expect(problemsOf('locale: fr\n')).toEqual([
+      `locale: expected one of ${LOCALES.join(', ')}, got "fr"`,
+    ]);
+  });
+
   it('reports every problem at once, because a deployment fixes them in one pass', () => {
     expect(problemsOf('port: 0\nlocale: fr\ndataDir: ""\n')).toEqual([
       'port: expected a whole number between 1 and 65535, got 0',

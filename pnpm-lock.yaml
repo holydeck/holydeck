@@ -145,6 +145,9 @@ importers:
       '@holydeck/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@holydeck/localization':
+        specifier: workspace:*
+        version: link:../../packages/localization
       fastify:
         specifier: ^5.12.3
         version: 5.12.3
@@ -224,6 +227,9 @@ importers:
       '@holydeck/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@holydeck/localization':
+        specifier: workspace:*
+        version: link:../../packages/localization
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^5.0.0

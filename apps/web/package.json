@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@holydeck/contracts": "workspace:*"
+    "@holydeck/contracts": "workspace:*",
+    "@holydeck/localization": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.0",

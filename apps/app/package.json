@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@holydeck/contracts": "workspace:*",
+    "@holydeck/localization": "workspace:*",
     "fastify": "^5.12.3",
     "yaml": "^2.9.0"
   },

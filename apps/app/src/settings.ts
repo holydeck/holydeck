@@ -5,15 +5,12 @@
 // file-level bind mount would keep serving the replaced one forever.
 
 import { INTERNAL_BINDINGS, MINIMUM_CORPUS_TOKEN_LENGTH } from '@holydeck/contracts/corpus';
+import { LOCALES, type Locale } from '@holydeck/localization/locales';
 import { parse } from 'yaml';
 
 import { corpusBinding } from './corpus.js';
 
 export const CANONICAL_SETTINGS_PATH = '/data/holydeck/config/settings.yaml';
-
-export const LOCALES = ['en', 'de', 'ta'] as const;
-
-export type Locale = (typeof LOCALES)[number];
 
 export interface Settings {
   port: number;
