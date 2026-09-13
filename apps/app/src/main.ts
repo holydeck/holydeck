@@ -13,6 +13,7 @@ import {
 } from './boot.js';
 import { systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
+import { serveLive } from './live.js';
 import { schemaStatus } from './migrations.js';
 import { repositoryDb } from './repositories.js';
 import { loadSettings, settingsPath } from './settings.js';
@@ -51,6 +52,9 @@ const app = buildApp({
   fetching: fetch,
   web,
 });
+
+// The live socket is part of the surface this service serves, so it is registered before it listens.
+await serveLive(app);
 
 for (const [key, source] of Object.entries(settings.sources)) {
   app.log.info(`${key} came from the ${source}`);

@@ -3,6 +3,7 @@ import { MESSAGE_CODES, errorEnvelope, successEnvelope } from '@holydeck/contrac
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 
 import { corpusClient } from './corpus.js';
+import { isUpgrade } from './live.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
 import type { Fetching } from './corpus.js';
@@ -38,6 +39,9 @@ export function buildApp({ settings, logger, fetching, web }: AppOptions): Fasti
   // handed a not-found for a route it was asking for in an older shape.
   app.addHook('onRequest', async (request, reply) => {
     if (!request.url.startsWith(VERSIONED_PREFIX)) return;
+    // A request asking to stop being an HTTP request is graded by the socket route instead, which can
+    // close with a reason a browser client can read — a refused handshake carries none.
+    if (isUpgrade(request.headers)) return;
     const decision = decideClient(request.headers[CLIENT_VERSION_HEADER]);
     if (decision.accepted) return;
     await reply.code(decision.status).send(

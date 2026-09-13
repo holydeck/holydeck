@@ -27,6 +27,7 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
+    "@fastify/websocket": "^11.3.0",
     "@holydeck/contracts": "workspace:*",
     "@holydeck/localization": "workspace:*",
     "fastify": "^5.12.3",
