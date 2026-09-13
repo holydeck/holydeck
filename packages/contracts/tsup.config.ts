@@ -8,6 +8,8 @@ export default defineConfig({
     'src/corpus.ts',
     'src/live.ts',
     'src/jobs.ts',
+    'src/entities.ts',
+    'src/portable.ts',
     'src/snapshots.ts',
     'src/services.ts',
   ],

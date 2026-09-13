@@ -33,6 +33,14 @@
       "types": "./dist/jobs.d.ts",
       "import": "./dist/jobs.js"
     },
+    "./entities": {
+      "types": "./dist/entities.d.ts",
+      "import": "./dist/entities.js"
+    },
+    "./portable": {
+      "types": "./dist/portable.d.ts",
+      "import": "./dist/portable.js"
+    },
     "./snapshots": {
       "types": "./dist/snapshots.d.ts",
       "import": "./dist/snapshots.js"
