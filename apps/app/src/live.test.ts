@@ -1,5 +1,8 @@
+import { request } from 'node:http';
+
 import { CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, supportedClientVersions } from '@holydeck/contracts/clients';
 import { LIVE_CHANNELS, parseSnapshotFrame } from '@holydeck/contracts/live';
+import { TICKET_QUERY, sessionCookie } from '@holydeck/contracts/sessions';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app.js';
@@ -12,11 +15,14 @@ import {
   isUpgrade,
   serveLive,
 } from './live.js';
+import { sessionContext, sessionsOn } from './sessions.js';
 import { DEFAULT_SETTINGS, type LoadedSettings } from './settings.js';
+import { memorySessions } from '../test/helpers/sessions.js';
 
 import type { Fetching } from './corpus.js';
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
+import type { SessionStore } from './sessions.js';
 
 const settings: LoadedSettings = {
   values: { ...DEFAULT_SETTINGS },
@@ -38,13 +44,47 @@ const AT = '2026-09-13T10:00:00.000Z';
 
 let running: FastifyInstance | undefined;
 
-const listening = async (): Promise<string> => {
-  const app = buildApp({ settings, logger: false, fetching: refusing });
-  await serveLive(app, { clock: () => AT });
+const listening = async (sessions?: SessionStore): Promise<string> => {
+  const app = buildApp({ settings, logger: false, fetching: refusing, sessions });
+  await serveLive(app, { clock: () => AT, sessions });
   await app.listen({ host: '127.0.0.1', port: 0 });
   running = app;
   const { port } = app.server.address() as AddressInfo;
   return `ws://127.0.0.1:${port}`;
+};
+
+/**
+ * The handshake itself, and only the handshake: a browser sets no header on a socket, so what is proven
+ * here is proven out of the cookie the browser attaches and the ticket in the query string. The answer
+ * is the status the upgrade was refused with, or 101 for the upgrade that was allowed to happen.
+ */
+const handshake = async (base: string, query: string, headers: Record<string, string>): Promise<number> => {
+  const url = new URL(`${LIVE_PATH}?${query}`, base.replace(/^ws/u, 'http'));
+  return new Promise<number>((resolve, reject) => {
+    const asked = request({
+      hostname: url.hostname,
+      port: url.port,
+      path: `${url.pathname}${url.search}`,
+      headers: {
+        connection: 'Upgrade',
+        upgrade: 'websocket',
+        'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        'sec-websocket-version': '13',
+        origin: `http://${url.host}`,
+        ...headers,
+      },
+    });
+    asked.on('upgrade', (_answer, socket) => {
+      socket.destroy();
+      resolve(101);
+    });
+    asked.on('response', (answer) => {
+      answer.resume();
+      resolve(answer.statusCode ?? 0);
+    });
+    asked.on('error', reject);
+    asked.end();
+  });
 };
 
 /** A session that records what arrived, so a test can wait for the next frame or for the close. */
@@ -252,5 +292,69 @@ describe('the live session', () => {
     const response = await running?.inject({ method: 'GET', url: `${LIVE_PATH}?channel=audience` });
     expect(response?.statusCode).toBe(426);
     expect(response?.json()).toMatchObject({ error: { message: UPDATE_REQUIRED_MESSAGE } });
+  });
+});
+
+// a socket is a state-changing connection a page on another site can also ask for, so the
+// handshake proves what a mutation proves — this deployment's own origin, and a ticket the session in
+// the cookie was issued, good once and for seconds. The ticket is in the URL because a browser socket
+// can put nothing anywhere else; the session identifier stays in the cookie, where a URL never sees it.
+describe('the handshake a deployment that keeps sessions requires', () => {
+  const started = async (defect?: unknown): Promise<{ base: string; cookie: string; ticket: string }> => {
+    const real = sessionsOn(memorySessions().db, { now: () => new Date().toISOString() });
+    const context = sessionContext('req-0f9c2a41');
+    const session = await real.start(context, { actor: 'account:7f3a', permissions: ['services.read'] });
+    const ticket = await real.issueTicket(context, session.token);
+    const base = await listening(defect === undefined ? real : { ...real, redeemTicket: () => Promise.reject(defect) });
+    return { base, cookie: sessionCookie(session.token, 60), ticket };
+  };
+
+  it('opens the socket for a session that spent a ticket, and closes that ticket behind it', async () => {
+    const { base, cookie, ticket } = await started();
+    const query = `channel=audience&${CURRENT}&${TICKET_QUERY}=${ticket}`;
+    expect(await handshake(base, query, { cookie })).toBe(101);
+    expect(await handshake(base, query, { cookie })).toBe(403);
+  });
+
+  it('refuses a handshake carrying no ticket at all', async () => {
+    const { base, cookie } = await started();
+    expect(await handshake(base, `channel=audience&${CURRENT}`, { cookie })).toBe(403);
+  });
+
+  it('refuses a ticket this deployment never issued', async () => {
+    const { base, cookie } = await started();
+    const query = `channel=audience&${CURRENT}&${TICKET_QUERY}=${'x'.repeat(43)}`;
+    expect(await handshake(base, query, { cookie })).toBe(403);
+  });
+
+  it('refuses a handshake carrying a ticket and no session', async () => {
+    const { base, ticket } = await started();
+    expect(await handshake(base, `channel=audience&${CURRENT}&${TICKET_QUERY}=${ticket}`, {})).toBe(401);
+  });
+
+  it('refuses a handshake asked for from another site, whatever it carries', async () => {
+    const { base, cookie, ticket } = await started();
+    const query = `channel=audience&${CURRENT}&${TICKET_QUERY}=${ticket}`;
+    expect(await handshake(base, query, { cookie, origin: 'https://elsewhere.example.invalid' })).toBe(403);
+  });
+
+  it('answers a store that failed for any other reason as a fault of this server’s, and says nothing of it', async () => {
+    const defect = new TypeError('mongodb://holydeck:hunter2@records.invalid:27017 is not a function');
+    const { base, cookie, ticket } = await started(defect);
+    expect(await handshake(base, `channel=audience&${CURRENT}&${TICKET_QUERY}=${ticket}`, { cookie })).toBe(500);
+  });
+
+  it('refuses a handshake whose session is unknown, and says so as a request with no session', async () => {
+    const { base, ticket } = await started();
+    const query = `channel=audience&${CURRENT}&${TICKET_QUERY}=${ticket}`;
+    const cookie = sessionCookie('y'.repeat(43), 60);
+    expect(await handshake(base, query, { cookie })).toBe(401);
+  });
+});
+
+describe('a deployment that keeps no sessions', () => {
+  it('opens the socket without a ticket, because there is no session for one to come from', async () => {
+    const base = await listening();
+    expect(await handshake(base, `channel=audience&${CURRENT}`, {})).toBe(101);
   });
 });

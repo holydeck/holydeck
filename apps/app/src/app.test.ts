@@ -7,10 +7,13 @@ import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { VERSIONED_PREFIX, buildApp } from './app.js';
+import { mutatingRoutesOf } from './csrf.js';
+import { SESSION_PATH, TICKET_PATH } from './session-routes.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
 import { DEFAULT_SETTINGS, type LoadedSettings } from './settings.js';
 
+import type { InjectOptions } from 'fastify';
 import type { WebAsset } from './static.js';
 
 const sources: LoadedSettings['sources'] = {
@@ -50,6 +53,33 @@ const served = async (
 };
 
 const current = { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) };
+
+// The contract the guard exists for, asked of the application rather than of a test double: every route
+// this server registers that changes something is one the guard saw, and every one of them refuses a
+// request carrying no session. A route added without the check is absent from the first list and reachable
+// in the second, and this fails either way.
+describe('every route that changes something', () => {
+  it('is one the session guard is on, and the list is the whole list', () => {
+    const app = buildApp({ settings, logger: false, fetching: refusing });
+    expect(mutatingRoutesOf(app)).toEqual([
+      { method: 'DELETE', url: SESSION_PATH },
+      { method: 'POST', url: TICKET_PATH },
+    ]);
+  });
+
+  it('refuses a request that carries no session, whichever route it is', async () => {
+    const app = buildApp({ settings, logger: false, fetching: refusing });
+    const routes = mutatingRoutesOf(app);
+    expect(routes.length).toBeGreaterThan(0);
+    for (const route of routes) {
+      // Fastify knows one method more than its own injector does, and none of them is one this serves.
+      const method = route.method as InjectOptions['method'];
+      const response = await app.inject({ method, url: route.url, headers: current });
+      expect(response.statusCode, `${route.method} ${route.url}`).toBe(401);
+    }
+    await app.close();
+  });
+});
 
 describe('the application server', () => {
   it('reports itself healthy in the envelope every successful response takes', async () => {

@@ -13,6 +13,7 @@ import {
   statusFrom,
 } from './migrations.js';
 import { QUEUE_INDEXES } from './queue.js';
+import { SESSION_INDEXES } from './sessions.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { FakeDb } from '../test/helpers/fake-db.js';
@@ -88,6 +89,7 @@ describe('the shipped migrations', () => {
       'prepared_snapshots',
       'run_events',
       'schema_migrations',
+      'sessions',
     ]);
 
     for (let step = SCHEMA_VERSION; step > 0; step -= 1) await rollback(db, CONTEXT, { now: clock });
@@ -100,6 +102,14 @@ describe('the shipped migrations', () => {
     const db = fakeDb();
     await migrate(db, CONTEXT, { now: clock });
     expect(db.indexes.get('jobs')).toEqual(QUEUE_INDEXES.map((index) => index.name));
+  });
+
+  // One of the two forgets: the expiry index is what removes a session the moment its absolute deadline
+  // passes, so an abandoned session stops existing without anything having to sweep for it.
+  test('build the sessions the indexes one is found and forgotten by', async () => {
+    const db = fakeDb();
+    await migrate(db, CONTEXT, { now: clock });
+    expect(db.indexes.get('sessions')).toEqual(SESSION_INDEXES.map((index) => index.name));
   });
 });
 
@@ -390,8 +400,10 @@ describe('what a migration is handed', () => {
     expect(Object.keys(migrationApi(fakeDb())).sort()).toEqual([
       'createIndex',
       'createQueueIndex',
+      'createSessionIndex',
       'dropIndex',
       'dropQueueIndex',
+      'dropSessionIndex',
       'repositories',
     ]);
   });

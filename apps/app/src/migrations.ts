@@ -7,12 +7,14 @@
 // is the promise ADR 0009 makes: the version moves forward, and a rollback restores the one before it.
 
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
+import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
 import { createIndexOn, dropIndexOn, repositoriesOn, RepositoryError } from './repositories.js';
 
 import type { RequestContext } from './context.js';
 import type { QueueIndex } from './queue.js';
 import type { RecordName } from './records.js';
 import type { Document, Repository, RepositoryDb } from './repositories.js';
+import type { SessionIndex } from './sessions.js';
 
 export type Direction = 'up' | 'down';
 
@@ -52,6 +54,9 @@ export interface MigrationApi {
   /** The queue is not a record class, so its indexes are named by the queue and built through it. */
   createQueueIndex(index: QueueIndex): Promise<string>;
   dropQueueIndex(name: string): Promise<void>;
+  /** Nor is a session, for the same reason: operational state, kept beside the records and not among them. */
+  createSessionIndex(index: SessionIndex): Promise<string>;
+  dropSessionIndex(name: string): Promise<void>;
 }
 
 export interface SchemaMigration {
@@ -114,6 +119,16 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...QUEUE_INDEXES].reverse()) await api.dropQueueIndex(index.name);
+    },
+  },
+  {
+    version: 3,
+    name: 'the indexes a session is found and forgotten by',
+    async up(api) {
+      for (const index of SESSION_INDEXES) await api.createSessionIndex(index);
+    },
+    async down(api) {
+      for (const index of [...SESSION_INDEXES].reverse()) await api.dropSessionIndex(index.name);
     },
   },
 ]);
@@ -204,6 +219,8 @@ export function migrationApi(db: RepositoryDb): MigrationApi {
     dropIndex: (name: RecordName, index: string) => dropIndexOn(db, name, index),
     createQueueIndex: (index: QueueIndex) => createQueueIndexOn(db, index),
     dropQueueIndex: (name: string) => dropQueueIndexOn(db, name),
+    createSessionIndex: (index: SessionIndex) => createSessionIndexOn(db, index),
+    dropSessionIndex: (name: string) => dropSessionIndexOn(db, name),
   });
 }
 

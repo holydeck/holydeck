@@ -3,10 +3,14 @@ import { MESSAGE_CODES, errorEnvelope, successEnvelope } from '@holydeck/contrac
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 
 import { corpusClient } from './corpus.js';
+import { guardMutations } from './csrf.js';
+import { withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
+import { serveSessionRoutes } from './session-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
 import type { Fetching } from './corpus.js';
+import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
 import type { WebAsset } from './static.js';
 
@@ -18,6 +22,8 @@ export interface AppOptions {
   fetching: Fetching;
   /** The built web client, when this deployment has one to serve. */
   web?: ReadonlyMap<string, WebAsset>;
+  /** The session store, where a deployment keeps sessions. Without one, nothing changes through here. */
+  sessions?: SessionStore;
 }
 
 /**
@@ -29,11 +35,13 @@ export const VERSIONED_PREFIX = '/api/';
 
 const NOT_FOUND = 'resource.not_found';
 
-export function buildApp({ settings, logger, fetching, web }: AppOptions): FastifyInstance {
+export function buildApp({ settings, logger, fetching, web, sessions }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
 
   withSecurityHeaders(app);
+  // Before every route, so a fault in one of them answers with a code and not with what it threw.
+  withSafeErrors(app);
 
   // Decided before routing, so a client this build cannot serve is told to update rather than being
   // handed a not-found for a route it was asking for in an older shape.
@@ -50,6 +58,10 @@ export function buildApp({ settings, logger, fetching, web }: AppOptions): Fasti
       ]),
     );
   });
+
+  // Installed before the first route is registered, which is what makes `mutatingRoutesOf` the whole
+  // list of the routes that change something: a route registered above this line would be missing from it.
+  guardMutations(app, { sessions });
 
   app.setNotFoundHandler((request, reply) =>
     reply
@@ -81,6 +93,8 @@ export function buildApp({ settings, logger, fetching, web }: AppOptions): Fasti
     }
     return successEnvelope({ translations: answer.value }, request.id, CLIENT_WINDOW.current);
   });
+
+  serveSessionRoutes(app, { sessions });
 
   if (web !== undefined) serveWebClient(app, web);
 

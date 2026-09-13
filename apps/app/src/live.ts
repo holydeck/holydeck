@@ -6,9 +6,14 @@
 
 import { decideClient } from '@holydeck/contracts/clients';
 import { LIVE_CHANNELS, type LiveChannel, type SnapshotFrame, parseFrame } from '@holydeck/contracts/live';
+import { TICKET_QUERY, isSameOrigin } from '@holydeck/contracts/sessions';
 import websocket from '@fastify/websocket';
 
-import type { FastifyInstance } from 'fastify';
+import { originOf, refuseAsForbidden, refuseAsStoreSaid, sessionCallFor, sessionFor } from './csrf.js';
+import { SessionError } from './sessions.js';
+
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { SessionStore } from './sessions.js';
 
 export const LIVE_PATH = '/api/v1/live';
 
@@ -53,12 +58,56 @@ const isChannel = (value: string | undefined): value is LiveChannel =>
 export interface LiveOptions {
   /** Explicit, so a frame's time is the session's time and a test does not have to read a clock. */
   readonly clock?: () => string;
+  /** Absent where a deployment keeps no sessions, and there is no ticket for a socket to be carrying. */
+  readonly sessions?: SessionStore;
 }
 
-export async function serveLive(app: FastifyInstance, { clock = () => new Date().toISOString() }: LiveOptions = {}): Promise<void> {
+/**
+ * What a socket proves before it is one. A browser sets no header on a WebSocket, so the two
+ * things a mutation proves in a header and a cookie are proven here in the cookie and the query string:
+ * the origin the page asking was served from, and a ticket this session was issued, good once and for
+ * seconds. The ticket is what appears in the URL — never the session identifier, which stays in the
+ * cookie where a proxy log, a referrer and a browser history never reach it.
+ *
+ * Refused before the upgrade finishes rather than closed after it: a status is something a client and an
+ * operator can both read, and a close code on a socket that already opened is neither.
+ */
+const proveHandshake =
+  (sessions: SessionStore) =>
+  async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!isSameOrigin(request.headers.origin, originOf(request))) {
+      await refuseAsForbidden(request, reply, 'origin', 'a socket is opened only from this deployment’s own pages');
+      return;
+    }
+    const ticket = queryOf(request.url, TICKET_QUERY);
+    if (ticket === undefined) {
+      await refuseAsForbidden(request, reply, TICKET_QUERY, 'ask this session for a ticket, and spend it here');
+      return;
+    }
+    const proven = await sessionFor(sessions, request, reply);
+    if (proven === undefined) return;
+    try {
+      await proven.sessions.redeemTicket(sessionCallFor(request), proven.token, ticket);
+    } catch (error: unknown) {
+      if (error instanceof SessionError && error.kind === 'ticket') {
+        await refuseAsForbidden(request, reply, TICKET_QUERY, 'a ticket opens one socket, within the seconds it is good for');
+        return;
+      }
+      await refuseAsStoreSaid(request, reply, error, 'this session ended while the socket was opening');
+    }
+  };
+
+export async function serveLive(
+  app: FastifyInstance,
+  { clock = () => new Date().toISOString(), sessions }: LiveOptions = {},
+): Promise<void> {
   await app.register(websocket);
 
-  app.get(LIVE_PATH, { websocket: true }, (socket, request) => {
+  // A deployment with no sessions has nothing to prove a handshake against, and serves the socket the
+  // way it serves everything else: to whoever asked.
+  const proving = sessions === undefined ? {} : { preValidation: proveHandshake(sessions) };
+
+  app.get(LIVE_PATH, { websocket: true, ...proving }, (socket, request) => {
     // Graded here rather than by the versioned-surface hook, for two reasons that point the same way: a
     // refused handshake tells a browser client nothing it can read, and an HTTP refusal written onto a
     // connection that asked to stop being HTTP is a socket both ends then wait on.
