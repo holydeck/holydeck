@@ -8,11 +8,11 @@ import { MongoClient } from 'mongodb';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, UPDATE_REQUIRED_STATUS } from '@holydeck/contracts/clients';
 import { UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { parseSnapshotFrame } from '@holydeck/contracts/live';
-import { TICKET_QUERY } from '@holydeck/contracts/sessions';
+import { SESSION_PATH, TICKET_QUERY } from '@holydeck/contracts/sessions';
 import { readJob } from '@holydeck/worker/jobs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { signInTo } from '../src/identity.js';
+import { OPERATOR, signInTo } from '../src/identity.js';
 import { reachLedger } from '../src/reach.js';
 import { startStack } from '../src/stack.js';
 
@@ -211,6 +211,57 @@ describe('a live WebSocket client', () => {
     const socket = session(`/api/v1/live?channel=stage&clientVersion=${CLIENT_WINDOW.current}`, {});
     expect(await socket.closed).toMatchObject({ code: 1006 });
     ledger.reached('websocket', 'a socket opened with no ticket was refused before the upgrade');
+  });
+});
+
+// The stopwatch the unit suite deliberately left to this one. What a password costs is scrypt at the
+// cost this deployment stores, and the whole point of deriving against a decoy for a handle nobody holds
+// is that the two answers cost the same — so the measurement has to be made where the derivation is the
+// real one, against a real database, over HTTP.
+describe('signing in', () => {
+  const attempt = async (name: string, password: string): Promise<{ status: number; ms: number }> => {
+    const started = performance.now();
+    const response = await fetch(`${stack.baseUrl}${SESSION_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: stack.baseUrl, ...CLIENT },
+      body: JSON.stringify({ name, password }),
+    });
+    await response.text();
+    return { status: response.status, ms: performance.now() - started };
+  };
+
+  const median = (values: readonly number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0;
+
+  it('costs a handle nobody holds what it costs a handle somebody does, and says the same thing', async () => {
+    // The decoy credential is derived once, on the first miss, and kept: that one derivation is this
+    // deployment's start-up cost, not an attempt's, so it is paid before anything is timed.
+    await attempt('warming-up', OPERATOR.password);
+
+    const wrong: number[] = [];
+    const unknown: number[] = [];
+    for (let round = 0; round < 5; round += 1) {
+      const known = await attempt(OPERATOR.name, 'not-the-passphrase');
+      const nobody = await attempt('nobody-holds-this', OPERATOR.password);
+      expect([known.status, nobody.status]).toEqual([401, 401]);
+      wrong.push(known.ms);
+      unknown.push(nobody.ms);
+    }
+
+    const known = median(wrong);
+    const nobody = median(unknown);
+    // Both paid for a derivation rather than one being answered from an index miss: at this cost, an
+    // answer that skipped scrypt comes back in single-digit milliseconds.
+    expect(Math.min(known, nobody)).toBeGreaterThan(20);
+    // Within half of the slower of the two, which is the tolerance a shared runner can hold. An answer
+    // that told the two apart would differ by the whole of a derivation, not by a fraction of one.
+    expect(Math.abs(known - nobody)).toBeLessThan(Math.max(known, nobody) / 2);
+    ledger.reached('application', `a miss cost ${Math.round(nobody)}ms against a hit's ${Math.round(known)}ms`);
+  });
+
+  // Five failures are under the limit and the successful sign-in clears them, which is what keeps the
+  // rest of this run — and the browser run against the same stack — signing in at all.
+  it('forgives what was counted against a handle as soon as that handle signs in', async () => {
+    await expect(attempt(OPERATOR.name, OPERATOR.password)).resolves.toMatchObject({ status: 201 });
   });
 });
 
