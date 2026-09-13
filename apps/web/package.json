@@ -10,8 +10,10 @@
   ],
   "scripts": {
     "build": "node build.mjs",
+    "dev": "node build.mjs --watch",
+    "health": "node health.mjs",
     "test": "vitest run --coverage",
-    "lint": "eslint src build.mjs",
+    "lint": "eslint src build.mjs health.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
