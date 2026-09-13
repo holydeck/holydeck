@@ -13,6 +13,8 @@
     "test:release": "node --test \"scripts/release/**/*.test.mjs\"",
     "test:workspaces": "node --test \"scripts/workspace/**/*.test.mjs\"",
     "dev:server": "docker compose -f compose.dev.yaml up --build",
+    "verify:compose": "node scripts/workspace/compose.mjs",
+    "verify:stack": "node scripts/stack/verify.mjs",
     "dev:server:down": "docker compose -f compose.dev.yaml down -v",
     "release": "release-it"
   },
@@ -26,7 +28,8 @@
     "release-it": "^21.0.2",
     "turbo": "^2.10.12",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.69.0"
+    "typescript-eslint": "^8.69.0",
+    "yaml": "^2.9.0"
   },
   "version": "2026.9.2"
 }

@@ -71,6 +71,11 @@ throws it away. `compose.test.yaml` is the same services arranged to remember no
 project, tmpfs instead of volumes, loopback ports of its own — so a test run starts from an empty
 database and can run beside the development stack.
 
+```sh
+pnpm verify:compose   # read both Compose files: health gates, wait conditions, what persists
+pnpm verify:stack     # bring both stacks up and read what they did (slow: it builds images)
+```
+
 Every start rebuilds, so the container always runs the current code. The corpus requires a
 credential and publishes on loopback only, the way a deployment runs it, so the CLI sends the
 dev credential with every request:
