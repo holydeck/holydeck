@@ -1,5 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
+import { coverage100 } from '../../vitest.base.js';
+
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
@@ -8,7 +10,7 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.test.ts', 'src/server.ts'],
-      thresholds: { statements: 100, branches: 100, functions: 100, lines: 100 },
+      thresholds: coverage100,
     },
   },
 });
