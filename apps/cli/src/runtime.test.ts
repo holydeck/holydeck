@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { HolyDeckError } from '@holydeck/core/messages';
 import { FIXED_NOW, fakeLauncher, makeContext } from '../test/harness.js';
 import { closeBrowsers, createRuntime, requireLocal, runtimeFlags } from './runtime.js';
@@ -136,7 +136,10 @@ describe('lock waits', () => {
     const runtime = await createRuntime(setup.ctx);
     const release = holdKjv(runtime.store.dataDir);
     const acquired = runtime.store.withLock('KJV', async () => 'acquired');
-    setTimeout(release, 20);
+    // Release once the waiter has said it is waiting, never on a timer: a release that lands
+    // between the failed acquire and the read that names the owner leaves the message generic.
+    await vi.waitUntil(() => setup.stderr().includes('datastore locked'));
+    release();
     await expect(acquired).resolves.toBe('acquired');
     expect(setup.stderr()).toContain(`KJV: datastore locked by process ${process.pid}`);
     expect(setup.stderr()).toContain('waiting for it to finish');
@@ -149,7 +152,8 @@ describe('lock waits', () => {
     setup.ctx.status = (text) => titles.push(text);
     const release = holdKjv(runtime.store.dataDir);
     const acquired = runtime.store.withLock('KJV', async () => 'acquired');
-    setTimeout(release, 20);
+    await vi.waitUntil(() => titles.length > 0);
+    release();
     await expect(acquired).resolves.toBe('acquired');
     expect(titles[0]).toContain('KJV: datastore locked by');
     expect(setup.stderr()).not.toContain('datastore locked');
