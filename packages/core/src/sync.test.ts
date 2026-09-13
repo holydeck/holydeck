@@ -151,7 +151,10 @@ describe('syncTranslation', () => {
       sleep: async (ms) => { sleeps.push(ms); },
     });
     expect(sleeps.filter((ms) => ms === 250)).toHaveLength(1188); // every chapter after the first
-  });
+    // The whole 1189-chapter canon runs here, which is the only test in this repository whose own work
+    // approaches the default five-second limit; on a machine running every workspace's suite at once it
+    // reached it and failed the gate for a reason that was never about the throttle.
+  }, 30_000);
 
   it('rejects unknown translations', async () => {
     const { fetcher } = stubFetcher(() => ({ status: 200, body: '' }));
