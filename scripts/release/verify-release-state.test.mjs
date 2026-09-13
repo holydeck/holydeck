@@ -103,11 +103,8 @@ test('a missing changelog section is reported', () => {
 
 // A workspace the release scripts do not know keeps its old version forever: the tag says one thing
 // and the package another, and nothing in the release run notices.
-test('every workspace in the root pipeline is versioned in lockstep', () => {
-  assert.deepEqual(
-    WORKSPACES.filter((workspace) => !MANIFESTS.includes(`${workspace}/package.json`)),
-    [],
-  );
+test('every workspace in the root pipeline is versioned in lockstep, and nothing else is', () => {
+  assert.deepEqual([...MANIFESTS].sort(), WORKSPACES.map((workspace) => `${workspace}/package.json`).sort());
 });
 
 test('every workspace in the root pipeline is named in the release gate', () => {

@@ -41,6 +41,7 @@ test('the fan-out targets are every workspace package and the CLI constant', () 
   assert.deepEqual(MANIFESTS, [
     'packages/contracts/package.json',
     'packages/core/package.json',
+    'packages/localization/package.json',
     'apps/app/package.json',
     'apps/cli/package.json',
     'apps/corpus/package.json',

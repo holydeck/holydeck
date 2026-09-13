@@ -15,6 +15,7 @@ export const fromRepoRoot = (path) => fileURLToPath(new URL(`../../${path}`, imp
 export const MANIFESTS = [
   'packages/contracts/package.json',
   'packages/core/package.json',
+  'packages/localization/package.json',
   'apps/app/package.json',
   'apps/cli/package.json',
   'apps/corpus/package.json',

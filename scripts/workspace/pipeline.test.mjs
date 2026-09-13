@@ -4,6 +4,7 @@ import {
   PIPELINE_TASKS,
   PUBLISHED_WORKSPACE,
   WORKSPACES,
+  packageDirsOn,
   readRepo,
   verifyPipeline,
   workspaceGlobsOf,
@@ -30,6 +31,7 @@ const complete = () => {
   }
   return {
     workspaceYaml: 'packages:\n  - packages/*\n  - apps/*\noverrides:\n  esbuild: 0.28.2\n',
+    packageDirs: [...WORKSPACES],
     manifests,
     vitestConfigs,
     coverageBase: 'export const coverage100 = { statements: 100, branches: 100, functions: 100, lines: 100 };\n',
@@ -130,6 +132,13 @@ const COUNTEREXAMPLES = [
     },
     problems: ['vitest.base.ts is missing'],
   },
+  {
+    why: 'a package on disk the census never names is one no root command ever runs',
+    break: (input) => {
+      input.packageDirs.push('packages/invented');
+    },
+    problems: ['packages/invented is a package on disk that the pipeline census does not declare'],
+  },
 ];
 
 for (const counterexample of COUNTEREXAMPLES) {
@@ -150,6 +159,19 @@ test('a glob matches one directory level and not the ones below it', () => {
   assert.deepEqual(verifyPipeline({ ...input, workspaceYaml: 'packages:\n  - apps/*\n' }).slice(0, 1), [
     'packages/core is not matched by any pnpm-workspace.yaml package glob',
   ]);
+});
+
+// Discovery is what makes the census two-way: WORKSPACES is hand-written, and a package nobody adds to
+// it is invisible to every rule above, because they all iterate the list rather than the repository.
+test('discovery finds a package under a glob, and an exact path that is one', () => {
+  const listing = { packages: ['core', 'localization', 'notes'], tools: ['scratch'] };
+  const manifests = new Set(['packages/core', 'packages/localization', 'tools/exact']);
+  const dirs = packageDirsOn(
+    ['packages/*', 'tools/*', 'tools/exact'],
+    (parent) => listing[parent] ?? [],
+    (dir) => manifests.has(dir),
+  );
+  assert.deepEqual(dirs, ['packages/core', 'packages/localization', 'tools/exact']);
 });
 
 // The checks above all run against constructed input. This one runs them against the repository, so

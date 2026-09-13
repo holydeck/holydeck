@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 
 import { fromRepoRoot } from './pipeline.mjs';
 
-export const BROWSER_SAFE_WORKSPACES = ['packages/contracts', 'apps/web'];
+export const BROWSER_SAFE_WORKSPACES = ['packages/contracts', 'packages/localization', 'apps/web'];
 
 // Node's own builtin list, in the bare spelling that predates the `node:` prefix. The prefixed form
 // needs no list at all, which is why it is handled separately.

@@ -12,6 +12,7 @@ export const EXPECTED_PACKAGE_NAMES = {
   'package.json': 'holydeck-monorepo',
   'packages/contracts/package.json': '@holydeck/contracts',
   'packages/core/package.json': '@holydeck/core',
+  'packages/localization/package.json': '@holydeck/localization',
   'apps/app/package.json': '@holydeck/app',
   'apps/cli/package.json': '@holydeck/cli',
   'apps/corpus/package.json': '@holydeck/corpus',

@@ -4,7 +4,7 @@
 // script is what turns that silence into a failure, and it is the reason the root commands can be
 // trusted to cover every workspace rather than whichever ones happen to be wired up.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const fromRepoRoot = (path) => fileURLToPath(new URL(`../../${path}`, import.meta.url));
@@ -17,6 +17,7 @@ export const PIPELINE_TASKS = ['build', 'test', 'lint', 'typecheck'];
 export const WORKSPACES = [
   'packages/core',
   'packages/contracts',
+  'packages/localization',
   'apps/cli',
   'apps/corpus',
   'apps/app',
@@ -58,12 +59,40 @@ const matchesGlob = (glob, dir) => {
 };
 
 /**
+ * Every directory a package glob matches that holds a manifest. `listDirs` and `hasManifest` are taken
+ * as arguments so this reads a repository in a test as easily as on disk.
+ */
+export function packageDirsOn(globs, listDirs, hasManifest) {
+  const dirs = [];
+  for (const glob of globs) {
+    const [prefix, rest] = glob.split('*');
+    if (rest === undefined) {
+      if (hasManifest(glob)) dirs.push(glob);
+      continue;
+    }
+    for (const name of listDirs(prefix.replace(/\/$/u, ''))) {
+      const dir = `${prefix}${name}`;
+      if (hasManifest(dir)) dirs.push(dir);
+    }
+  }
+  return dirs.sort();
+}
+
+/**
  * Grades the repository layout against the pipeline it claims to have. `manifests` and
  * `vitestConfigs` are keyed by workspace directory; a missing key means the file is absent.
+ * `packageDirs` is what the repository actually holds, which is the only way a package missing from
+ * the census below can be noticed at all: every other rule here iterates the census.
  */
-export function verifyPipeline({ workspaceYaml, manifests, vitestConfigs, coverageBase }) {
+export function verifyPipeline({ workspaceYaml, packageDirs, manifests, vitestConfigs, coverageBase }) {
   const problems = [];
   const globs = workspaceGlobsOf(workspaceYaml ?? '');
+
+  for (const dir of packageDirs) {
+    if (!WORKSPACES.includes(dir)) {
+      problems.push(`${dir} is a package on disk that the pipeline census does not declare`);
+    }
+  }
 
   if (coverageBase === undefined) {
     problems.push(`${COVERAGE_BASE} is missing`);
@@ -131,7 +160,15 @@ export function readRepo() {
     manifests[dir] = read(`${dir}/package.json`);
     vitestConfigs[dir] = read(`${dir}/vitest.config.ts`);
   }
-  return { workspaceYaml: read('pnpm-workspace.yaml'), manifests, vitestConfigs, coverageBase: read(COVERAGE_BASE) };
+  const workspaceYaml = read('pnpm-workspace.yaml');
+  const packageDirs = packageDirsOn(
+    workspaceGlobsOf(workspaceYaml ?? ''),
+    (parent) => readdirSync(fromRepoRoot(parent), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name),
+    (dir) => read(`${dir}/package.json`) !== undefined,
+  );
+  return { workspaceYaml, packageDirs, manifests, vitestConfigs, coverageBase: read(COVERAGE_BASE) };
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {

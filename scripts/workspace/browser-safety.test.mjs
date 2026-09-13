@@ -16,13 +16,20 @@ const clean = () => ({
       'packages/contracts/src/problems.ts': 'export const ok = 1;\n',
       'packages/contracts/src/http.test.ts': "import { readFileSync } from 'node:fs';\nreadFileSync;\n",
     },
+    'packages/localization': {
+      'packages/localization/src/messages.ts': "import { n } from './format.js';\nexport const c = n;\n",
+      'packages/localization/src/format.ts': 'export const n = 2;\n',
+    },
     'apps/web': {
       'apps/web/src/api.ts': "import { ok } from '@holydeck/contracts/problems';\nexport const b = ok;\n",
+      'apps/web/src/shell.ts': "import { t } from '@holydeck/localization/messages';\nexport const d = t;\n",
     },
   },
   manifests: {
     'packages/contracts': '{"name":"@holydeck/contracts"}',
-    'apps/web': '{"name":"@holydeck/web","dependencies":{"@holydeck/contracts":"workspace:*"}}',
+    'packages/localization': '{"name":"@holydeck/localization"}',
+    'apps/web':
+      '{"name":"@holydeck/web","dependencies":{"@holydeck/contracts":"workspace:*","@holydeck/localization":"workspace:*"}}',
   },
 });
 
@@ -32,8 +39,8 @@ const withSource = (file, text) => {
   return input;
 };
 
-test('the two browser-safe workspaces are the ones the contracts reach the browser through', () => {
-  assert.deepEqual(BROWSER_SAFE_WORKSPACES, ['packages/contracts', 'apps/web']);
+test('the browser-safe workspaces are the ones shipped code reaches the browser through', () => {
+  assert.deepEqual(BROWSER_SAFE_WORKSPACES, ['packages/contracts', 'packages/localization', 'apps/web']);
 });
 
 test('every kind of import is collected, including the ones a naive scan misses', () => {
