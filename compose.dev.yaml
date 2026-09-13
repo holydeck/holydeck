@@ -1,12 +1,21 @@
-# Development stack: the corpus server, the application, the worker and the MongoDB they store into,
-# all built from this checkout.
+# Development stack: the corpus server, the application, the web development flow, the worker, the
+# migration that has to run before any of them serves, and the MongoDB they store into — all built from
+# this checkout.
 # This is for testing and development only — apps/corpus/compose.example.yaml is the
 # deployment example, and it pulls the published image instead of building one.
 #
-#   pnpm dev:server        # or: docker compose -f compose.dev.yaml up --build
+#   pnpm dev:server        # or: docker compose -f compose.dev.yaml up --build --wait
 #   pnpm dev:server:down   # or: docker compose -f compose.dev.yaml down -v
 #
-# It builds from the working tree, so the running server is whatever the code says right now.
+# It builds from the working tree, so the running server is whatever the code says right now. Editing
+# apps/web/src rebuilds the client in place; editing anything else means building the images again.
+#
+# Data lives in named volumes, so `down` and `up` again finds yesterday's work. `down -v` is the one that
+# throws it away. compose.test.yaml is the opposite stack: it keeps nothing on purpose.
+#
+# No settings file is mounted here; the services read their defaults and the environment below. To try a
+# settings.yaml, mount the directory that holds it — never the file itself, because saving it writes a
+# new file and renames it over the old one, and a bind mount of a file follows the inode it was given.
 #
 # The corpus requires a credential here, the same way a deployment does, so the application can
 # refuse to read a library that anybody could read. Point the CLI at it with
@@ -32,9 +41,29 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    # Health is declared in apps/corpus/Dockerfile, because a deployment that pulls the published image
+    # gets the same check without copying it into its own Compose file.
+
+  # Runs once, before anything serves: T19 made the application refuse a database whose schema version is
+  # not the one it was built for, and this is what moves it there. Re-running it is a no-op, so every
+  # `up` goes through it and every `up` records that it did.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    command: ["node", "/srv/app/dist/migrate.js"]
+    environment:
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+      HOLYDECK_LOG_LEVEL: debug
+    volumes:
+      - holydeck-dev-data:/data/holydeck
+    depends_on:
+      mongo:
+        condition: service_healthy
 
   # The application and the worker are the same image with different commands; that is the point of
-  # running both here. The application answers on 3100 so it does not collide with the corpus server.
+  # running both here. The application answers on 3100 so it does not collide with the corpus server,
+  # and on every interface, because the phones and tablets it has to be tried on are not this machine.
   app:
     build:
       context: .
@@ -45,14 +74,40 @@ services:
       # The application reads the corpus over this network and never publishes it onwards.
       HOLYDECK_CORPUS_URL: http://server:3000
       HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:-dev-corpus-token-not-a-secret}
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
     ports:
       - "3100:3100"
     depends_on:
-      - server
+      migrate:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+      web:
+        condition: service_healthy
     volumes:
       - holydeck-dev-data:/data/holydeck
+      # The client the web service just built, read-only: the application serves it from its own origin
+      # at the same relative path the image uses, so dev and deployment agree.
+      - web-dist:/srv/web/dist:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  # The web development flow: esbuild watching the mounted source and writing into the volume the
+  # application serves. It is healthy when the client it wrote is usable, not when the process is up —
+  # a watching build survives a compile error, and serving the last good client while lying about it is
+  # worse than saying so.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
+    volumes:
+      - ./apps/web/src:/repo/apps/web/src:ro
+      - web-dist:/repo/apps/web/dist
+    healthcheck:
+      test: ["CMD", "node", "/repo/apps/web/health.mjs"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -66,12 +121,23 @@ services:
       HOLYDECK_LOG_LEVEL: debug
     volumes:
       - holydeck-dev-data:/data/holydeck
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # The worker serves no HTTP, so its health is the heartbeat it writes: it stops writing when the
+    # data directory it needs goes away, which is the failure that would otherwise look like silence.
+    healthcheck:
+      test: ["CMD", "node", "/srv/worker/dist/health.js"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
 
   mongo:
     image: mongo:8
-    # Published so mongosh or Compass can look inside; change the host port if 27017 is taken.
+    # Loopback only, like the corpus: this holds the records, and it requires no credential here.
+    # mongosh or Compass on this machine still reach it.
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongo-dev-data:/data/db
     healthcheck:
@@ -83,3 +149,4 @@ services:
 volumes:
   holydeck-dev-data:
   mongo-dev-data:
+  web-dist:

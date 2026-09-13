@@ -1,0 +1,126 @@
+# Test stack: the same six services as compose.dev.yaml, arranged to remember nothing.
+#
+#   node scripts/stack/verify.mjs        # brings both stacks up and reads them
+#   docker compose -f compose.test.yaml --progress quiet up --build --wait
+#   docker compose -f compose.test.yaml down -v
+#
+# Two differences from the development stack, and both are the point of this file.
+#
+# It names its own project, so it builds its own containers, its own network and its own volumes rather
+# than taking over the development stack a `docker compose up` in this directory started.
+#
+# Everything that holds records is a tmpfs: the database, the application's data directory and the
+# worker's. A run writes them to memory and `down` drops them, so a second run starts from nothing and a
+# test that passed only because the previous run left a record behind fails here instead of passing.
+#
+# Ports are published on loopback only, on their own numbers, so a test stack can run beside the
+# development one without either taking the other's port. The corpus is not published at all; the
+# services reach it over this network, which is all it is for.
+#
+# The one named volume is the built web client, which is output rather than record: keeping it across runs
+# is a build cache, and Compose scopes it to this project's name, so the development stack's client and
+# this one are two different volumes that happen to share a key.
+name: holydeck-test
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: apps/corpus/Dockerfile
+    environment:
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017
+      HOLYDECK_MONGO_DB: holydeck
+      HOLYDECK_LOG_LEVEL: warn
+      HOLYDECK_CORPUS_TOKEN: test-corpus-token-not-a-secret
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    command: ["node", "/srv/app/dist/migrate.js"]
+    environment:
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+      HOLYDECK_LOG_LEVEL: warn
+    tmpfs:
+      - /data/holydeck:size=64m,mode=1777
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    environment:
+      HOLYDECK_PORT: "3100"
+      HOLYDECK_LOG_LEVEL: warn
+      HOLYDECK_CORPUS_URL: http://server:3000
+      HOLYDECK_CORPUS_TOKEN: test-corpus-token-not-a-secret
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+    ports:
+      - "127.0.0.1:3300:3100"
+    tmpfs:
+      - /data/holydeck:size=256m,mode=1777
+    volumes:
+      - web-dist:/srv/web/dist:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
+    volumes:
+      - ./apps/web/src:/repo/apps/web/src:ro
+      - web-dist:/repo/apps/web/dist
+    healthcheck:
+      test: ["CMD", "node", "/repo/apps/web/health.mjs"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    command: ["node", "/srv/worker/dist/main.js"]
+    environment:
+      HOLYDECK_LOG_LEVEL: warn
+    tmpfs:
+      - /data/holydeck:size=256m,mode=1777
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "/srv/worker/dist/health.js"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  mongo:
+    image: mongo:8
+    ports:
+      - "127.0.0.1:27018:27017"
+    tmpfs:
+      - /data/db:size=1g,mode=1777
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  web-dist:

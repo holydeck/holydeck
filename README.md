@@ -43,15 +43,33 @@ gh pr create --base main
 
 Merge once every check is green.
 
-### Running the server locally
+### Running the stack locally
 
-`compose.dev.yaml` builds the server image from this checkout and starts it with a MongoDB, so
-the CLI can be tested against a real server without deploying anything:
+`compose.dev.yaml` builds everything from this checkout — the corpus server, the application, the
+web client's watching build, the worker, the migration that runs before any of them serves, and the
+MongoDB they store into — so the CLI and the client can be tested against real services without
+deploying anything:
 
 ```sh
 pnpm dev:server        # build from the working tree, serve on http://localhost:3000
-pnpm dev:server:down   # stop it and delete the database volume
+pnpm dev:server:down   # stop it and delete the volumes
 ```
+
+Every service is health-checked, so `docker compose -f compose.dev.yaml up --build --wait app server
+web worker` comes back only once the stack is usable rather than merely started. The application
+answers `/health`, the corpus declares its check in its own image, and the worker serves no HTTP at
+all: its health is the heartbeat it writes, which it stops writing when the data directory it needs
+goes away.
+
+Editing `apps/web/src` rebuilds the client in place — the web service watches the mounted source and
+writes into the volume the application serves. Editing anything else means building the images again.
+A watching build survives a compile error, so the build records whether it worked and the service is
+unhealthy until it does.
+
+Records live in named volumes: `down` and `up` again finds the same database, and `down -v` is what
+throws it away. `compose.test.yaml` is the same services arranged to remember nothing — its own
+project, tmpfs instead of volumes, loopback ports of its own — so a test run starts from an empty
+database and can run beside the development stack.
 
 Every start rebuilds, so the container always runs the current code. The corpus requires a
 credential and publishes on loopback only, the way a deployment runs it, so the CLI sends the
@@ -63,9 +81,9 @@ HOLYDECK_SERVER_TOKEN=dev-corpus-token-not-a-secret \
   node apps/cli/dist/cli.js get "PSA 118:24" --server-url http://localhost:3000
 ```
 
-The stack also starts the application on <http://localhost:3100>. It serves the web client from
-its own origin and reads the corpus over the internal network, which is the only way anything
-reaches the library.
+The application answers on <http://localhost:3100>, on every interface, because the phones and
+tablets it has to be tried on are not this machine. It serves the web client from its own origin and
+reads the corpus over the internal network, which is the only way anything reaches the library.
 
 The corpus syncs through the Chromium in its own image, so `POST /api/v1/translations/KJV/sync`
 works from the dev stack too. `apps/corpus/compose.example.yaml` is the deployment example

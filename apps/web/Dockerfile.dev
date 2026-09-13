@@ -1,0 +1,26 @@
+# The web development flow, and only that: esbuild watching the source this checkout has and writing the
+# client into the volume the application serves. There is no production counterpart here — apps/app's
+# Dockerfile builds the client into its own image, which is what a deployment ships.
+#
+# The watcher imports its workspace dependencies from their built dist, so those are built once while the
+# image is built. Editing one of them means building this image again; editing apps/web/src does not,
+# which is the whole point of the mount.
+FROM node:24.20.0-slim
+WORKDIR /repo
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json vitest.base.ts eslint.config.js .browserslistrc ./
+COPY packages ./packages
+COPY apps ./apps
+RUN pnpm install --frozen-lockfile
+RUN pnpm turbo build --filter=@holydeck/web...
+# An empty named volume mounted at dist inherits this ownership, so the watcher can write what it owns.
+RUN chown -R node:node /repo/apps/web/dist
+USER node
+# The watcher is started as node rather than through pnpm: pnpm at run time means corepack downloading
+# itself again as a different user and deciding the workspace needs reinstalling, neither of which a
+# container that is already built has any business doing. esbuild resolves its entry points from the
+# working directory, so this is the directory the build script expects.
+WORKDIR /repo/apps/web
+# No HEALTHCHECK: a watching build survives a compile error, so being alive says nothing about whether
+# the client is usable. The stack asks health.mjs, which reads what the build recorded.
+CMD ["node", "build.mjs", "--watch"]
