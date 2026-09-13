@@ -6,7 +6,7 @@ const packageNames = {
   'package.json': 'holydeck-monorepo',
   'packages/core/package.json': '@holydeck/core',
   'apps/cli/package.json': '@holydeck/cli',
-  'apps/server/package.json': '@holydeck/server',
+  'apps/corpus/package.json': '@holydeck/corpus',
 };
 const manifest = (path, version) => JSON.stringify({ name: packageNames[path], version });
 
@@ -16,7 +16,7 @@ const consistent = {
     'package.json': manifest('package.json', '2026.9.0'),
     'packages/core/package.json': manifest('packages/core/package.json', '2026.9.0'),
     'apps/cli/package.json': manifest('apps/cli/package.json', '2026.9.0'),
-    'apps/server/package.json': manifest('apps/server/package.json', '2026.9.0'),
+    'apps/corpus/package.json': manifest('apps/corpus/package.json', '2026.9.0'),
   },
   cliVersionModule: "export const CLI_VERSION = '2026.9.0';\n",
   changelog: '# Changelog\n\n## 2026.9.0 (2026-09-08)\n\n### Features\n\n* first release\n',
@@ -49,11 +49,11 @@ test('a lagging manifest is reported by path', () => {
     ...consistent,
     manifests: {
       ...consistent.manifests,
-      'apps/server/package.json': manifest('apps/server/package.json', '2026.8.9'),
+      'apps/corpus/package.json': manifest('apps/corpus/package.json', '2026.8.9'),
     },
   };
   assert.deepEqual(verifyReleaseState(state), [
-    'apps/server/package.json has version 2026.8.9, expected 2026.9.0',
+    'apps/corpus/package.json has version 2026.8.9, expected 2026.9.0',
   ]);
 });
 

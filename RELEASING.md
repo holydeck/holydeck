@@ -1,13 +1,13 @@
 # Releasing HolyDeck
 
 Every release is a **lockstep release train**: `@holydeck/core`, the `@holydeck/cli`
-CLI, and `@holydeck/server` always share one version number. One release
+CLI, and `@holydeck/corpus` always share one version number. One release
 produces:
 
 | Artifact | Where |
 | --- | --- |
 | `@holydeck/cli@<version>` | npmjs (with provenance) and GitHub Packages |
-| `ghcr.io/holydeck/server:<version>`, plus `:latest` when it is the newest release | GHCR (`@holydeck/server` is never published to a registry — it ships as this image only) |
+| `ghcr.io/holydeck/server:<version>`, plus `:latest` when it is the newest release | GHCR (`@holydeck/corpus` is never published to a registry — it ships as this image only) |
 | GitHub Release `v<version>` | notes taken from the `CHANGELOG.md` section |
 
 `@holydeck/core` is deliberately **not published** to any registry: it is a
@@ -56,7 +56,7 @@ machine, and you are on a clean, up-to-date `main`.
    - computes the next calver version,
    - prepends the new section to `CHANGELOG.md`,
    - bumps the version in the root, `packages/core`, `apps/cli`
-     (including the embedded `CLI_VERSION` constant), and `apps/server`,
+     (including the embedded `CLI_VERSION` constant), and `apps/corpus`,
    - creates ONE signed commit `chore(release): v<version>`, tags it
      `v<version>`, and pushes commit + tag.
 

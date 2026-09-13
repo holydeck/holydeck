@@ -1,5 +1,5 @@
 {
-  "name": "@holydeck/server",
+  "name": "@holydeck/corpus",
   "version": "2026.9.2",
   "description": "HolyDeck HTTP server: Fastify + MongoDB shell over @holydeck/core",
   "license": "MIT",

@@ -7,8 +7,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.js
 COPY packages ./packages
 COPY apps ./apps
 RUN pnpm install --frozen-lockfile
-RUN pnpm turbo build --filter=@holydeck/server...
-RUN pnpm --filter @holydeck/server deploy --legacy --prod /out
+RUN pnpm turbo build --filter=@holydeck/corpus...
+RUN pnpm --filter @holydeck/corpus deploy --legacy --prod /out
 
 FROM node:24.20.0-slim
 ENV NODE_ENV=production \

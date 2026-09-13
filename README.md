@@ -61,7 +61,7 @@ node apps/cli/dist/cli.js get "PSA 118:24" --server-url http://localhost:3000
 ```
 
 The server syncs through the Chromium in its own image, so `POST /api/v1/translations/KJV/sync`
-works from the dev stack too. `apps/server/compose.example.yaml` is the deployment example
+works from the dev stack too. `apps/corpus/compose.example.yaml` is the deployment example
 instead: it pulls the published image rather than building one.
 
 ## License

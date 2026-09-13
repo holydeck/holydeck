@@ -41,7 +41,7 @@ test('the fan-out targets are the three workspace packages and the CLI constant'
   assert.deepEqual(MANIFESTS, [
     'packages/core/package.json',
     'apps/cli/package.json',
-    'apps/server/package.json',
+    'apps/corpus/package.json',
   ]);
   assert.equal(CLI_VERSION_FILE, 'apps/cli/src/version.ts');
 });

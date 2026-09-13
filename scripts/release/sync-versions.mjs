@@ -15,7 +15,7 @@ export const fromRepoRoot = (path) => fileURLToPath(new URL(`../../${path}`, imp
 export const MANIFESTS = [
   'packages/core/package.json',
   'apps/cli/package.json',
-  'apps/server/package.json',
+  'apps/corpus/package.json',
 ];
 
 export const CLI_VERSION_FILE = 'apps/cli/src/version.ts';

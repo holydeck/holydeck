@@ -12,7 +12,7 @@ export const EXPECTED_PACKAGE_NAMES = {
   'package.json': 'holydeck-monorepo',
   'packages/core/package.json': '@holydeck/core',
   'apps/cli/package.json': '@holydeck/cli',
-  'apps/server/package.json': '@holydeck/server',
+  'apps/corpus/package.json': '@holydeck/corpus',
 };
 
 export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog }) {
