@@ -70,6 +70,21 @@ test('a wrong package name is reported by path', () => {
   ]);
 });
 
+// A rename leaves the old path behind somewhere. The gate knows four manifests by name, and a
+// path outside that set used to be waved through unnamed rather than reported.
+test('a manifest the gate does not know is reported, not waved through', () => {
+  const state = {
+    ...consistent,
+    manifests: {
+      ...consistent.manifests,
+      'apps/server/package.json': JSON.stringify({ name: '@holydeck/corpus', version: '2026.9.0' }),
+    },
+  };
+  assert.deepEqual(verifyReleaseState(state), [
+    'apps/server/package.json is not a release manifest',
+  ]);
+});
+
 test('a stale CLI_VERSION constant is reported', () => {
   const state = { ...consistent, cliVersionModule: "export const CLI_VERSION = '0.0.0';\n" };
   assert.deepEqual(verifyReleaseState(state), [

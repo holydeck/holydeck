@@ -28,7 +28,9 @@ export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog
       problems.push(`${path} has version ${manifest.version}, expected ${version}`);
     }
     const expectedName = EXPECTED_PACKAGE_NAMES[path];
-    if (expectedName && manifest.name !== expectedName) {
+    if (expectedName === undefined) {
+      problems.push(`${path} is not a release manifest`);
+    } else if (manifest.name !== expectedName) {
       problems.push(`${path} has name ${manifest.name}, expected ${expectedName}`);
     }
   }
