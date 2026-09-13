@@ -43,6 +43,32 @@ gh pr create --base main
 
 Merge once every check is green.
 
+### Checks
+
+`pnpm install` installs the hooks. A commit runs the checks that read staged files, which is quick and
+leaves the rest of the working tree alone: staging one hunk of a file and committing it keeps the hunk
+that was not staged, even though the checks rewrite the file in between.
+
+```sh
+pnpm exec lint-staged          # what a commit runs
+node scripts/verify/gate.mjs   # what a push runs: every required check, in order
+```
+
+The gate is one list, in `scripts/verify/gate.mjs`, and CI runs the same commands step for step. A test
+holds the two together, so a check added to the gate cannot be a check CI quietly skips. `git push
+--no-verify` skips the hook; CI does not.
+
+The browser suite drives a real Chromium, which each machine downloads once:
+
+```sh
+pnpm --filter @holydeck/harness exec playwright install chromium
+pnpm test:e2e   # the client on a desktop, a tablet and a phone
+```
+
+`tests/harness` also holds the integration suite `pnpm turbo run test` runs: it starts a MongoDB of its
+own, the corpus, the migration, the application and the worker, reaches all four through the outside of
+them, and fails if a run never touched one of them.
+
 ### Running the stack locally
 
 `compose.dev.yaml` builds everything from this checkout — the corpus server, the application, the
