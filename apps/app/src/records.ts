@@ -119,6 +119,28 @@ export function recordFor(name: string): RecordClass {
   return record;
 }
 
+/**
+ * The database privileges the data layer needs for a record class: read what is there, append to it, and
+ * build the indexes a migration builds. Nothing that could change or remove a record is in the list, so a
+ * deployment granting exactly this makes append-only the database’s rule rather than this layer’s promise.
+ */
+export const RECORD_ACTIONS: readonly string[] = Object.freeze([
+  'createIndex',
+  'dropIndex',
+  'find',
+  'insert',
+  'listIndexes',
+]);
+
+export interface RecordPrivileges {
+  readonly collection: string;
+  readonly actions: readonly string[];
+}
+
+export function privilegesFor(name: RecordName): RecordPrivileges {
+  return { collection: RECORDS[name].collection, actions: RECORD_ACTIONS };
+}
+
 export interface RecordPermissions {
   readonly read: string;
   readonly append: string;

@@ -2,6 +2,7 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig({
   entry: [
+    'src/canonical.ts',
     'src/problems.ts',
     'src/http.ts',
     'src/clients.ts',
@@ -10,6 +11,7 @@ export default defineConfig({
     'src/jobs.ts',
     'src/entities.ts',
     'src/portable.ts',
+    'src/revisions.ts',
     'src/snapshots.ts',
     'src/services.ts',
   ],

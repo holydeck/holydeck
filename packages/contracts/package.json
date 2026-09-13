@@ -9,6 +9,10 @@
     "dist"
   ],
   "exports": {
+    "./canonical": {
+      "types": "./dist/canonical.d.ts",
+      "import": "./dist/canonical.js"
+    },
     "./problems": {
       "types": "./dist/problems.d.ts",
       "import": "./dist/problems.js"
@@ -40,6 +44,10 @@
     "./portable": {
       "types": "./dist/portable.d.ts",
       "import": "./dist/portable.js"
+    },
+    "./revisions": {
+      "types": "./dist/revisions.d.ts",
+      "import": "./dist/revisions.js"
     },
     "./snapshots": {
       "types": "./dist/snapshots.d.ts",

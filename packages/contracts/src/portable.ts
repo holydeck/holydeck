@@ -10,6 +10,7 @@
 // form that surface reads and writes through, and the export is canonical so an unchanged song re-exports
 // to identical bytes.
 
+import { canonical } from './canonical.js';
 import { type EntityKind, EntityError, PORTABLE_KINDS } from './entities.js';
 import { FIELD_CODES, isRecord, type Parsed, parseObject } from './problems.js';
 
@@ -85,14 +86,6 @@ export function portableDocument(schema: PortableSchema, body: PortableBody): Po
     body,
   };
 }
-
-const canonical = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (!isRecord(value)) return value;
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(value).toSorted()) sorted[key] = canonical(value[key]);
-  return sorted;
-};
 
 /**
  * Writes a document as the bytes it travels as: the declaration first, every object sorted, and a
