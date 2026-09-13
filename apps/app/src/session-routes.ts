@@ -31,6 +31,7 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { originOf, provenSession, refuseAsForbidden, sessionCallFor, sessionFor } from './csrf.js';
 import { sessionContext } from './sessions.js';
+import { totpContext } from './totp.js';
 
 import type { AuditEntry } from './audit.js';
 import type { Identity } from './onboarding.js';
@@ -111,8 +112,8 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
     const asked = accountScope(credentials.value.name);
     if (await identity.attempts.locked(gate, asked)) return refused();
 
-    const account = await identity.accounts.authenticate(accountContext(correlation), credentials.value);
-    if (account === undefined) {
+    /** One refusal, whichever half of the sign-in was wrong. What differs is written down, not answered. */
+    const denied = async (actor: string, subject: string, detail: string): Promise<FastifyReply> => {
       await recorded(request, 'the sign-in gate could not count a failure', async () => {
         if (await identity.attempts.failed(gate, asked)) {
           await note('system', {
@@ -123,13 +124,27 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
           });
         }
       });
-      await note('system', {
-        action: 'session.signIn',
-        subject: credentials.value.name,
-        outcome: 'refused',
-        detail: 'the handle or the password was wrong',
-      });
+      await note(actor, { action: 'session.signIn', subject, outcome: 'refused', detail });
       return refused();
+    };
+
+    const account = await identity.accounts.authenticate(accountContext(correlation), credentials.value);
+    if (account === undefined) {
+      return denied('system', credentials.value.name, 'the handle or the password was wrong');
+    }
+
+    // Asked only once the password is this account's, which is the one thing that makes the extra read
+    // safe to make: a caller guessing handles never gets this far, so the read tells them nothing. What
+    // comes back says whether anything is owed and whether what was typed settles it, in one answer, so
+    // no separate question is asked that could say by its cost alone that this account owes a factor.
+    const second = await identity.totp.satisfied(totpContext(correlation), account.id, credentials.value.code ?? '');
+    if (second === 'refused') {
+      // Counted on the same scope a wrong password is: a password that has leaked is exactly what puts a
+      // second factor under a guessing attack, and the gate is what makes guessing it cost something.
+      return denied(actorFor(account.id), account.name, 'the second factor was wrong, or was not given');
+    }
+    if (second === 'accepted') {
+      await note(actorFor(account.id), { action: 'totp.use', subject: actorFor(account.id), outcome: 'allowed' });
     }
 
     await recorded(request, 'the sign-in gate could not forgive a scope', () =>

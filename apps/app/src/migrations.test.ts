@@ -16,6 +16,7 @@ import {
 } from './migrations.js';
 import { QUEUE_INDEXES } from './queue.js';
 import { SESSION_INDEXES } from './sessions.js';
+import { TOTP_INDEXES } from './totp.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { FakeDb } from '../test/helpers/fake-db.js';
@@ -94,6 +95,7 @@ describe('the shipped migrations', () => {
       'schema_migrations',
       'sessions',
       'sign_in_attempts',
+      'totp_credentials',
     ]);
 
     for (let step = SCHEMA_VERSION; step > 0; step -= 1) await rollback(db, CONTEXT, { now: clock });
@@ -131,6 +133,14 @@ describe('the shipped migrations', () => {
     const db = fakeDb();
     await migrate(db, CONTEXT, { now: clock });
     expect(db.indexes.get('sign_in_attempts')).toEqual(ATTEMPT_INDEXES.map((index) => index.name));
+  });
+
+  // The third that forgets, and the one with the shortest patience: a secret shown on a screen and never
+  // proved is enrollable for a quarter of an hour, and afterwards it is not there to be enrolled.
+  test('build the second factors the index an enrolment nobody proved is forgotten by', async () => {
+    const db = fakeDb();
+    await migrate(db, CONTEXT, { now: clock });
+    expect(db.indexes.get('totp_credentials')).toEqual(TOTP_INDEXES.map((index) => index.name));
   });
 });
 
@@ -424,11 +434,13 @@ describe('what a migration is handed', () => {
       'createIndex',
       'createQueueIndex',
       'createSessionIndex',
+      'createTotpIndex',
       'dropAccountIndex',
       'dropAttemptIndex',
       'dropIndex',
       'dropQueueIndex',
       'dropSessionIndex',
+      'dropTotpIndex',
       'repositories',
     ]);
   });

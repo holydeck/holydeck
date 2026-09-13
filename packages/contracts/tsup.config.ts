@@ -16,6 +16,7 @@ export default defineConfig({
     'src/sessions.ts',
     'src/snapshots.ts',
     'src/services.ts',
+    'src/totp.ts',
   ],
   format: ['esm'],
   dts: true,

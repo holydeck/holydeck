@@ -8,6 +8,7 @@ import { notFound, withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveSessionRoutes } from './session-routes.js';
+import { serveTotpRoutes } from './totp-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
 import type { Fetching } from './corpus.js';
@@ -98,6 +99,10 @@ export function buildApp({ settings, logger, fetching, web, sessions, identity }
   serveOnboarding(app, { identity });
 
   serveSessionRoutes(app, { sessions, identity });
+
+  // Behind the guard, unlike the two above: a second factor is enrolled and given up by an operator who
+  // is already signed in, which is what lets this surface say plainly what a sign-in never may.
+  serveTotpRoutes(app, { identity });
 
   if (web !== undefined) serveWebClient(app, web);
 

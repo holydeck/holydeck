@@ -258,3 +258,29 @@ describe('signing in', () => {
     });
   });
 });
+
+describe('reading an account back by the identifier history carries', () => {
+  test('answers the record and never the credential it is kept next to', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    const found = await store.read(FIRST_RUN, claimed.id);
+    expect(found).toEqual(claimed);
+    expect(JSON.stringify(found)).not.toContain('credential');
+  });
+
+  test('answers nothing for an identifier no account holds, which is not a defect', async () => {
+    await expect(store.read(FIRST_RUN, 'B'.repeat(22))).resolves.toBeUndefined();
+  });
+
+  test('a document this store cannot read back is a defect here too, and not an account that is missing', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    const [stored] = storedAccounts(rows);
+    rows.set(claimed.id, { ...stored, role: 'archbishop' });
+    await expect(store.read(FIRST_RUN, claimed.id)).rejects.toMatchObject({ kind: 'schema' });
+  });
+
+  test('is a read, and is refused without a context or without the permission to make one', async () => {
+    await expect(store.read(undefined, 'B'.repeat(22))).rejects.toBeInstanceOf(AccountError);
+    const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.create] };
+    await expect(store.read(blind, 'B'.repeat(22))).rejects.toMatchObject({ kind: 'permission' });
+  });
+});

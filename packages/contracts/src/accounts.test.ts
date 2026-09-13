@@ -7,6 +7,7 @@ import {
   DISPLAY_NAME,
   ONBOARDING_PATH,
   PASSWORD,
+  accountIdIn,
   actorFor,
   isAccountId,
   isAccountName,
@@ -44,6 +45,13 @@ describe('what an account is', () => {
 
   it('is acted under a name the durable records carry, which is never the raw identifier', () => {
     expect(actorFor(ID)).toBe(`account:${ID}`);
+  });
+
+  it('is read back out of that name, and nothing that is not one reads back as an account', () => {
+    expect(accountIdIn(actorFor(ID))).toBe(ID);
+    for (const actor of ['system', `account:${'!'.repeat(22)}`, 'account:', `account:${ID}:extra`, ID]) {
+      expect(accountIdIn(actor)).toBeUndefined();
+    }
   });
 
   it('is identified by enough randomness that no one guesses another account’s identifier', () => {
@@ -229,6 +237,24 @@ describe('signing in', () => {
       ok: true,
       value: { name: 'andru', password: 'short' },
     });
+  });
+
+  it('carries a second factor when one was typed, spaced the way it was shown and no other rule applied', () => {
+    expect(parseSignIn({ name: 'andru', password: 'a-passphrase-worth-typing', code: ' 123-456 ' })).toEqual({
+      ok: true,
+      value: { name: 'andru', password: 'a-passphrase-worth-typing', code: '123456' },
+    });
+    const long = parseSignIn({ name: 'andru', password: 'a-passphrase-worth-typing', code: 'A'.repeat(65) });
+    expect(long.ok).toBe(false);
+    if (long.ok) throw new Error('unreachable');
+    expect(long.problems.map((problem) => problem.path)).toEqual(['credentials.code']);
+  });
+
+  it('carries no second factor when none was typed, which is what an account without one sends', () => {
+    const parsed = parseSignIn({ name: 'andru', password: 'a-passphrase-worth-typing' });
+    expect(parsed.ok && parsed.value.code).toBeUndefined();
+    const typedNothing = parseSignIn({ name: 'andru', password: 'a-passphrase-worth-typing', code: '' });
+    expect(typedNothing.ok && typedNothing.value.code).toBeUndefined();
   });
 
   it('reads a handle no claim could have created rather than refusing it', () => {

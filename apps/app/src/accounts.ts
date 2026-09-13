@@ -131,6 +131,8 @@ export interface AccountStore {
   count(context: unknown): Promise<number>;
   /** The account these credentials belong to, or nothing at all — and the same work is done either way. */
   authenticate(context: unknown, credentials: SignIn): Promise<AccountRecord | undefined>;
+  /** The account an actor names, for a surface already holding a session: never a way to look for one. */
+  read(context: unknown, id: string): Promise<AccountRecord | undefined>;
 }
 
 export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore {
@@ -153,6 +155,26 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
       throw new AccountError('permission', `accounts: the actor may not ${need} an account, which needs ${permission}`);
     }
     return context as RequestContext;
+  };
+
+  /**
+   * The record, out of the document it is kept in. Everything the collection holds that an account is not
+   * — the derived credential, the founder marker — stays here, because what is not read cannot be handed
+   * to a caller by a later field being added to this list.
+   */
+  const readBack = (found: Document): AccountRecord => {
+    const parsed = parseAccountRecord({
+      id: found['_id'],
+      name: found['name'],
+      displayName: found['displayName'],
+      role: found['role'],
+      createdAt: found['createdAt'],
+    });
+    if (!parsed.ok) {
+      const problems = parsed.problems.map((problem) => `${problem.path} ${problem.message}`).join('; ');
+      throw new AccountError('schema', `an account this store cannot read back: ${problems}`);
+    }
+    return parsed.value;
   };
 
   const store: AccountStore = {
@@ -199,18 +221,13 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
       const stored = typeof found?.['credential'] === 'string' ? found['credential'] : await measuredAgainstNobody();
       const matches = await verify(credentials.password, stored);
       if (found === null || !matches) return undefined;
-      const parsed = parseAccountRecord({
-        id: found['_id'],
-        name: found['name'],
-        displayName: found['displayName'],
-        role: found['role'],
-        createdAt: found['createdAt'],
-      });
-      if (!parsed.ok) {
-        const problems = parsed.problems.map((problem) => `${problem.path} ${problem.message}`).join('; ');
-        throw new AccountError('schema', `an account this store cannot read back: ${problems}`);
-      }
-      return parsed.value;
+      return readBack(found);
+    },
+
+    async read(context, id) {
+      permit(context, 'read');
+      const found = await db.collection(ACCOUNTS_COLLECTION).findOne({ _id: id });
+      return found === null ? undefined : readBack(found);
     },
 
     async claimed(context) {

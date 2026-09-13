@@ -21,18 +21,22 @@ import { ACCOUNT_ATTEMPT_LIMIT, LOCK_MINUTES, accountScope, attemptContext, atte
 import { auditOn } from './audit.js';
 import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
+import { codeAt, stepAt } from './otp.js';
 import { SIGN_IN_REFUSED, serveSessionRoutes } from './session-routes.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { totpContext, totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 import { memorySessions } from '../test/helpers/sessions.js';
+import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { AccountStore } from './accounts.js';
 import type { AttemptGate } from './attempts.js';
 import type { Identity } from './onboarding.js';
 import type { SessionRoutesOptions } from './session-routes.js';
 import type { SessionStore, StartedSession } from './sessions.js';
+import type { TotpStore } from './totp.js';
 import type { Document } from './repositories.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 import type { FastifyInstance, InjectOptions } from 'fastify';
@@ -45,12 +49,14 @@ const ID = 'A'.repeat(22);
 const CLAIM = { name: 'lucia', displayName: 'Lucia Brandt', password: 'a-long-enough-passphrase' };
 
 const MINUTE = 60_000;
+const HALF_MINUTE = MINUTE / 2;
 
 let app: FastifyInstance;
 let store: SessionStore;
 let sessionRows: Map<string, Document>;
 let accounts: AccountStore;
 let attempts: AttemptGate;
+let totp: TotpStore;
 let trail: FakeDb;
 let identity: Identity;
 let clock: number;
@@ -103,6 +109,18 @@ const signingIn = (
 
 const failing = (password = 'not-the-passphrase', name = CLAIM.name) => signingIn({ name, password });
 
+const withCode = (code: string) => signingIn({ name: CLAIM.name, password: CLAIM.password, code });
+
+/** An account that owes a second factor, with the secret its codes come from and the codes that stand in. */
+const owing = async (): Promise<{ readonly secret: string; readonly codes: readonly string[] }> => {
+  const { secret } = await totp.enroll(totpContext('req-0f9c2a41'), ID);
+  const codes = await totp.verify(totpContext('req-0f9c2a41'), ID, codeAt(secret, stepAt(now())));
+  // Proving the enrolment spends that half-minute's code, exactly as signing in with it would, so the
+  // clock moves on to the step an operator's first real sign-in would be typing a code from.
+  clock += HALF_MINUTE;
+  return { secret, codes: codes ?? [] };
+};
+
 const entries = (): Document[] => trail.rows.get('audit_events') ?? [];
 
 const tokenIn = (header: unknown): string => cookieIn(String(header), SESSION_COOKIE) ?? '';
@@ -120,11 +138,13 @@ beforeEach(async () => {
     verify: async (password, stored) => stored === `test-hash:${password}`,
   });
   attempts = attemptsOn(memoryAttempts().db, { now });
+  totp = totpsOn(memoryTotp().db, { now });
   await accounts.claim(accountContext('req-1a2b3c4d'), CLAIM);
   identity = {
     accounts,
     audit: auditOn(trail, { now, newId: () => `e${entries().length}` }),
     attempts,
+    totp,
   };
   app = await serving({ sessions: store, identity });
 });
@@ -242,6 +262,82 @@ describe('what a refused sign-in says', () => {
       subject: 'nobody',
       outcome: 'refused',
     });
+  });
+});
+
+describe('a second factor, where the account owes one', () => {
+  test('the right password alone is refused, in the words a wrong password is refused in', async () => {
+    await owing();
+    const owed = await signingIn();
+    const wrong = await failing();
+    expect(owed.statusCode).toBe(401);
+    expect(owed.headers['set-cookie']).toBeUndefined();
+    expect(sessionRows.size).toBe(0);
+    // Whether the password was right is exactly what a caller who did not answer the second factor
+    // must not learn, so the two refusals are one answer down to the sentence.
+    expect({ ...owed.json().error, requestId: '' }).toEqual({ ...wrong.json().error, requestId: '' });
+  });
+
+  test('a code that is not this second factor’s is refused the same way, and so is nonsense', async () => {
+    const { secret } = await owing();
+    const elsewhere = codeAt(secret, stepAt(now()) + 9);
+    for (const code of [elsewhere, 'not-a-code', '']) {
+      const response = await withCode(code);
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error.code).toBe(SIGN_IN_REFUSED);
+    }
+  });
+
+  test('the code opens the session, and the trail records the factor before the sign-in it allowed', async () => {
+    const { secret } = await owing();
+    const response = await withCode(codeAt(secret, stepAt(now())));
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data).toMatchObject({ actor: actorFor(ID) });
+    expect(entries()).toMatchObject([
+      { actor: actorFor(ID), action: 'totp.use', subject: actorFor(ID), outcome: 'allowed' },
+      { actor: actorFor(ID), action: 'session.signIn', subject: CLAIM.name, outcome: 'allowed' },
+    ]);
+  });
+
+  test('a recovery code stands in for the application once, and is gone the second time', async () => {
+    const { codes } = await owing();
+    const first = String(codes[0]);
+    await expect(withCode(first)).resolves.toMatchObject({ statusCode: 201 });
+    await expect(withCode(first)).resolves.toMatchObject({ statusCode: 401 });
+  });
+
+  test('a code that opened a session does not open a second one, inside the same half-minute', async () => {
+    const { secret } = await owing();
+    const code = codeAt(secret, stepAt(now()));
+    await expect(withCode(code)).resolves.toMatchObject({ statusCode: 201 });
+    await expect(withCode(code)).resolves.toMatchObject({ statusCode: 401 });
+  });
+
+  test('a wrong code is counted against the handle a wrong password is counted against', async () => {
+    const { secret } = await owing();
+    for (let attempt = 0; attempt < ACCOUNT_ATTEMPT_LIMIT; attempt += 1) await withCode('000000');
+    // The lock is the gate's, and it holds whatever the next request gets right.
+    await expect(withCode(codeAt(secret, stepAt(now())))).resolves.toMatchObject({ statusCode: 401 });
+    expect(entries()).toContainEqual(expect.objectContaining({ action: 'session.lock', subject: accountScope(CLAIM.name) }));
+  });
+
+  test('the trail says which half of the sign-in was refused, which the answer never does', async () => {
+    await owing();
+    await signingIn();
+    expect(entries()[0]).toMatchObject({
+      actor: actorFor(ID),
+      action: 'session.signIn',
+      subject: CLAIM.name,
+      outcome: 'refused',
+      detail: expect.stringContaining('second factor'),
+    });
+  });
+
+  test('an enrolment nobody proved is not owed, and never stands between an operator and their account', async () => {
+    await totp.enroll(totpContext('req-0f9c2a41'), ID);
+    const response = await signingIn();
+    expect(response.statusCode).toBe(201);
+    expect(entries()).toMatchObject([{ action: 'session.signIn', outcome: 'allowed' }]);
   });
 });
 

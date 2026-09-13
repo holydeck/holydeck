@@ -64,6 +64,10 @@
     "./sessions": {
       "types": "./dist/sessions.d.ts",
       "import": "./dist/sessions.js"
+    },
+    "./totp": {
+      "types": "./dist/totp.d.ts",
+      "import": "./dist/totp.js"
     }
   },
   "scripts": {

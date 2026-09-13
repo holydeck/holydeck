@@ -34,7 +34,14 @@ export const MESSAGE_CODES: readonly MessageCode[] = [
   { code: VALIDATION_FAILED, status: 422, stable: true, since: 1 },
   { code: 'auth.session.expired', status: 401, stable: true, since: 1 },
   { code: 'auth.sign_in_refused', status: 401, stable: true, since: 1 },
+  // A second factor that did not match, which is one code for a wrong digit, a reused one and a code for
+  // an enrolment that is not there: what a refusal must not say is which of those it was.
+  { code: 'auth.totp_refused', status: 401, stable: true, since: 1 },
   { code: 'auth.forbidden', status: 403, stable: true, since: 1 },
+  // Enrolling over a second factor that is already proved, and asking of one that was never enrolled.
+  // Both are a request that disagrees with the state it is aimed at, which is what 409 says.
+  { code: 'auth.totp_enrolled', status: 409, stable: true, since: 1 },
+  { code: 'auth.totp_missing', status: 409, stable: true, since: 1 },
   { code: 'resource.not_found', status: 404, stable: true, since: 1 },
   { code: UPDATE_REQUIRED, status: 426, stable: true, since: 1 },
   { code: STALE_STATE_REVISION, status: 409, stable: true, since: 1 },

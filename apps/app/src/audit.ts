@@ -19,7 +19,19 @@ import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
 
 /** Every action this release records. One entry per thing an administrator can be answerable for. */
-export const AUDIT_ACTIONS = ['instance.claim', 'session.signIn', 'session.lock'] as const;
+export const AUDIT_ACTIONS = [
+  'instance.claim',
+  'session.signIn',
+  'session.lock',
+  // A second factor is its own small history: enrolling one, proving it, spending a code at a sign-in,
+  // drawing fresh recovery codes, and giving it up. The trail holds the account it happened to and
+  // never the secret, the code, or a recovery code — those live in `totp.ts` and go no further.
+  'totp.enroll',
+  'totp.verify',
+  'totp.use',
+  'totp.regenerate',
+  'totp.revoke',
+] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

@@ -8,6 +8,7 @@
 // the routes it guards would be a circle.
 
 import { FIELD_CODES, type Parsed, type Problem, parseObject } from './problems.js';
+import { SECOND_FACTOR, normalizedCode } from './totp.js';
 
 /** Where a fresh instance is claimed, and where a claimed one answers as a path that is not served. */
 export const ONBOARDING_PATH = '/api/v1/onboarding';
@@ -45,8 +46,20 @@ export const isAccountId = (value: string): boolean => ID.test(value);
 
 export const isAccountName = (value: string): boolean => NAME.test(value);
 
+const ACTOR_PREFIX = 'account:';
+
 /** How an account appears in a durable record and in a request context: never as the bare identifier. */
-export const actorFor = (id: string): string => `account:${id}`;
+export const actorFor = (id: string): string => `${ACTOR_PREFIX}${id}`;
+
+/**
+ * The identifier back out of that name, and nothing for an actor that is not an account. A record is
+ * written by whoever made it — a session, a migration, this server itself — and only some of those are
+ * people; code that needs the account behind an actor has to be told plainly when there is not one.
+ */
+export const accountIdIn = (actor: string): string | undefined => {
+  const id = actor.startsWith(ACTOR_PREFIX) ? actor.slice(ACTOR_PREFIX.length) : '';
+  return isAccountId(id) ? id : undefined;
+};
 
 const NAME_RULE = `must be ${ACCOUNT_NAME.minimum} to ${ACCOUNT_NAME.maximum} lowercase letters, digits, dots, dashes or underscores, beginning and ending with a letter or digit`;
 
@@ -130,6 +143,8 @@ export function parseInstanceClaim(value: unknown): Parsed<InstanceClaim> {
 export interface SignIn {
   readonly name: string;
   readonly password: string;
+  /** The second factor, when the account has one and the person typed it. Absent is not a refusal here. */
+  readonly code?: string;
 }
 
 /**
@@ -149,7 +164,15 @@ export function parseSignIn(value: unknown): Parsed<SignIn> {
     if (characters(password) > PASSWORD.maximum) {
       reader.reject('password', FIELD_CODES.notAllowed, `must be at most ${PASSWORD.maximum} characters`);
     }
-    return { name, password };
+    // A code is optional at this layer whether or not the account has a second factor: which accounts have
+    // one is the store's knowledge, and answering "that account needs a code" to a form is the enumeration
+    // this route exists not to do. Typed nothing and sent nothing are the same thing, and both are absent.
+    const typedCode = reader.optionalText('code') ?? '';
+    if (characters(typedCode) > SECOND_FACTOR.maximum) {
+      reader.reject('code', FIELD_CODES.notAllowed, `must be at most ${SECOND_FACTOR.maximum} characters`);
+    }
+    const code = normalizedCode(typedCode);
+    return code === '' ? { name, password } : { name, password, code };
   });
 }
 

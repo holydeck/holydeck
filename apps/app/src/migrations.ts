@@ -10,6 +10,7 @@ import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './acc
 import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
+import { TOTP_INDEXES, createTotpIndexOn, dropTotpIndexOn } from './totp.js';
 import { createIndexOn, dropIndexOn, repositoriesOn, RepositoryError } from './repositories.js';
 
 import type { AccountIndex } from './accounts.js';
@@ -19,6 +20,7 @@ import type { QueueIndex } from './queue.js';
 import type { RecordName } from './records.js';
 import type { Document, Repository, RepositoryDb } from './repositories.js';
 import type { SessionIndex } from './sessions.js';
+import type { TotpIndex } from './totp.js';
 
 export type Direction = 'up' | 'down';
 
@@ -67,6 +69,9 @@ export interface MigrationApi {
   /** Nor is a count of failed sign-ins, which is the shortest-lived operational state of the four. */
   createAttemptIndex(index: AttemptIndex): Promise<string>;
   dropAttemptIndex(name: string): Promise<void>;
+  /** Nor is a second factor: one credential per account, kept where revoking it cannot reach a password. */
+  createTotpIndex(index: TotpIndex): Promise<string>;
+  dropTotpIndex(name: string): Promise<void>;
 }
 
 export interface SchemaMigration {
@@ -159,6 +164,16 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...ATTEMPT_INDEXES].reverse()) await api.dropAttemptIndex(index.name);
+    },
+  },
+  {
+    version: 6,
+    name: 'the index an enrolment nobody proved is forgotten by',
+    async up(api) {
+      for (const index of TOTP_INDEXES) await api.createTotpIndex(index);
+    },
+    async down(api) {
+      for (const index of [...TOTP_INDEXES].reverse()) await api.dropTotpIndex(index.name);
     },
   },
 ]);
@@ -255,6 +270,8 @@ export function migrationApi(db: RepositoryDb): MigrationApi {
     dropAccountIndex: (name: string) => dropAccountIndexOn(db, name),
     createAttemptIndex: (index: AttemptIndex) => createAttemptIndexOn(db, index),
     dropAttemptIndex: (name: string) => dropAttemptIndexOn(db, name),
+    createTotpIndex: (index: TotpIndex) => createTotpIndexOn(db, index),
+    dropTotpIndex: (name: string) => dropTotpIndexOn(db, name),
   });
 }
 

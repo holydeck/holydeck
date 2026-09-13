@@ -106,6 +106,15 @@ describe('the context the trail is written under', () => {
   });
 
   it('declares the actions this release records, and only those', () => {
-    expect(AUDIT_ACTIONS).toEqual(['instance.claim', 'session.signIn', 'session.lock']);
+    expect(AUDIT_ACTIONS).toEqual([
+      'instance.claim',
+      'session.signIn',
+      'session.lock',
+      'totp.enroll',
+      'totp.verify',
+      'totp.use',
+      'totp.regenerate',
+      'totp.revoke',
+    ]);
   });
 });

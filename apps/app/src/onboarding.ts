@@ -25,18 +25,20 @@ import { notFound } from './failures.js';
 import type { AccountStore } from './accounts.js';
 import type { AttemptGate } from './attempts.js';
 import type { AuditEntry, AuditTrail } from './audit.js';
+import type { TotpStore } from './totp.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 /**
  * What an instance needs to know who anybody is: somewhere to keep the accounts, somewhere to record what
- * was done about them, and the gate that counts what has been tried against them. Built once and handed
- * to every surface that answers for an identity; a first run uses two of the three, and signing in uses
- * all of them.
+ * was done about them, the gate that counts what has been tried against them, and the second factors an
+ * account may owe. Built once and handed to every surface that answers for an identity; a first run uses
+ * two of the four, and signing in uses all of them.
  */
 export interface Identity {
   readonly accounts: AccountStore;
   readonly audit: AuditTrail;
   readonly attempts: AttemptGate;
+  readonly totp: TotpStore;
 }
 
 export interface OnboardingOptions {
