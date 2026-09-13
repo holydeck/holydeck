@@ -54,6 +54,13 @@ describe('the released message codes', () => {
       ['resource.not_found', 404],
       ['client.update_required', 426],
       ['command.stale_state_revision', 409],
+      ['corpus.reference.malformed', 422],
+      ['corpus.reference.not_found', 404],
+      ['corpus.translation.unknown', 404],
+      ['corpus.revision.not_found', 404],
+      ['corpus.unavailable', 503],
+      ['corpus.upstream.unavailable', 502],
+      ['corpus.unexpected_error', 500],
     ]);
     expect([VALIDATION_FAILED, UPDATE_REQUIRED, STALE_STATE_REVISION]).toEqual([
       'request.validation_failed',

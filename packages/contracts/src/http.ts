@@ -30,6 +30,15 @@ export const MESSAGE_CODES: readonly MessageCode[] = [
   { code: 'resource.not_found', status: 404, stable: true, since: 1 },
   { code: UPDATE_REQUIRED, status: 426, stable: true, since: 1 },
   { code: STALE_STATE_REVISION, status: 409, stable: true, since: 1 },
+  // The corpus boundary. These are what a client learns when the application could not read the corpus;
+  // the corpus's own codes and wording stay behind the boundary, and `./corpus.js` holds the translation.
+  { code: 'corpus.reference.malformed', status: 422, stable: true, since: 1 },
+  { code: 'corpus.reference.not_found', status: 404, stable: true, since: 1 },
+  { code: 'corpus.translation.unknown', status: 404, stable: true, since: 1 },
+  { code: 'corpus.revision.not_found', status: 404, stable: true, since: 1 },
+  { code: 'corpus.unavailable', status: 503, stable: true, since: 1 },
+  { code: 'corpus.upstream.unavailable', status: 502, stable: true, since: 1 },
+  { code: 'corpus.unexpected_error', status: 500, stable: true, since: 1 },
 ];
 
 /** Codes withdrawn from the registry. A released code is deprecated in documentation, never removed. */

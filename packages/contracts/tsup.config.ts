@@ -5,6 +5,7 @@ export default defineConfig({
     'src/problems.ts',
     'src/http.ts',
     'src/clients.ts',
+    'src/corpus.ts',
     'src/live.ts',
     'src/jobs.ts',
     'src/snapshots.ts',
