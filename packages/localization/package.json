@@ -1,0 +1,36 @@
+{
+  "name": "@holydeck/localization",
+  "version": "2026.9.2",
+  "description": "Locale resolution, message catalogs, and locale-aware formatting shared by every HolyDeck client",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./locales": {
+      "types": "./dist/locales.d.ts",
+      "import": "./dist/locales.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js"
+    },
+    "./messages": {
+      "types": "./dist/messages.d.ts",
+      "import": "./dist/messages.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.0",
+    "tsup": "^8.5.1",
+    "vitest": "^5.0.0"
+  }
+}
