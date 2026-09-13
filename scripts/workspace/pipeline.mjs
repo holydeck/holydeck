@@ -23,6 +23,9 @@ export const WORKSPACES = [
   'apps/app',
   'apps/web',
   'apps/worker',
+  // The harness is a workspace like any other: it is linted, typechecked and run by the root commands,
+  // and the integration suite it holds is the `test` script turbo runs here.
+  'tests/harness',
 ];
 
 export const COVERAGE_BASE = 'vitest.base.ts';
@@ -52,6 +55,16 @@ export function workspaceGlobsOf(yamlText) {
   return globs;
 }
 
+// A glob can name a directory a checkout does not hold yet. That is a workspace the rules below report
+// as missing, not a reason for the census to stop reading the repository with a stack trace.
+const dirsUnder = (listDirs, parent) => {
+  try {
+    return listDirs(parent);
+  } catch {
+    return [];
+  }
+};
+
 const matchesGlob = (glob, dir) => {
   const [prefix, rest] = glob.split('*');
   if (rest === undefined) return glob === dir;
@@ -70,7 +83,7 @@ export function packageDirsOn(globs, listDirs, hasManifest) {
       if (hasManifest(glob)) dirs.push(glob);
       continue;
     }
-    for (const name of listDirs(prefix.replace(/\/$/u, ''))) {
+    for (const name of dirsUnder(listDirs, prefix.replace(/\/$/u, ''))) {
       const dir = `${prefix}${name}`;
       if (hasManifest(dir)) dirs.push(dir);
     }

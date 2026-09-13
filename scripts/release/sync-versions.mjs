@@ -21,6 +21,7 @@ export const MANIFESTS = [
   'apps/corpus/package.json',
   'apps/web/package.json',
   'apps/worker/package.json',
+  'tests/harness/package.json',
 ];
 
 export const CLI_VERSION_FILE = 'apps/cli/src/version.ts';

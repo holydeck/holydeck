@@ -30,7 +30,7 @@ const complete = () => {
     vitestConfigs[dir] = "import { coverage100 } from '../../vitest.base.js';\n";
   }
   return {
-    workspaceYaml: 'packages:\n  - packages/*\n  - apps/*\noverrides:\n  esbuild: 0.28.2\n',
+    workspaceYaml: 'packages:\n  - packages/*\n  - apps/*\n  - tests/*\noverrides:\n  esbuild: 0.28.2\n',
     packageDirs: [...WORKSPACES],
     manifests,
     vitestConfigs,
@@ -56,6 +56,7 @@ const COUNTEREXAMPLES = [
       'apps/app is not matched by any pnpm-workspace.yaml package glob',
       'apps/web is not matched by any pnpm-workspace.yaml package glob',
       'apps/worker is not matched by any pnpm-workspace.yaml package glob',
+      'tests/harness is not matched by any pnpm-workspace.yaml package glob',
     ],
   },
   {
@@ -172,6 +173,17 @@ test('discovery finds a package under a glob, and an exact path that is one', ()
     (dir) => manifests.has(dir),
   );
   assert.deepEqual(dirs, ['packages/core', 'packages/localization', 'tools/exact']);
+});
+
+// A checkout being prepared has the glob before it has the directory, and a census that crashes there
+// reports a stack trace where it should report the workspace it could not find.
+test('discovery reports nothing for a glob whose directory is not there yet', () => {
+  assert.deepEqual(
+    packageDirsOn(['tests/*'], () => {
+      throw Object.assign(new Error('no such file or directory'), { code: 'ENOENT' });
+    }, () => false),
+    [],
+  );
 });
 
 // The checks above all run against constructed input. This one runs them against the repository, so

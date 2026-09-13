@@ -1,0 +1,27 @@
+{
+  "name": "@holydeck/harness",
+  "version": "2026.9.2",
+  "description": "HolyDeck test harness: the integration and browser end-to-end layers the built stack is run through",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "lint": "eslint src integration build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@holydeck/app": "workspace:*",
+    "@holydeck/contracts": "workspace:*",
+    "@holydeck/corpus": "workspace:*",
+    "@holydeck/web": "workspace:*",
+    "@holydeck/worker": "workspace:*",
+    "@playwright/test": "^1.63.0",
+    "@vitest/coverage-v8": "^5.0.0",
+    "mongodb": "^6.21.0",
+    "mongodb-memory-server": "^10.4.3",
+    "vitest": "^5.0.0"
+  }
+}

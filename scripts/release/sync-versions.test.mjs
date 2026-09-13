@@ -47,6 +47,7 @@ test('the fan-out targets are every workspace package and the CLI constant', () 
     'apps/corpus/package.json',
     'apps/web/package.json',
     'apps/worker/package.json',
+    'tests/harness/package.json',
   ]);
   assert.equal(CLI_VERSION_FILE, 'apps/cli/src/version.ts');
 });

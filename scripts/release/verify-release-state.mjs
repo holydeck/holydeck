@@ -18,6 +18,7 @@ export const EXPECTED_PACKAGE_NAMES = {
   'apps/corpus/package.json': '@holydeck/corpus',
   'apps/web/package.json': '@holydeck/web',
   'apps/worker/package.json': '@holydeck/worker',
+  'tests/harness/package.json': '@holydeck/harness',
 };
 
 export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog }) {

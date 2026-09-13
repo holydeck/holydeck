@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - apps/*
+  - tests/*
 overrides:
   esbuild: 0.28.2
 allowBuilds:

@@ -5,6 +5,12 @@
   "license": "MIT",
   "private": true,
   "type": "module",
+  "exports": {
+    "./jobs": {
+      "types": "./dist/jobs.d.ts",
+      "import": "./dist/jobs.js"
+    }
+  },
   "files": [
     "dist"
   ],
