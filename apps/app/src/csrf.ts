@@ -14,6 +14,7 @@ import { errorEnvelope } from '@holydeck/contracts/http';
 import {
   CSRF_HEADER,
   SESSION_COOKIE,
+  SESSION_PATH,
   clearedSessionCookie,
   cookieIn,
   isSameOrigin,
@@ -42,12 +43,14 @@ const SIGN_IN_MESSAGE = 'Sign in again to continue.';
 const REFUSED_MESSAGE = 'The request could not be accepted.';
 
 /**
- * The mutating routes that may be reached without a session, written as `METHOD /path`. Claiming a fresh
- * instance is the one change that cannot carry a session: it is the request that creates the first
- * account there could ever be a session for. It closes for good once the instance has been claimed, and
- * the route answers not-found from then on, so this exception opens nothing after a first run.
+ * The mutating routes that may be reached without a session, written as `METHOD /path`. Both are changes
+ * that cannot carry a session, for the same reason read twice: claiming a fresh instance is the request
+ * that creates the first account there could ever be a session for, and signing in is the request that
+ * opens one. The claim closes for good once it has been used and answers not-found from then on; signing
+ * in stays open because it has to, which is why it is the one route with a gate that counts what it is
+ * sent. Anything else added here is a hole.
  */
-export const UNGUARDED: readonly string[] = Object.freeze([`POST ${ONBOARDING_PATH}`]);
+export const UNGUARDED: readonly string[] = Object.freeze([`POST ${ONBOARDING_PATH}`, `POST ${SESSION_PATH}`]);
 
 /** What the guard proved, for the route that asked for it. A route reads this; nothing else may set it. */
 export interface Guarded {

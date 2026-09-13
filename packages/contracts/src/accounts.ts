@@ -126,6 +126,33 @@ export function parseInstanceClaim(value: unknown): Parsed<InstanceClaim> {
   });
 }
 
+/** What signing in takes: the handle an account is known by, and the password it was claimed with. */
+export interface SignIn {
+  readonly name: string;
+  readonly password: string;
+}
+
+/**
+ * Reads a sign-in the same way a claim is read, and grades it deliberately less. Only the ceilings are
+ * enforced, because they are the guard on handing a megabyte to a slow hash and nothing else. A floor, or
+ * the shape of a handle, is a rule about what may be created — and applying it here would strand every
+ * account made before the rule changed, answering somebody who knows their own password with a validation
+ * problem instead of letting them in. Being wrong is the store's answer to give, and it gives one answer.
+ */
+export function parseSignIn(value: unknown): Parsed<SignIn> {
+  return parseObject(value, 'credentials', (reader) => {
+    const name = reader.text('name').trim().toLowerCase();
+    if (characters(name) > ACCOUNT_NAME.maximum) {
+      reader.reject('name', FIELD_CODES.notAllowed, `must be at most ${ACCOUNT_NAME.maximum} characters`);
+    }
+    const password = reader.text('password').normalize('NFKC');
+    if (characters(password) > PASSWORD.maximum) {
+      reader.reject('password', FIELD_CODES.notAllowed, `must be at most ${PASSWORD.maximum} characters`);
+    }
+    return { name, password };
+  });
+}
+
 export interface OnboardingOffer {
   /** What the account a claim creates will be. There is one, and this is it. */
   readonly role: AccountRole;

@@ -7,11 +7,13 @@
 // is the promise ADR 0009 makes: the version moves forward, and a rollback restores the one before it.
 
 import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './accounts.js';
+import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
 import { createIndexOn, dropIndexOn, repositoriesOn, RepositoryError } from './repositories.js';
 
 import type { AccountIndex } from './accounts.js';
+import type { AttemptIndex } from './attempts.js';
 import type { RequestContext } from './context.js';
 import type { QueueIndex } from './queue.js';
 import type { RecordName } from './records.js';
@@ -62,6 +64,9 @@ export interface MigrationApi {
   /** Nor is an account: operational state too, changed over its life, and in a collection of its own. */
   createAccountIndex(index: AccountIndex): Promise<string>;
   dropAccountIndex(name: string): Promise<void>;
+  /** Nor is a count of failed sign-ins, which is the shortest-lived operational state of the four. */
+  createAttemptIndex(index: AttemptIndex): Promise<string>;
+  dropAttemptIndex(name: string): Promise<void>;
 }
 
 export interface SchemaMigration {
@@ -144,6 +149,16 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...ACCOUNT_INDEXES].reverse()) await api.dropAccountIndex(index.name);
+    },
+  },
+  {
+    version: 5,
+    name: 'the index a scope nobody is guessing at is forgotten by',
+    async up(api) {
+      for (const index of ATTEMPT_INDEXES) await api.createAttemptIndex(index);
+    },
+    async down(api) {
+      for (const index of [...ATTEMPT_INDEXES].reverse()) await api.dropAttemptIndex(index.name);
     },
   },
 ]);
@@ -238,6 +253,8 @@ export function migrationApi(db: RepositoryDb): MigrationApi {
     dropSessionIndex: (name: string) => dropSessionIndexOn(db, name),
     createAccountIndex: (index: AccountIndex) => createAccountIndexOn(db, index),
     dropAccountIndex: (name: string) => dropAccountIndexOn(db, name),
+    createAttemptIndex: (index: AttemptIndex) => createAttemptIndexOn(db, index),
+    dropAttemptIndex: (name: string) => dropAttemptIndexOn(db, name),
   });
 }
 

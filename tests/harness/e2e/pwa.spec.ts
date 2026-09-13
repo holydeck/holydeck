@@ -2,7 +2,59 @@
 // case this is for, so the parts that make the client installable and keep it working with the network
 // gone are graded here rather than assumed from the files being on disk.
 
+import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
+import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
+import { CSRF_HEADER, SESSION_PATH, TICKET_PATH, TICKET_QUERY } from '@holydeck/contracts/sessions';
 import { expect, test } from '@playwright/test';
+
+import { OPERATOR } from '../src/identity.js';
+
+import type { Page } from '@playwright/test';
+
+/**
+ * What the page has to hold before it may open a socket: a session, and a ticket spent from it. Asked
+ * for from inside the page, because the cookie the application sets has to be the cookie the browser
+ * sends back on the upgrade — the same journey the client makes, made by the same browser.
+ *
+ * The claim is allowed to have happened already: three browser projects drive one stack, and the first
+ * of them claims it.
+ */
+const ticketFor = async (page: Page): Promise<string> =>
+  page.evaluate(
+    async (input: {
+      operator: { name: string; displayName: string; password: string };
+      version: string;
+      versionHeader: string;
+      csrfHeader: string;
+      onboarding: string;
+      session: string;
+      ticket: string;
+    }) => {
+      const post = async (path: string, body: unknown, headers: Record<string, string> = {}): Promise<Response> =>
+        fetch(path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', [input.versionHeader]: input.version, ...headers },
+          body: JSON.stringify(body),
+        });
+      const claimed = await post(input.onboarding, input.operator);
+      if (claimed.status !== 201 && claimed.status !== 404) throw new Error(`the claim answered ${claimed.status}`);
+      const opened = await post(input.session, { name: input.operator.name, password: input.operator.password });
+      if (opened.status !== 201) throw new Error(`signing in answered ${opened.status}`);
+      const session = (await opened.json()) as { data: { csrf: string } };
+      const issued = await post(input.ticket, {}, { [input.csrfHeader]: session.data.csrf });
+      if (issued.status !== 200) throw new Error(`the ticket answered ${issued.status}`);
+      return ((await issued.json()) as { data: { ticket: string } }).data.ticket;
+    },
+    {
+      operator: { ...OPERATOR },
+      version: String(CLIENT_WINDOW.current),
+      versionHeader: CLIENT_VERSION_HEADER,
+      csrfHeader: CSRF_HEADER,
+      onboarding: ONBOARDING_PATH,
+      session: SESSION_PATH,
+      ticket: TICKET_PATH,
+    },
+  );
 
 test.describe('the client a device can install and keep', () => {
   test('offers a manifest a browser will install from', async ({ page, baseURL }) => {
@@ -66,7 +118,9 @@ test.describe('the client a device can install and keep', () => {
       if (message.text().includes('Content Security Policy')) violations.push(message.text());
     });
     await page.goto('/');
-    const wsUrl = `${(baseURL ?? '').replace(/^http/u, 'ws')}/api/v1/live?channel=stage&clientVersion=1`;
+    const ticket = await ticketFor(page);
+    const wsUrl =
+      `${(baseURL ?? '').replace(/^http/u, 'ws')}/api/v1/live?channel=stage&clientVersion=1&${TICKET_QUERY}=${ticket}`;
     const frame = await page.evaluate(
       (url) =>
         new Promise<unknown>((resolve, reject) => {

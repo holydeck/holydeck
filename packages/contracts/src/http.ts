@@ -33,6 +33,7 @@ export const UNEXPECTED_ERROR = 'server.unexpected_error';
 export const MESSAGE_CODES: readonly MessageCode[] = [
   { code: VALIDATION_FAILED, status: 422, stable: true, since: 1 },
   { code: 'auth.session.expired', status: 401, stable: true, since: 1 },
+  { code: 'auth.sign_in_refused', status: 401, stable: true, since: 1 },
   { code: 'auth.forbidden', status: 403, stable: true, since: 1 },
   { code: 'resource.not_found', status: 404, stable: true, since: 1 },
   { code: UPDATE_REQUIRED, status: 426, stable: true, since: 1 },

@@ -5,11 +5,13 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { AccountError, accountsOn } from './accounts.js';
+import { attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
 import { guardMutations } from './csrf.js';
 import { NOT_FOUND, notFound, withSafeErrors } from './failures.js';
 import { serveOnboarding } from './onboarding.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
+import { memoryAttempts } from '../test/helpers/attempts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { AccountStore } from './accounts.js';
@@ -43,6 +45,7 @@ const serving = async (identity: Identity | undefined): Promise<FastifyInstance>
 const identityOf = (store: AccountStore): Identity => ({
   accounts: store,
   audit: auditOn(trailDb, { now: () => NOW, newId: () => `e${trailDb.rows.get('audit_events')?.length ?? 0}` }),
+  attempts: attemptsOn(memoryAttempts().db, { now: () => NOW }),
 });
 
 const entries = () => trailDb.rows.get('audit_events') ?? [];
@@ -207,7 +210,7 @@ describe('once the instance is claimed', () => {
 
 describe('when the trail refuses the entry', () => {
   const deaf = (store: AccountStore): Identity => ({
-    accounts: store,
+    ...identityOf(store),
     audit: { record: () => Promise.reject(new Error('the trail is unavailable')) },
   });
 

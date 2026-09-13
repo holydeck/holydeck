@@ -51,6 +51,7 @@ describe('the released message codes', () => {
     expect(MESSAGE_CODES.map((entry) => [entry.code, entry.status])).toEqual([
       ['request.validation_failed', 422],
       ['auth.session.expired', 401],
+      ['auth.sign_in_refused', 401],
       ['auth.forbidden', 403],
       ['resource.not_found', 404],
       ['client.update_required', 426],

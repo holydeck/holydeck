@@ -92,11 +92,12 @@ export function buildApp({ settings, logger, fetching, web, sessions, identity }
     return successEnvelope({ translations: answer.value }, request.id, CLIENT_WINDOW.current);
   });
 
-  // Registered below the guard like everything else, and reached without a session only because it is
-  // the one entry in the guard's declared exceptions — which closes the moment the instance is claimed.
+  // Both are registered below the guard like everything else, and the two changes they serve without a
+  // session are reached only because the guard declares them: claiming, which closes the moment the
+  // instance is claimed, and signing in, which is how a session comes to exist at all.
   serveOnboarding(app, { identity });
 
-  serveSessionRoutes(app, { sessions });
+  serveSessionRoutes(app, { sessions, identity });
 
   if (web !== undefined) serveWebClient(app, web);
 

@@ -12,9 +12,9 @@ import { ACCOUNT_ID_BYTES, actorFor, parseAccountRecord } from '@holydeck/contra
 import { randomBytes } from 'node:crypto';
 
 import { contextProblems, requestContext } from './context.js';
-import { hashPassword } from './credentials.js';
+import { hashPassword, verifyPassword } from './credentials.js';
 
-import type { AccountRecord, InstanceClaim } from '@holydeck/contracts/accounts';
+import type { AccountRecord, InstanceClaim, SignIn } from '@holydeck/contracts/accounts';
 import type { Db } from 'mongodb';
 
 import type { RequestContext } from './context.js';
@@ -81,6 +81,7 @@ export class AccountError extends Error {
 /** The slice of a Mongo collection the store uses. Narrow on purpose: a test can supply all of it. */
 export interface AccountCollection {
   insertOne(document: Document): Promise<{ insertedId: unknown }>;
+  findOne(filter: Filter): Promise<Document | null>;
   countDocuments(filter: Filter): Promise<number>;
   createIndex(keys: Readonly<Record<string, 1 | -1>>, options?: Readonly<Record<string, unknown>>): Promise<string>;
   dropIndex(index: string): Promise<void>;
@@ -106,12 +107,21 @@ export function accountContext(correlationId: string): RequestContext {
 
 const DUPLICATE_KEY = 11_000;
 
+/**
+ * The password the credential a miss is measured against is derived from. It is not a secret and guarding
+ * it would buy nothing: no account can hold it, because no handle is attached to it and the derivation it
+ * feeds is thrown away against every wrong answer this store gives.
+ */
+const DECOY = 'no account holds this password';
+
 export interface AccountOptions {
   /** Injected, so every instant one store writes comes from one clock and a test does not wait. */
   readonly now: () => string;
   readonly newId?: () => string;
   /** Injected for the same reason: a suite proves what is stored without paying what scrypt costs. */
   readonly hash?: (password: string) => Promise<string>;
+  /** Injected so a suite can assert that a miss was measured, which a stopwatch can only approximate. */
+  readonly verify?: (password: string, stored: string) => Promise<boolean>;
 }
 
 export interface AccountStore {
@@ -119,11 +129,21 @@ export interface AccountStore {
   claim(context: unknown, claim: InstanceClaim): Promise<AccountRecord>;
   claimed(context: unknown): Promise<boolean>;
   count(context: unknown): Promise<number>;
+  /** The account these credentials belong to, or nothing at all — and the same work is done either way. */
+  authenticate(context: unknown, credentials: SignIn): Promise<AccountRecord | undefined>;
 }
 
 export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore {
   const newId = options.newId ?? ((): string => randomBytes(ACCOUNT_ID_BYTES).toString('base64url'));
   const hash = options.hash ?? hashPassword;
+  const verify = options.verify ?? verifyPassword;
+
+  // Derived on the first handle nobody holds and kept from then on. Eager would cost every deployment a
+  // derivation at boot for something most never need; lazy costs the first such attempt two instead of
+  // one, which makes one probe slower rather than any probe faster and so tells a caller nothing about
+  // who exists. What it must never be is skipped: an answer that does no work is the stopwatch oracle.
+  let noAccountsCredential: Promise<string> | undefined;
+  const measuredAgainstNobody = (): Promise<string> => (noAccountsCredential ??= hash(DECOY));
 
   const permit = (context: unknown, need: AccountNeed): RequestContext => {
     const problems = contextProblems(context);
@@ -171,6 +191,26 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
         throw error;
       }
       return record;
+    },
+
+    async authenticate(context, credentials) {
+      permit(context, 'read');
+      const found = await db.collection(ACCOUNTS_COLLECTION).findOne({ name: credentials.name });
+      const stored = typeof found?.['credential'] === 'string' ? found['credential'] : await measuredAgainstNobody();
+      const matches = await verify(credentials.password, stored);
+      if (found === null || !matches) return undefined;
+      const parsed = parseAccountRecord({
+        id: found['_id'],
+        name: found['name'],
+        displayName: found['displayName'],
+        role: found['role'],
+        createdAt: found['createdAt'],
+      });
+      if (!parsed.ok) {
+        const problems = parsed.problems.map((problem) => `${problem.path} ${problem.message}`).join('; ');
+        throw new AccountError('schema', `an account this store cannot read back: ${problems}`);
+      }
+      return parsed.value;
     },
 
     async claimed(context) {

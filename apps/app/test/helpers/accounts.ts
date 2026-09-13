@@ -29,6 +29,7 @@ export const memoryAccounts = (): { rows: Map<string, Document>; db: AccountDb; 
       rows.set(id, { ...document });
       return { insertedId: id };
     },
+    findOne: async (filter) => [...rows.values()].find((row) => matches(row, filter)) ?? null,
     countDocuments: async (filter) => [...rows.values()].filter((row) => matches(row, filter)).length,
     createIndex: async () => 'created',
     dropIndex: async () => undefined,

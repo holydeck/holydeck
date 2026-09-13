@@ -8,12 +8,15 @@ import { MongoClient } from 'mongodb';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, UPDATE_REQUIRED_STATUS } from '@holydeck/contracts/clients';
 import { UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { parseSnapshotFrame } from '@holydeck/contracts/live';
+import { TICKET_QUERY } from '@holydeck/contracts/sessions';
 import { readJob } from '@holydeck/worker/jobs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { signInTo } from '../src/identity.js';
 import { reachLedger } from '../src/reach.js';
 import { startStack } from '../src/stack.js';
 
+import type { SignedIn } from '../src/identity.js';
 import type { Stack } from '../src/stack.js';
 
 const CLIENT = { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) };
@@ -39,9 +42,13 @@ const LEASED = {
 const ledger = reachLedger();
 
 let stack: Stack;
+let operator: SignedIn;
 
 beforeAll(async () => {
   stack = await startStack();
+  // A stack that keeps records keeps sessions, so every socket it serves is opened by spending a ticket.
+  // The run claims the instance it just started and signs in, which is what a person does to open one.
+  operator = await signInTo(stack.baseUrl);
 });
 
 afterAll(async () => {
@@ -52,14 +59,14 @@ afterAll(async () => {
 });
 
 /** One live session, recording what arrived so an assertion can wait for it rather than poll. */
-function session(path: string): {
+function session(path: string, headers: Record<string, string>): {
   closed: Promise<{ code: number; reason: string }>;
   open: Promise<void>;
   send(frame: unknown): void;
   next(): Promise<unknown>;
   close(): void;
 } {
-  const socket = new WebSocket(`${stack.baseUrl.replace(/^http/u, 'ws')}${path}`);
+  const socket = new WebSocket(`${stack.baseUrl.replace(/^http/u, 'ws')}${path}`, { headers });
   const frames: unknown[] = [];
   const waiting: Array<(frame: unknown) => void> = [];
   socket.addEventListener('message', (event: MessageEvent) => {
@@ -85,6 +92,16 @@ function session(path: string): {
     close: () => socket.close(),
   };
 }
+
+/**
+ * A socket the way a page opens one: the session in the cookie, the origin the page was served from,
+ * and a ticket spent in the query string, which is the only place a browser socket can carry anything.
+ */
+const live = async (query: string): Promise<ReturnType<typeof session>> =>
+  session(`/api/v1/live?${query}&${TICKET_QUERY}=${await operator.ticket()}`, {
+    origin: stack.baseUrl,
+    cookie: operator.cookie,
+  });
 
 describe('the same-origin application', () => {
   it('answers its health check with the locale this deployment was configured for', async () => {
@@ -163,29 +180,37 @@ describe('MongoDB', () => {
 
 describe('a live WebSocket client', () => {
   it('is answered with a snapshot of the channel it asked for', async () => {
-    const live = session(`/api/v1/live?channel=live-control&clientVersion=${CLIENT_WINDOW.current}`);
-    const parsed = parseSnapshotFrame(await live.next());
+    const socket = await live(`channel=live-control&clientVersion=${CLIENT_WINDOW.current}`);
+    const parsed = parseSnapshotFrame(await socket.next());
     expect(parsed.ok).toBe(true);
     expect(parsed.ok && parsed.value).toMatchObject({ kind: 'snapshot', channel: 'live-control', sequence: 0 });
-    live.close();
-    await live.closed;
-    ledger.reached('websocket', 'a session on live-control opened with a snapshot');
+    socket.close();
+    await socket.closed;
+    ledger.reached('websocket', 'a ticket from a signed-in session opened live-control with a snapshot');
   });
 
   it('answers a resume from the sequence the client last saw', async () => {
-    const live = session(`/api/v1/live?channel=stage&clientVersion=${CLIENT_WINDOW.current}`);
-    await live.next();
-    live.send({ kind: 'resume', channel: 'stage', fromSequence: 7 });
-    expect(await live.next()).toMatchObject({ kind: 'snapshot', channel: 'stage', sequence: 7 });
-    live.close();
-    await live.closed;
+    const socket = await live(`channel=stage&clientVersion=${CLIENT_WINDOW.current}`);
+    await socket.next();
+    socket.send({ kind: 'resume', channel: 'stage', fromSequence: 7 });
+    expect(await socket.next()).toMatchObject({ kind: 'snapshot', channel: 'stage', sequence: 7 });
+    socket.close();
+    await socket.closed;
     ledger.reached('websocket', 'a resume was answered from the sequence the client named');
   });
 
   it('refuses a client version it cannot serve, with a reason the client can read', async () => {
-    const live = session('/api/v1/live?channel=audience&clientVersion=99');
-    expect(await live.closed).toMatchObject({ code: 1008 });
-    expect((await live.closed).reason).toContain(UPDATE_REQUIRED_MESSAGE);
+    const socket = await live('channel=audience&clientVersion=99');
+    expect(await socket.closed).toMatchObject({ code: 1008 });
+    expect((await socket.closed).reason).toContain(UPDATE_REQUIRED_MESSAGE);
+  });
+
+  // The other half of the same rule, proven from outside: a ticket is what a socket costs, and a client
+  // that has none is refused before it is a socket at all rather than answered a frame.
+  it('refuses a client that spent no ticket, whatever channel it asked for', async () => {
+    const socket = session(`/api/v1/live?channel=stage&clientVersion=${CLIENT_WINDOW.current}`, {});
+    expect(await socket.closed).toMatchObject({ code: 1006 });
+    ledger.reached('websocket', 'a socket opened with no ticket was refused before the upgrade');
   });
 });
 

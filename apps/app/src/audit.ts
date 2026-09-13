@@ -19,7 +19,7 @@ import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
 
 /** Every action this release records. One entry per thing an administrator can be answerable for. */
-export const AUDIT_ACTIONS = ['instance.claim'] as const;
+export const AUDIT_ACTIONS = ['instance.claim', 'session.signIn', 'session.lock'] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

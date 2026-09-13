@@ -13,6 +13,7 @@ import {
   onboardingOffer,
   parseAccountRecord,
   parseInstanceClaim,
+  parseSignIn,
   passwordProblem,
 } from './accounts.js';
 import { FIELD_CODES } from './problems.js';
@@ -181,5 +182,60 @@ describe('claiming an instance', () => {
       `claim.displayName=${FIELD_CODES.notText}`,
       `claim.password=${FIELD_CODES.notText}`,
     ]);
+  });
+});
+
+describe('signing in', () => {
+  it('reads a handle and a password after the same normalisation the claim applied to them', () => {
+    const parsed = parseSignIn({ name: '  Andru  ', password: 'cafe\u0301-passphrase-x' });
+    expect(parsed).toEqual({ ok: true, value: { name: 'andru', password: 'caf\u00e9-passphrase-x' } });
+  });
+
+  it('refuses a body that is not an object before it looks for a field in one', () => {
+    expect(parseSignIn('andru')).toEqual({
+      ok: false,
+      problems: [{ path: 'credentials', code: FIELD_CODES.notAnObject, message: 'must be an object' }],
+    });
+  });
+
+  it('names both fields at once when neither is there, under the object they belong to', () => {
+    const parsed = parseSignIn({});
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error('unreachable');
+    expect(parsed.problems.map((problem) => problem.path)).toEqual(['credentials.name', 'credentials.password']);
+    expect(parsed.problems.every((problem) => problem.code === FIELD_CODES.required)).toBe(true);
+  });
+
+  it('refuses an empty handle or an empty password rather than carrying it to the store as a guess', () => {
+    const parsed = parseSignIn({ name: '', password: '' });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error('unreachable');
+    expect(parsed.problems.map((problem) => problem.code)).toEqual([FIELD_CODES.empty, FIELD_CODES.empty]);
+  });
+
+  it('refuses either field past its ceiling, because a megabyte must never reach a deliberately slow hash', () => {
+    const parsed = parseSignIn({ name: 'a'.repeat(ACCOUNT_NAME.maximum + 1), password: 'x'.repeat(PASSWORD.maximum + 1) });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error('unreachable');
+    expect(parsed.problems.map((problem) => problem.path)).toEqual(['credentials.name', 'credentials.password']);
+  });
+
+  // The two rules a claim enforces and signing in deliberately does not. A floor or a handle rule that
+  // changed after an account was made would otherwise strand that account: its password and its handle
+  // were legal the day they were chosen, and refusing them now would answer the person who knows their
+  // password with a validation problem instead of letting them in.
+  it('reads a password under the floor a claim enforces rather than refusing it', () => {
+    expect(parseSignIn({ name: 'andru', password: 'short' })).toEqual({
+      ok: true,
+      value: { name: 'andru', password: 'short' },
+    });
+  });
+
+  it('reads a handle no claim could have created rather than refusing it', () => {
+    expect(isAccountName('_andru_')).toBe(false);
+    expect(parseSignIn({ name: '_andru_', password: 'a-passphrase-worth-typing' })).toEqual({
+      ok: true,
+      value: { name: '_andru_', password: 'a-passphrase-worth-typing' },
+    });
   });
 });

@@ -3,10 +3,17 @@
 // random text, and every question about who it belongs to is a question for the store that issued it.
 //
 // Nothing here generates a token either. Randomness is the runtime's, and a browser and a server do not
-// draw it the same way. What travels is the shape a token has to have, the cookie that carries it, the two
-// windows a session lives inside, and the header a client returns its CSRF token in.
+// draw it the same way. What travels is where a session is opened and ended, the shape a token has to
+// have, the cookie that carries it, the two windows a session lives inside, and the header a client
+// returns its CSRF token in.
 
 import { FIELD_CODES, type Parsed, parseObject } from './problems.js';
+
+/** Where a session is opened, read, and ended. One resource: signing in creates it, signing out removes it. */
+export const SESSION_PATH = '/api/v1/session';
+
+/** A ticket is a change: it is issued once, spends the session's own standing, and is then gone. */
+export const TICKET_PATH = '/api/v1/live/ticket';
 
 /** The cookie the identifier travels in, and the only place it ever travels. */
 export const SESSION_COOKIE = 'holydeck_session';

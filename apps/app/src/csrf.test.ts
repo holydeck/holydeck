@@ -3,6 +3,7 @@ import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/client
 import {
   CSRF_HEADER,
   SESSION_COOKIE,
+  SESSION_PATH,
   clearedSessionCookie,
   mutates,
   sessionCookie,
@@ -159,10 +160,11 @@ describe('what the guard refuses', () => {
 });
 
 describe('the routes the guard covers', () => {
-  test('every route that changes something is behind it, and the one exception is the declared one', () => {
-    // Claiming a fresh instance is the only change a request with no session may make, because it is the
-    // request that creates the first account there could be a session for. Anything added here is a hole.
-    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`]);
+  test('every route that changes something is behind it, and the exceptions are the declared ones', () => {
+    // Claiming a fresh instance and signing in are the only changes a request with no session may make:
+    // one creates the first account there could be a session for, the other opens the session. Anything
+    // added here is a hole.
+    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`, `POST ${SESSION_PATH}`]);
     expect(mutatingRoutesOf(app)).toEqual([{ method: 'POST', url: '/api/v1/anything' }]);
   });
 

@@ -1,35 +1,67 @@
+import { PASSWORD, actorFor } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
+import { VALIDATION_FAILED } from '@holydeck/contracts/http';
 import {
   CSRF_HEADER,
+  SESSION_ABSOLUTE_HOURS,
+  SESSION_COOKIE,
+  SESSION_PATH,
+  TICKET_PATH,
   TICKET_SECONDS,
   clearedSessionCookie,
+  cookieIn,
   isOpaqueToken,
   sessionCookie,
 } from '@holydeck/contracts/sessions';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { guardMutations, mutatingRoutesOf } from './csrf.js';
+import { accountContext, accountsOn } from './accounts.js';
+import { ACCOUNT_ATTEMPT_LIMIT, LOCK_MINUTES, accountScope, attemptContext, attemptsOn } from './attempts.js';
+import { auditOn } from './audit.js';
+import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
-import { SESSION_PATH, TICKET_PATH, serveSessionRoutes } from './session-routes.js';
+import { SIGN_IN_REFUSED, serveSessionRoutes } from './session-routes.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { memoryAccounts } from '../test/helpers/accounts.js';
+import { memoryAttempts } from '../test/helpers/attempts.js';
+import { fakeDb } from '../test/helpers/fake-db.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 
-import type { FastifyInstance } from 'fastify';
+import type { AccountStore } from './accounts.js';
+import type { AttemptGate } from './attempts.js';
+import type { Identity } from './onboarding.js';
+import type { SessionRoutesOptions } from './session-routes.js';
 import type { SessionStore, StartedSession } from './sessions.js';
+import type { Document } from './repositories.js';
+import type { FakeDb } from '../test/helpers/fake-db.js';
+import type { FastifyInstance, InjectOptions } from 'fastify';
 
 const NOW = '2026-09-13T09:30:00.000Z';
 const ORIGIN = 'https://holydeck.example.invalid';
 const HOST = 'holydeck.example.invalid';
+const ID = 'A'.repeat(22);
+
+const CLAIM = { name: 'lucia', displayName: 'Lucia Brandt', password: 'a-long-enough-passphrase' };
+
+const MINUTE = 60_000;
 
 let app: FastifyInstance;
 let store: SessionStore;
+let sessionRows: Map<string, Document>;
+let accounts: AccountStore;
+let attempts: AttemptGate;
+let trail: FakeDb;
+let identity: Identity;
+let clock: number;
 
-const serving = async (sessions: SessionStore | undefined): Promise<FastifyInstance> => {
+const now = (): string => new Date(clock).toISOString();
+
+const serving = async (options: SessionRoutesOptions): Promise<FastifyInstance> => {
   const built = Fastify({ logger: false });
   withSafeErrors(built);
-  guardMutations(built, { sessions });
-  serveSessionRoutes(built, { sessions });
+  guardMutations(built, { sessions: options.sessions });
+  serveSessionRoutes(built, options);
   await built.ready();
   return built;
 };
@@ -52,9 +84,49 @@ const asking = (method: 'GET' | 'DELETE' | 'POST', url: string, session: Started
     },
   });
 
+const signingIn = (
+  payload: unknown = { name: CLAIM.name, password: CLAIM.password },
+  headers: Record<string, string | undefined> = {},
+) =>
+  app.inject({
+    method: 'POST',
+    url: SESSION_PATH,
+    headers: {
+      [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
+      host: HOST,
+      'x-forwarded-proto': 'https',
+      origin: ORIGIN,
+      ...headers,
+    } as Record<string, string>,
+    payload: payload as InjectOptions['payload'],
+  });
+
+const failing = (password = 'not-the-passphrase', name = CLAIM.name) => signingIn({ name, password });
+
+const entries = (): Document[] => trail.rows.get('audit_events') ?? [];
+
+const tokenIn = (header: unknown): string => cookieIn(String(header), SESSION_COOKIE) ?? '';
+
 beforeEach(async () => {
-  store = sessionsOn(memorySessions().db, { now: () => NOW });
-  app = await serving(store);
+  clock = Date.parse(NOW);
+  trail = fakeDb();
+  const sessions = memorySessions();
+  sessionRows = sessions.rows;
+  store = sessionsOn(sessions.db, { now });
+  accounts = accountsOn(memoryAccounts().db, {
+    now,
+    newId: () => ID,
+    hash: async (password) => `test-hash:${password}`,
+    verify: async (password, stored) => stored === `test-hash:${password}`,
+  });
+  attempts = attemptsOn(memoryAttempts().db, { now });
+  await accounts.claim(accountContext('req-1a2b3c4d'), CLAIM);
+  identity = {
+    accounts,
+    audit: auditOn(trail, { now, newId: () => `e${entries().length}` }),
+    attempts,
+  };
+  app = await serving({ sessions: store, identity });
 });
 
 afterEach(async () => {
@@ -79,10 +151,172 @@ describe('what an operator can ask about their own session', () => {
   });
 
   test('is a safe method, and so is not one the guard is on', async () => {
+    // Signing in changes something and is still not in this list: it is the mutation that cannot carry a
+    // session, and the guard's declared exception is what lets it past rather than a hole in the guard.
     expect(mutatingRoutesOf(app)).toEqual([
       { method: 'DELETE', url: SESSION_PATH },
       { method: 'POST', url: TICKET_PATH },
     ]);
+  });
+});
+
+describe('signing in', () => {
+  test('a handle and the password it was claimed with open a session, given as a cookie', async () => {
+    const response = await signingIn();
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data).toMatchObject({
+      actor: actorFor(ID),
+      rotation: 'authentication',
+      // What the operator may do is granted by the roles work; a session that proves who opens nothing.
+      permissions: [],
+    });
+    const cookie = String(response.headers['set-cookie']);
+    expect(isOpaqueToken(tokenIn(cookie))).toBe(true);
+    expect(cookie).toContain(`Max-Age=${SESSION_ABSOLUTE_HOURS * 3600}`);
+    expect(cookie).toContain('HttpOnly');
+    // The identifier is in the cookie and nowhere else, the answering body included.
+    expect(response.body).not.toContain(tokenIn(cookie));
+  });
+
+  test('the session it opens is one the rest of the surface accepts', async () => {
+    const opened = await signingIn();
+    const cookie = String(opened.headers['set-cookie']);
+    const response = await app.inject({
+      method: 'GET',
+      url: SESSION_PATH,
+      headers: { host: HOST, 'x-forwarded-proto': 'https', origin: ORIGIN, cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ actor: actorFor(ID) });
+  });
+
+  test('a handle is read the way it was claimed, whatever case and spacing it is typed in', async () => {
+    const response = await signingIn({ name: '  LUCIA  ', password: CLAIM.password });
+    expect(response.statusCode).toBe(201);
+  });
+
+  test('the trail records the sign-in under the account, which is what history is kept by', async () => {
+    await signingIn();
+    expect(entries()).toHaveLength(1);
+    expect(entries()[0]).toMatchObject({
+      actor: actorFor(ID),
+      action: 'session.signIn',
+      subject: CLAIM.name,
+      outcome: 'allowed',
+    });
+  });
+});
+
+describe('what a refused sign-in says', () => {
+  test('a wrong password and a handle nobody holds are answered in the same words', async () => {
+    const wrong = await failing();
+    const nobody = await failing('not-the-passphrase', 'nobody');
+    expect(wrong.statusCode).toBe(401);
+    expect(nobody.statusCode).toBe(401);
+    expect(wrong.json().error.code).toBe(SIGN_IN_REFUSED);
+    // Everything but the request identifier, which is this request's own and says nothing about accounts.
+    expect({ ...wrong.json().error, requestId: '' }).toEqual({ ...nobody.json().error, requestId: '' });
+  });
+
+  test('a body that is not a sign-in at all is refused the same way, not as a validation problem', async () => {
+    const refusals = [{}, { name: CLAIM.name }, { name: CLAIM.name, password: 'x'.repeat(PASSWORD.maximum + 1) }];
+    for (const payload of refusals) {
+      const response = await signingIn(payload);
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error.code).toBe(SIGN_IN_REFUSED);
+      expect(response.body).not.toContain(VALIDATION_FAILED);
+    }
+  });
+
+  test('a refusal opens nothing: no cookie is set, and no session is written to keep', async () => {
+    const response = await failing();
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(sessionRows.size).toBe(0);
+  });
+
+  test('the trail records the attempt under the handle it asked for, with nobody to attribute it to', async () => {
+    await failing('not-the-passphrase', 'nobody');
+    expect(entries()[0]).toMatchObject({
+      actor: 'system',
+      action: 'session.signIn',
+      subject: 'nobody',
+      outcome: 'refused',
+    });
+  });
+});
+
+describe('too many attempts', () => {
+  const lockingOut = async (name = CLAIM.name): Promise<void> => {
+    for (let attempt = 0; attempt < ACCOUNT_ATTEMPT_LIMIT; attempt += 1) {
+      expect((await failing('not-the-passphrase', name)).statusCode).toBe(401);
+    }
+  };
+
+  test('the failure that reaches the threshold locks the handle, and the right password is refused too', async () => {
+    let reads = 0;
+    const counted: AccountStore = {
+      ...accounts,
+      authenticate: async (context, credentials) => {
+        reads += 1;
+        return accounts.authenticate(context, credentials);
+      },
+    };
+    app = await serving({ sessions: store, identity: { ...identity, accounts: counted } });
+    await lockingOut();
+    expect(reads).toBe(ACCOUNT_ATTEMPT_LIMIT);
+    const right = await signingIn();
+    expect(right.statusCode).toBe(401);
+    expect(right.json().error.code).toBe(SIGN_IN_REFUSED);
+    // The gate is asked before the credential is read, so a locked handle costs no derivation at all.
+    expect(reads).toBe(ACCOUNT_ATTEMPT_LIMIT);
+  });
+
+  test('the lock releases when its window is over, and the same password then opens a session', async () => {
+    await lockingOut();
+    clock += LOCK_MINUTES[0]! * MINUTE + 1000;
+    const response = await signingIn();
+    expect(response.statusCode).toBe(201);
+  });
+
+  test('a handle nobody holds locks exactly like one somebody does, and locks nothing else', async () => {
+    await lockingOut('nobody');
+    const gate = attemptContext('req-2b3c4d5e');
+    expect(await attempts.locked(gate, accountScope('nobody'))).toBe(true);
+    expect(await attempts.locked(gate, accountScope(CLAIM.name))).toBe(false);
+    expect((await signingIn()).statusCode).toBe(201);
+  });
+
+  test('a sign-in that succeeds forgives the failures that came before it', async () => {
+    for (let attempt = 0; attempt < ACCOUNT_ATTEMPT_LIMIT - 1; attempt += 1) await failing();
+    expect((await signingIn()).statusCode).toBe(201);
+    for (let attempt = 0; attempt < ACCOUNT_ATTEMPT_LIMIT - 1; attempt += 1) await failing();
+    expect(await attempts.locked(attemptContext('req-3c4d5e6f'), accountScope(CLAIM.name))).toBe(false);
+  });
+
+  test('the trail says a handle was locked, which is the one thing the answer does not say', async () => {
+    await lockingOut();
+    expect(entries().filter((entry) => entry['action'] === 'session.lock')).toMatchObject([
+      { actor: 'system', subject: accountScope(CLAIM.name), outcome: 'refused' },
+    ]);
+  });
+});
+
+describe('where a sign-in may come from', () => {
+  test('a page on another site cannot sign anyone in', async () => {
+    const response = await signingIn(undefined, { origin: 'https://elsewhere.example.invalid' });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe(FORBIDDEN);
+    expect(sessionRows.size).toBe(0);
+  });
+
+  test('a terminal, which sends no origin at all, is not refused for that', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: SESSION_PATH,
+      headers: { host: HOST, 'x-forwarded-proto': 'https' },
+      payload: { name: CLAIM.name, password: CLAIM.password },
+    });
+    expect(response.statusCode).toBe(201);
   });
 });
 
@@ -124,11 +358,67 @@ describe('the ticket a socket handshake carries', () => {
   });
 });
 
-describe('a deployment that keeps no sessions', () => {
-  test('serves the surface and answers every part of it the same way', async () => {
-    app = await serving(undefined);
+describe('a deployment that cannot sign anyone in', () => {
+  test('one that keeps no sessions serves the surface and answers every part of it the same way', async () => {
+    app = await serving({ sessions: undefined, identity });
     expect((await asking('GET', SESSION_PATH, undefined)).statusCode).toBe(401);
     expect((await asking('DELETE', SESSION_PATH, undefined)).statusCode).toBe(401);
     expect((await asking('POST', TICKET_PATH, undefined)).statusCode).toBe(401);
+    const refused = await signingIn();
+    expect(refused.statusCode).toBe(401);
+    expect(refused.json().error.code).toBe(SIGN_IN_REFUSED);
+  });
+
+  test('one that keeps no accounts refuses in the same words, rather than saying it keeps none', async () => {
+    app = await serving({ sessions: store, identity: undefined });
+    const refused = await signingIn();
+    expect(refused.statusCode).toBe(401);
+    expect(refused.json().error.code).toBe(SIGN_IN_REFUSED);
+  });
+});
+
+describe('what recording must never cost', () => {
+  const deaf = (over: Partial<Identity>): SessionRoutesOptions => ({
+    sessions: store,
+    identity: { ...identity, ...over },
+  });
+
+  test('a trail that refuses the entry does not undo the sign-in that happened', async () => {
+    app = await serving(deaf({ audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } }));
+    expect((await signingIn()).statusCode).toBe(201);
+    expect((await failing()).statusCode).toBe(401);
+  });
+
+  test('a counter that could not be written does not turn an answer into a fault', async () => {
+    const broken: AttemptGate = {
+      ...attempts,
+      failed: () => Promise.reject(new Error('the gate is unavailable')),
+      forgiven: () => Promise.reject(new Error('the gate is unavailable')),
+    };
+    app = await serving(deaf({ attempts: broken }));
+    expect((await failing()).statusCode).toBe(401);
+    expect((await signingIn()).statusCode).toBe(201);
+  });
+
+  test('a gate that cannot say whether a handle is locked is a fault of this server’s, not a refusal', async () => {
+    const blind: AttemptGate = {
+      ...attempts,
+      locked: () => Promise.reject(new Error('mongodb://holydeck:hunter2@records.invalid:27017 is unreachable')),
+    };
+    app = await serving(deaf({ attempts: blind }));
+    const response = await signingIn();
+    expect(response.statusCode).toBe(500);
+    expect(response.body).not.toContain('hunter2');
+  });
+
+  test('a store that failed for some other reason is a defect, and is not answered as a refused sign-in', async () => {
+    const broken: AccountStore = {
+      ...accounts,
+      authenticate: () => Promise.reject(new TypeError('records.invalid is not a function')),
+    };
+    app = await serving(deaf({ accounts: broken }));
+    const response = await signingIn();
+    expect(response.statusCode).toBe(500);
+    expect(response.body).not.toContain('not a function');
   });
 });

@@ -13,7 +13,7 @@ import {
   dropAccountIndexOn,
 } from './accounts.js';
 import { ContextError } from './context.js';
-import { hashPassword } from './credentials.js';
+import { hashPassword, verifyPassword } from './credentials.js';
 import { memoryAccounts, storedAccounts } from '../test/helpers/accounts.js';
 
 import type { AccountStore } from './accounts.js';
@@ -172,5 +172,89 @@ describe('what the collection is read and written through', () => {
     expect(FIRST_RUN.actor).toBe('system');
     expect([...FIRST_RUN.permissions].sort()).toEqual([ACCOUNT_PERMISSIONS.create, ACCOUNT_PERMISSIONS.read].sort());
     expect(() => accountContext('no')).toThrow(ContextError);
+  });
+});
+
+describe('signing in', () => {
+  let derived: string[];
+  let measured: { password: string; stored: string }[];
+
+  beforeEach(() => {
+    derived = [];
+    measured = [];
+    const memory = memoryAccounts();
+    rows = memory.rows;
+    store = accountsOn(memory.db, {
+      now: () => NOW,
+      hash: async (password) => {
+        derived.push(password);
+        return weakly(password);
+      },
+      verify: async (password, stored) => {
+        measured.push({ password, stored });
+        return verifyPassword(password, stored);
+      },
+    });
+  });
+
+  test('the account a handle and its own password belong to is the account the store answers with', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await expect(store.authenticate(FIRST_RUN, { name: CLAIM.name, password: PASSWORD })).resolves.toEqual(claimed);
+  });
+
+  test('the answer carries what a client may read, and neither the credential nor the founder marker', async () => {
+    await store.claim(FIRST_RUN, CLAIM);
+    const account = await store.authenticate(FIRST_RUN, { name: CLAIM.name, password: PASSWORD });
+    expect(Object.keys(account ?? {})).toEqual(['id', 'name', 'displayName', 'role', 'createdAt']);
+  });
+
+  test('a password that is not that account’s and a handle nobody holds are the same answer', async () => {
+    await store.claim(FIRST_RUN, CLAIM);
+    const wrong = await store.authenticate(FIRST_RUN, { name: CLAIM.name, password: 'not-the-passphrase' });
+    const nobody = await store.authenticate(FIRST_RUN, { name: 'nobody', password: PASSWORD });
+    expect(wrong).toBeUndefined();
+    expect(nobody).toEqual(wrong);
+  });
+
+  // The stopwatch belongs in the integration suite, where the cost is the real one. What is asserted here
+  // is the mechanism it would measure: a handle nobody holds is answered by deriving against a credential
+  // no password matches, so the work a miss does is the work a hit does.
+  test('a handle nobody holds is still measured against a credential, so a miss costs what a hit costs', async () => {
+    await store.claim(FIRST_RUN, CLAIM);
+    const stored = String(storedAccounts(rows)[0]?.['credential']);
+    measured.length = 0;
+    await store.authenticate(FIRST_RUN, { name: 'nobody', password: PASSWORD });
+    expect(measured).toHaveLength(1);
+    expect(measured[0]?.password).toBe(PASSWORD);
+    expect(measured[0]?.stored).not.toBe(stored);
+  });
+
+  test('the credential a miss is measured against is derived once and kept, not derived per attempt', async () => {
+    await store.claim(FIRST_RUN, CLAIM);
+    derived.length = 0;
+    await store.authenticate(FIRST_RUN, { name: 'nobody', password: PASSWORD });
+    await store.authenticate(FIRST_RUN, { name: 'somebody-else', password: PASSWORD });
+    expect(derived).toHaveLength(1);
+    expect(derived[0]).not.toBe(PASSWORD);
+    expect(measured[0]?.stored).toBe(measured[1]?.stored);
+  });
+
+  test('a document this store cannot read back is a defect of the server’s, not a refused sign-in', async () => {
+    await store.claim(FIRST_RUN, CLAIM);
+    const [stored] = storedAccounts(rows);
+    rows.set(String(stored?.['_id']), { ...stored, role: 'archbishop' });
+    await expect(store.authenticate(FIRST_RUN, { name: CLAIM.name, password: PASSWORD })).rejects.toMatchObject({
+      kind: 'schema',
+    });
+  });
+
+  test('signing in reads an account, and is refused without a context or without the permission to', async () => {
+    await expect(store.authenticate(undefined, { name: CLAIM.name, password: PASSWORD })).rejects.toBeInstanceOf(
+      AccountError,
+    );
+    const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.create] };
+    await expect(store.authenticate(blind, { name: CLAIM.name, password: PASSWORD })).rejects.toMatchObject({
+      kind: 'permission',
+    });
   });
 });

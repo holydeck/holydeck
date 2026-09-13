@@ -106,6 +106,6 @@ describe('the context the trail is written under', () => {
   });
 
   it('declares the actions this release records, and only those', () => {
-    expect(AUDIT_ACTIONS).toEqual(['instance.claim']);
+    expect(AUDIT_ACTIONS).toEqual(['instance.claim', 'session.signIn', 'session.lock']);
   });
 });

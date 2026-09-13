@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { ACCOUNT_INDEXES } from './accounts.js';
+import { ATTEMPT_INDEXES } from './attempts.js';
 import { requestContext, systemContext } from './context.js';
 import {
   MIGRATIONS,
@@ -92,6 +93,7 @@ describe('the shipped migrations', () => {
       'run_events',
       'schema_migrations',
       'sessions',
+      'sign_in_attempts',
     ]);
 
     for (let step = SCHEMA_VERSION; step > 0; step -= 1) await rollback(db, CONTEXT, { now: clock });
@@ -121,6 +123,14 @@ describe('the shipped migrations', () => {
     const db = fakeDb();
     await migrate(db, CONTEXT, { now: clock });
     expect(db.indexes.get('accounts')).toEqual(ACCOUNT_INDEXES.map((index) => index.name));
+  });
+
+  // The other of the two that forgets: a scope nobody has failed against for a day stops existing, so a
+  // deployment that has been running for a year holds counts for the people signing in this week.
+  test('build the sign-in attempts the index a scope nobody is using is forgotten by', async () => {
+    const db = fakeDb();
+    await migrate(db, CONTEXT, { now: clock });
+    expect(db.indexes.get('sign_in_attempts')).toEqual(ATTEMPT_INDEXES.map((index) => index.name));
   });
 });
 
@@ -410,10 +420,12 @@ describe('what a migration is handed', () => {
   test('offers the repositories and the index calls, and nothing that could rewrite history', () => {
     expect(Object.keys(migrationApi(fakeDb())).sort()).toEqual([
       'createAccountIndex',
+      'createAttemptIndex',
       'createIndex',
       'createQueueIndex',
       'createSessionIndex',
       'dropAccountIndex',
+      'dropAttemptIndex',
       'dropIndex',
       'dropQueueIndex',
       'dropSessionIndex',

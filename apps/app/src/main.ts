@@ -5,6 +5,7 @@ import { MongoClient } from 'mongodb';
 
 import { accountDb, accountsOn } from './accounts.js';
 import { buildApp } from './app.js';
+import { attemptDb, attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
 import {
   checkCorpusBoundary,
@@ -59,6 +60,7 @@ if (settings.values.mongoUrl !== '') {
   identity = {
     accounts: accountsOn(accountDb(store.db()), { now }),
     audit: auditOn(repositoryDb(store.db()), { now }),
+    attempts: attemptsOn(attemptDb(store.db()), { now }),
   };
 }
 
@@ -78,12 +80,11 @@ const app = buildApp({
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.
 //
-// Served without a handshake ticket for as long as this build has no way to sign in: a ticket comes from
-// a session, a session comes from signing in, and a guard on a deployment nothing can hold a session in
-// refuses every client there is, including the only one this repository ships. The guard itself is built
-// and proven; `serveLive(app, { sessions })` is the one line that turns it on, and the release that adds
-// account sign-in adds it.
-await serveLive(app);
+// Guarded by a handshake ticket wherever a session can be held: a ticket is spent from a session, and a
+// session is opened by signing in. A deployment that keeps no durable records has no sessions to hand the
+// guard, so it has no tickets either, and its socket refuses every client there is — which is the same
+// answer as before, reached now because there is nothing to sign in to rather than no way to sign in.
+await serveLive(app, { sessions });
 
 for (const [key, source] of Object.entries(settings.sources)) {
   app.log.info(`${key} came from the ${source}`);
