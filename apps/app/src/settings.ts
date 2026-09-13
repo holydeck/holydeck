@@ -4,7 +4,10 @@
 // directory, never the file itself: settings are replaced atomically, which changes the inode, and a
 // file-level bind mount would keep serving the replaced one forever.
 
+import { INTERNAL_BINDINGS, MINIMUM_CORPUS_TOKEN_LENGTH } from '@holydeck/contracts/corpus';
 import { parse } from 'yaml';
+
+import { corpusBinding } from './corpus.js';
 
 export const CANONICAL_SETTINGS_PATH = '/data/holydeck/config/settings.yaml';
 
@@ -17,6 +20,10 @@ export interface Settings {
   dataDir: string;
   mediaRoot: string;
   locale: Locale;
+  /** Where the corpus service answers. Empty means this deployment has no scripture library. */
+  corpusUrl: string;
+  /** The credential the corpus requires. Empty only alongside an empty address. */
+  corpusToken: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -24,6 +31,8 @@ export const DEFAULT_SETTINGS: Settings = {
   dataDir: '/data/holydeck',
   mediaRoot: '/data/holydeck/media',
   locale: 'en',
+  corpusUrl: '',
+  corpusToken: '',
 };
 
 export type SettingsSource = 'default' | 'file' | 'env';
@@ -50,6 +59,8 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   dataDir: 'HOLYDECK_DATA_DIR',
   mediaRoot: 'HOLYDECK_MEDIA_ROOT',
   locale: 'HOLYDECK_LOCALE',
+  corpusUrl: 'HOLYDECK_CORPUS_URL',
+  corpusToken: 'HOLYDECK_CORPUS_TOKEN',
 };
 
 export function settingsPath(env: Record<string, string | undefined>): string {
@@ -79,6 +90,37 @@ const parseLocale = (raw: unknown): Parsed<Locale> => {
     return { ok: false, problem: `expected one of ${LOCALES.join(', ')}, got ${JSON.stringify(raw)}` };
   }
   return { ok: true, value: locale };
+};
+
+// An address the rest of the world can resolve is refused outright: the corpus holds the whole library
+// and every sync job, and a deployment that can reach it from outside has already lost the argument.
+const parseCorpusUrl = (raw: unknown): Parsed<string> => {
+  const rejected = { ok: false, problem: `expected an http or https address, got ${JSON.stringify(raw)}` } as const;
+  if (typeof raw !== 'string') return rejected;
+  const value = raw.trim();
+  if (value === '') return { ok: true, value: '' };
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return rejected;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return rejected;
+  const binding = corpusBinding(value);
+  if (!INTERNAL_BINDINGS.some((internal) => internal === binding)) {
+    return { ok: false, problem: `expected an address inside this deployment, got ${url.hostname}` };
+  }
+  return { ok: true, value };
+};
+
+// The problem never carries the value: a settings error ends up in a log, and this one is a secret.
+const parseCorpusToken = (raw: unknown): Parsed<string> => {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (typeof raw === 'string' && value === '') return { ok: true, value: '' };
+  if (typeof raw !== 'string' || value.length < MINIMUM_CORPUS_TOKEN_LENGTH) {
+    return { ok: false, problem: `expected a credential of at least ${MINIMUM_CORPUS_TOKEN_LENGTH} characters` };
+  }
+  return { ok: true, value };
 };
 
 function readFileLayer(
@@ -149,12 +191,34 @@ export function loadSettings(input: {
   const dataDir = resolve('dataDir', DEFAULT_SETTINGS.dataDir, parseAbsolutePath, layers);
   const mediaRoot = resolve('mediaRoot', DEFAULT_SETTINGS.mediaRoot, parseAbsolutePath, layers);
   const locale = resolve('locale', DEFAULT_SETTINGS.locale, parseLocale, layers);
+  const corpusProblems = problems.length;
+  const corpusUrl = resolve('corpusUrl', DEFAULT_SETTINGS.corpusUrl, parseCorpusUrl, layers);
+  const corpusToken = resolve('corpusToken', DEFAULT_SETTINGS.corpusToken, parseCorpusToken, layers);
+  // Only worth saying when both were readable: a rejected credential already said what to fix, and
+  // adding "set both" to it would read as a second, separate mistake.
+  if (problems.length === corpusProblems && (corpusUrl.value === '') !== (corpusToken.value === '')) {
+    problems.push('corpusUrl and corpusToken: set both or neither, so the library is never read without a credential');
+  }
 
   if (problems.length > 0) throw new SettingsError(problems);
 
   return {
-    values: { port: port.value, dataDir: dataDir.value, mediaRoot: mediaRoot.value, locale: locale.value },
-    sources: { port: port.source, dataDir: dataDir.source, mediaRoot: mediaRoot.source, locale: locale.source },
+    values: {
+      port: port.value,
+      dataDir: dataDir.value,
+      mediaRoot: mediaRoot.value,
+      locale: locale.value,
+      corpusUrl: corpusUrl.value,
+      corpusToken: corpusToken.value,
+    },
+    sources: {
+      port: port.source,
+      dataDir: dataDir.source,
+      mediaRoot: mediaRoot.source,
+      locale: locale.source,
+      corpusUrl: corpusUrl.source,
+      corpusToken: corpusToken.source,
+    },
     path,
   };
 }

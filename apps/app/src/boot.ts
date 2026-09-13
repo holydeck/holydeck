@@ -1,4 +1,9 @@
+import { corpusBoundaryProblems } from '@holydeck/contracts/corpus';
 import { MESSAGE_CODES, REMOVED_CODES, messageCodeProblems } from '@holydeck/contracts/http';
+
+import { corpusBoundaryFor, corpusProbeProblems } from './corpus.js';
+
+import type { CorpusProbe, CorpusSettings } from './corpus.js';
 
 /** Reads the settings file if it is there. A fresh install has none, and that is not a fault. */
 export function readSettingsText(read: (path: string) => string, path: string): string | undefined {
@@ -25,4 +30,24 @@ export function checkReleasedContracts(
   if (problems.length > 0) {
     throw new Error(`the released message codes cannot be served: ${problems.join('; ')}`);
   }
+}
+
+const refuseToStart = (reason: string, problems: readonly string[]): void => {
+  if (problems.length > 0) throw new Error(`${reason}: ${problems.join('; ')}`);
+};
+
+/**
+ * Grades the boundary this deployment presents against the documented one. The settings already refuse
+ * an address the outside world can reach; this grades the whole packet — the client, the credential and
+ * the routes the application depends on — so a build whose contract has drifted is caught here rather
+ * than in front of a congregation.
+ */
+export function checkCorpusBoundary(corpus: CorpusSettings): void {
+  if (corpus.url === '') return;
+  refuseToStart('the corpus boundary is not one this application will cross', corpusBoundaryProblems(corpusBoundaryFor(corpus)));
+}
+
+/** A corpus that answers anyone who can reach it is a deployment fault, not something to serve through. */
+export function checkCorpusIsClosed(probe: CorpusProbe): void {
+  refuseToStart('the corpus is open', corpusProbeProblems(probe));
 }

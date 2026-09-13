@@ -7,7 +7,11 @@
 #   pnpm dev:server:down   # or: docker compose -f compose.dev.yaml down -v
 #
 # It builds from the working tree, so the running server is whatever the code says right now.
-# Point the CLI at it with --server-url http://localhost:3000.
+#
+# The corpus requires a credential here, the same way a deployment does, so the application can
+# refuse to read a library that anybody could read. Point the CLI at it with
+#   --server-url http://localhost:3000   and   HOLYDECK_SERVER_TOKEN=dev-corpus-token-not-a-secret
+# Set HOLYDECK_CORPUS_TOKEN in your shell to use a different one; both services read the same value.
 services:
   server:
     build:
@@ -20,8 +24,11 @@ services:
       # bible.com answers plain HTTP clients with a JavaScript challenge. The image ships the
       # Chromium that passes it, so syncing from the dev stack behaves like the real thing.
       HOLYDECK_BROWSER_FETCH: "true"
+      HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:-dev-corpus-token-not-a-secret}
+    # Published on loopback only: a corpus reachable from the network is a library anybody can read,
+    # and the application refuses to start against one. The CLI on this machine still reaches it.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       mongo:
         condition: service_healthy
@@ -35,8 +42,13 @@ services:
     environment:
       HOLYDECK_PORT: "3100"
       HOLYDECK_LOG_LEVEL: debug
+      # The application reads the corpus over this network and never publishes it onwards.
+      HOLYDECK_CORPUS_URL: http://server:3000
+      HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:-dev-corpus-token-not-a-secret}
     ports:
       - "3100:3100"
+    depends_on:
+      - server
     volumes:
       - holydeck-dev-data:/data/holydeck
     healthcheck:

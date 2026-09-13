@@ -16,9 +16,9 @@ ENV NODE_ENV=production
 WORKDIR /srv
 COPY --from=build /out/app ./app
 COPY --from=build /out/worker ./worker
-# The application serves this client same-origin; until it does, the image already carries it so the
-# deployment does not need a second artefact later.
-COPY --from=build /repo/apps/web/dist ./web
+# The application serves this client from its own origin, and finds it at this path relative to its
+# own dist directory — the same relative path the repository has, so dev and image agree.
+COPY --from=build /repo/apps/web/dist ./web/dist
 # An empty named volume mounted here inherits this ownership, so the worker can create what it owns.
 RUN mkdir -p /data/holydeck && chown -R node:node /data/holydeck
 USER node

@@ -39,7 +39,7 @@ if (problems.length > 0) throw new Error(`the manifest is not installable:\n  ${
 await writeFile(new URL('manifest.webmanifest', dist), `${JSON.stringify(WEB_MANIFEST, null, 2)}\n`);
 
 const shell = await readFile(new URL('index.html', dist), 'utf8');
-for (const required of ['/manifest.webmanifest', '/main.js', WEB_MANIFEST.theme_color]) {
+for (const required of ['/manifest.webmanifest', '/main.js', '/app.css', WEB_MANIFEST.theme_color]) {
   if (!shell.includes(required)) throw new Error(`index.html does not reference ${required}`);
 }
 

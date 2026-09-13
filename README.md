@@ -53,14 +53,21 @@ pnpm dev:server        # build from the working tree, serve on http://localhost:
 pnpm dev:server:down   # stop it and delete the database volume
 ```
 
-Every start rebuilds, so the container always runs the current code. Check it with
-`curl localhost:3000/health`, then point the CLI at it:
+Every start rebuilds, so the container always runs the current code. The corpus requires a
+credential and publishes on loopback only, the way a deployment runs it, so the CLI sends the
+dev credential with every request:
 
 ```sh
-node apps/cli/dist/cli.js get "PSA 118:24" --server-url http://localhost:3000
+curl localhost:3000/health
+HOLYDECK_SERVER_TOKEN=dev-corpus-token-not-a-secret \
+  node apps/cli/dist/cli.js get "PSA 118:24" --server-url http://localhost:3000
 ```
 
-The server syncs through the Chromium in its own image, so `POST /api/v1/translations/KJV/sync`
+The stack also starts the application on <http://localhost:3100>. It serves the web client from
+its own origin and reads the corpus over the internal network, which is the only way anything
+reaches the library.
+
+The corpus syncs through the Chromium in its own image, so `POST /api/v1/translations/KJV/sync`
 works from the dev stack too. `apps/corpus/compose.example.yaml` is the deployment example
 instead: it pulls the published image rather than building one.
 
