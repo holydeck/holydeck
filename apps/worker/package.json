@@ -9,6 +9,10 @@
     "./jobs": {
       "types": "./dist/jobs.d.ts",
       "import": "./dist/jobs.js"
+    },
+    "./runner": {
+      "types": "./dist/runner.d.ts",
+      "import": "./dist/runner.js"
     }
   },
   "files": [
@@ -23,7 +27,8 @@
   },
   "dependencies": {
     "@holydeck/app": "workspace:*",
-    "@holydeck/contracts": "workspace:*"
+    "@holydeck/contracts": "workspace:*",
+    "mongodb": "^6.21.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.0",

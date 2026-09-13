@@ -270,6 +270,9 @@ importers:
       '@holydeck/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      mongodb:
+        specifier: ^6.21.0
+        version: 6.21.0(socks@2.8.10)
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^5.0.0
