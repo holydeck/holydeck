@@ -20,6 +20,7 @@ const STATUS_BY_CODE: Partial<Record<MessageCode, number>> = {
   template_invalid: 400,
   template_index_out_of_range: 400,
   request_invalid: 400,
+  auth_failed: 401,
   rate_limit_exceeded: 429,
   unknown_translation: 404,
   chapter_not_in_store: 404,
@@ -35,6 +36,16 @@ const STATUS_BY_CODE: Partial<Record<MessageCode, number>> = {
   scrape_parse_failed: 502,
   version_meta_invalid: 502,
 };
+
+/**
+ * Every code this server can put in an error envelope: the ones it maps a status for, and the one the
+ * error handler falls back to. The application reads these across the boundary and has to have decided
+ * what each becomes, so this list is what that decision is checked against.
+ */
+export const SERVER_ERROR_CODES: readonly MessageCode[] = [
+  ...(Object.keys(STATUS_BY_CODE) as MessageCode[]),
+  'internal_error',
+];
 
 export function statusForCode(code: MessageCode): number {
   return STATUS_BY_CODE[code] ?? 500;

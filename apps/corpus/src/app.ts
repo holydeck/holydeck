@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { HolyDeckError } from '@holydeck/core/messages';
+import { requireApiToken } from './auth.js';
 import { API_ENDPOINTS, errorEnvelope, statusForCode } from './errors.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerLegacyVerseRoute } from './routes/legacy.js';
@@ -20,6 +21,8 @@ export interface AppDeps {
   jobs: SyncJobManager;
   version: string;
   logger?: FastifyServerOptions['logger'];
+  /** Set by a deployment that keeps this service internal; absent leaves /api/v1 open. */
+  apiToken?: string;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -61,8 +64,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   registerHealthRoute(app, deps);
 
+  const apiToken = deps.apiToken;
+
   void app.register(
     async (api) => {
+      // Only the API is closed. /health is registered outside this scope and stays open, because a
+      // deployment that cannot tell whether the service is alive is worse off than one that can.
+      if (apiToken !== undefined) {
+        api.addHook('onRequest', async (request) => {
+          requireApiToken(request.headers, apiToken);
+        });
+      }
       registerTranslationsRoutes(api, deps);
       registerVersesRoute(api, deps);
       registerSyncRoutes(api, deps);

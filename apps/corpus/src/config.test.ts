@@ -11,6 +11,33 @@ function thrownCode(env: NodeJS.ProcessEnv): string {
   }
 }
 
+describe('the internal API token', () => {
+  it('is absent by default, which leaves the API open to whoever can reach the port', () => {
+    expect(resolveServerConfig({}).apiToken).toBeUndefined();
+  });
+
+  it('is read from the environment when a deployment closes the port', () => {
+    const token = 'z'.repeat(24);
+    expect(resolveServerConfig({ HOLYDECK_CORPUS_TOKEN: token }).apiToken).toBe(token);
+  });
+
+  it('refuses a token too short to be worth presenting, including an empty one', () => {
+    expect(thrownCode({ HOLYDECK_CORPUS_TOKEN: '' })).toBe('config_invalid_value');
+    expect(thrownCode({ HOLYDECK_CORPUS_TOKEN: 'short' })).toBe('config_invalid_value');
+    expect(thrownCode({ HOLYDECK_CORPUS_TOKEN: ' '.repeat(40) })).toBe('config_invalid_value');
+  });
+
+  it('names the variable and never the value it refused', () => {
+    try {
+      resolveServerConfig({ HOLYDECK_CORPUS_TOKEN: 'short-but-secret' });
+      expect.fail('did not refuse');
+    } catch (error) {
+      expect((error as Error).message).toContain('HOLYDECK_CORPUS_TOKEN');
+      expect((error as Error).message).not.toContain('short-but-secret');
+    }
+  });
+});
+
 describe('resolveServerConfig', () => {
   it('returns documented defaults for an empty environment', () => {
     expect(resolveServerConfig({})).toEqual({

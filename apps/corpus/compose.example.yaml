@@ -1,10 +1,15 @@
-# Example deployment: HolyDeck server + MongoDB, from the published image.
-# For hacking on the server itself use compose.dev.yaml in the repo root, which builds
+# Example deployment: the HolyDeck corpus + MongoDB, from the published image.
+# For hacking on the corpus itself use compose.dev.yaml in the repo root, which builds
 # the image from the working tree instead of pulling it.
 #
-# The server has no auth or TLS of its own — put your reverse proxy in front
-# (e.g. https://bible.example.com -> your-proxy -> server:3000) and terminate
-# TLS / access control there.
+# The corpus is an internal service. It is not published here, so it is reachable only from
+# this network, and it requires a credential on every API request so that reaching the port is
+# not the same as reading the library. Its client is the HolyDeck application, which joins this
+# network and is the only thing a reverse proxy should see.
+#
+# To use the CLI against it, log in with "holydeck auth login" or set HOLYDECK_SERVER_TOKEN to the
+# same value as HOLYDECK_CORPUS_TOKEN, and reach it from inside the network (docker compose run)
+# rather than by publishing the port.
 services:
   server:
     image: ghcr.io/holydeck/server:latest
@@ -12,11 +17,12 @@ services:
     environment:
       HOLYDECK_MONGO_URL: mongodb://mongo:27017
       HOLYDECK_MONGO_DB: holydeck
+      # Long and random, kept out of this file. Generate one with: openssl rand -hex 32
+      HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:?set a long random value before starting}
       # bible.com answers plain HTTP clients with a JavaScript challenge. Set this to fetch
       # through the Chromium the image ships, which runs that challenge once per sync.
       HOLYDECK_BROWSER_FETCH: "true"
-    ports:
-      - "3000:3000"
+    # No ports: nothing outside this network talks to the corpus.
     depends_on:
       - mongo
 

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@fastify/rate-limit": "^11.2.0",
+    "@holydeck/contracts": "workspace:*",
     "@holydeck/core": "workspace:*",
     "fastify": "^5.12.3",
     "mongodb": "^6.21.0"

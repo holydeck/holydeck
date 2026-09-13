@@ -35,7 +35,14 @@ const jobs = new SyncJobManager(store, fetcher, db, {
   delayMs: config.syncDelayMs,
 });
 
-const app = buildApp({ store, fetcher, jobs, version, logger: { level: config.logLevel } });
+const app = buildApp({
+  store,
+  fetcher,
+  jobs,
+  version,
+  logger: { level: config.logLevel },
+  ...(config.apiToken === undefined ? {} : { apiToken: config.apiToken }),
+});
 
 const recovered = await jobs.recoverInterrupted();
 if (recovered > 0) {

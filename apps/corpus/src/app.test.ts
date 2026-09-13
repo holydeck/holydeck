@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { corpusAuthorization } from '@holydeck/contracts/corpus';
 import { HolyDeckError } from '@holydeck/core/messages';
 import { Fetcher } from '@holydeck/core/fetcher';
 import { API_ENDPOINTS } from './errors.js';
@@ -152,5 +153,59 @@ describe('logger option', () => {
     const response = await silent.inject({ method: 'GET', url: '/health' });
     expect(response.statusCode).toBe(200);
     await silent.close();
+  });
+});
+
+describe('the internal API token gate', () => {
+  const token = 'g'.repeat(24);
+  let gated: ReturnType<typeof buildApp>;
+
+  beforeAll(async () => {
+    gated = buildApp({ store: ctx.store, fetcher: ctx.fetcher, jobs: ctx.jobs, version: '0.0.0-test', apiToken: token });
+    await gated.ready();
+  });
+
+  afterAll(async () => {
+    await gated.close();
+  });
+
+  it('refuses an unauthenticated API request with 401 and nothing about the data behind it', async () => {
+    const response = await gated.inject({ method: 'GET', url: '/api/v1/translations' });
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: { code: 'auth_failed', message: 'Authentication failed: no matching bearer token was presented.' },
+    });
+  });
+
+  it('refuses a wrong token the same way, whichever API route it is presented to', async () => {
+    for (const url of ['/api/v1/translations', '/api/v1/stats', '/api/v1/translations/KJV/canon']) {
+      const response = await gated.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: corpusAuthorization('h'.repeat(24)) },
+      });
+      expect(response.statusCode, url).toBe(401);
+    }
+  });
+
+  it('serves the API to the token it was configured with', async () => {
+    const response = await gated.inject({
+      method: 'GET',
+      url: '/api/v1/translations',
+      headers: { authorization: corpusAuthorization(token) },
+    });
+    expect(response.statusCode).toBe(200);
+  });
+
+  // A liveness probe has no credential to present and learns nothing from the answer, so closing it
+  // would only mean a deployment cannot tell whether the service it cannot read is alive.
+  it('leaves the liveness probe open', async () => {
+    const response = await gated.inject({ method: 'GET', url: '/health' });
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('leaves the API open when no token is configured, which is how the CLI still reaches it', async () => {
+    const response = await ctx.app.inject({ method: 'GET', url: '/api/v1/translations' });
+    expect(response.statusCode).toBe(200);
   });
 });

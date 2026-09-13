@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { CORPUS_ROUTES } from '@holydeck/contracts/corpus';
 import { API_ENDPOINTS } from './errors.js';
 import { buildTestApp } from '../test/helpers/app.js';
 import type { TestApp } from '../test/helpers/app.js';
@@ -51,6 +52,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await ctx.stop();
+});
+
+// The application depends on a named subset of these routes. It cannot be the one that decides they
+// still exist, so the dependency is checked here, against the router this server actually builds.
+it('still serves every route the application depends on', () => {
+  expect(CORPUS_ROUTES.map((route) => route.route).filter((route) => !RELEASED_ROUTES.includes(route))).toEqual([]);
 });
 
 it('serves every released route and nothing besides', () => {
