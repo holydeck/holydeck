@@ -4,6 +4,7 @@ import {
   MESSAGE_CODES,
   REMOVED_CODES,
   STALE_STATE_REVISION,
+  UNEXPECTED_ERROR,
   UPDATE_REQUIRED,
   VALIDATION_FAILED,
   errorEnvelope,
@@ -61,6 +62,7 @@ describe('the released message codes', () => {
       ['corpus.unavailable', 503],
       ['corpus.upstream.unavailable', 502],
       ['corpus.unexpected_error', 500],
+      ['server.unexpected_error', 500],
     ]);
     expect([VALIDATION_FAILED, UPDATE_REQUIRED, STALE_STATE_REVISION]).toEqual([
       'request.validation_failed',
@@ -72,6 +74,7 @@ describe('the released message codes', () => {
   it('holds its own registry to the rule it states, so a released code cannot quietly move', () => {
     expect(messageCodeProblems(MESSAGE_CODES, REMOVED_CODES)).toEqual([]);
     expect(statusForCode('auth.forbidden')).toBe(403);
+    expect(statusForCode(UNEXPECTED_ERROR)).toBe(500);
     expect(statusForCode('auth.teapot')).toBeUndefined();
   });
 

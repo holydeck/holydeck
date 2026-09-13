@@ -12,6 +12,7 @@ export default defineConfig({
     'src/entities.ts',
     'src/portable.ts',
     'src/revisions.ts',
+    'src/sessions.ts',
     'src/snapshots.ts',
     'src/services.ts',
   ],

@@ -23,6 +23,13 @@ export const VALIDATION_FAILED = 'request.validation_failed';
 export const UPDATE_REQUIRED = 'client.update_required';
 export const STALE_STATE_REVISION = 'command.stale_state_revision';
 
+/**
+ * The one code a fault of this server's own takes. A client is told that the request did not happen and
+ * nothing more: the sentence a thrown error carries is written for an operator reading a log, and it has
+ * been known to carry a connection string with it.
+ */
+export const UNEXPECTED_ERROR = 'server.unexpected_error';
+
 export const MESSAGE_CODES: readonly MessageCode[] = [
   { code: VALIDATION_FAILED, status: 422, stable: true, since: 1 },
   { code: 'auth.session.expired', status: 401, stable: true, since: 1 },
@@ -39,6 +46,7 @@ export const MESSAGE_CODES: readonly MessageCode[] = [
   { code: 'corpus.unavailable', status: 503, stable: true, since: 1 },
   { code: 'corpus.upstream.unavailable', status: 502, stable: true, since: 1 },
   { code: 'corpus.unexpected_error', status: 500, stable: true, since: 1 },
+  { code: UNEXPECTED_ERROR, status: 500, stable: true, since: 1 },
 ];
 
 /** Codes withdrawn from the registry. A released code is deprecated in documentation, never removed. */

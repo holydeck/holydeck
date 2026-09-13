@@ -56,6 +56,10 @@
     "./services": {
       "types": "./dist/services.d.ts",
       "import": "./dist/services.js"
+    },
+    "./sessions": {
+      "types": "./dist/sessions.d.ts",
+      "import": "./dist/sessions.js"
     }
   },
   "scripts": {
