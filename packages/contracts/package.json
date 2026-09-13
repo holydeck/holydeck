@@ -9,6 +9,10 @@
     "dist"
   ],
   "exports": {
+    "./accounts": {
+      "types": "./dist/accounts.d.ts",
+      "import": "./dist/accounts.js"
+    },
     "./canonical": {
       "types": "./dist/canonical.d.ts",
       "import": "./dist/canonical.js"

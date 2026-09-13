@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
+import { ACCOUNT_INDEXES } from './accounts.js';
 import { requestContext, systemContext } from './context.js';
 import {
   MIGRATIONS,
@@ -83,6 +84,7 @@ describe('the shipped migrations', () => {
     await migrate(db, CONTEXT, { now: clock });
     const created = new Map([...db.indexes].filter(([, names]) => names.length > 0));
     expect([...created.keys()].sort()).toEqual([
+      'accounts',
       'audit_events',
       'content_revisions',
       'jobs',
@@ -110,6 +112,15 @@ describe('the shipped migrations', () => {
     const db = fakeDb();
     await migrate(db, CONTEXT, { now: clock });
     expect(db.indexes.get('sessions')).toEqual(SESSION_INDEXES.map((index) => index.name));
+  });
+
+  // The founder index is what makes claiming an instance a decision the database takes: unique over a
+  // field only the founder carries, so two claims arriving together are a duplicate key rather than two
+  // founders.
+  test('build the accounts the indexes one is named and an instance is claimed by', async () => {
+    const db = fakeDb();
+    await migrate(db, CONTEXT, { now: clock });
+    expect(db.indexes.get('accounts')).toEqual(ACCOUNT_INDEXES.map((index) => index.name));
   });
 });
 
@@ -398,9 +409,11 @@ describe('rolling back', () => {
 describe('what a migration is handed', () => {
   test('offers the repositories and the index calls, and nothing that could rewrite history', () => {
     expect(Object.keys(migrationApi(fakeDb())).sort()).toEqual([
+      'createAccountIndex',
       'createIndex',
       'createQueueIndex',
       'createSessionIndex',
+      'dropAccountIndex',
       'dropIndex',
       'dropQueueIndex',
       'dropSessionIndex',

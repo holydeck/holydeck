@@ -22,6 +22,18 @@ export class ContextError extends Error {
 
 const CORRELATION_ID = /^[A-Za-z0-9:_-]{4,64}$/u;
 
+const CORRELATION_LIMIT = 64;
+
+/**
+ * Turns an identifier this server did not choose — Fastify's request id, usually `req-1`, but a
+ * deployment may generate its own — into one a context accepts, under a prefix naming what is being
+ * followed. What the alphabet leaves out becomes a dash rather than being dropped: dropping would fold
+ * `a/b` into `ab`, and a correlation identifier is worth keeping only while it still tells two apart.
+ */
+export function correlationFor(prefix: string, id: string): string {
+  return `${prefix}${id.replace(/[^A-Za-z0-9:_-]/gu, '-').slice(0, CORRELATION_LIMIT - prefix.length)}`;
+}
+
 const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)

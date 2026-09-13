@@ -2,12 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE } from '@holydeck/contracts/clients';
 import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { VERSIONED_PREFIX, buildApp } from './app.js';
-import { mutatingRoutesOf } from './csrf.js';
+import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { SESSION_PATH, TICKET_PATH } from './session-routes.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
@@ -65,6 +66,17 @@ describe('every route that changes something', () => {
       { method: 'DELETE', url: SESSION_PATH },
       { method: 'POST', url: TICKET_PATH },
     ]);
+  });
+
+  // The exception the guard declares is only sound if it names a route this application registers: a
+  // path in `UNGUARDED` that nothing serves is dead text, and one that serves something else is a hole.
+  it('is behind it except the claim, which is declared, registered, and answered without a session', async () => {
+    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`]);
+    const app = buildApp({ settings, logger: false, fetching: refusing });
+    const response = await app.inject({ method: 'POST', url: ONBOARDING_PATH, headers: current });
+    // Not 401: the guard is not on it. Not-found because this deployment was handed no accounts to claim.
+    expect(response.statusCode).toBe(404);
+    await app.close();
   });
 
   it('refuses a request that carries no session, whichever route it is', async () => {

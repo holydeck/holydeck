@@ -9,6 +9,7 @@
 // registered after it, so `mutatingRoutesOf` reports what this guard is actually on, and a contract test
 // compares that against every route the application registers.
 
+import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
 import { errorEnvelope } from '@holydeck/contracts/http';
 import {
   CSRF_HEADER,
@@ -20,6 +21,7 @@ import {
 } from '@holydeck/contracts/sessions';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
+import { correlationFor } from './context.js';
 import { unexpectedFailure } from './failures.js';
 import { SessionError } from './sessions.js';
 import { sessionContext } from './sessions.js';
@@ -40,10 +42,12 @@ const SIGN_IN_MESSAGE = 'Sign in again to continue.';
 const REFUSED_MESSAGE = 'The request could not be accepted.';
 
 /**
- * The mutating routes that may be reached without a session, written as `METHOD /path`. Sign-in is the
- * one request that cannot carry a session, and until there is a sign-in route there are none at all.
+ * The mutating routes that may be reached without a session, written as `METHOD /path`. Claiming a fresh
+ * instance is the one change that cannot carry a session: it is the request that creates the first
+ * account there could ever be a session for. It closes for good once the instance has been claimed, and
+ * the route answers not-found from then on, so this exception opens nothing after a first run.
  */
-export const UNGUARDED: readonly string[] = Object.freeze([]);
+export const UNGUARDED: readonly string[] = Object.freeze([`POST ${ONBOARDING_PATH}`]);
 
 /** What the guard proved, for the route that asked for it. A route reads this; nothing else may set it. */
 export interface Guarded {
@@ -101,12 +105,9 @@ const digest = (value: string): Buffer => createHash('sha256').update(value).dig
 /** Compared as digests so the comparison is over two equal lengths, and takes the same time either way. */
 const returned = (sent: unknown, held: string): boolean => timingSafeEqual(digest(String(sent)), digest(held));
 
-/** Fastify's identifier is usually `req-1`; a deployment may generate its own, and a context is graded. */
-const correlationFor = (id: string): string => `guard:${id.replace(/[^A-Za-z0-9:_-]/gu, '-').slice(0, 57)}`;
-
 /** The context a session call made for one request runs under, carrying that request's own identifier. */
 export const sessionCallFor = (request: FastifyRequest): RequestContext =>
-  sessionContext(correlationFor(request.id));
+  sessionContext(correlationFor('guard:', request.id));
 
 /** The two refusals that mean "sign in again". Every other refusal from the store is a defect. */
 const SIGN_IN_AGAIN = new Set<SessionRefusal>(['unknown', 'expired']);

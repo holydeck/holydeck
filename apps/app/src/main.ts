@@ -3,7 +3,9 @@ import { fileURLToPath } from 'node:url';
 
 import { MongoClient } from 'mongodb';
 
+import { accountDb, accountsOn } from './accounts.js';
 import { buildApp } from './app.js';
+import { auditOn } from './audit.js';
 import {
   checkCorpusBoundary,
   checkCorpusIsClosed,
@@ -21,6 +23,7 @@ import { sessionDb, sessionsOn } from './sessions.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
+import type { Identity } from './onboarding.js';
 import type { SessionStore } from './sessions.js';
 
 checkReleasedContracts();
@@ -44,11 +47,19 @@ let store: MongoClient | undefined;
 // A session is a durable record, so a deployment that keeps none keeps no sessions either, and refuses
 // every request that would change something rather than accepting one it cannot prove.
 let sessions: SessionStore | undefined;
+// Accounts are kept the same way and for the same reason: a deployment with nowhere to put one cannot be
+// claimed, and its onboarding route answers not-found from the first request rather than from the second.
+let identity: Identity | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl);
   await store.connect();
   checkSchema(await schemaStatus(repositoryDb(store.db()), systemContext(`boot:${process.pid}`)));
-  sessions = sessionsOn(sessionDb(store.db()), { now: () => new Date().toISOString() });
+  const now = (): string => new Date().toISOString();
+  sessions = sessionsOn(sessionDb(store.db()), { now });
+  identity = {
+    accounts: accountsOn(accountDb(store.db()), { now }),
+    audit: auditOn(repositoryDb(store.db()), { now }),
+  };
 }
 
 // Shipped in the same image as this service, at the same relative path the repository has.
@@ -62,6 +73,7 @@ const app = buildApp({
   fetching: fetch,
   web,
   sessions,
+  identity,
 });
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.

@@ -4,12 +4,14 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 
 import { corpusClient } from './corpus.js';
 import { guardMutations } from './csrf.js';
-import { withSafeErrors } from './failures.js';
+import { notFound, withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
+import { serveOnboarding } from './onboarding.js';
 import { serveSessionRoutes } from './session-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
 import type { Fetching } from './corpus.js';
+import type { Identity } from './onboarding.js';
 import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
 import type { WebAsset } from './static.js';
@@ -24,6 +26,8 @@ export interface AppOptions {
   web?: ReadonlyMap<string, WebAsset>;
   /** The session store, where a deployment keeps sessions. Without one, nothing changes through here. */
   sessions?: SessionStore;
+  /** Where accounts are kept and what is done to them is recorded. Without it, there is nothing to claim. */
+  identity?: Identity;
 }
 
 /**
@@ -33,9 +37,7 @@ export interface AppOptions {
  */
 export const VERSIONED_PREFIX = '/api/';
 
-const NOT_FOUND = 'resource.not_found';
-
-export function buildApp({ settings, logger, fetching, web, sessions }: AppOptions): FastifyInstance {
+export function buildApp({ settings, logger, fetching, web, sessions, identity }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
 
@@ -63,11 +65,7 @@ export function buildApp({ settings, logger, fetching, web, sessions }: AppOptio
   // list of the routes that change something: a route registered above this line would be missing from it.
   guardMutations(app, { sessions });
 
-  app.setNotFoundHandler((request, reply) =>
-    reply
-      .code(404)
-      .send(errorEnvelope(NOT_FOUND, `${request.method} ${request.url} is not a path this server serves.`, request.id)),
-  );
+  app.setNotFoundHandler((request, reply) => reply.code(404).send(notFound(request)));
 
   app.get('/health', (request) =>
     successEnvelope({ status: 'ok', locale: settings.values.locale }, request.id, CLIENT_WINDOW.current),
@@ -93,6 +91,10 @@ export function buildApp({ settings, logger, fetching, web, sessions }: AppOptio
     }
     return successEnvelope({ translations: answer.value }, request.id, CLIENT_WINDOW.current);
   });
+
+  // Registered below the guard like everything else, and reached without a session only because it is
+  // the one entry in the guard's declared exceptions — which closes the moment the instance is claimed.
+  serveOnboarding(app, { identity });
 
   serveSessionRoutes(app, { sessions });
 

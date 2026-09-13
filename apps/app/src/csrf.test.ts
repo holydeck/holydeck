@@ -1,3 +1,4 @@
+import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import {
   CSRF_HEADER,
@@ -158,8 +159,10 @@ describe('what the guard refuses', () => {
 });
 
 describe('the routes the guard covers', () => {
-  test('every route that changes something is behind it, and the exceptions are declared and none', () => {
-    expect(UNGUARDED).toEqual([]);
+  test('every route that changes something is behind it, and the one exception is the declared one', () => {
+    // Claiming a fresh instance is the only change a request with no session may make, because it is the
+    // request that creates the first account there could be a session for. Anything added here is a hole.
+    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`]);
     expect(mutatingRoutesOf(app)).toEqual([{ method: 'POST', url: '/api/v1/anything' }]);
   });
 

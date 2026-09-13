@@ -1,0 +1,185 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  ACCOUNT_ID_BYTES,
+  ACCOUNT_NAME,
+  ACCOUNT_ROLES,
+  DISPLAY_NAME,
+  ONBOARDING_PATH,
+  PASSWORD,
+  actorFor,
+  isAccountId,
+  isAccountName,
+  onboardingOffer,
+  parseAccountRecord,
+  parseInstanceClaim,
+  passwordProblem,
+} from './accounts.js';
+import { FIELD_CODES } from './problems.js';
+
+import type { AccountRecord } from './accounts.js';
+
+const ID = 'GLkQ5wEtQEy5PfN2Zr9m7A';
+
+const RECORD: AccountRecord = {
+  id: ID,
+  name: 'andru',
+  displayName: 'Andru Tharmarajah',
+  role: 'admin',
+  createdAt: '2026-09-13T09:30:00.000Z',
+};
+
+const CLAIM = { name: 'Andru ', displayName: ' Andru Tharmarajah ', password: 'a-long-enough-passphrase' };
+
+const codes = (value: unknown): string[] => {
+  const parsed = parseInstanceClaim(value);
+  return parsed.ok ? [] : parsed.problems.map((problem) => `${problem.path}=${problem.code}`);
+};
+
+describe('what an account is', () => {
+  it('is one of the three roles the permission model names, admin first', () => {
+    expect(ACCOUNT_ROLES).toEqual(['admin', 'editor', 'member']);
+  });
+
+  it('is acted under a name the durable records carry, which is never the raw identifier', () => {
+    expect(actorFor(ID)).toBe(`account:${ID}`);
+  });
+
+  it('is identified by enough randomness that no one guesses another account’s identifier', () => {
+    expect(ACCOUNT_ID_BYTES).toBeGreaterThanOrEqual(16);
+    expect(isAccountId(ID)).toBe(true);
+    expect(isAccountId('7f3a')).toBe(false);
+    expect(isAccountId(`${ID}/../admin`)).toBe(false);
+  });
+
+  it('is signed in under a handle of one settled shape, so two accounts cannot look alike', () => {
+    expect(isAccountName('andru')).toBe(true);
+    expect(isAccountName('andru.t_2-x')).toBe(true);
+    expect(isAccountName('an')).toBe(false);
+    expect(isAccountName('a'.repeat(ACCOUNT_NAME.maximum + 1))).toBe(false);
+    expect(isAccountName('Andru')).toBe(false);
+    expect(isAccountName('.andru')).toBe(false);
+    expect(isAccountName('andru.')).toBe(false);
+    expect(isAccountName('andru tharmarajah')).toBe(false);
+  });
+
+  it('reads back as itself, which is what the store writing one grades it against', () => {
+    const parsed = parseAccountRecord(RECORD);
+    expect(parsed.ok && parsed.value).toEqual(RECORD);
+  });
+
+  it('reports every field a record is missing at once rather than the first one', () => {
+    const parsed = parseAccountRecord({});
+    expect(parsed.ok).toBe(false);
+    expect(!parsed.ok && parsed.problems.map((problem) => problem.path)).toEqual([
+      'account.id',
+      'account.name',
+      'account.displayName',
+      'account.role',
+      'account.createdAt',
+    ]);
+  });
+
+  it('refuses a record whose identifier or handle this code could not have written', () => {
+    const parsed = parseAccountRecord({ ...RECORD, id: 'short', name: 'Andru' });
+    expect(!parsed.ok && parsed.problems.map((problem) => `${problem.path}=${problem.code}`)).toEqual([
+      `account.id=${FIELD_CODES.notAllowed}`,
+      `account.name=${FIELD_CODES.notAllowed}`,
+    ]);
+  });
+
+  it('refuses a role nothing grants, rather than reading it as the first one', () => {
+    const parsed = parseAccountRecord({ ...RECORD, role: 'owner' });
+    expect(!parsed.ok && parsed.problems.map((problem) => `${problem.path}=${problem.code}`)).toEqual([
+      `account.role=${FIELD_CODES.notAllowed}`,
+    ]);
+  });
+});
+
+describe('what a password has to be', () => {
+  it('is long rather than complicated: a length floor, a ceiling, and no composition rule at all', () => {
+    expect(PASSWORD.minimum).toBeGreaterThanOrEqual(12);
+    expect(PASSWORD.maximum).toBeGreaterThanOrEqual(64);
+    expect(passwordProblem('a-long-enough-passphrase')).toBeUndefined();
+    expect(passwordProblem('☕'.repeat(PASSWORD.minimum))).toBeUndefined();
+  });
+
+  it('is refused for being short or for being longer than anything a deployment will store', () => {
+    expect(passwordProblem('a'.repeat(PASSWORD.minimum - 1))).toMatchObject({
+      path: 'password',
+      code: FIELD_CODES.tooSmall,
+    });
+    expect(passwordProblem('a'.repeat(PASSWORD.maximum + 1))).toMatchObject({
+      path: 'password',
+      code: FIELD_CODES.notAllowed,
+    });
+  });
+
+  it('is measured in characters a person typed, not in the bytes they happen to take', () => {
+    // Twelve emoji are twelve characters to whoever typed them, and forty-eight bytes to a machine.
+    expect(passwordProblem('🕊'.repeat(PASSWORD.minimum))).toBeUndefined();
+    expect(passwordProblem('🕊'.repeat(PASSWORD.minimum - 1))).toBeDefined();
+  });
+});
+
+describe('claiming an instance', () => {
+  it('is offered at one path, which a client asks for before it shows a form', () => {
+    expect(ONBOARDING_PATH).toBe('/api/v1/onboarding');
+    expect(onboardingOffer()).toEqual({ role: 'admin', name: ACCOUNT_NAME, password: PASSWORD });
+  });
+
+  it('takes a handle, a name to show, and a password, and settles the shape of each', () => {
+    const parsed = parseInstanceClaim(CLAIM);
+    expect(parsed.ok && parsed.value).toEqual({
+      name: 'andru',
+      displayName: 'Andru Tharmarajah',
+      password: 'a-long-enough-passphrase',
+    });
+  });
+
+  it('reads a password as the characters it was typed as, however they were composed', () => {
+    // One passphrase, typed twice: once with the single character for an accented e, and once with
+    // the letter and a combining accent after it. A keyboard decides which arrives; a person typed one.
+    const composed = parseInstanceClaim({ ...CLAIM, password: 'caf\u00e9-passphrase-x' });
+    const decomposed = parseInstanceClaim({ ...CLAIM, password: 'cafe\u0301-passphrase-x' });
+    expect(composed.ok && composed.value.password).toBe('caf\u00e9-passphrase-x');
+    expect(decomposed.ok && decomposed.value.password).toBe(composed.ok && composed.value.password);
+  });
+
+  it('refuses a payload that is not one, rather than reading fields off nothing', () => {
+    expect(codes('andru')).toEqual([`claim=${FIELD_CODES.notAnObject}`]);
+  });
+
+  it('names every field a claim is missing at once, in the order the form asks for them', () => {
+    expect(codes({})).toEqual([
+      `claim.name=${FIELD_CODES.required}`,
+      `claim.displayName=${FIELD_CODES.required}`,
+      `claim.password=${FIELD_CODES.required}`,
+    ]);
+  });
+
+  it('refuses a handle no account may be signed in under, once, and says which field', () => {
+    expect(codes({ ...CLAIM, name: 'an' })).toEqual([`claim.name=${FIELD_CODES.notAllowed}`]);
+    expect(codes({ ...CLAIM, name: '' })).toEqual([`claim.name=${FIELD_CODES.empty}`]);
+  });
+
+  it('refuses a name to show that is nothing but spaces, which is a name nobody would recognise', () => {
+    expect(codes({ ...CLAIM, displayName: '   ' })).toEqual([`claim.displayName=${FIELD_CODES.empty}`]);
+    expect(codes({ ...CLAIM, displayName: 'x'.repeat(DISPLAY_NAME.maximum + 1) })).toEqual([
+      `claim.displayName=${FIELD_CODES.notAllowed}`,
+    ]);
+  });
+
+  it('refuses a password the deployment would not store, and says so as a field problem', () => {
+    expect(codes({ ...CLAIM, password: 'short' })).toEqual([`claim.password=${FIELD_CODES.tooSmall}`]);
+    expect(codes({ ...CLAIM, password: '' })).toEqual([`claim.password=${FIELD_CODES.empty}`]);
+  });
+
+  it('refuses a field that is not text, and does not also complain about its shape', () => {
+    expect(codes({ name: 4, displayName: false, password: null })).toEqual([
+      `claim.name=${FIELD_CODES.notText}`,
+      `claim.displayName=${FIELD_CODES.notText}`,
+      `claim.password=${FIELD_CODES.notText}`,
+    ]);
+  });
+});

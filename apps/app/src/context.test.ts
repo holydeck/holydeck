@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ContextError, contextProblems, requestContext, systemContext } from './context.js';
+import { ContextError, contextProblems, correlationFor, requestContext, systemContext } from './context.js';
 
 const FULL = { actor: 'account:7f3a', permissions: ['runEvents.append'], correlationId: 'req-0f9c2a41' };
 
@@ -58,5 +58,24 @@ describe('the context the schema work runs under', () => {
     expect(context.actor).toBe('system');
     expect(context.permissions).toEqual(['schemaMigrations.append', 'schemaMigrations.read']);
     expect(context.correlationId).toBe('migrate-0f9c2a41');
+  });
+});
+
+describe('a correlation identifier made out of one this server did not choose', () => {
+  it('is one a context accepts, whatever the identifier it was made from held', () => {
+    for (const id of ['req-1', 'a/b c', '', 'x'.repeat(200), '…']) {
+      expect(contextProblems({ actor: 'system', permissions: [], correlationId: correlationFor('guard:', id) })).toEqual(
+        [],
+      );
+    }
+  });
+
+  it('replaces what the alphabet leaves out rather than dropping it, which would fold two into one', () => {
+    expect(correlationFor('claim:', 'a/b c')).toBe('claim:a-b-c');
+    expect(correlationFor('claim:', 'a/b')).not.toBe(correlationFor('claim:', 'ab'));
+  });
+
+  it('never outgrows what a context accepts, however long the identifier was', () => {
+    expect(correlationFor('guard:', 'x'.repeat(200))).toHaveLength(64);
   });
 });

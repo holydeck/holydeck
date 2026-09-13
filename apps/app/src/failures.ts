@@ -7,13 +7,23 @@
 import { UNEXPECTED_ERROR, errorEnvelope } from '@holydeck/contracts/http';
 
 import type { ErrorEnvelope } from '@holydeck/contracts/http';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 /** Deliberately says nothing about the fault: what a client can do about it is the same either way. */
 export const UNEXPECTED_MESSAGE = 'The request could not be completed.';
 
 export const unexpectedFailure = (requestId: string): ErrorEnvelope =>
   errorEnvelope(UNEXPECTED_ERROR, UNEXPECTED_MESSAGE, requestId);
+
+export const NOT_FOUND = 'resource.not_found';
+
+/**
+ * A path this server does not serve. Shared rather than written twice, because a route that closes —
+ * onboarding, once the instance is claimed — has to be indistinguishable from a path that was never
+ * there: a different message, or a different code, would answer the question the closed route refuses.
+ */
+export const notFound = (request: Pick<FastifyRequest, 'id' | 'method' | 'url'>): ErrorEnvelope =>
+  errorEnvelope(NOT_FOUND, `${request.method} ${request.url} is not a path this server serves.`, request.id);
 
 /** Installs the handler. Called before routes, so nothing registered later can answer with its own. */
 export function withSafeErrors(app: FastifyInstance): void {
