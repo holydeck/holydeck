@@ -183,6 +183,51 @@ describe('once the instance is claimed', () => {
       outcome: 'refused',
     });
   });
+
+  // The promise is that this route is indistinguishable from a path the server never served, and a
+  // validation problem breaks it more cheaply than anything else could: it takes no handle and no
+  // password to post an empty body, and the answer alone says the deployment is installed and in use.
+  test('a body that is not a claim at all is answered the same way, not as a validation problem', async () => {
+    const response = await claiming({});
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe(NOT_FOUND);
+  });
+
+  test('a foreign origin is answered the same way too, because a closed route has nothing to refuse for', async () => {
+    const response = await claiming(CLAIM, { origin: 'https://elsewhere.example.invalid' });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe(NOT_FOUND);
+  });
+
+  test('an attempt that named no handle is in the trail under none, rather than not being in it at all', async () => {
+    await claiming({});
+    expect(entries()[1]).toMatchObject({ action: 'instance.claim', outcome: 'refused', subject: '(no handle)' });
+  });
+});
+
+describe('when the trail refuses the entry', () => {
+  const deaf = (store: AccountStore): Identity => ({
+    accounts: store,
+    audit: { record: () => Promise.reject(new Error('the trail is unavailable')) },
+  });
+
+  // The trail records what happened; it does not decide it. An account that exists has to be answered as
+  // created even when the entry saying so could not be written — the alternative tells an administrator
+  // their claim failed, and the claim they make next is refused as a second one, locking them out.
+  test('a claim that was made is answered as made', async () => {
+    app = await serving(deaf(accounts));
+    const response = await claiming();
+    expect(response.statusCode).toBe(201);
+    expect(rows.size).toBe(1);
+  });
+
+  test('a claim refused as a second one is still answered as not-found', async () => {
+    expect((await claiming()).statusCode).toBe(201);
+    app = await serving(deaf(accounts));
+    const response = await claiming({ ...CLAIM, name: 'andrew' });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe(NOT_FOUND);
+  });
 });
 
 describe('a deployment with no accounts to claim', () => {
@@ -190,6 +235,24 @@ describe('a deployment with no accounts to claim', () => {
     app = await serving(undefined);
     expect((await ask('GET', ONBOARDING_PATH)).statusCode).toBe(404);
     expect((await claiming()).statusCode).toBe(404);
+  });
+});
+
+describe('when two claims arrive together', () => {
+  // The race the question above cannot settle: both callers were told the instance was unclaimed, and
+  // then one of them lost the write. The loser is answered out of the same place in the same words as
+  // anyone else who arrives late, and is in the trail beside the claim that won.
+  test('the one that lost the write is answered as not-found, and is recorded as having tried', async () => {
+    const raced: AccountStore = {
+      ...accounts,
+      claimed: () => Promise.resolve(false),
+      claim: () => Promise.reject(new AccountError('claimed', 'this instance has been claimed already')),
+    };
+    app = await serving(identityOf(raced));
+    const response = await claiming({ ...CLAIM, name: 'andrew' });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe(NOT_FOUND);
+    expect(entries()[0]).toMatchObject({ actor: 'system', subject: 'andrew', outcome: 'refused' });
   });
 });
 
