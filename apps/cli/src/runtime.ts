@@ -9,6 +9,7 @@ import { errLine } from './context.js';
 import type { CliContext } from './context.js';
 import { createAccessTokenProvider } from './oidc.js';
 import { ServerClient } from './server-client.js';
+import type { AccessTokenProvider } from './server-client.js';
 
 export interface GlobalFlags {
   dataDir?: string;
@@ -92,6 +93,16 @@ export async function resolveRuntimeConfig(ctx: CliContext, flags: GlobalFlags =
   return config;
 }
 
+/**
+ * A stored login wins, and the configured credential is what a run with nobody logged in falls back
+ * to — a development stack or a scheduled job talking to a server that requires one. It is read from
+ * the environment or the config file and never from a flag, so it stays out of shell history.
+ */
+export function serverTokenProvider(login: AccessTokenProvider, configured: string | undefined): AccessTokenProvider {
+  if (configured === undefined) return login;
+  return async (forceRefresh?: boolean) => (await login(forceRefresh)) ?? configured;
+}
+
 export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): Promise<Runtime> {
   const config = await resolveRuntimeConfig(ctx, flags);
 
@@ -115,7 +126,8 @@ export async function createRuntime(ctx: CliContext, flags: GlobalFlags = {}): P
 
   const serverUrl = config.values.serverUrl;
   if (serverUrl !== undefined) {
-    const accessToken = createAccessTokenProvider(ctx.platform, serverUrl, { httpPost: ctx.httpPost, now: ctx.now });
+    const login = createAccessTokenProvider(ctx.platform, serverUrl, { httpPost: ctx.httpPost, now: ctx.now });
+    const accessToken = serverTokenProvider(login, config.values.serverToken);
     const server = new ServerClient(serverUrl, { httpGet: ctx.httpGet, httpPost: ctx.httpPost, accessToken });
     return { config, store, fetcher, server, mode: 'server', browser };
   }

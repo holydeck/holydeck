@@ -178,6 +178,11 @@ Every command works against the local datastore by default. Pass
 HolyDeck server instead — the server ships as a container image at
 `ghcr.io/holydeck/server`.
 
+A server that requires a credential of its own — the way the corpus does — takes
+it from `HOLYDECK_SERVER_TOKEN` or `serverToken` in the config file. That is for a
+development stack or a scheduled job; a person should log in instead, and a stored
+login always wins over the configured credential.
+
 If the server is protected by an OpenID Connect provider, log in once before
 using it:
 

@@ -35,6 +35,7 @@ describe('configScaffold', () => {
     const text = configScaffold();
     for (const key of [
       'serverUrl',
+      'serverToken',
       'oidcIssuer',
       'oidcClientId',
       'oidcAudience',
@@ -51,6 +52,7 @@ describe('configScaffold', () => {
     }
     for (const env of [
       'HOLYDECK_SERVER_URL',
+      'HOLYDECK_SERVER_TOKEN',
       'HOLYDECK_OIDC_ISSUER',
       'HOLYDECK_OIDC_CLIENT_ID',
       'HOLYDECK_OIDC_AUDIENCE',

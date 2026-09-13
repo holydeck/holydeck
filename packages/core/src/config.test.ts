@@ -40,6 +40,11 @@ describe('parseConfigFile', () => {
     expect(parseConfigFile('browserFetch: true\n', 'x.yaml')).toEqual({ browserFetch: true });
   });
 
+  it('reads a credential for a server that requires one', () => {
+    expect(parseConfigFile('serverToken: a-token-that-came-from-the-file\n', 'x.yaml'))
+      .toEqual({ serverToken: 'a-token-that-came-from-the-file' });
+  });
+
   it('parses reusable OIDC login settings', () => {
     expect(parseConfigFile([
       'oidcIssuer: https://auth.example.com',
@@ -68,6 +73,7 @@ describe('parseConfigFile', () => {
     ['browserFetch: sometimes', 'config_invalid_value'],
     ['oidcCallbackPort: 0', 'config_invalid_value'],
     ['serverUrl: 7', 'config_invalid_value'],
+    ['serverToken: 7', 'config_invalid_value'],
     ['template: 7', 'config_invalid_value'],
     [': : :', 'config_file_unreadable'],
   ])('rejects %j with %s', (text, code) => {
@@ -134,6 +140,16 @@ describe('resolveConfig', () => {
     expect(resolved.values.oidcResource).toBe('https://resource.example.com');
     expect(resolved.values.oidcScope).toBe('openid offline_access');
     expect(resolved.values.oidcCallbackPort).toBe(4567);
+  });
+
+  it('takes a credential for a closed server from the environment', () => {
+    const resolved = resolveConfig({
+      platform: darwin,
+      env: { HOLYDECK_SERVER_URL: 'http://s:3000', HOLYDECK_SERVER_TOKEN: 'a-token-long-enough-to-type' },
+    });
+    expect(resolved.values.serverToken).toBe('a-token-long-enough-to-type');
+    expect(resolved.sources.serverToken).toBe('env');
+    expect(resolveConfig({ platform: darwin, env: {} }).values.serverToken).toBeUndefined();
   });
 
   it('honors deprecated aliases only when the new name is unset, with a notice', () => {

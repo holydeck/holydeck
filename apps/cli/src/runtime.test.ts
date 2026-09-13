@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { HolyDeckError } from '@holydeck/core/messages';
 import { FIXED_NOW, fakeLauncher, makeContext } from '../test/harness.js';
-import { closeBrowsers, createRuntime, requireLocal, runtimeFlags } from './runtime.js';
+import { closeBrowsers, createRuntime, requireLocal, runtimeFlags, serverTokenProvider } from './runtime.js';
 
 describe('createRuntime', () => {
   it('builds a local runtime from env defaults', async () => {
@@ -36,6 +36,32 @@ describe('createRuntime', () => {
     expect(runtime.mode).toBe('server');
     expect(runtime.server?.baseUrl).toBe('https://holydeck.example.com');
     expect(runtime.config.sources.serverUrl).toBe('flag');
+  });
+
+  it('sends the configured credential to a server that requires one', async () => {
+    const { ctx } = makeContext({
+      env: { HOLYDECK_SERVER_URL: 'https://holydeck.example.com', HOLYDECK_SERVER_TOKEN: 'a-token-long-enough-to-type' },
+    });
+    const sent: Array<Record<string, string>> = [];
+    ctx.httpGet = async (_url, headers) => {
+      sent.push(headers);
+      return { status: 200, body: JSON.stringify({ status: 'ok', version: '1.0.0', uptime: 1, store: 'ready' }) };
+    };
+    const runtime = await createRuntime(ctx);
+    await runtime.server?.health();
+    expect(sent[0]?.['authorization']).toBe('Bearer a-token-long-enough-to-type');
+  });
+
+  it('sends no credential when none is configured and nobody is logged in', async () => {
+    const { ctx } = makeContext({ env: { HOLYDECK_SERVER_URL: 'https://holydeck.example.com' } });
+    const sent: Array<Record<string, string>> = [];
+    ctx.httpGet = async (_url, headers) => {
+      sent.push(headers);
+      return { status: 200, body: JSON.stringify({ status: 'ok', version: '1.0.0', uptime: 1, store: 'ready' }) };
+    };
+    const runtime = await createRuntime(ctx);
+    await runtime.server?.health();
+    expect(sent[0]?.['authorization']).toBeUndefined();
   });
 
   it('switches to server mode from the environment too', async () => {
@@ -157,6 +183,18 @@ describe('lock waits', () => {
     await expect(acquired).resolves.toBe('acquired');
     expect(titles[0]).toContain('KJV: datastore locked by');
     expect(setup.stderr()).not.toContain('datastore locked');
+  });
+});
+
+describe('serverTokenProvider', () => {
+  it('prefers a stored login and falls back to the configured credential', async () => {
+    const login = async (forceRefresh = false): Promise<string | undefined> => (forceRefresh ? 'refreshed' : 'logged-in');
+    expect(await serverTokenProvider(login, 'configured')()).toBe('logged-in');
+    expect(await serverTokenProvider(login, 'configured')(true)).toBe('refreshed');
+    const nobody = async (): Promise<string | undefined> => undefined;
+    expect(await serverTokenProvider(nobody, 'configured')()).toBe('configured');
+    expect(await serverTokenProvider(nobody, undefined)()).toBeUndefined();
+    expect(serverTokenProvider(login, undefined)).toBe(login);
   });
 });
 

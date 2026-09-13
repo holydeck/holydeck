@@ -5,6 +5,8 @@ import { HolyDeckError, formatMessage } from './messages.js';
 export interface HolyDeckConfig {
   dataDir: string;
   serverUrl?: string;
+  /** A credential for a server that requires one, for runs with no interactive login to draw on. */
+  serverToken?: string;
   oidcIssuer?: string;
   oidcClientId?: string;
   oidcAudience?: string;
@@ -61,6 +63,8 @@ export function parseConfigFile(text: string, path: string): Partial<HolyDeckCon
   if (dataDirValue !== undefined) out.dataDir = dataDirValue;
   const serverUrlValue = stringValue(obj, 'serverUrl');
   if (serverUrlValue !== undefined) out.serverUrl = serverUrlValue;
+  const serverTokenValue = stringValue(obj, 'serverToken');
+  if (serverTokenValue !== undefined) out.serverToken = serverTokenValue;
   const oidcIssuer = stringValue(obj, 'oidcIssuer');
   if (oidcIssuer !== undefined) out.oidcIssuer = oidcIssuer;
   const oidcClientId = stringValue(obj, 'oidcClientId');
@@ -157,6 +161,7 @@ function envLayer(env: Record<string, string | undefined>, notices: string[]): P
     layer.template = env.YOU_VERSION_CLI_TEMPLATE_OUTPUT_FORMAT;
   }
   if (env.HOLYDECK_SERVER_URL !== undefined) layer.serverUrl = env.HOLYDECK_SERVER_URL;
+  if (env.HOLYDECK_SERVER_TOKEN !== undefined) layer.serverToken = env.HOLYDECK_SERVER_TOKEN;
   if (env.HOLYDECK_OIDC_ISSUER !== undefined) layer.oidcIssuer = env.HOLYDECK_OIDC_ISSUER;
   if (env.HOLYDECK_OIDC_CLIENT_ID !== undefined) layer.oidcClientId = env.HOLYDECK_OIDC_CLIENT_ID;
   if (env.HOLYDECK_OIDC_AUDIENCE !== undefined) layer.oidcAudience = env.HOLYDECK_OIDC_AUDIENCE;
@@ -202,6 +207,7 @@ export function resolveConfig(inputs: {
   const sources: Record<keyof HolyDeckConfig, ConfigSource> = {
     dataDir: 'default',
     serverUrl: 'default',
+    serverToken: 'default',
     oidcIssuer: 'default',
     oidcClientId: 'default',
     oidcAudience: 'default',
