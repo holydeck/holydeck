@@ -25,6 +25,7 @@ import { notFound } from './failures.js';
 import type { AccountStore } from './accounts.js';
 import type { AttemptGate } from './attempts.js';
 import type { AuditEntry, AuditTrail } from './audit.js';
+import type { PasskeyStore } from './passkeys.js';
 import type { TotpStore } from './totp.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -39,6 +40,7 @@ export interface Identity {
   readonly audit: AuditTrail;
   readonly attempts: AttemptGate;
   readonly totp: TotpStore;
+  readonly passkeys: PasskeyStore;
 }
 
 export interface OnboardingOptions {

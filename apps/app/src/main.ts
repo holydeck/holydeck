@@ -21,6 +21,7 @@ import { schemaStatus } from './migrations.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
 import { sessionDb, sessionsOn } from './sessions.js';
+import { passkeyDb, passkeysOn } from './passkeys.js';
 import { totpDb, totpsOn } from './totp.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
@@ -63,6 +64,7 @@ if (settings.values.mongoUrl !== '') {
     audit: auditOn(repositoryDb(store.db()), { now }),
     attempts: attemptsOn(attemptDb(store.db()), { now }),
     totp: totpsOn(totpDb(store.db()), { now }),
+    passkeys: passkeysOn(passkeyDb(store.db()), { now }),
   };
 }
 

@@ -20,11 +20,13 @@ import { withSafeErrors } from './failures.js';
 import { codeAt, stepAt } from './otp.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { TOTP_ENROLLED, TOTP_MISSING, TOTP_REFUSED, serveTotpRoutes } from './totp-routes.js';
+import { passkeysOn } from './passkeys.js';
 import { TotpError, totpContext, totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 import { memorySessions } from '../test/helpers/sessions.js';
+import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { Identity } from './onboarding.js';
@@ -101,6 +103,7 @@ beforeEach(async () => {
     audit: auditOn(trail, { now, newId: () => `e${entries().length}` }),
     attempts: attemptsOn(memoryAttempts().db, { now }),
     totp,
+    passkeys: passkeysOn(memoryPasskeys().db, { now }),
   };
   app = Fastify({ logger: false });
   withSafeErrors(app);

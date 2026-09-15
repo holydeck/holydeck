@@ -22,6 +22,7 @@ export type MessageCode = {
 export const VALIDATION_FAILED = 'request.validation_failed';
 export const UPDATE_REQUIRED = 'client.update_required';
 export const STALE_STATE_REVISION = 'command.stale_state_revision';
+export const NOT_FOUND = 'resource.not_found';
 
 /**
  * The one code a fault of this server's own takes. A client is told that the request did not happen and
@@ -37,12 +38,18 @@ export const MESSAGE_CODES: readonly MessageCode[] = [
   // A second factor that did not match, which is one code for a wrong digit, a reused one and a code for
   // an enrolment that is not there: what a refusal must not say is which of those it was.
   { code: 'auth.totp_refused', status: 401, stable: true, since: 1 },
+  // A ceremony that did not verify: a signature that is not that key's, a challenge nobody issued or
+  // that was answered already, and a key this deployment does not hold. One code for all of them.
+  { code: 'auth.passkey_refused', status: 401, stable: true, since: 1 },
   { code: 'auth.forbidden', status: 403, stable: true, since: 1 },
   // Enrolling over a second factor that is already proved, and asking of one that was never enrolled.
   // Both are a request that disagrees with the state it is aimed at, which is what 409 says.
   { code: 'auth.totp_enrolled', status: 409, stable: true, since: 1 },
   { code: 'auth.totp_missing', status: 409, stable: true, since: 1 },
-  { code: 'resource.not_found', status: 404, stable: true, since: 1 },
+  // Registering a key this deployment already holds, and registering one over the account's ceiling.
+  { code: 'auth.passkey_registered', status: 409, stable: true, since: 1 },
+  { code: 'auth.passkey_limit', status: 409, stable: true, since: 1 },
+  { code: NOT_FOUND, status: 404, stable: true, since: 1 },
   { code: UPDATE_REQUIRED, status: 426, stable: true, since: 1 },
   { code: STALE_STATE_REVISION, status: 409, stable: true, since: 1 },
   // The corpus boundary. These are what a client learns when the application could not read the corpus;

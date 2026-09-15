@@ -17,6 +17,7 @@ export default defineConfig({
     'src/snapshots.ts',
     'src/services.ts',
     'src/totp.ts',
+    'src/webauthn.ts',
   ],
   format: ['esm'],
   dts: true,

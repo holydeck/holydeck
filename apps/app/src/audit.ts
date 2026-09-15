@@ -31,6 +31,13 @@ export const AUDIT_ACTIONS = [
   'totp.use',
   'totp.regenerate',
   'totp.revoke',
+  // A passkey has the same small history, minus a secret to keep: registering one, renaming it, signing
+  // in with it, and giving it up. The trail holds the key's identifier, which is public by construction,
+  // and never the public key, the challenge or the signature.
+  'passkey.register',
+  'passkey.name',
+  'passkey.use',
+  'passkey.revoke',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

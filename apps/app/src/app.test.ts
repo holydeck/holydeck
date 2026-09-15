@@ -7,6 +7,7 @@ import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE } from '@
 import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
 import { TOTP_PATH, TOTP_RECOVERY_PATH, TOTP_VERIFICATION_PATH } from '@holydeck/contracts/totp';
+import { PASSKEY_OPTIONS_PATH, PASSKEY_PATH } from '@holydeck/contracts/webauthn';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { VERSIONED_PREFIX, buildApp } from './app.js';
@@ -73,6 +74,10 @@ describe('every route that changes something', () => {
       { method: 'POST', url: TOTP_VERIFICATION_PATH },
       { method: 'POST', url: TOTP_RECOVERY_PATH },
       { method: 'DELETE', url: TOTP_PATH },
+      { method: 'POST', url: PASSKEY_OPTIONS_PATH },
+      { method: 'POST', url: PASSKEY_PATH },
+      { method: 'PATCH', url: `${PASSKEY_PATH}/:id` },
+      { method: 'DELETE', url: `${PASSKEY_PATH}/:id` },
     ]);
   });
 

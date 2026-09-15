@@ -10,10 +10,12 @@ import { auditOn } from './audit.js';
 import { guardMutations } from './csrf.js';
 import { NOT_FOUND, notFound, withSafeErrors } from './failures.js';
 import { serveOnboarding } from './onboarding.js';
+import { passkeysOn } from './passkeys.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
+import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { AccountStore } from './accounts.js';
@@ -49,6 +51,7 @@ const identityOf = (store: AccountStore): Identity => ({
   audit: auditOn(trailDb, { now: () => NOW, newId: () => `e${trailDb.rows.get('audit_events')?.length ?? 0}` }),
   attempts: attemptsOn(memoryAttempts().db, { now: () => NOW }),
   totp: totpsOn(memoryTotp().db, { now: () => NOW }),
+  passkeys: passkeysOn(memoryPasskeys().db, { now: () => NOW }),
 });
 
 const entries = () => trailDb.rows.get('audit_events') ?? [];

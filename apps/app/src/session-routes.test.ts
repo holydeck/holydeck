@@ -22,14 +22,17 @@ import { auditOn } from './audit.js';
 import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { codeAt, stepAt } from './otp.js';
+import { passkeyContext, passkeysOn } from './passkeys.js';
 import { SIGN_IN_REFUSED, serveSessionRoutes } from './session-routes.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { totpContext, totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
+import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
+import { webauthnDevice } from '../test/helpers/webauthn-device.js';
 
 import type { AccountStore } from './accounts.js';
 import type { AttemptGate } from './attempts.js';
@@ -39,6 +42,7 @@ import type { SessionStore, StartedSession } from './sessions.js';
 import type { TotpStore } from './totp.js';
 import type { Document } from './repositories.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
+import type { AuthenticateOptions, WebAuthnDevice } from '../test/helpers/webauthn-device.js';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 
 const NOW = '2026-09-13T09:30:00.000Z';
@@ -125,6 +129,47 @@ const entries = (): Document[] => trail.rows.get('audit_events') ?? [];
 
 const tokenIn = (header: unknown): string => cookieIn(String(header), SESSION_COOKIE) ?? '';
 
+/** A key already registered to the claimed account, the way a prior sign-in would have left one. */
+const registered = async (options?: { readonly counter?: number }): Promise<WebAuthnDevice> => {
+  const device = webauthnDevice({ rpId: HOST, origin: ORIGIN });
+  await identity.passkeys.register(passkeyContext('req-passkey-fixture'), ID, {
+    id: device.credentialId,
+    name: 'a registered key',
+    publicKey: Buffer.from(device.publicKey).toString('base64url'),
+    counter: options?.counter ?? 0,
+    transports: ['internal'],
+    synced: true,
+  });
+  return device;
+};
+
+/** Draws the challenge a browser would get back from asking to sign in with a passkey. */
+const passkeyChallenge = async (): Promise<string> => {
+  const response = await signingIn({ passkey: { step: 'challenge' } });
+  expect(response.statusCode).toBe(200);
+  return String(response.json().data.passkey.challenge);
+};
+
+const signingInWithPasskey = (device: WebAuthnDevice, challenge: string, options?: AuthenticateOptions) => {
+  const produced = device.authenticate(challenge, options);
+  return signingIn({
+    passkey: {
+      step: 'assertion',
+      assertion: {
+        id: produced.id,
+        rawId: produced.rawId,
+        type: 'public-key',
+        response: {
+          clientDataJSON: produced.response.clientDataJSON,
+          authenticatorData: produced.response.authenticatorData,
+          signature: produced.response.signature,
+          ...(produced.response.userHandle === undefined ? {} : { userHandle: produced.response.userHandle }),
+        },
+      },
+    },
+  });
+};
+
 beforeEach(async () => {
   clock = Date.parse(NOW);
   trail = fakeDb();
@@ -144,6 +189,7 @@ beforeEach(async () => {
     accounts,
     audit: auditOn(trail, { now, newId: () => `e${entries().length}` }),
     attempts,
+    passkeys: passkeysOn(memoryPasskeys().db, { now }),
     totp,
   };
   app = await serving({ sessions: store, identity });
@@ -224,6 +270,162 @@ describe('signing in', () => {
       subject: CLAIM.name,
       outcome: 'allowed',
     });
+  });
+});
+
+describe('signing in with a passkey', () => {
+  test('a registered key opens a session, exactly as a password does', async () => {
+    const device = await registered();
+    const challenge = await passkeyChallenge();
+    const response = await signingInWithPasskey(device, challenge);
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data).toMatchObject({ actor: actorFor(ID), rotation: 'authentication', permissions: [] });
+    const cookie = String(response.headers['set-cookie']);
+    expect(isOpaqueToken(tokenIn(cookie))).toBe(true);
+  });
+
+  test('the trail records the sign-in under the key, and when it was used is kept', async () => {
+    const device = await registered();
+    const challenge = await passkeyChallenge();
+    await signingInWithPasskey(device, challenge);
+    expect(entries()).toContainEqual(
+      expect.objectContaining({
+        actor: actorFor(ID),
+        action: 'passkey.use',
+        subject: device.credentialId,
+        outcome: 'allowed',
+      }),
+    );
+    const stored = await identity.passkeys.find(passkeyContext('req-passkey-check'), device.credentialId);
+    expect(stored?.lastUsedAt).toBe(NOW);
+  });
+
+  test('a counter that has not moved past what was last reported is refused, and opens nothing', async () => {
+    const device = await registered({ counter: 5 });
+    const first = await passkeyChallenge();
+    await expect(signingInWithPasskey(device, first, { signCount: 6 })).resolves.toMatchObject({ statusCode: 201 });
+    const second = await passkeyChallenge();
+    const response = await signingInWithPasskey(device, second, { signCount: 3 });
+    expect(response.statusCode).toBe(401);
+    const stored = await identity.passkeys.find(passkeyContext('req-passkey-counter'), device.credentialId);
+    expect(stored?.counter).toBe(6);
+  });
+
+  test('a key this deployment has revoked answers the same refusal a wrong password does', async () => {
+    const device = await registered();
+    await identity.passkeys.revoke(passkeyContext('req-passkey-revoke'), ID, device.credentialId);
+    const challenge = await passkeyChallenge();
+    const response = await signingInWithPasskey(device, challenge);
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe(SIGN_IN_REFUSED);
+  });
+
+  test('a credential this deployment never registered is refused the same way', async () => {
+    const stranger = webauthnDevice({ rpId: HOST, origin: ORIGIN });
+    const challenge = await passkeyChallenge();
+    const response = await signingInWithPasskey(stranger, challenge);
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe(SIGN_IN_REFUSED);
+  });
+
+  test('a signature that does not check out is refused, and opens nothing', async () => {
+    const device = await registered();
+    const challenge = await passkeyChallenge();
+    const response = await signingInWithPasskey(device, challenge, { wrongSignature: true });
+    expect(response.statusCode).toBe(401);
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(sessionRows.size).toBe(0);
+  });
+
+  test('a run of bad signatures locks the handle, exactly as a run of bad passwords does', async () => {
+    const device = await registered();
+    for (let attempt = 0; attempt < ACCOUNT_ATTEMPT_LIMIT; attempt += 1) {
+      const challenge = await passkeyChallenge();
+      await signingInWithPasskey(device, challenge, { wrongSignature: true });
+    }
+    expect(entries()).toContainEqual(expect.objectContaining({ action: 'session.lock', subject: accountScope(CLAIM.name) }));
+  });
+
+  test('a challenge answered twice is spent the first time and refused the second', async () => {
+    const device = await registered();
+    const challenge = await passkeyChallenge();
+    await expect(signingInWithPasskey(device, challenge)).resolves.toMatchObject({ statusCode: 201 });
+    await expect(signingInWithPasskey(device, challenge)).resolves.toMatchObject({ statusCode: 401 });
+  });
+
+  test('a challenge drawn for a registration is not answered as one drawn for a sign-in', async () => {
+    const device = await registered();
+    const drawnForRegistration = await identity.passkeys.challenge(
+      passkeyContext('req-passkey-reg-challenge'),
+      'registration',
+      ID,
+    );
+    const response = await signingInWithPasskey(device, drawnForRegistration);
+    expect(response.statusCode).toBe(401);
+  });
+
+  test('client data with no readable challenge is refused, not read as any particular one', async () => {
+    const stranger = webauthnDevice({ rpId: HOST, origin: ORIGIN });
+    const garbled = Buffer.from(JSON.stringify({ type: 'webauthn.get' }), 'utf8').toString('base64url');
+    const produced = stranger.authenticate('unused-challenge');
+    const response = await signingIn({
+      passkey: {
+        step: 'assertion',
+        assertion: {
+          id: produced.id,
+          rawId: produced.rawId,
+          type: 'public-key',
+          response: {
+            clientDataJSON: garbled,
+            authenticatorData: produced.response.authenticatorData,
+            signature: produced.response.signature,
+          },
+        },
+      },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(entries()).toContainEqual(
+      expect.objectContaining({ action: 'passkey.use', outcome: 'refused', detail: 'no readable challenge' }),
+    );
+  });
+
+  test('a body that names the step but nothing else is refused, not answered as a validation problem', async () => {
+    const response = await signingIn({ passkey: {} });
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe(SIGN_IN_REFUSED);
+    expect(response.body).not.toContain(VALIDATION_FAILED);
+  });
+
+  test('a key whose account this deployment no longer holds is refused', async () => {
+    const orphan = webauthnDevice({ rpId: HOST, origin: ORIGIN });
+    await identity.passkeys.register(passkeyContext('req-passkey-orphan'), 'B'.repeat(22), {
+      id: orphan.credentialId,
+      name: 'an orphaned key',
+      publicKey: Buffer.from(orphan.publicKey).toString('base64url'),
+      counter: 0,
+      transports: ['internal'],
+      synced: true,
+    });
+    const challenge = await passkeyChallenge();
+    const response = await signingInWithPasskey(orphan, challenge);
+    expect(response.statusCode).toBe(401);
+  });
+
+  test('a locked account refuses even the right key, exactly as it refuses the right password', async () => {
+    const device = await registered();
+    for (let attempt = 0; attempt < ACCOUNT_ATTEMPT_LIMIT; attempt += 1) await failing();
+    const challenge = await passkeyChallenge();
+    const response = await signingInWithPasskey(device, challenge);
+    expect(response.statusCode).toBe(401);
+    expect(sessionRows.size).toBe(0);
+  });
+
+  test('a sign-in that succeeds forgives the failures that came before it, the gate a password shares', async () => {
+    const device = await registered();
+    for (let attempt = 0; attempt < ACCOUNT_ATTEMPT_LIMIT - 1; attempt += 1) await failing();
+    const challenge = await passkeyChallenge();
+    await expect(signingInWithPasskey(device, challenge)).resolves.toMatchObject({ statusCode: 201 });
+    expect(await attempts.locked(attemptContext('req-passkey-forgiven'), accountScope(CLAIM.name))).toBe(false);
   });
 });
 

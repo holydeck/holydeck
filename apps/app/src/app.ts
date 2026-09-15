@@ -7,6 +7,7 @@ import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
 import { serveOnboarding } from './onboarding.js';
+import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
@@ -103,6 +104,7 @@ export function buildApp({ settings, logger, fetching, web, sessions, identity }
   // Behind the guard, unlike the two above: a second factor is enrolled and given up by an operator who
   // is already signed in, which is what lets this surface say plainly what a sign-in never may.
   serveTotpRoutes(app, { identity });
+  servePasskeyRoutes(app, { identity, sessions });
 
   if (web !== undefined) serveWebClient(app, web);
 

@@ -115,6 +115,10 @@ describe('the context the trail is written under', () => {
       'totp.use',
       'totp.regenerate',
       'totp.revoke',
+      'passkey.register',
+      'passkey.name',
+      'passkey.use',
+      'passkey.revoke',
     ]);
   });
 });

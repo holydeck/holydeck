@@ -8,6 +8,7 @@
 
 import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './accounts.js';
 import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
+import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
 import { TOTP_INDEXES, createTotpIndexOn, dropTotpIndexOn } from './totp.js';
@@ -16,6 +17,7 @@ import { createIndexOn, dropIndexOn, repositoriesOn, RepositoryError } from './r
 import type { AccountIndex } from './accounts.js';
 import type { AttemptIndex } from './attempts.js';
 import type { RequestContext } from './context.js';
+import type { PasskeyIndex } from './passkeys.js';
 import type { QueueIndex } from './queue.js';
 import type { RecordName } from './records.js';
 import type { Document, Repository, RepositoryDb } from './repositories.js';
@@ -72,6 +74,9 @@ export interface MigrationApi {
   /** Nor is a second factor: one credential per account, kept where revoking it cannot reach a password. */
   createTotpIndex(index: TotpIndex): Promise<string>;
   dropTotpIndex(name: string): Promise<void>;
+  /** Nor is a passkey, which is two collections: the keys an account holds and the challenges they answer. */
+  createPasskeyIndex(index: PasskeyIndex): Promise<string>;
+  dropPasskeyIndex(name: string): Promise<void>;
 }
 
 export interface SchemaMigration {
@@ -176,6 +181,16 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
       for (const index of [...TOTP_INDEXES].reverse()) await api.dropTotpIndex(index.name);
     },
   },
+  {
+    version: 7,
+    name: 'the indexes a passkey is listed by and a challenge nobody answered is forgotten by',
+    async up(api) {
+      for (const index of PASSKEY_INDEXES) await api.createPasskeyIndex(index);
+    },
+    async down(api) {
+      for (const index of [...PASSKEY_INDEXES].reverse()) await api.dropPasskeyIndex(index.name);
+    },
+  },
 ]);
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -272,6 +287,8 @@ export function migrationApi(db: RepositoryDb): MigrationApi {
     dropAttemptIndex: (name: string) => dropAttemptIndexOn(db, name),
     createTotpIndex: (index: TotpIndex) => createTotpIndexOn(db, index),
     dropTotpIndex: (name: string) => dropTotpIndexOn(db, name),
+    createPasskeyIndex: (index: PasskeyIndex) => createPasskeyIndexOn(db, index),
+    dropPasskeyIndex: (name: string) => dropPasskeyIndexOn(db, name),
   });
 }
 
