@@ -7,6 +7,7 @@ import { accountDb, accountsOn } from './accounts.js';
 import { buildApp } from './app.js';
 import { attemptDb, attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
+import { capabilityDb, capabilitiesOn } from './capabilities.js';
 import {
   checkCorpusBoundary,
   checkCorpusIsClosed,
@@ -26,6 +27,7 @@ import { totpDb, totpsOn } from './totp.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
+import type { CapabilityStore } from './capabilities.js';
 import type { Identity } from './onboarding.js';
 import type { SessionStore } from './sessions.js';
 
@@ -53,6 +55,9 @@ let sessions: SessionStore | undefined;
 // Accounts are kept the same way and for the same reason: a deployment with nowhere to put one cannot be
 // claimed, and its onboarding route answers not-found from the first request rather than from the second.
 let identity: Identity | undefined;
+// Capabilities are kept the same way and for the same reason: a deployment with nowhere to put one has
+// no guest invitation and no output capability to issue, and its route answers not-found instead.
+let capabilities: CapabilityStore | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl);
   await store.connect();
@@ -66,6 +71,7 @@ if (settings.values.mongoUrl !== '') {
     totp: totpsOn(totpDb(store.db()), { now }),
     passkeys: passkeysOn(passkeyDb(store.db()), { now }),
   };
+  capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
 }
 
 // Shipped in the same image as this service, at the same relative path the repository has.
@@ -80,6 +86,7 @@ const app = buildApp({
   web,
   sessions,
   identity,
+  capabilities,
 });
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.

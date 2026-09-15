@@ -8,6 +8,7 @@
 
 import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './accounts.js';
 import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
+import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } from './capabilities.js';
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
@@ -16,6 +17,7 @@ import { createIndexOn, dropIndexOn, repositoriesOn, RepositoryError } from './r
 
 import type { AccountIndex } from './accounts.js';
 import type { AttemptIndex } from './attempts.js';
+import type { CapabilityIndex } from './capabilities.js';
 import type { RequestContext } from './context.js';
 import type { PasskeyIndex } from './passkeys.js';
 import type { QueueIndex } from './queue.js';
@@ -77,6 +79,9 @@ export interface MigrationApi {
   /** Nor is a passkey, which is two collections: the keys an account holds and the challenges they answer. */
   createPasskeyIndex(index: PasskeyIndex): Promise<string>;
   dropPasskeyIndex(name: string): Promise<void>;
+  /** Nor is a capability: a Guest's invitation or an output window's grant, gone the moment it expires. */
+  createCapabilityIndex(index: CapabilityIndex): Promise<string>;
+  dropCapabilityIndex(name: string): Promise<void>;
 }
 
 export interface SchemaMigration {
@@ -191,6 +196,16 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
       for (const index of [...PASSKEY_INDEXES].reverse()) await api.dropPasskeyIndex(index.name);
     },
   },
+  {
+    version: 8,
+    name: 'the index a capability nobody revoked is forgotten by',
+    async up(api) {
+      for (const index of CAPABILITY_INDEXES) await api.createCapabilityIndex(index);
+    },
+    async down(api) {
+      for (const index of [...CAPABILITY_INDEXES].reverse()) await api.dropCapabilityIndex(index.name);
+    },
+  },
 ]);
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -289,6 +304,8 @@ export function migrationApi(db: RepositoryDb): MigrationApi {
     dropTotpIndex: (name: string) => dropTotpIndexOn(db, name),
     createPasskeyIndex: (index: PasskeyIndex) => createPasskeyIndexOn(db, index),
     dropPasskeyIndex: (name: string) => dropPasskeyIndexOn(db, name),
+    createCapabilityIndex: (index: CapabilityIndex) => createCapabilityIndexOn(db, index),
+    dropCapabilityIndex: (name: string) => dropCapabilityIndexOn(db, name),
   });
 }
 

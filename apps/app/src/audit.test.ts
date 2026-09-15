@@ -122,6 +122,9 @@ describe('the context the trail is written under', () => {
       'account.control',
       'session.slot.add',
       'session.slot.switch',
+      'capability.guest.issue',
+      'capability.output.issue',
+      'capability.revoke',
     ]);
   });
 });

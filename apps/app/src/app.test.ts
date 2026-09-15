@@ -11,6 +11,7 @@ import { PASSKEY_OPTIONS_PATH, PASSKEY_PATH } from '@holydeck/contracts/webauthn
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { VERSIONED_PREFIX, buildApp } from './app.js';
+import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
@@ -82,6 +83,11 @@ describe('every route that changes something', () => {
       // The first route a permission gates, and not merely a proved session — still counted here, because
       // the guard it is behind is asked before the permission is.
       { method: 'PATCH', url: `${ACCOUNTS_PATH}/:id/control-presentation` },
+      // Behind the same permission as the route above: issuing or revoking a Guest's invitation or an
+      // output window's capability is Control presentation's, not merely a proved session's.
+      { method: 'POST', url: GUEST_INVITATION_PATH },
+      { method: 'POST', url: OUTPUT_CAPABILITY_PATH },
+      { method: 'DELETE', url: `${CAPABILITIES_PATH}/:capabilityId` },
     ]);
   });
 

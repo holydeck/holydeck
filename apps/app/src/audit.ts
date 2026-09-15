@@ -45,6 +45,11 @@ export const AUDIT_ACTIONS = [
   // moving between the slots it already holds. Neither entry ever carries a permission or a token.
   'session.slot.add',
   'session.slot.switch',
+  // A Guest's invitation or an output window's capability, issued or given back before it was ever spent.
+  // The trail holds the operator who acted and the service and view in prose, and never the token.
+  'capability.guest.issue',
+  'capability.output.issue',
+  'capability.revoke',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

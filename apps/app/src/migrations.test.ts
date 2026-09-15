@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import { ACCOUNT_INDEXES } from './accounts.js';
 import { ATTEMPT_INDEXES } from './attempts.js';
+import { CAPABILITY_INDEXES } from './capabilities.js';
 import { requestContext, systemContext } from './context.js';
 import {
   MIGRATIONS,
@@ -88,6 +89,7 @@ describe('the shipped migrations', () => {
     expect([...created.keys()].sort()).toEqual([
       'accounts',
       'audit_events',
+      'capabilities',
       'content_revisions',
       'jobs',
       'passkey_challenges',
@@ -143,6 +145,14 @@ describe('the shipped migrations', () => {
     const db = fakeDb();
     await migrate(db, CONTEXT, { now: clock });
     expect(db.indexes.get('totp_credentials')).toEqual(TOTP_INDEXES.map((index) => index.name));
+  });
+
+  // The fourth that forgets: a capability nobody revoked is not one a deployment running for a year should
+  // still be holding open, so it stops existing on its own deadline rather than needing to be swept for.
+  test('build the capabilities the index one nobody revoked is forgotten by', async () => {
+    const db = fakeDb();
+    await migrate(db, CONTEXT, { now: clock });
+    expect(db.indexes.get('capabilities')).toEqual(CAPABILITY_INDEXES.map((index) => index.name));
   });
 });
 
@@ -433,6 +443,7 @@ describe('what a migration is handed', () => {
     expect(Object.keys(migrationApi(fakeDb())).sort()).toEqual([
       'createAccountIndex',
       'createAttemptIndex',
+      'createCapabilityIndex',
       'createIndex',
       'createPasskeyIndex',
       'createQueueIndex',
@@ -440,6 +451,7 @@ describe('what a migration is handed', () => {
       'createTotpIndex',
       'dropAccountIndex',
       'dropAttemptIndex',
+      'dropCapabilityIndex',
       'dropIndex',
       'dropPasskeyIndex',
       'dropQueueIndex',

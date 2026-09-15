@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 
 import { serveAccountRoutes } from './accounts-routes.js';
 import { enforceAuthorization } from './authorization.js';
+import { serveCapabilityRoutes } from './capability-routes.js';
 import { corpusClient } from './corpus.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
@@ -15,6 +16,7 @@ import { serveTotpRoutes } from './totp-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
 import type { RouteNeed } from './authorization.js';
+import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { Identity } from './onboarding.js';
 import type { SessionStore } from './sessions.js';
@@ -35,6 +37,8 @@ export interface AppOptions {
   sessions?: SessionStore;
   /** Where accounts are kept and what is done to them is recorded. Without it, there is nothing to claim. */
   identity?: Identity;
+  /** Where a Guest's invitation or an output window's capability is kept. Without it, there is none to grant. */
+  capabilities?: CapabilityStore;
 }
 
 /**
@@ -44,7 +48,7 @@ export interface AppOptions {
  */
 export const VERSIONED_PREFIX = '/api/';
 
-export function buildApp({ settings, logger, fetching, web, sessions, identity }: AppOptions): FastifyInstance {
+export function buildApp({ settings, logger, fetching, web, sessions, identity, capabilities }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
 
@@ -118,6 +122,10 @@ export function buildApp({ settings, logger, fetching, web, sessions, identity }
   // The first route this server asks a permission of, and not merely a proved session: administering
   // another account is Admin's alone, by the roles this server enforces.
   serveAccountRoutes(app, { identity });
+
+  // Behind the same permission as the account surface above: issuing a Guest's invitation or an output
+  // window's capability is Control presentation's, not merely a proved session's.
+  serveCapabilityRoutes(app, { capabilities, identity });
 
   if (web !== undefined) serveWebClient(app, web);
 
