@@ -1,10 +1,12 @@
 // Where the settings file is read back, and where a change to it is asked for.
 //
 // Shaped like `accounts-routes.ts`: one permission, `SETTINGS_MANAGE`, gates both routes, and a deployment
-// with nowhere to keep a settings admin serves the same two paths answering not-found. Reading the file is
-// never audited, the same as any other GET; writing it is, exactly once per request that succeeds, and the
-// entry names which fields changed and never what they changed to — the trail is not a second place a
-// secret could leak from.
+// with nowhere to keep an identity serves the same two paths answering not-found — the same gate
+// `accounts-routes.ts` uses, and for the same reason: nothing to audit a change against. `main.ts` never
+// constructs a `settingsAdmin` without an `identity` alongside it either (both come from the same
+// `mongoUrl !== ''` block), so this one gate covers both. Reading the file is never audited, the same as
+// any other GET; writing it is, exactly once per request that succeeds, and the entry names which fields
+// changed and never what they changed to — the trail is not a second place a secret could leak from.
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { successEnvelope, validationFailure } from '@holydeck/contracts/http';
@@ -39,16 +41,16 @@ const ROUTES = [
 ] as const;
 
 export interface SettingsRoutesOptions {
-  /** Absent in a deployment that keeps no settings admin, which has nothing here to read or change. */
+  /** Absent whenever `identity` is, per `main.ts`'s wiring — never independently, from this module's view. */
   readonly settingsAdmin: SettingsAdmin | undefined;
-  /** Absent audit-writing is best-effort everywhere else in this server, and this surface is no different. */
+  /** Absent in a deployment that keeps no identity, which has nothing here to audit a change against. */
   readonly identity: Identity | undefined;
 }
 
 export function serveSettingsRoutes(app: FastifyInstance, { settingsAdmin, identity }: SettingsRoutesOptions): void {
-  // A deployment with nowhere to keep a settings admin has nothing here to read or change. Every path is
-  // still served, so the guard's table remains the complete shape of the surface in every deployment.
-  if (settingsAdmin === undefined) {
+  // A deployment with nowhere to keep an identity has nothing here to audit a change against. Every path
+  // is still served, so the guard's table remains the complete shape of the surface in every deployment.
+  if (identity === undefined) {
     for (const [method, url] of ROUTES) {
       app.route({
         method,
@@ -59,6 +61,10 @@ export function serveSettingsRoutes(app: FastifyInstance, { settingsAdmin, ident
     }
     return;
   }
+
+  // Guaranteed by `main.ts`'s wiring, not by this module: an `identity` never exists without a
+  // `settingsAdmin` alongside it, so the gate above is this module's only check for either.
+  const admin = settingsAdmin as SettingsAdmin;
 
   /**
    * Written after the change, and logged rather than answered when the trail refuses it: a settings change
@@ -71,7 +77,6 @@ export function serveSettingsRoutes(app: FastifyInstance, { settingsAdmin, ident
     outcome: AuditOutcome,
     detail: string,
   ): Promise<void> => {
-    if (identity === undefined) return;
     try {
       await identity.audit.record(auditContext(actor, correlationFor(SETTINGS_PREFIX, request.id)), {
         action,
@@ -85,13 +90,13 @@ export function serveSettingsRoutes(app: FastifyInstance, { settingsAdmin, ident
   };
 
   app.get(SETTINGS_PATH, { config: { need: PERMISSION } }, (request) => {
-    const loaded = settingsAdmin.current();
+    const loaded = admin.current();
     const redact = redactorFor(secretsIn(loaded.values));
     return successEnvelope(
       {
         values: redact(loaded.values) as Settings,
         sources: loaded.sources,
-        lastReloadError: settingsAdmin.lastReloadError(),
+        lastReloadError: admin.lastReloadError(),
       },
       request.id,
       CLIENT_WINDOW.current,
@@ -106,13 +111,13 @@ export function serveSettingsRoutes(app: FastifyInstance, { settingsAdmin, ident
     }
     const operator = provenSession(request).record.actor;
     try {
-      const updated = await settingsAdmin.update(request.body as Partial<Settings>);
+      const updated = await admin.update(request.body as Partial<Settings>);
       const changed = Object.keys(request.body).sort().join(', ');
       await note(request, 'settings.update', operator, 'allowed', `changed ${changed}`);
       const redact = redactorFor(secretsIn(updated.values));
       return reply.send(
         successEnvelope(
-          { values: redact(updated.values) as Settings, sources: updated.sources, lastReloadError: settingsAdmin.lastReloadError() },
+          { values: redact(updated.values) as Settings, sources: updated.sources, lastReloadError: admin.lastReloadError() },
           request.id,
           CLIENT_WINDOW.current,
         ),

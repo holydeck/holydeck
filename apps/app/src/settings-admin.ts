@@ -57,14 +57,22 @@ async function readTextOrEmpty(io: SettingsAdminIO, path: string): Promise<strin
   }
 }
 
-function mappingIn(text: string): Record<string, unknown> {
+// Refuses the same way `settings.ts`'s own `readFileLayer` does: a file an external hand corrupted since
+// the last load is not "nothing here yet", and merging a partial change into `{}` would silently discard
+// every field it holds, reverting them to defaults on the very next unrelated change. `update()` must
+// leave a corrupted file exactly as corrupted as it found it, the same as a bad submitted field does.
+function mappingIn(text: string, path: string): Record<string, unknown> {
   let raw: unknown;
   try {
     raw = parse(text);
   } catch {
-    return {};
+    throw new SettingsError([`${path}: is not valid YAML`]);
   }
-  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? { ...(raw as Record<string, unknown>) } : {};
+  if (raw === null || raw === undefined) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new SettingsError([`${path}: expected a mapping of settings`]);
+  }
+  return { ...(raw as Record<string, unknown>) };
 }
 
 export function settingsAdminOn(seed: LoadedSettings, io: SettingsAdminOptions): SettingsAdmin {
@@ -89,7 +97,7 @@ export function settingsAdminOn(seed: LoadedSettings, io: SettingsAdminOptions):
 
     async update(partial) {
       const path = snapshot.path;
-      const mapping = mappingIn(await readTextOrEmpty(io, path));
+      const mapping = mappingIn(await readTextOrEmpty(io, path), path);
       Object.assign(mapping, partial);
       const merged = stringify(mapping);
       // Validated as a whole before anything is written: a partial change that fails alongside a valid one

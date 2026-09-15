@@ -102,15 +102,31 @@ describe('reading the file that is not there yet', () => {
   });
 });
 
-describe('recovering from a file that is not valid YAML', () => {
-  it('treats unparsable existing content as empty rather than failing the whole update', async () => {
+describe('refusing to write over a file already corrupted on disk', () => {
+  it('refuses an update rather than merging into an empty mapping, when the existing file is not valid YAML', async () => {
     const io = fakeSettingsIO({ [PATH]: 'port: 3000\n\tlocale: en\n' });
     const admin = settingsAdminOn(seeded('port: 3000\n'), { ...io, env: {} });
 
-    const updated = await admin.update({ locale: 'de' });
+    // The seed above predates the corruption, so this is the same shape the route sees: a snapshot from
+    // the last good load, and a file an external hand has since broken underneath it.
+    await expect(admin.update({ locale: 'de' })).rejects.toThrow(SettingsError);
 
-    expect(updated.values.locale).toBe('de');
-    expect(updated.values.port).toBe(3000);
+    expect(io.writes).toHaveLength(0);
+    expect(io.renames).toHaveLength(0);
+    expect(admin.current().values.port).toBe(3000);
+    expect(admin.current().values.locale).toBe('en');
+  });
+
+  it('refuses an update rather than merging into an empty mapping, when the existing file is not a mapping', async () => {
+    const io = fakeSettingsIO({ [PATH]: '- port\n- locale\n' });
+    const admin = settingsAdminOn(seeded('port: 3000\n'), { ...io, env: {} });
+
+    await expect(admin.update({ locale: 'de' })).rejects.toThrow(SettingsError);
+
+    expect(io.writes).toHaveLength(0);
+    expect(io.renames).toHaveLength(0);
+    expect(admin.current().values.port).toBe(3000);
+    expect(admin.current().values.locale).toBe('en');
   });
 });
 

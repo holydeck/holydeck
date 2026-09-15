@@ -207,18 +207,6 @@ describe('the trail this route writes', () => {
     expect(entries()).toEqual([]);
   });
 
-  test('applies a change even when this deployment keeps no identity to audit it against', async () => {
-    await app.close();
-    app = Fastify({ logger: false });
-    withSafeErrors(app);
-    guardMutations(app, { sessions });
-    enforceAuthorization(app, { sessions });
-    serveSettingsRoutes(app, { settingsAdmin, identity: undefined });
-    await app.ready();
-    const response = await patching({ locale: 'de' });
-    expect(response.statusCode).toBe(200);
-  });
-
   test('a trail that refuses an entry does not cost the change', async () => {
     identity = { ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } };
     await app.close();
@@ -234,13 +222,25 @@ describe('the trail this route writes', () => {
 });
 
 describe('what this surface refuses to answer at all', () => {
-  test('a deployment that keeps no settings admin serves both paths, and answers not-found from each', async () => {
+  test('a deployment that keeps neither serves both paths, and answers not-found from each', async () => {
     await app.close();
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
     enforceAuthorization(app, { sessions });
-    serveSettingsRoutes(app, { settingsAdmin: undefined, identity });
+    serveSettingsRoutes(app, { settingsAdmin: undefined, identity: undefined });
+    await app.ready();
+    expect((await reading()).statusCode).toBe(404);
+    expect((await patching({ locale: 'de' })).statusCode).toBe(404);
+  });
+
+  test('answers not-found from the identity gate alone, even with a settings admin configured', async () => {
+    await app.close();
+    app = Fastify({ logger: false });
+    withSafeErrors(app);
+    guardMutations(app, { sessions });
+    enforceAuthorization(app, { sessions });
+    serveSettingsRoutes(app, { settingsAdmin, identity: undefined });
     await app.ready();
     expect((await reading()).statusCode).toBe(404);
     expect((await patching({ locale: 'de' })).statusCode).toBe(404);
