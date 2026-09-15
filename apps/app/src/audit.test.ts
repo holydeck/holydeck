@@ -129,6 +129,7 @@ describe('the context the trail is written under', () => {
       'capability.guest.issue',
       'capability.output.issue',
       'capability.revoke',
+      'settings.update',
     ]);
   });
 });

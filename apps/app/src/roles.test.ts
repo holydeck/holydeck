@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ACCOUNTS_MANAGE, PRESENTATION_CONTROL, permissionsFor } from './roles.js';
+import { ACCOUNTS_MANAGE, PRESENTATION_CONTROL, SETTINGS_MANAGE, permissionsFor } from './roles.js';
 
 import type { AccountRecord } from '@holydeck/contracts/accounts';
 
@@ -17,8 +17,8 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin the accounts a deployment must always be able to administer', () => {
-    expect(permissionsFor(accountOf('admin', false))).toEqual([ACCOUNTS_MANAGE]);
+  it('grants an admin the accounts and the settings a deployment must always be able to administer', () => {
+    expect(permissionsFor(accountOf('admin', false))).toEqual([ACCOUNTS_MANAGE, SETTINGS_MANAGE]);
   });
 
   it('grants an editor and a member nothing by role alone', () => {
@@ -40,7 +40,7 @@ describe('what Control presentation is', () => {
   });
 
   it('adds to what the role already grants, rather than replacing it', () => {
-    expect(permissionsFor(accountOf('admin', true))).toEqual([ACCOUNTS_MANAGE, PRESENTATION_CONTROL]);
+    expect(permissionsFor(accountOf('admin', true))).toEqual([ACCOUNTS_MANAGE, SETTINGS_MANAGE, PRESENTATION_CONTROL]);
   });
 
   it('is gone the moment it is revoked, whatever role carried it', () => {

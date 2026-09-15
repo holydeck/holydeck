@@ -12,8 +12,11 @@ export const PRESENTATION_CONTROL = 'presentation.control';
 /** Administers accounts: grants and revokes what other accounts hold. Admin's alone, by role. */
 export const ACCOUNTS_MANAGE = 'accounts.manage';
 
+/** Views and changes the settings file. Admin's alone, by role — the same as accounts. */
+export const SETTINGS_MANAGE = 'settings.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
-  admin: [ACCOUNTS_MANAGE],
+  admin: [ACCOUNTS_MANAGE, SETTINGS_MANAGE],
   editor: [],
   member: [],
 };

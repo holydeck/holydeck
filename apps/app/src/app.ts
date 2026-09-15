@@ -12,6 +12,7 @@ import { isUpgrade } from './live.js';
 import { serveOnboarding } from './onboarding.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
+import { serveSettingsRoutes } from './settings-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
@@ -19,6 +20,7 @@ import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { Identity } from './onboarding.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
 import type { WebAsset } from './static.js';
@@ -39,6 +41,8 @@ export interface AppOptions {
   identity?: Identity;
   /** Where a Guest's invitation or an output window's capability is kept. Without it, there is none to grant. */
   capabilities?: CapabilityStore;
+  /** Where the settings file is written and hot-reloaded. Without it, there is nothing to administer. */
+  settingsAdmin?: SettingsAdmin;
 }
 
 /**
@@ -48,7 +52,16 @@ export interface AppOptions {
  */
 export const VERSIONED_PREFIX = '/api/';
 
-export function buildApp({ settings, logger, fetching, web, sessions, identity, capabilities }: AppOptions): FastifyInstance {
+export function buildApp({
+  settings,
+  logger,
+  fetching,
+  web,
+  sessions,
+  identity,
+  capabilities,
+  settingsAdmin,
+}: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
 
@@ -126,6 +139,10 @@ export function buildApp({ settings, logger, fetching, web, sessions, identity, 
   // Behind the same permission as the account surface above: issuing a Guest's invitation or an output
   // window's capability is Control presentation's, not merely a proved session's.
   serveCapabilityRoutes(app, { capabilities, identity });
+
+  // Behind the same permission as the account surface: reading or changing the settings file is Admin's
+  // alone, the same as administering an account is.
+  serveSettingsRoutes(app, { settingsAdmin, identity });
 
   if (web !== undefined) serveWebClient(app, web);
 

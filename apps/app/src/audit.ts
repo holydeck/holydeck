@@ -54,6 +54,9 @@ export const AUDIT_ACTIONS = [
   'capability.guest.issue',
   'capability.output.issue',
   'capability.revoke',
+  // The settings file, administered as the one thing it is: a change is recorded once, naming only
+  // which fields it touched and never a value — viewing it is never audited, the same as any other GET.
+  'settings.update',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

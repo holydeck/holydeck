@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
+import { SETTINGS_PATH } from './settings-routes.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
@@ -29,6 +30,7 @@ const sources: LoadedSettings['sources'] = {
   corpusUrl: 'default',
   corpusToken: 'default',
   mongoUrl: 'default',
+  timezone: 'default',
 };
 
 const settings: LoadedSettings = {
@@ -93,6 +95,8 @@ describe('every route that changes something', () => {
       { method: 'POST', url: GUEST_INVITATION_PATH },
       { method: 'POST', url: OUTPUT_CAPABILITY_PATH },
       { method: 'DELETE', url: `${CAPABILITIES_PATH}/:capabilityId` },
+      // Behind the same permission as the account surface: changing the settings file is Admin's alone.
+      { method: 'PATCH', url: SETTINGS_PATH },
     ]);
   });
 

@@ -23,6 +23,8 @@ export interface Settings {
   corpusToken: string;
   /** Where the durable records live. Empty means this deployment keeps none yet. */
   mongoUrl: string;
+  /** The installation's IANA time zone. Round-trips through this loader; no scheduling reads it yet. */
+  timezone: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -33,6 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   corpusUrl: '',
   corpusToken: '',
   mongoUrl: '',
+  timezone: 'Europe/Zurich',
 };
 
 export type SettingsSource = 'default' | 'file' | 'env';
@@ -62,6 +65,7 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   corpusUrl: 'HOLYDECK_CORPUS_URL',
   corpusToken: 'HOLYDECK_CORPUS_TOKEN',
   mongoUrl: 'HOLYDECK_MONGO_URL',
+  timezone: 'HOLYDECK_TIMEZONE',
 };
 
 export function settingsPath(env: Record<string, string | undefined>): string {
@@ -91,6 +95,15 @@ const parseLocale = (raw: unknown): Parsed<Locale> => {
     return { ok: false, problem: `expected one of ${LOCALES.join(', ')}, got ${JSON.stringify(raw)}` };
   }
   return { ok: true, value: locale };
+};
+
+const TIME_ZONES = new Set<string>(Intl.supportedValuesOf('timeZone'));
+
+const parseTimezone = (raw: unknown): Parsed<string> => {
+  if (typeof raw !== 'string' || !TIME_ZONES.has(raw)) {
+    return { ok: false, problem: `expected an IANA time zone, got ${JSON.stringify(raw)}` };
+  }
+  return { ok: true, value: raw };
 };
 
 // An address the rest of the world can resolve is refused outright: the corpus holds the whole library
@@ -233,6 +246,7 @@ export function loadSettings(input: {
   }
 
   const mongoUrl = resolve('mongoUrl', DEFAULT_SETTINGS.mongoUrl, parseMongoUrl, layers);
+  const timezone = resolve('timezone', DEFAULT_SETTINGS.timezone, parseTimezone, layers);
 
   if (problems.length > 0) throw new SettingsError(problems);
 
@@ -245,6 +259,7 @@ export function loadSettings(input: {
       corpusUrl: corpusUrl.value,
       corpusToken: corpusToken.value,
       mongoUrl: mongoUrl.value,
+      timezone: timezone.value,
     },
     sources: {
       port: port.source,
@@ -254,6 +269,7 @@ export function loadSettings(input: {
       corpusUrl: corpusUrl.source,
       corpusToken: corpusToken.source,
       mongoUrl: mongoUrl.source,
+      timezone: timezone.source,
     },
     path,
   };

@@ -34,6 +34,7 @@ const settings: LoadedSettings = {
     corpusUrl: 'default',
     corpusToken: 'default',
     mongoUrl: 'default',
+    timezone: 'default',
   },
   path: '/data/holydeck/config/settings.yaml',
 };

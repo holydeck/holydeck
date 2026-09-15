@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, watch } from 'node:fs';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { MongoClient } from 'mongodb';
@@ -23,12 +24,14 @@ import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
 import { sessionDb, sessionsOn } from './sessions.js';
 import { passkeyDb, passkeysOn } from './passkeys.js';
+import { settingsAdminOn } from './settings-admin.js';
 import { totpDb, totpsOn } from './totp.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
 import type { Identity } from './onboarding.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { SessionStore } from './sessions.js';
 
 checkReleasedContracts();
@@ -58,6 +61,11 @@ let identity: Identity | undefined;
 // Capabilities are kept the same way and for the same reason: a deployment with nowhere to put one has
 // no guest invitation and no output capability to issue, and its route answers not-found instead.
 let capabilities: CapabilityStore | undefined;
+// The settings admin is kept apart from the durable store, but wired up alongside it: a deployment with
+// nowhere to keep accounts has nobody who could administer settings either, and its route answers
+// not-found the same way the others do.
+let settingsAdmin: SettingsAdmin | undefined;
+let stopWatchingSettings: (() => void) | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl);
   await store.connect();
@@ -72,6 +80,15 @@ if (settings.values.mongoUrl !== '') {
     passkeys: passkeysOn(passkeyDb(store.db()), { now }),
   };
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
+  settingsAdmin = settingsAdminOn(settings, {
+    readFile: (path) => readFile(path, 'utf8'),
+    writeFile,
+    rename,
+    watch,
+    env: process.env,
+  });
+  const watcher = settingsAdmin.watch();
+  stopWatchingSettings = () => watcher.close();
 }
 
 // Shipped in the same image as this service, at the same relative path the repository has.
@@ -87,6 +104,7 @@ const app = buildApp({
   sessions,
   identity,
   capabilities,
+  settingsAdmin,
 });
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.
@@ -103,6 +121,7 @@ for (const [key, source] of Object.entries(settings.sources)) {
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
+    stopWatchingSettings?.();
     void app
       .close()
       .then(() => store?.close())

@@ -1,0 +1,182 @@
+import { basename, dirname } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
+
+import { settingsAdminOn } from './settings-admin.js';
+import { CANONICAL_SETTINGS_PATH, SettingsError, loadSettings } from './settings.js';
+import { fakeSettingsIO } from '../test/helpers/settings-io.js';
+
+const PATH = CANONICAL_SETTINGS_PATH;
+
+const seeded = (fileText?: string, env: Record<string, string | undefined> = {}) =>
+  loadSettings({ fileText, env, path: PATH });
+
+describe('writing a change atomically', () => {
+  it('writes a temp file in the same directory, then renames it onto the canonical path, and adopts the result', async () => {
+    const io = fakeSettingsIO({ [PATH]: 'port: 4100\n' });
+    const admin = settingsAdminOn(seeded('port: 4100\n'), { ...io, env: {} });
+
+    const updated = await admin.update({ locale: 'de' });
+
+    expect(updated.values).toMatchObject({ port: 4100, locale: 'de' });
+    expect(admin.current().values.locale).toBe('de');
+    expect(io.writes).toHaveLength(1);
+    expect(io.renames).toHaveLength(1);
+    expect(io.renames[0]?.to).toBe(PATH);
+    expect(dirname(io.writes[0]?.path ?? '')).toBe(dirname(PATH));
+    expect(io.writes[0]?.path).toBe(io.renames[0]?.from);
+    expect(parse(io.files.get(PATH) ?? '')).toMatchObject({ port: 4100, locale: 'de' });
+  });
+
+  it('leaves the previous valid file intact, and the snapshot unmoved, when the rename is interrupted', async () => {
+    const io = fakeSettingsIO({ [PATH]: 'port: 4100\n' });
+    io.failNextRename();
+    const admin = settingsAdminOn(seeded('port: 4100\n'), { ...io, env: {} });
+
+    await expect(admin.update({ locale: 'de' })).rejects.toThrow();
+
+    expect(io.files.get(PATH)).toBe('port: 4100\n');
+    expect(io.writes).toHaveLength(1);
+    expect(io.renames).toHaveLength(1);
+    expect(admin.current().values.port).toBe(4100);
+    expect(admin.current().values.locale).toBe('en');
+  });
+});
+
+describe('validating the whole file before writing any of it', () => {
+  it('applies neither field from a partial update that mixes a valid field with an invalid one', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    await expect(admin.update({ locale: 'de', port: 0 })).rejects.toThrow(SettingsError);
+
+    expect(io.writes).toHaveLength(0);
+    expect(io.renames).toHaveLength(0);
+    expect(admin.current().values.locale).toBe('en');
+    expect(admin.current().values.port).toBe(3000);
+  });
+});
+
+describe('the file layer a write did not touch', () => {
+  it('keeps an env-sourced field env-sourced, and a file-sourced field unchanged, after a third field is written', async () => {
+    const env = { HOLYDECK_PORT: '4200' };
+    const fileText = 'locale: de\n';
+    const seed = loadSettings({ fileText, env, path: PATH });
+    expect(seed.sources.port).toBe('env');
+    expect(seed.sources.locale).toBe('file');
+
+    const io = fakeSettingsIO({ [PATH]: fileText });
+    const admin = settingsAdminOn(seed, { ...io, env });
+
+    const updated = await admin.update({ mediaRoot: '/data/holydeck/other-media' });
+
+    expect(updated.sources.port).toBe('env');
+    expect(updated.values.port).toBe(4200);
+    expect(updated.sources.locale).toBe('file');
+    expect(updated.values.locale).toBe('de');
+    expect(updated.values.mediaRoot).toBe('/data/holydeck/other-media');
+    // The write started from the raw file, not the resolved snapshot: the env-sourced port never
+    // entered the file, so a later read of the file layer alone still would not find it there.
+    expect(parse(io.files.get(PATH) ?? '')).not.toHaveProperty('port');
+  });
+});
+
+describe('reading the file that is not there yet', () => {
+  it('treats a missing settings file as an empty one, the same as a fresh install', async () => {
+    const io = fakeSettingsIO();
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    const updated = await admin.update({ locale: 'de' });
+
+    expect(updated.values.locale).toBe('de');
+    expect(io.writes).toHaveLength(1);
+  });
+
+  it('does not swallow a read failure that is not the file simply being absent', async () => {
+    const io = fakeSettingsIO({ [PATH]: 'port: 4100\n' });
+    io.readFile = () => Promise.reject(new Error('the disk is unavailable'));
+    const admin = settingsAdminOn(seeded('port: 4100\n'), { ...io, env: {} });
+
+    await expect(admin.update({ locale: 'de' })).rejects.toThrow('the disk is unavailable');
+  });
+});
+
+describe('recovering from a file that is not valid YAML', () => {
+  it('treats unparsable existing content as empty rather than failing the whole update', async () => {
+    const io = fakeSettingsIO({ [PATH]: 'port: 3000\n\tlocale: en\n' });
+    const admin = settingsAdminOn(seeded('port: 3000\n'), { ...io, env: {} });
+
+    const updated = await admin.update({ locale: 'de' });
+
+    expect(updated.values.locale).toBe('de');
+    expect(updated.values.port).toBe(3000);
+  });
+});
+
+describe('hot reload from an external edit', () => {
+  it('watches the parent directory, not the file itself', () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    admin.watch();
+
+    expect(io.watchedDirs).toEqual([dirname(PATH)]);
+  });
+
+  it('adopts a valid external edit when the watcher sees the file change', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+    admin.watch();
+
+    io.files.set(PATH, 'locale: de\n');
+    await io.emit('change', basename(PATH));
+
+    expect(admin.current().values.locale).toBe('de');
+    expect(admin.lastReloadError()).toBeUndefined();
+  });
+
+  it('does nothing for a change event naming an unrelated file in the same directory', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+    admin.watch();
+
+    io.files.set(PATH, 'locale: de\n');
+    await io.emit('change', 'unrelated.yaml');
+
+    expect(admin.current().values.locale).toBe('en');
+  });
+
+  it('keeps the previous snapshot and records the rejection when the edit fails validation', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+    admin.watch();
+
+    io.files.set(PATH, 'port: 0\n');
+    await io.emit('change', basename(PATH));
+
+    expect(admin.current().values.port).toBe(3000);
+    expect(admin.lastReloadError()).toContain('port');
+  });
+
+  it('records a read failure as a reload error too, not only a rejected value', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    io.readFile = () => Promise.reject(new Error('the disk is unavailable'));
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+    admin.watch();
+
+    await io.emit('change', basename(PATH));
+
+    expect(admin.current().values.locale).toBe('en');
+    expect(admin.lastReloadError()).toContain('the disk is unavailable');
+  });
+
+  it('closes the watch it was given', () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    admin.watch().close();
+
+    expect(io.closed).toBe(true);
+  });
+});

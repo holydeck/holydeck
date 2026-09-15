@@ -37,6 +37,7 @@ describe('precedence', () => {
       corpusUrl: 'default',
       corpusToken: 'default',
       mongoUrl: 'default',
+      timezone: 'default',
     });
     expect(loaded.path).toBe(CANONICAL_SETTINGS_PATH);
   });
@@ -54,6 +55,7 @@ describe('precedence', () => {
       corpusUrl: 'default',
       corpusToken: 'default',
       mongoUrl: 'default',
+      timezone: 'default',
     });
   });
 
@@ -74,6 +76,7 @@ describe('precedence', () => {
       HOLYDECK_CORPUS_URL: 'http://corpus:8080',
       HOLYDECK_CORPUS_TOKEN: 'c'.repeat(24),
       HOLYDECK_MONGO_URL: 'mongodb://mongo:27017/holydeck',
+      HOLYDECK_TIMEZONE: 'Asia/Tokyo',
     });
     expect(loaded.values).toEqual({
       port: 8080,
@@ -83,8 +86,9 @@ describe('precedence', () => {
       corpusUrl: 'http://corpus:8080',
       corpusToken: 'c'.repeat(24),
       mongoUrl: 'mongodb://mongo:27017/holydeck',
+      timezone: 'Asia/Tokyo',
     });
-    expect(Object.values(loaded.sources)).toEqual(['env', 'env', 'env', 'env', 'env', 'env', 'env']);
+    expect(Object.values(loaded.sources)).toEqual(['env', 'env', 'env', 'env', 'env', 'env', 'env', 'env']);
   });
 });
 
@@ -148,6 +152,35 @@ describe('the settings path', () => {
     expect(settingsPath({ HOLYDECK_SETTINGS_PATH: '/etc/holydeck/settings.yaml' })).toBe(
       '/etc/holydeck/settings.yaml',
     );
+  });
+});
+
+describe('the installation’s time zone', () => {
+  it('defaults to Europe/Zurich', () => {
+    const loaded = load();
+    expect(loaded.values.timezone).toBe('Europe/Zurich');
+    expect(loaded.sources.timezone).toBe('default');
+  });
+
+  it('is overridden by the file', () => {
+    const loaded = load('timezone: America/New_York\n');
+    expect(loaded.values.timezone).toBe('America/New_York');
+    expect(loaded.sources.timezone).toBe('file');
+  });
+
+  it('is overridden by the environment, over the file', () => {
+    const loaded = load('timezone: America/New_York\n', { HOLYDECK_TIMEZONE: 'Asia/Tokyo' });
+    expect(loaded.values.timezone).toBe('Asia/Tokyo');
+    expect(loaded.sources.timezone).toBe('env');
+  });
+
+  it('rejects a string that is not a real IANA identifier', () => {
+    expect(problemsOf('timezone: Mordor/Barad-dur\n')).toEqual([
+      'timezone: expected an IANA time zone, got "Mordor/Barad-dur"',
+    ]);
+    expect(problemsOf(undefined, { HOLYDECK_TIMEZONE: 'not/a-zone' })).toEqual([
+      'HOLYDECK_TIMEZONE: expected an IANA time zone, got "not/a-zone"',
+    ]);
   });
 });
 
