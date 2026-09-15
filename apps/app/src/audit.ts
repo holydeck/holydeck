@@ -45,6 +45,9 @@ export const AUDIT_ACTIONS = [
   'account.disable',
   'account.restore',
   'account.role',
+  // A proven session refused for lacking a permission its route required. The one server-wide check that
+  // decides what a session may do, as opposed to who it is — `session.signIn`'s refusal covers the latter.
+  'authorization.refuse',
   // A browser-container gaining a second (or third) authenticated slot, and the container's own pointer
   // moving between the slots it already holds. Neither entry ever carries a permission or a token.
   'session.slot.add',
@@ -57,9 +60,67 @@ export const AUDIT_ACTIONS = [
   // The settings file, administered as the one thing it is: a change is recorded once, naming only
   // which fields it touched and never a value — viewing it is never audited, the same as any other GET.
   'settings.update',
+  // Reserved for the content surface T42+ builds. Exercised only by this task's own tests today — no
+  // production caller exists yet.
+  'content.change',
+  // Reserved for the presentation-run surface T76+ builds. Exercised only by this task's own tests today.
+  'presentation.run',
+  // Reserved for the backup surface T100+ builds. Exercised only by this task's own tests today.
+  'backup.run',
+  // Reserved for the restore surface T101+ builds. Exercised only by this task's own tests today.
+  'restore.run',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+/** The seven kinds of thing ADMN-03 asks the trail to answer for, spanning every action above. */
+export const AUDIT_CATEGORIES = [
+  'authentication',
+  'authorization',
+  'settings',
+  'content',
+  'presentation',
+  'backup',
+  'restore',
+] as const;
+
+export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];
+
+/**
+ * Every action's category, so an entry can be filtered by the kind of thing it answers for without
+ * parsing its name. `authentication` proves who the actor is; `authorization` grants, revokes or checks
+ * what that actor may do — a distinction this map is what makes assertable rather than merely intended.
+ */
+export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
+  'instance.claim': 'authentication',
+  'session.signIn': 'authentication',
+  'session.lock': 'authentication',
+  'totp.enroll': 'authentication',
+  'totp.verify': 'authentication',
+  'totp.use': 'authentication',
+  'totp.regenerate': 'authentication',
+  'totp.revoke': 'authentication',
+  'passkey.register': 'authentication',
+  'passkey.name': 'authentication',
+  'passkey.use': 'authentication',
+  'passkey.revoke': 'authentication',
+  'session.slot.add': 'authentication',
+  'session.slot.switch': 'authentication',
+  'account.control': 'authorization',
+  'account.create': 'authorization',
+  'account.disable': 'authorization',
+  'account.restore': 'authorization',
+  'account.role': 'authorization',
+  'capability.guest.issue': 'authorization',
+  'capability.output.issue': 'authorization',
+  'capability.revoke': 'authorization',
+  'authorization.refuse': 'authorization',
+  'settings.update': 'settings',
+  'content.change': 'content',
+  'presentation.run': 'presentation',
+  'backup.run': 'backup',
+  'restore.run': 'restore',
+};
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */
 export type AuditOutcome = 'allowed' | 'refused';

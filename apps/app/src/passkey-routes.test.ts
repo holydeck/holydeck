@@ -147,7 +147,7 @@ beforeEach(async () => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
-  enforceAuthorization(app, { sessions });
+  enforceAuthorization(app, { sessions, identity: undefined });
   servePasskeyRoutes(app, { identity });
   await app.ready();
   session = await sessions.start(sessionContext(CORRELATION), { actor: actorFor(ID), permissions: [] });
@@ -441,7 +441,7 @@ describe('the surface itself', () => {
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
-    enforceAuthorization(app, { sessions });
+    enforceAuthorization(app, { sessions, identity: undefined });
     servePasskeyRoutes(app, { identity });
     await app.ready();
     await expect(registering()).resolves.toMatchObject({ statusCode: 201 });

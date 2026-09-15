@@ -73,7 +73,7 @@ const serving = async (options: SessionRoutesOptions): Promise<FastifyInstance> 
   const built = Fastify({ logger: false });
   withSafeErrors(built);
   guardMutations(built, { sessions: options.sessions });
-  enforceAuthorization(built, { sessions: options.sessions });
+  enforceAuthorization(built, { sessions: options.sessions, identity: undefined });
   serveSessionRoutes(built, options);
   await built.ready();
   return built;
@@ -791,7 +791,7 @@ describe('security fixture: account-switching.v1', () => {
     const built = Fastify({ logger: false });
     withSafeErrors(built);
     guardMutations(built, { sessions: store });
-    enforceAuthorization(built, { sessions: store });
+    enforceAuthorization(built, { sessions: store, identity: undefined });
     serveSessionRoutes(built, { sessions: store, identity });
     built.get(probePath, { config: { need: { kind: 'permission', need: PRESENTATION_CONTROL } } }, async () => ({
       issued: true,
@@ -808,7 +808,7 @@ describe('security fixture: account-switching.v1', () => {
     const built = Fastify({ logger: false });
     withSafeErrors(built);
     guardMutations(built, { sessions: store });
-    enforceAuthorization(built, { sessions: store });
+    enforceAuthorization(built, { sessions: store, identity: undefined });
     serveSessionRoutes(built, { sessions: store, identity });
     built.get(probePath, { config: { need: { kind: 'permission', need: 'drafts.read' } } }, async () => ({
       drafts: [],

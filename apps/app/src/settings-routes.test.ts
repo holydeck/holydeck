@@ -92,7 +92,7 @@ beforeEach(async () => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
-  enforceAuthorization(app, { sessions });
+  enforceAuthorization(app, { sessions, identity: undefined });
   serveSettingsRoutes(app, { settingsAdmin, identity });
   await app.ready();
   admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [SETTINGS_MANAGE] });
@@ -159,7 +159,7 @@ describe('changing a setting', () => {
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
-    enforceAuthorization(app, { sessions });
+    enforceAuthorization(app, { sessions, identity: undefined });
     serveSettingsRoutes(app, { settingsAdmin, identity });
     await app.ready();
 
@@ -213,7 +213,7 @@ describe('the trail this route writes', () => {
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
-    enforceAuthorization(app, { sessions });
+    enforceAuthorization(app, { sessions, identity: undefined });
     serveSettingsRoutes(app, { settingsAdmin, identity });
     await app.ready();
     const response = await patching({ locale: 'de' });
@@ -227,7 +227,7 @@ describe('what this surface refuses to answer at all', () => {
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
-    enforceAuthorization(app, { sessions });
+    enforceAuthorization(app, { sessions, identity: undefined });
     serveSettingsRoutes(app, { settingsAdmin: undefined, identity: undefined });
     await app.ready();
     expect((await reading()).statusCode).toBe(404);
@@ -239,7 +239,7 @@ describe('what this surface refuses to answer at all', () => {
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
-    enforceAuthorization(app, { sessions });
+    enforceAuthorization(app, { sessions, identity: undefined });
     serveSettingsRoutes(app, { settingsAdmin, identity: undefined });
     await app.ready();
     expect((await reading()).statusCode).toBe(404);

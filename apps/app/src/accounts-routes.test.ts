@@ -116,7 +116,7 @@ beforeEach(async () => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
-  enforceAuthorization(app, { sessions });
+  enforceAuthorization(app, { sessions, identity: undefined });
   serveAccountRoutes(app, { identity });
   await app.ready();
   admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [ACCOUNTS_MANAGE] });
@@ -188,7 +188,7 @@ describe('creating an account beyond the one the founder claims', () => {
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
-    enforceAuthorization(app, { sessions });
+    enforceAuthorization(app, { sessions, identity: undefined });
     serveAccountRoutes(app, { identity });
     await app.ready();
     const response = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
@@ -326,7 +326,7 @@ describe('what this surface refuses to answer at all', () => {
     const built = Fastify({ logger: false });
     withSafeErrors(built);
     guardMutations(built, { sessions });
-    enforceAuthorization(built, { sessions });
+    enforceAuthorization(built, { sessions, identity: undefined });
     serveAccountRoutes(built, { identity: bag });
     await built.ready();
     return built;

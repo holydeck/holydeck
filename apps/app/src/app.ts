@@ -91,7 +91,7 @@ export function buildApp({
 
   // Installed right after: a mutating route's session is already proved by the guard above by the time
   // this asks for it, and every route registered from here down is one this check was on for.
-  enforceAuthorization(app, { sessions });
+  enforceAuthorization(app, { sessions, identity });
 
   app.setNotFoundHandler((request, reply) => reply.code(404).send(notFound(request)));
 

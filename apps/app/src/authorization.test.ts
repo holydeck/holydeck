@@ -3,13 +3,26 @@ import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
+import { accountsOn } from './accounts.js';
+import { attemptsOn } from './attempts.js';
+import { auditOn } from './audit.js';
 import { enforceAuthorization, needsOf } from './authorization.js';
 import { guardMutations, provenSession } from './csrf.js';
 import { withSafeErrors } from './failures.js';
+import { passkeysOn } from './passkeys.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { totpsOn } from './totp.js';
+import { memoryAccounts } from '../test/helpers/accounts.js';
+import { memoryAttempts } from '../test/helpers/attempts.js';
+import { fakeDb } from '../test/helpers/fake-db.js';
+import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
+import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { RouteNeed } from './authorization.js';
+import type { Identity } from './onboarding.js';
+import type { Document } from './repositories.js';
+import type { FakeDb } from '../test/helpers/fake-db.js';
 import type { FastifyInstance } from 'fastify';
 import type { SessionStore, StartedSession } from './sessions.js';
 
@@ -26,11 +39,27 @@ const PUBLIC: RouteNeed = { kind: 'public' };
 const SESSION: RouteNeed = { kind: 'session' };
 const permission = (need: string): RouteNeed => ({ kind: 'permission', need });
 
-const serving = async (sessions: SessionStore | undefined): Promise<FastifyInstance> => {
+/** Built fresh per test that needs one: only `audit` is asked of it here, the rest stays unused. */
+const identityWith = (trail: FakeDb): Identity => ({
+  accounts: accountsOn(memoryAccounts().db, {
+    now: () => NOW,
+    newId: () => 'A'.repeat(22),
+    hash: async (password) => `test-hash:${password}`,
+    verify: async (password, stored) => stored === `test-hash:${password}`,
+  }),
+  audit: auditOn(trail, { now: () => NOW, newId: (() => { let n = 0; return () => `e${n++}`; })() }),
+  attempts: attemptsOn(memoryAttempts().db, { now: () => NOW }),
+  totp: totpsOn(memoryTotp().db, { now: () => NOW }),
+  passkeys: passkeysOn(memoryPasskeys().db, { now: () => NOW }),
+});
+
+const entries = (trail: FakeDb): Document[] => trail.rows.get('audit_events') ?? [];
+
+const serving = async (sessions: SessionStore | undefined, identity?: Identity): Promise<FastifyInstance> => {
   const built = Fastify({ logger: false });
   withSafeErrors(built);
   guardMutations(built, { sessions });
-  enforceAuthorization(built, { sessions });
+  enforceAuthorization(built, { sessions, identity });
 
   built.get('/api/v1/open', { config: { need: PUBLIC } }, () => ({ open: true }));
   built.get('/api/v1/mine', { config: { need: SESSION } }, (request) => ({
@@ -146,6 +175,73 @@ describe('a route declared permission', () => {
   });
 });
 
+describe('a permission refusal, with an identity to audit against', () => {
+  let trail: FakeDb;
+
+  beforeEach(async () => {
+    trail = fakeDb();
+    app = await serving(store, identityWith(trail));
+  });
+
+  test('records exactly one authorization.refuse entry naming the actor and the missing permission', async () => {
+    const session = await signedIn([]);
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/admin-only',
+      headers: withSession(session),
+    });
+    expect(response.statusCode).toBe(403);
+    expect(entries(trail)).toEqual([
+      expect.objectContaining({
+        actor: 'account:7f3a',
+        action: 'authorization.refuse',
+        subject: 'PATCH /api/v1/admin-only',
+        outcome: 'refused',
+      }),
+    ]);
+    expect(entries(trail)[0]?.['detail']).toContain('accounts.manage');
+  });
+
+  test('records nothing when the session carries the needed permission', async () => {
+    const session = await signedIn(['accounts.manage']);
+    await app.inject({ method: 'PATCH', url: '/api/v1/admin-only', headers: withSession(session) });
+    expect(entries(trail)).toEqual([]);
+  });
+
+  test('records nothing for a session-kind refusal — no session to name, and session.signIn already covers it', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/v1/mine', headers: version });
+    expect(response.statusCode).toBe(401);
+    expect(entries(trail)).toEqual([]);
+  });
+
+  test('still refuses with 403 even when the trail itself refuses the entry', async () => {
+    app = await serving(store, {
+      ...identityWith(trail),
+      audit: { record: () => Promise.reject(new Error('the trail is unavailable')) },
+    });
+    const session = await signedIn([]);
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/admin-only',
+      headers: withSession(session),
+    });
+    expect(response.statusCode).toBe(403);
+  });
+});
+
+describe('a permission refusal, with no identity to audit against', () => {
+  test('still refuses with 403, even though nothing here can be audited', async () => {
+    app = await serving(store, undefined);
+    const session = await signedIn([]);
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/admin-only',
+      headers: withSession(session),
+    });
+    expect(response.statusCode).toBe(403);
+  });
+});
+
 describe('what this check declares', () => {
   test('names the need of every route it was put on, keyed the way it looks one up', () => {
     // Fastify exposes a HEAD alongside every GET unless told not to, and it carries the same declared
@@ -168,7 +264,7 @@ describe('what this check declares', () => {
 
   test('throws the moment a route is registered with no declared need, before the application ever serves', async () => {
     const broken = Fastify({ logger: false });
-    enforceAuthorization(broken, { sessions: store });
+    enforceAuthorization(broken, { sessions: store, identity: undefined });
     expect(() => broken.get('/api/v1/undeclared', () => ({ ok: true }))).toThrow(
       /declares no authorization need/u,
     );
@@ -182,7 +278,7 @@ describe('a request no route matched', () => {
     const open = Fastify({ logger: false });
     withSafeErrors(open);
     guardMutations(open, { sessions: store });
-    enforceAuthorization(open, { sessions: store });
+    enforceAuthorization(open, { sessions: store, identity: undefined });
     open.setNotFoundHandler((request, reply) => reply.code(404).send({ notFound: true }));
     await open.ready();
     const response = await open.inject({ method: 'GET', url: '/api/v1/nope', headers: version });

@@ -11,10 +11,13 @@
 
 import { mutates } from '@holydeck/contracts/sessions';
 
+import { auditContext } from './audit.js';
+import { correlationFor } from './context.js';
 import { provenSession, refuseAsForbidden, rememberProvenSession, sessionFor } from './csrf.js';
 import { unexpectedFailure } from './failures.js';
 
 import type { FastifyInstance, HTTPMethods } from 'fastify';
+import type { Identity } from './onboarding.js';
 import type { SessionStore } from './sessions.js';
 
 /**
@@ -43,18 +46,22 @@ declare module 'fastify' {
 export interface AuthorizationOptions {
   /** Absent in a deployment that keeps no sessions. A `session` or `permission` route then proves none. */
   readonly sessions: SessionStore | undefined;
+  /** Absent in a deployment that keeps no identity — a permission refusal then has nothing to audit against. */
+  readonly identity: Identity | undefined;
 }
 
 const NEEDS = new WeakMap<FastifyInstance, Map<string, RouteNeed>>();
 
 const keyFor = (method: string, url: string): string => `${method} ${url}`;
 
+const AUTHZ_PREFIX = 'authz:';
+
 /** The need declared for every route this check is installed on. A route it was never put on has none. */
 export function needsOf(app: FastifyInstance): ReadonlyMap<string, RouteNeed> {
   return NEEDS.get(app) ?? new Map();
 }
 
-export function enforceAuthorization(app: FastifyInstance, { sessions }: AuthorizationOptions): void {
+export function enforceAuthorization(app: FastifyInstance, { sessions, identity }: AuthorizationOptions): void {
   const declared = new Map<string, RouteNeed>();
   NEEDS.set(app, declared);
 
@@ -92,7 +99,20 @@ export function enforceAuthorization(app: FastifyInstance, { sessions }: Authori
     if (!mutates(request.method)) rememberProvenSession(request, proven);
 
     if (need.kind === 'permission' && !proven.record.permissions.includes(need.need)) {
-      await refuseAsForbidden(request, reply, 'permission', `this session may not ${need.need}`);
+      const detail = `this session may not ${need.need}`;
+      if (identity !== undefined) {
+        try {
+          await identity.audit.record(auditContext(proven.record.actor, correlationFor(AUTHZ_PREFIX, request.id)), {
+            action: 'authorization.refuse',
+            subject: `${request.method} ${String(request.routeOptions.url)}`,
+            outcome: 'refused',
+            detail,
+          });
+        } catch (error: unknown) {
+          request.log.error({ err: error }, 'the authorization trail refused an entry');
+        }
+      }
+      await refuseAsForbidden(request, reply, 'permission', detail);
     }
   });
 }

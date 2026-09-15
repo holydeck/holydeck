@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { requestContext } from './context.js';
-import { RECORDS } from './records.js';
+import { RECORDS, RECORD_NAMES } from './records.js';
 import { RepositoryError, createIndexOn, dropIndexOn, repositoriesOn } from './repositories.js';
 
 import type { RepositoryCollection, RepositoryDb } from './repositories.js';
@@ -252,6 +252,20 @@ describe('the set of repositories', () => {
   it('offers no way to rewrite or delete a durable record', () => {
     const { db } = fakeDb();
     expect(Object.keys(repositoriesOn(db).runEvents).sort()).toEqual(['append', 'count', 'read', 'record']);
+  });
+
+  // Invariant 13: retention cleanup of one record class can never reach another's protected records —
+  // proved here structurally, because no class offers a way to change or remove a record at all, of its
+  // own or anyone else's. The database grants below auditEvents' own privileges hold up the other half.
+  it('proves Invariant 13 structurally: no class, including auditEvents, exposes a way to change or remove a record', () => {
+    const { db } = fakeDb();
+    const built = repositoriesOn(db);
+    for (const name of RECORD_NAMES) {
+      const keys = Object.keys(built[name]);
+      for (const forbidden of ['update', 'delete', 'remove', 'purge']) {
+        expect(keys, `${name} exposes ${forbidden}`).not.toContain(forbidden);
+      }
+    }
   });
 
   it('reports a class nobody ships when the name arrived as data', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AUDIT_ACTIONS, auditContext, auditOn } from './audit.js';
+import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn } from './audit.js';
 import { ContextError, requestContext } from './context.js';
 import { RepositoryError } from './repositories.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -124,12 +124,55 @@ describe('the context the trail is written under', () => {
       'account.disable',
       'account.restore',
       'account.role',
+      'authorization.refuse',
       'session.slot.add',
       'session.slot.switch',
       'capability.guest.issue',
       'capability.output.issue',
       'capability.revoke',
       'settings.update',
+      'content.change',
+      'presentation.run',
+      'backup.run',
+      'restore.run',
     ]);
+  });
+});
+
+describe('the category taxonomy', () => {
+  it('declares exactly the seven categories the plan names', () => {
+    expect(AUDIT_CATEGORIES).toEqual([
+      'authentication',
+      'authorization',
+      'settings',
+      'content',
+      'presentation',
+      'backup',
+      'restore',
+    ]);
+  });
+
+  it('categorizes every declared action, and no action outside the declared list', () => {
+    expect(Object.keys(CATEGORY_OF).sort()).toEqual([...AUDIT_ACTIONS].sort());
+  });
+
+  it('gives every category at least one member action — a category producing none fails this test', () => {
+    for (const category of AUDIT_CATEGORIES) {
+      const members = AUDIT_ACTIONS.filter((action) => CATEGORY_OF[action] === category);
+      expect(members.length, `category ${category} has no member action`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('the actions reserved for a surface not yet built', () => {
+  it('accepts each one, so the surface that calls it for the first time finds the trail already open', async () => {
+    const db = fakeDb();
+    const trail = trailOn(db, ['r1', 'r2', 'r3', 'r4']);
+    const context = auditContext('system', CORRELATION);
+    const reserved = ['content.change', 'presentation.run', 'backup.run', 'restore.run'] as const;
+    for (const action of reserved) {
+      await expect(trail.record(context, { action, subject: 'reserved', outcome: 'allowed' })).resolves.toBeTruthy();
+    }
+    expect(entries(db).map((entry) => entry['action'])).toEqual(reserved);
   });
 });

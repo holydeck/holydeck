@@ -102,7 +102,7 @@ beforeEach(async () => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
-  enforceAuthorization(app, { sessions });
+  enforceAuthorization(app, { sessions, identity: undefined });
   serveCapabilityRoutes(app, { capabilities, identity });
   await app.ready();
   operator = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [PRESENTATION_CONTROL] });
@@ -276,7 +276,7 @@ describe('what this surface refuses to answer at all', () => {
     const built = Fastify({ logger: false });
     withSafeErrors(built);
     guardMutations(built, { sessions });
-    enforceAuthorization(built, { sessions });
+    enforceAuthorization(built, { sessions, identity: undefined });
     serveCapabilityRoutes(built, { capabilities: bag, identity: held });
     await built.ready();
     return built;
