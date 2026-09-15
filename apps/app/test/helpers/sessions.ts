@@ -14,12 +14,22 @@ export const memorySessions = (): { rows: Map<string, Document>; db: SessionDb; 
   const rows = new Map<string, Document>();
   const names: string[] = [];
 
+  /** A dotted path, read off an array field: `slots.actor` reads `actor` from every entry of `slots`. */
+  const arrayField = (row: Document, path: string): { readonly array: readonly Document[]; readonly key: string } | undefined => {
+    const at = path.indexOf('.');
+    if (at === -1) return undefined;
+    const array = row[path.slice(0, at)];
+    return Array.isArray(array) ? { array: array as readonly Document[], key: path.slice(at + 1) } : undefined;
+  };
+
   const matches = (row: Document, filter: Filter): boolean =>
     Object.entries(filter).every(([field, wanted]) => {
-      if (field === 'tickets.hash') {
-        const tickets = (row['tickets'] ?? []) as readonly { hash: string }[];
-        return tickets.some((ticket) => ticket.hash === wanted);
+      if (wanted !== null && typeof wanted === 'object' && '$size' in (wanted as Document)) {
+        const value = row[field];
+        return Array.isArray(value) && value.length === (wanted as Document)['$size'];
       }
+      const nested = arrayField(row, field);
+      if (nested !== undefined) return nested.array.some((entry) => entry[nested.key] === wanted);
       return row[field] === wanted;
     });
 
@@ -30,15 +40,22 @@ export const memorySessions = (): { rows: Map<string, Document>; db: SessionDb; 
     const next = { ...row };
     const set = update['$set'] as Document | undefined;
     if (set !== undefined) Object.assign(next, set);
-    const pull = update['$pull'] as { tickets: { hash: string } } | undefined;
+    const pull = update['$pull'] as Document | undefined;
     if (pull !== undefined) {
-      const tickets = (next['tickets'] ?? []) as readonly { hash: string }[];
-      next['tickets'] = tickets.filter((ticket) => ticket.hash !== pull.tickets.hash);
+      for (const [field, condition] of Object.entries(pull)) {
+        const current = (next[field] ?? []) as readonly Document[];
+        next[field] = current.filter(
+          (entry) => !Object.entries(condition as Document).every(([key, wanted]) => entry[key] === wanted),
+        );
+      }
     }
-    const push = update['$push'] as { tickets: { $each: unknown[]; $slice: number } } | undefined;
+    const push = update['$push'] as Document | undefined;
     if (push !== undefined) {
-      const tickets = [...((next['tickets'] ?? []) as unknown[]), ...push.tickets.$each];
-      next['tickets'] = tickets.slice(push.tickets.$slice);
+      for (const [field, spec] of Object.entries(push)) {
+        const shaped = spec as { $each: unknown[]; $slice?: number };
+        const current = [...((next[field] ?? []) as unknown[]), ...shaped.$each];
+        next[field] = shaped.$slice === undefined ? current : current.slice(shaped.$slice);
+      }
     }
     rows.set(String(next['_id']), next);
     return next;
@@ -64,6 +81,11 @@ export const memorySessions = (): { rows: Map<string, Document>; db: SessionDb; 
       if (row === undefined) return { matchedCount: 0 };
       apply(row, update);
       return { matchedCount: 1 };
+    },
+    updateMany: async (filter, update) => {
+      const matched = [...rows.values()].filter((row) => matches(row, filter));
+      for (const row of matched) apply(row, update);
+      return { modifiedCount: matched.length };
     },
     deleteOne: async (filter) => {
       const row = found(filter);
@@ -91,4 +113,3 @@ export const memorySessions = (): { rows: Map<string, Document>; db: SessionDb; 
     },
   };
 };
-

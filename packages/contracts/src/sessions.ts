@@ -79,6 +79,15 @@ export interface SessionRecord {
   readonly csrf: string;
 }
 
+/**
+ * What a browser-container's other authenticated slots are told about: which one, and who. Never a
+ * permission, a CSRF token, or anything else that could stand in for that slot's own session.
+ */
+export interface SlotSummary {
+  readonly slotId: string;
+  readonly actor: string;
+}
+
 const TOKEN = /^[A-Za-z0-9_-]{43,}$/u;
 
 const MINUTE = 60_000;

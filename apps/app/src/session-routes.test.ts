@@ -24,9 +24,9 @@ import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { codeAt, stepAt } from './otp.js';
 import { passkeyContext, passkeysOn } from './passkeys.js';
-import { ACCOUNTS_MANAGE } from './roles.js';
+import { ACCOUNTS_MANAGE, PRESENTATION_CONTROL } from './roles.js';
 import { SIGN_IN_REFUSED, serveSessionRoutes } from './session-routes.js';
-import { sessionContext, sessionsOn } from './sessions.js';
+import { SessionError, sessionContext, sessionsOn, tokenDigest } from './sessions.js';
 import { totpContext, totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
@@ -82,7 +82,12 @@ const serving = async (options: SessionRoutesOptions): Promise<FastifyInstance> 
 const signedIn = async (): Promise<StartedSession> =>
   store.start(sessionContext('req-0f9c2a41'), { actor: 'account:7f3a', permissions: ['services.read'] });
 
-const asking = (method: 'GET' | 'DELETE' | 'POST', url: string, session: StartedSession | undefined) =>
+const asking = (
+  method: 'GET' | 'DELETE' | 'PATCH' | 'POST',
+  url: string,
+  session: StartedSession | undefined,
+  payload?: unknown,
+) =>
   app.inject({
     method,
     url,
@@ -95,7 +100,29 @@ const asking = (method: 'GET' | 'DELETE' | 'POST', url: string, session: Started
         ? {}
         : { cookie: sessionCookie(session.token, 60), [CSRF_HEADER]: session.record.csrf }),
     },
+    ...(payload === undefined ? {} : { payload: payload as InjectOptions['payload'] }),
   });
+
+/** The identifier a slot for the given actor was assigned inside the container the token names. */
+const slotIdOf = (token: string, actor: string): string => {
+  const stored = sessionRows.get(tokenDigest(token)) as Document;
+  const slot = (stored['slots'] as Document[]).find((candidate) => candidate['actor'] === actor) as Document;
+  return slot['slotId'] as string;
+};
+
+/** Two slots in one container: a Control-permissioned one, and a Member-permissioned one joined onto it. */
+const joined = async (): Promise<{ readonly control: StartedSession; readonly member: StartedSession }> => {
+  const control = await store.start(sessionContext('req-0f9c2a41'), {
+    actor: 'account:c0e7',
+    permissions: [PRESENTATION_CONTROL],
+  });
+  const member = await store.start(
+    sessionContext('req-0f9c2a41'),
+    { actor: 'account:9b12', permissions: ['services.read'] },
+    control.token,
+  );
+  return { control, member };
+};
 
 const signingIn = (
   payload: unknown = { name: CLAIM.name, password: CLAIM.password },
@@ -207,7 +234,9 @@ describe('what an operator can ask about their own session', () => {
     const session = await signedIn();
     const response = await asking('GET', SESSION_PATH, session);
     expect(response.statusCode).toBe(200);
-    expect(response.json().data).toEqual(session.record);
+    expect(response.json().data).toMatchObject(session.record);
+    // The container this session belongs to holds one slot so far: itself.
+    expect(response.json().data.slots).toEqual([{ slotId: expect.any(String), actor: session.record.actor }]);
     // The identifier is a cookie the browser sends and script cannot read. It is not in this
     // answer, and there is no route that puts it in a URL either.
     expect(response.body).not.toContain(session.token);
@@ -224,6 +253,7 @@ describe('what an operator can ask about their own session', () => {
     // session, and the guard's declared exception is what lets it past rather than a hole in the guard.
     expect(mutatingRoutesOf(app)).toEqual([
       { method: 'DELETE', url: SESSION_PATH },
+      { method: 'PATCH', url: SESSION_PATH },
       { method: 'POST', url: TICKET_PATH },
     ]);
   });
@@ -273,6 +303,25 @@ describe('signing in', () => {
       subject: CLAIM.name,
       outcome: 'allowed',
     });
+  });
+});
+
+describe('signing in while a session is already open in this browser', () => {
+  test('joins a second slot onto the same container rather than opening a new one', async () => {
+    const first = await signingIn();
+    const cookie = String(first.headers['set-cookie']);
+    const response = await app.inject({
+      method: 'POST',
+      url: SESSION_PATH,
+      headers: { host: HOST, 'x-forwarded-proto': 'https', origin: ORIGIN, cookie },
+      payload: { name: CLAIM.name, password: CLAIM.password },
+    });
+    expect(response.statusCode).toBe(201);
+    // A live join keeps the container's own identifier rather than minting a fresh one.
+    expect(tokenIn(response.headers['set-cookie'])).toBe(tokenIn(cookie));
+    expect(entries()).toContainEqual(
+      expect.objectContaining({ action: 'session.slot.add', subject: actorFor(ID), outcome: 'allowed' }),
+    );
   });
 });
 
@@ -663,11 +712,193 @@ describe('the ticket a socket handshake carries', () => {
   });
 });
 
+describe('switching between the slots a container holds', () => {
+  test('moves the pointer, sets no cookie either way, and the next request answers as the new slot', async () => {
+    const { control, member } = await joined();
+    const controlId = slotIdOf(control.token, control.record.actor);
+    const response = await asking('PATCH', SESSION_PATH, member, { active: controlId });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(response.json().data).toMatchObject({ actor: control.record.actor });
+    const after = await asking('GET', SESSION_PATH, member);
+    expect(after.json().data).toMatchObject({ actor: control.record.actor });
+  });
+
+  test('an identifier naming no slot in this container is refused, and the active slot stays what it was', async () => {
+    const { member } = await joined();
+    const response = await asking('PATCH', SESSION_PATH, member, { active: 'not-a-real-slot' });
+    expect(response.statusCode).toBe(403);
+    const after = await asking('GET', SESSION_PATH, member);
+    expect(after.json().data).toMatchObject({ actor: member.record.actor });
+  });
+
+  test('is behind the guard, so a page on another site cannot switch an operator’s slot', async () => {
+    const { control, member } = await joined();
+    const controlId = slotIdOf(control.token, control.record.actor);
+    const response = await app.inject({
+      method: 'PATCH',
+      url: SESSION_PATH,
+      headers: { host: HOST, origin: 'https://elsewhere.example.invalid', cookie: sessionCookie(member.token, 60) },
+      payload: { active: controlId },
+    });
+    expect(response.statusCode).toBe(403);
+  });
+
+  test('is refused to a request that carries no session', async () => {
+    expect((await asking('PATCH', SESSION_PATH, undefined, { active: 'anything' })).statusCode).toBe(401);
+  });
+
+  test('a body with no active identifier at all is refused the same way an unknown one is', async () => {
+    const { member } = await joined();
+    expect((await asking('PATCH', SESSION_PATH, member, {})).statusCode).toBe(403);
+  });
+
+  test('no body at all is refused the same way, rather than read as any particular slot', async () => {
+    const { member } = await joined();
+    expect((await asking('PATCH', SESSION_PATH, member)).statusCode).toBe(403);
+  });
+
+  test('a refusal for a reason other than an unknown slot is answered the way any other refusal is', async () => {
+    const session = await signedIn();
+    const broken: SessionStore = { ...store, activate: () => Promise.reject(new SessionError('expired', 'gone')) };
+    app = await serving({ sessions: broken, identity });
+    const response = await asking('PATCH', SESSION_PATH, session, { active: 'anything' });
+    expect(response.statusCode).toBe(401);
+  });
+
+  test('the trail records which slot a switch asked for, allowed or refused', async () => {
+    const { control, member } = await joined();
+    const controlId = slotIdOf(control.token, control.record.actor);
+    await asking('PATCH', SESSION_PATH, member, { active: controlId });
+    // The active slot is `control` now, so the second, invalid switch is proven with `control`'s own
+    // token — `member`'s CSRF token would be refused by the guard before the route is ever reached.
+    await asking('PATCH', SESSION_PATH, control, { active: 'not-a-real-slot' });
+    expect(entries()).toMatchObject([
+      { action: 'session.slot.switch', subject: control.record.actor, outcome: 'allowed' },
+      { action: 'session.slot.switch', subject: 'not-a-real-slot', outcome: 'refused' },
+    ]);
+  });
+});
+
+describe('security fixture: account-switching.v1', () => {
+  // Two of these six scenarios name a surface this release does not yet have: a drafts editor and a
+  // presentation output window are both later work. Each is proved here at the mechanism level instead —
+  // against a purpose-built route gated the same way a real one would be — because the thing under test
+  // is the authorization boundary between slots, not the surface a later release will hang off it.
+
+  test('issue a Control presentation command while the Member slot is active', async () => {
+    const probePath = '/api/v1/test/control-only';
+    const built = Fastify({ logger: false });
+    withSafeErrors(built);
+    guardMutations(built, { sessions: store });
+    enforceAuthorization(built, { sessions: store });
+    serveSessionRoutes(built, { sessions: store, identity });
+    built.get(probePath, { config: { need: { kind: 'permission', need: PRESENTATION_CONTROL } } }, async () => ({
+      issued: true,
+    }));
+    await built.ready();
+    app = built;
+    const { member } = await joined();
+    const response = await asking('GET', probePath, member);
+    expect(response.statusCode).toBe(403);
+  });
+
+  test('read the Editor drafts from the Member slot', async () => {
+    const probePath = '/api/v1/test/drafts-only';
+    const built = Fastify({ logger: false });
+    withSafeErrors(built);
+    guardMutations(built, { sessions: store });
+    enforceAuthorization(built, { sessions: store });
+    serveSessionRoutes(built, { sessions: store, identity });
+    built.get(probePath, { config: { need: { kind: 'permission', need: 'drafts.read' } } }, async () => ({
+      drafts: [],
+    }));
+    await built.ready();
+    app = built;
+    const control = await store.start(sessionContext('req-0f9c2a41'), { actor: 'account:1e2f', permissions: ['drafts.read'] });
+    const member = await store.start(
+      sessionContext('req-0f9c2a41'),
+      { actor: 'account:9b12', permissions: ['services.read'] },
+      control.token,
+    );
+    const response = await asking('GET', probePath, member);
+    expect(response.statusCode).toBe(403);
+  });
+
+  test('replay the Editor CSRF token from the Member slot', async () => {
+    const { control, member } = await joined();
+    const response = await app.inject({
+      method: 'DELETE',
+      url: SESSION_PATH,
+      headers: {
+        [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
+        host: HOST,
+        'x-forwarded-proto': 'https',
+        origin: ORIGIN,
+        cookie: sessionCookie(member.token, 60),
+        [CSRF_HEADER]: control.record.csrf,
+      },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe(FORBIDDEN);
+  });
+
+  test('switch back mid-run and resume the run', async () => {
+    const { control, member } = await joined();
+    const controlId = slotIdOf(control.token, control.record.actor);
+    const memberId = slotIdOf(control.token, member.record.actor);
+    // Control is running something — it holds the ticket for the run — before anyone switches away.
+    await store.activate(sessionContext('req-0f9c2a41'), control.token, controlId);
+    const ticket = await store.issueTicket(sessionContext('req-0f9c2a41'), control.token);
+    await asking('PATCH', SESSION_PATH, control, { active: memberId });
+    const response = await asking('PATCH', SESSION_PATH, member, { active: controlId });
+    expect(response.statusCode).toBe(200);
+    // Resolving the ticket after switching away and back proves the run it stands for was never disturbed.
+    const resumed = await store.redeemTicket(sessionContext('req-0f9c2a41'), control.token, ticket);
+    expect(resumed.actor).toBe(control.record.actor);
+  });
+
+  test('present the Editor session cookie with the Member slot selected', async () => {
+    const { control, member } = await joined();
+    const controlId = slotIdOf(control.token, control.record.actor);
+    await store.activate(sessionContext('req-0f9c2a41'), control.token, controlId);
+    // A claim of "the Member slot is selected" sent in the one place a client could try to put it — there
+    // is no such field this route reads, since the cookie names a container and never a slot.
+    const response = await app.inject({
+      method: 'GET',
+      url: SESSION_PATH,
+      headers: {
+        [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
+        host: HOST,
+        'x-forwarded-proto': 'https',
+        origin: ORIGIN,
+        cookie: sessionCookie(control.token, 60),
+        'x-claimed-active-slot': slotIdOf(control.token, member.record.actor),
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ actor: control.record.actor });
+  });
+
+  test('open an output window from the Member slot claiming Control', async () => {
+    const { member } = await joined();
+    const response = await asking('POST', TICKET_PATH, member);
+    expect(response.statusCode).toBe(200);
+    const { ticket } = response.json().data as { readonly ticket: string };
+    // Redemption has no HTTP surface of its own — it happens inside the WebSocket handshake a later
+    // release wires up — so it is proved directly against the store, the same call that handshake makes.
+    const resolved = await store.redeemTicket(sessionContext('req-0f9c2a41'), member.token, ticket);
+    expect(resolved.actor).toBe(member.record.actor);
+    expect(resolved.permissions).not.toContain(PRESENTATION_CONTROL);
+  });
+});
+
 describe('a deployment that cannot sign anyone in', () => {
   test('one that keeps no sessions serves the surface and answers every part of it the same way', async () => {
     app = await serving({ sessions: undefined, identity });
     expect((await asking('GET', SESSION_PATH, undefined)).statusCode).toBe(401);
     expect((await asking('DELETE', SESSION_PATH, undefined)).statusCode).toBe(401);
+    expect((await asking('PATCH', SESSION_PATH, undefined, { active: 'anything' })).statusCode).toBe(401);
     expect((await asking('POST', TICKET_PATH, undefined)).statusCode).toBe(401);
     const refused = await signingIn();
     expect(refused.statusCode).toBe(401);
@@ -679,6 +910,14 @@ describe('a deployment that cannot sign anyone in', () => {
     const refused = await signingIn();
     expect(refused.statusCode).toBe(401);
     expect(refused.json().error.code).toBe(SIGN_IN_REFUSED);
+  });
+
+  test('one that keeps no accounts still switches a slot, with nothing to trail it in', async () => {
+    app = await serving({ sessions: store, identity: undefined });
+    const { control, member } = await joined();
+    const controlId = slotIdOf(control.token, control.record.actor);
+    const response = await asking('PATCH', SESSION_PATH, member, { active: controlId });
+    expect(response.statusCode).toBe(200);
   });
 });
 
@@ -692,6 +931,15 @@ describe('what recording must never cost', () => {
     app = await serving(deaf({ audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } }));
     expect((await signingIn()).statusCode).toBe(201);
     expect((await failing()).statusCode).toBe(401);
+  });
+
+  test('a trail that refuses the entry does not undo the slot switch that happened', async () => {
+    app = await serving(deaf({ audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } }));
+    const { control, member } = await joined();
+    const controlId = slotIdOf(control.token, control.record.actor);
+    expect((await asking('PATCH', SESSION_PATH, member, { active: controlId })).statusCode).toBe(200);
+    const after = await asking('GET', SESSION_PATH, member);
+    expect(after.json().data).toMatchObject({ actor: control.record.actor });
   });
 
   test('a counter that could not be written does not turn an answer into a fault', async () => {

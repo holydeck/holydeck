@@ -17,10 +17,12 @@ import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
 import {
   SESSION_ABSOLUTE_HOURS,
+  SESSION_COOKIE,
   SESSION_PATH,
   TICKET_PATH,
   TICKET_SECONDS,
   clearedSessionCookie,
+  cookieIn,
   isSameOrigin,
   sessionCookie,
 } from '@holydeck/contracts/sessions';
@@ -30,14 +32,14 @@ import { accountContext } from './accounts.js';
 import { accountScope, attemptContext } from './attempts.js';
 import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
-import { originOf, provenSession, refuseAsForbidden, sessionCallFor } from './csrf.js';
+import { originOf, provenSession, refuseAsForbidden, refuseAsStoreSaid, sessionCallFor } from './csrf.js';
 import { passkeyContext } from './passkeys.js';
 import { permissionsFor } from './roles.js';
-import { sessionContext } from './sessions.js';
+import { SessionError, sessionContext } from './sessions.js';
 import { totpContext } from './totp.js';
 import { authenticationOptions, challengeIn, verifiedAssertion } from './webauthn.js';
 
-import type { AuditEntry } from './audit.js';
+import type { AuditEntry, AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
 import type { Identity } from './onboarding.js';
 import type { SessionStore } from './sessions.js';
@@ -112,10 +114,19 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
 
     const correlation = correlationFor(SIGN_IN_PREFIX, request.id);
     const gate = attemptContext(correlation);
+    // Read once, before either branch: a live container is joined by a new slot rather than replaced, so
+    // an operator already signed in elsewhere in this browser keeps that slot when signing in as another.
+    const join = cookieIn(request.headers.cookie, SESSION_COOKIE);
     const note = (actor: string, entry: AuditEntry): Promise<void> =>
       recorded(request, 'the sign-in trail refused an entry', async () => {
         await identity.audit.record(auditContext(actor, correlation), entry);
       });
+    // A join is only ever recorded once the container answers with the same identifier it was given: a
+    // fresh start, or a fallback from a stale or dead one, always mints a new token instead.
+    const notedJoin = (opened: { readonly token: string }, actor: string): Promise<void> =>
+      opened.token === join
+        ? note(actor, { action: 'session.slot.add', subject: actor, outcome: 'allowed' })
+        : Promise.resolve();
 
     // A passkey names no handle up front — that is the point of a resident key — so it is told apart from
     // a password before either is read, and answered in the same refusal a wrong password is.
@@ -186,10 +197,12 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
 
       await identity.passkeys.used(context, stored.id, verified.value.counter);
       await recorded(request, 'the sign-in gate could not forgive a scope', () => identity.attempts.forgiven(gate, asked));
-      const opened = await sessions.start(sessionContext(correlation), {
-        actor: actorFor(stored.account),
-        permissions: permissionsFor(account),
-      });
+      const opened = await sessions.start(
+        sessionContext(correlation),
+        { actor: actorFor(stored.account), permissions: permissionsFor(account) },
+        join,
+      );
+      await notedJoin(opened, actorFor(stored.account));
       await note(actorFor(stored.account), { action: 'passkey.use', subject: stored.id, outcome: 'allowed' });
       return reply
         .code(201)
@@ -247,10 +260,12 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
     );
     // What the operator may do is granted from the account this session was opened for, the same way a
     // passkey sign-in above grants it: by the roles this server enforces, not by what a client claims.
-    const opened = await sessions.start(sessionContext(correlation), {
-      actor: actorFor(account.id),
-      permissions: permissionsFor(account),
-    });
+    const opened = await sessions.start(
+      sessionContext(correlation),
+      { actor: actorFor(account.id), permissions: permissionsFor(account) },
+      join,
+    );
+    await notedJoin(opened, actorFor(account.id));
     await note(actorFor(account.id), { action: 'session.signIn', subject: account.name, outcome: 'allowed' });
     return reply
       .code(201)
@@ -260,10 +275,12 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
 
   // Safe, and so not behind the guard, which is why the authorization check proves the session in its
   // place. It answers what a client needs to render an operator and to return a token with — never the
-  // identifier itself.
-  app.get(SESSION_PATH, { config: { need: SESSION } }, (request) =>
-    successEnvelope(provenSession(request).record, request.id, CLIENT_WINDOW.current),
-  );
+  // identifier itself — plus every slot the container holds, redacted to what another slot may be told.
+  app.get(SESSION_PATH, { config: { need: SESSION } }, async (request) => {
+    const proven = provenSession(request);
+    const slots = await proven.sessions.slots(sessionCallFor(request), proven.token);
+    return successEnvelope({ ...proven.record, slots }, request.id, CLIENT_WINDOW.current);
+  });
 
   app.delete(SESSION_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const proven = provenSession(request);
@@ -271,6 +288,38 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
     return reply
       .header('set-cookie', clearedSessionCookie())
       .send(successEnvelope({ ended }, request.id, CLIENT_WINDOW.current));
+  });
+
+  // The one mutation `guardMutations` proves before this runs: a switch changes nothing but the container's
+  // own pointer, and only among slots it already holds, so no cookie is set and none is cleared either way.
+  app.patch(SESSION_PATH, { config: { need: SESSION } }, async (request, reply) => {
+    const proven = provenSession(request);
+    const body = request.body as { readonly active?: unknown } | undefined;
+    const active = typeof body?.active === 'string' ? body.active : '';
+    const correlation = correlationFor('switch:', request.id);
+    const note = (subject: string, outcome: AuditOutcome): Promise<void> =>
+      recorded(request, 'the slot-switch trail refused an entry', async () => {
+        if (identity !== undefined) {
+          await identity.audit.record(auditContext(proven.record.actor, correlation), {
+            action: 'session.slot.switch',
+            subject,
+            outcome,
+          });
+        }
+      });
+    try {
+      const record = await proven.sessions.activate(sessionCallFor(request), proven.token, active);
+      await note(record.actor, 'allowed');
+      return reply.send(successEnvelope(record, request.id, CLIENT_WINDOW.current));
+    } catch (error: unknown) {
+      if (error instanceof SessionError && error.kind === 'slot') {
+        await note(active, 'refused');
+        await refuseAsForbidden(request, reply, 'active', 'no slot with that identifier in this session');
+        return reply;
+      }
+      await refuseAsStoreSaid(request, reply, error, 'this session is over, or was never one this server issued');
+      return reply;
+    }
   });
 
   app.post(TICKET_PATH, { config: { need: SESSION } }, async (request) => {

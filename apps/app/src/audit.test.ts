@@ -120,6 +120,8 @@ describe('the context the trail is written under', () => {
       'passkey.use',
       'passkey.revoke',
       'account.control',
+      'session.slot.add',
+      'session.slot.switch',
     ]);
   });
 });

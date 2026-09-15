@@ -27,12 +27,18 @@ const MINUTE = 60_000;
 
 const GATEKEEPER = sessionContext('req-0f9c2a41');
 
+interface StoredSlot {
+  slotId: string;
+  actor: string;
+  csrf: string;
+}
+
 interface StoredSession {
   _id: string;
-  actor?: string;
-  csrf?: string;
+  active?: string;
+  slots?: readonly StoredSlot[];
   expiresOn?: Date;
-  tickets?: readonly { hash: string; expiresAt: string }[];
+  tickets?: readonly { hash: string; expiresAt: string; slotId: string }[];
 }
 
 let mongo: TestMongo;
@@ -65,7 +71,7 @@ describe('a session in a real database', () => {
     expect(isOpaqueToken(first.token)).toBe(true);
 
     const stored = await sessions().findOne({ _id: tokenDigest(first.token) });
-    expect(stored?.actor).toBe(ACTOR);
+    expect(stored?.slots?.[0]?.actor).toBe(ACTOR);
     // Everything the database holds, as text: the identifier is not in it, and the digest is.
     expect(JSON.stringify(stored)).not.toContain(first.token);
     expect(stored?.expiresOn).toBeInstanceOf(Date);
@@ -89,7 +95,7 @@ describe('a session in a real database', () => {
     expect(await sessions().countDocuments({})).toBe(0);
   });
 
-  test('recovering a credential ends every session that actor holds, in one query the index serves', async () => {
+  test('recovering a credential ends every container that actor holds a slot in, in one query the index serves', async () => {
     await createSessionIndexOn(db, SESSION_INDEXES[0] as (typeof SESSION_INDEXES)[number]);
     await store.start(GATEKEEPER, { actor: ACTOR, permissions: ['services.read'] });
     await store.start(GATEKEEPER, { actor: ACTOR, permissions: ['services.read'] });
@@ -97,8 +103,21 @@ describe('a session in a real database', () => {
 
     await expect(store.revokeAllFor(GATEKEEPER, ACTOR)).resolves.toBe(2);
     const left = await sessions().find({}).toArray();
-    expect(left.map((row) => row.actor)).toEqual(['account:9b12']);
+    expect(left.map((row) => row.slots?.[0]?.actor)).toEqual(['account:9b12']);
     await expect(store.read(GATEKEEPER, other.token)).resolves.toMatchObject({ actor: 'account:9b12' });
+  });
+
+  test('recovering a credential pulls only that actor’s own slot, leaving a sibling in the same container', async () => {
+    await createSessionIndexOn(db, SESSION_INDEXES[0] as (typeof SESSION_INDEXES)[number]);
+    const first = await store.start(GATEKEEPER, { actor: ACTOR, permissions: ['services.read'] });
+    const joined = await store.start(GATEKEEPER, { actor: 'account:9b12', permissions: ['services.read'] }, first.token);
+    expect(joined.token).toBe(first.token);
+
+    await expect(store.revokeAllFor(GATEKEEPER, ACTOR)).resolves.toBe(1);
+    const left = await sessions().find({}).toArray();
+    expect(left).toHaveLength(1);
+    expect(left[0]?.slots?.map((slot) => slot.actor)).toEqual(['account:9b12']);
+    await expect(store.read(GATEKEEPER, joined.token)).resolves.toMatchObject({ actor: 'account:9b12' });
   });
 
   // The point of the ticket: a browser cannot put a header on a handshake, so what proves the handshake is

@@ -41,6 +41,10 @@ export const AUDIT_ACTIONS = [
   // Granting or revoking Control presentation, apart from the three roles. Nothing else an account holder
   // is administered into yet has a trail of its own — role reassignment is a later release's.
   'account.control',
+  // A browser-container gaining a second (or third) authenticated slot, and the container's own pointer
+  // moving between the slots it already holds. Neither entry ever carries a permission or a token.
+  'session.slot.add',
+  'session.slot.switch',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

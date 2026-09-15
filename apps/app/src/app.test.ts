@@ -67,6 +67,7 @@ describe('every route that changes something', () => {
     const app = buildApp({ settings, logger: false, fetching: refusing });
     expect(mutatingRoutesOf(app)).toEqual([
       { method: 'DELETE', url: SESSION_PATH },
+      { method: 'PATCH', url: SESSION_PATH },
       { method: 'POST', url: TICKET_PATH },
       // Served whether or not this deployment keeps accounts, so that the four changes a second factor
       // takes are counted here in every deployment rather than in only some of them.
