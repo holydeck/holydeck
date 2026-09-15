@@ -19,10 +19,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { accountContext, accountsOn } from './accounts.js';
 import { ACCOUNT_ATTEMPT_LIMIT, LOCK_MINUTES, accountScope, attemptContext, attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
+import { enforceAuthorization } from './authorization.js';
 import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { codeAt, stepAt } from './otp.js';
 import { passkeyContext, passkeysOn } from './passkeys.js';
+import { ACCOUNTS_MANAGE } from './roles.js';
 import { SIGN_IN_REFUSED, serveSessionRoutes } from './session-routes.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { totpContext, totpsOn } from './totp.js';
@@ -71,6 +73,7 @@ const serving = async (options: SessionRoutesOptions): Promise<FastifyInstance> 
   const built = Fastify({ logger: false });
   withSafeErrors(built);
   guardMutations(built, { sessions: options.sessions });
+  enforceAuthorization(built, { sessions: options.sessions });
   serveSessionRoutes(built, options);
   await built.ready();
   return built;
@@ -233,8 +236,8 @@ describe('signing in', () => {
     expect(response.json().data).toMatchObject({
       actor: actorFor(ID),
       rotation: 'authentication',
-      // What the operator may do is granted by the roles work; a session that proves who opens nothing.
-      permissions: [],
+      // Granted from the account this session was opened for: a founder is Admin by role.
+      permissions: [ACCOUNTS_MANAGE],
     });
     const cookie = String(response.headers['set-cookie']);
     expect(isOpaqueToken(tokenIn(cookie))).toBe(true);
@@ -279,7 +282,11 @@ describe('signing in with a passkey', () => {
     const challenge = await passkeyChallenge();
     const response = await signingInWithPasskey(device, challenge);
     expect(response.statusCode).toBe(201);
-    expect(response.json().data).toMatchObject({ actor: actorFor(ID), rotation: 'authentication', permissions: [] });
+    expect(response.json().data).toMatchObject({
+      actor: actorFor(ID),
+      rotation: 'authentication',
+      permissions: [ACCOUNTS_MANAGE],
+    });
     const cookie = String(response.headers['set-cookie']);
     expect(isOpaqueToken(tokenIn(cookie))).toBe(true);
   });

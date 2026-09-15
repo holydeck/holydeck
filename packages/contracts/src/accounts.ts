@@ -13,6 +13,9 @@ import { SECOND_FACTOR, normalizedCode } from './totp.js';
 /** Where a fresh instance is claimed, and where a claimed one answers as a path that is not served. */
 export const ONBOARDING_PATH = '/api/v1/onboarding';
 
+/** Where an account is administered — today, only Control presentation, granted and revoked apart from role. */
+export const ACCOUNTS_PATH = '/api/v1/accounts';
+
 /** The three roles the permission model names. Admin first: it is the one a first run creates. */
 export const ACCOUNT_ROLES = ['admin', 'editor', 'member'] as const;
 
@@ -90,6 +93,8 @@ export interface AccountRecord {
   readonly displayName: string;
   readonly role: AccountRole;
   readonly createdAt: string;
+  /** Administered on its own, apart from the three roles. Neither admin nor editor holds it implicitly. */
+  readonly controlPresentation: boolean;
 }
 
 export function parseAccountRecord(value: unknown): Parsed<AccountRecord> {
@@ -100,6 +105,7 @@ export function parseAccountRecord(value: unknown): Parsed<AccountRecord> {
       displayName: reader.text('displayName'),
       role: reader.choice('role', ACCOUNT_ROLES),
       createdAt: reader.time('createdAt'),
+      controlPresentation: reader.flag('controlPresentation'),
     };
     if (record.id !== '' && !isAccountId(record.id)) {
       reader.reject('id', FIELD_CODES.notAllowed, 'must be an opaque identifier this server issued');
@@ -107,6 +113,15 @@ export function parseAccountRecord(value: unknown): Parsed<AccountRecord> {
     if (record.name !== '' && !isAccountName(record.name)) reader.reject('name', FIELD_CODES.notAllowed, NAME_RULE);
     return record;
   });
+}
+
+/** What granting or revoking Control presentation takes: the one flag that says which it now is. */
+export interface ControlGrant {
+  readonly granted: boolean;
+}
+
+export function parseControlGrant(value: unknown): Parsed<ControlGrant> {
+  return parseObject(value, 'grant', (reader) => ({ granted: reader.flag('granted') }));
 }
 
 /** What a first run is asked for: a handle to sign in under, a name to show, and a password. */

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
+import { ACCOUNTS_PATH, ONBOARDING_PATH } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE } from '@holydeck/contracts/clients';
 import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
@@ -78,6 +78,9 @@ describe('every route that changes something', () => {
       { method: 'POST', url: PASSKEY_PATH },
       { method: 'PATCH', url: `${PASSKEY_PATH}/:id` },
       { method: 'DELETE', url: `${PASSKEY_PATH}/:id` },
+      // The first route a permission gates, and not merely a proved session — still counted here, because
+      // the guard it is behind is asked before the permission is.
+      { method: 'PATCH', url: `${ACCOUNTS_PATH}/:id/control-presentation` },
     ]);
   });
 

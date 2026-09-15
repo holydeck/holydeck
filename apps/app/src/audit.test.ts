@@ -119,6 +119,7 @@ describe('the context the trail is written under', () => {
       'passkey.name',
       'passkey.use',
       'passkey.revoke',
+      'account.control',
     ]);
   });
 });

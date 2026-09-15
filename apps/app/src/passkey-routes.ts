@@ -22,17 +22,19 @@ import {
 import { accountContext } from './accounts.js';
 import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
-import { originOf, provenSession, refuseAsForbidden, sessionFor } from './csrf.js';
+import { originOf, provenSession, refuseAsForbidden } from './csrf.js';
 import { notFound } from './failures.js';
 import { PasskeyError, passkeyContext } from './passkeys.js';
 import { challengeIn, registrationOptions, verifiedRegistration } from './webauthn.js';
 
 import type { AuditAction, AuditOutcome } from './audit.js';
+import type { RouteNeed } from './authorization.js';
 import type { Identity } from './onboarding.js';
 import type { StoredPasskey } from './passkeys.js';
-import type { SessionStore } from './sessions.js';
 import type { RelyingParty } from './webauthn.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+
+const SESSION: RouteNeed = { kind: 'session' };
 
 /** A ceremony that did not prove a key this server asked for. */
 export const PASSKEY_REFUSED = 'auth.passkey_refused';
@@ -56,8 +58,6 @@ const PASSKEY_PREFIX = 'passkey:';
 export interface PasskeyRoutesOptions {
   /** Absent in a deployment that keeps no accounts, which has no passkeys either. */
   readonly identity: Identity | undefined;
-  /** Safe reads still have to prove a session, so this route needs the same store the guard uses. */
-  readonly sessions: SessionStore | undefined;
 }
 
 /** Every route this module serves, in the order it registers them, and what each of them changes. */
@@ -86,12 +86,17 @@ const partyOf = (request: FastifyRequest): RelyingParty => {
 const refuse = (request: FastifyRequest, reply: FastifyReply, code: string, message: string): FastifyReply =>
   reply.code(code === PASSKEY_REFUSED ? 401 : 409).send(errorEnvelope(code, message, request.id));
 
-export function servePasskeyRoutes(app: FastifyInstance, { identity, sessions }: PasskeyRoutesOptions): void {
+export function servePasskeyRoutes(app: FastifyInstance, { identity }: PasskeyRoutesOptions): void {
   // A deployment with nowhere to keep an account has no passkeys to manage. The paths are still served,
   // so the guard's table remains the complete shape of the surface in every deployment.
   if (identity === undefined) {
     for (const [method, url] of ROUTES) {
-      app.route({ method, url, handler: (request, reply) => reply.code(404).send(notFound(request)) });
+      app.route({
+        method,
+        url,
+        config: { need: SESSION },
+        handler: (request, reply) => reply.code(404).send(notFound(request)),
+      });
     }
     return;
   }
@@ -136,7 +141,7 @@ export function servePasskeyRoutes(app: FastifyInstance, { identity, sessions }:
     return account;
   };
 
-  app.post(PASSKEY_OPTIONS_PATH, async (request, reply) => {
+  app.post(PASSKEY_OPTIONS_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const account = await accountFor(request, reply, id);
@@ -153,7 +158,7 @@ export function servePasskeyRoutes(app: FastifyInstance, { identity, sessions }:
     );
   });
 
-  app.post(PASSKEY_PATH, async (request, reply) => {
+  app.post(PASSKEY_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const parsed = parsePasskeyRegistration(request.body);
@@ -195,10 +200,8 @@ export function servePasskeyRoutes(app: FastifyInstance, { identity, sessions }:
     return reply.code(201).send(successEnvelope({ passkey: summaryOf(passkey) }, request.id, CLIENT_WINDOW.current));
   });
 
-  app.get(PASSKEY_PATH, async (request, reply) => {
-    const proven = await sessionFor(sessions, request, reply);
-    if (proven === undefined) return reply;
-    const id = accountIdIn(proven.record.actor);
+  app.get(PASSKEY_PATH, { config: { need: SESSION } }, async (request, reply) => {
+    const id = accountIdIn(provenSession(request).record.actor);
     if (id === undefined) {
       await refuseAsForbidden(request, reply, 'actor', NOT_AN_ACCOUNT);
       return reply;
@@ -207,7 +210,7 @@ export function servePasskeyRoutes(app: FastifyInstance, { identity, sessions }:
     return successEnvelope({ passkeys: passkeys.map(summaryOf) }, request.id, CLIENT_WINDOW.current);
   });
 
-  app.patch(`${PASSKEY_PATH}/:id`, async (request, reply) => {
+  app.patch(`${PASSKEY_PATH}/:id`, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const parsed = parsePasskeyName(request.body);
@@ -224,7 +227,7 @@ export function servePasskeyRoutes(app: FastifyInstance, { identity, sessions }:
     return reply.send(successEnvelope({ renamed: true }, request.id, CLIENT_WINDOW.current));
   });
 
-  app.delete(`${PASSKEY_PATH}/:id`, async (request, reply) => {
+  app.delete(`${PASSKEY_PATH}/:id`, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const key = (request.params as { readonly id: string }).id;

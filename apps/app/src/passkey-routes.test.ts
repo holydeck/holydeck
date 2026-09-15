@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { ACCOUNTS_COLLECTION, accountContext, accountsOn } from './accounts.js';
 import { attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
+import { enforceAuthorization } from './authorization.js';
 import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { PASSKEY_LIMIT_REACHED, PASSKEY_REFUSED, PASSKEY_REGISTERED, servePasskeyRoutes } from './passkey-routes.js';
@@ -146,7 +147,8 @@ beforeEach(async () => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
-  servePasskeyRoutes(app, { identity, sessions });
+  enforceAuthorization(app, { sessions });
+  servePasskeyRoutes(app, { identity });
   await app.ready();
   session = await sessions.start(sessionContext(CORRELATION), { actor: actorFor(ID), permissions: [] });
 });
@@ -419,7 +421,7 @@ describe('the surface itself', () => {
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
-    servePasskeyRoutes(app, { identity: undefined, sessions });
+    servePasskeyRoutes(app, { identity: undefined });
     await app.ready();
     for (const response of [
       await asking('POST', PASSKEY_OPTIONS_PATH),
@@ -439,7 +441,8 @@ describe('the surface itself', () => {
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
-    servePasskeyRoutes(app, { identity, sessions });
+    enforceAuthorization(app, { sessions });
+    servePasskeyRoutes(app, { identity });
     await app.ready();
     await expect(registering()).resolves.toMatchObject({ statusCode: 201 });
     expect(await listed()).toHaveLength(1);
@@ -454,7 +457,7 @@ describe('the surface itself', () => {
     app = Fastify({ logger: false });
     withSafeErrors(app);
     guardMutations(app, { sessions });
-    servePasskeyRoutes(app, { identity, sessions });
+    servePasskeyRoutes(app, { identity });
     await app.ready();
     const response = await registering();
     expect(response.statusCode).toBe(500);

@@ -2,6 +2,8 @@ import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, decideClient, supportedClientVers
 import { MESSAGE_CODES, errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 
+import { serveAccountRoutes } from './accounts-routes.js';
+import { enforceAuthorization } from './authorization.js';
 import { corpusClient } from './corpus.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
@@ -12,11 +14,14 @@ import { serveSessionRoutes } from './session-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
+import type { RouteNeed } from './authorization.js';
 import type { Fetching } from './corpus.js';
 import type { Identity } from './onboarding.js';
 import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
 import type { WebAsset } from './static.js';
+
+const PUBLIC: RouteNeed = { kind: 'public' };
 
 export interface AppOptions {
   settings: LoadedSettings;
@@ -67,14 +72,18 @@ export function buildApp({ settings, logger, fetching, web, sessions, identity }
   // list of the routes that change something: a route registered above this line would be missing from it.
   guardMutations(app, { sessions });
 
+  // Installed right after: a mutating route's session is already proved by the guard above by the time
+  // this asks for it, and every route registered from here down is one this check was on for.
+  enforceAuthorization(app, { sessions });
+
   app.setNotFoundHandler((request, reply) => reply.code(404).send(notFound(request)));
 
-  app.get('/health', (request) =>
+  app.get('/health', { config: { need: PUBLIC } }, (request) =>
     successEnvelope({ status: 'ok', locale: settings.values.locale }, request.id, CLIENT_WINDOW.current),
   );
 
   // What a client is allowed to depend on, served from the same registry the boot check grades.
-  app.get('/api/contracts', (request) =>
+  app.get('/api/contracts', { config: { need: PUBLIC } }, (request) =>
     successEnvelope(
       { clientVersions: supportedClientVersions(), messageCodes: MESSAGE_CODES },
       request.id,
@@ -84,7 +93,7 @@ export function buildApp({ settings, logger, fetching, web, sessions, identity }
 
   // The library is read here and nowhere else: a client asks this application, this application asks
   // the corpus with a credential a client never sees, and a refusal is translated on the way back.
-  app.get('/api/v1/translations', async (request, reply) => {
+  app.get('/api/v1/translations', { config: { need: PUBLIC } }, async (request, reply) => {
     const answer = await corpus.translations();
     if (!answer.ok) {
       return reply
@@ -104,7 +113,11 @@ export function buildApp({ settings, logger, fetching, web, sessions, identity }
   // Behind the guard, unlike the two above: a second factor is enrolled and given up by an operator who
   // is already signed in, which is what lets this surface say plainly what a sign-in never may.
   serveTotpRoutes(app, { identity });
-  servePasskeyRoutes(app, { identity, sessions });
+  servePasskeyRoutes(app, { identity });
+
+  // The first route this server asks a permission of, and not merely a proved session: administering
+  // another account is Admin's alone, by the roles this server enforces.
+  serveAccountRoutes(app, { identity });
 
   if (web !== undefined) serveWebClient(app, web);
 

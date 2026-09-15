@@ -94,6 +94,15 @@ export function provenSession(request: FastifyRequest): Guarded {
 }
 
 /**
+ * Stashes a session a safe route proved for itself, so it reads back exactly the way a mutating route's
+ * does: through `provenSession`. Nothing but the authorization hook that proves a safe route's session
+ * calls this — a route that proves its own would be a route trusting itself instead of the guard.
+ */
+export function rememberProvenSession(request: FastifyRequest, guarded: Guarded): void {
+  PROVEN.set(request, guarded);
+}
+
+/**
  * The origin the browser saw, which is not always the one this process did: behind a reverse proxy the
  * connection arrives as plain HTTP, and only the forwarded header remembers what the browser asked for.
  * The first value is the one the browser reached; the rest are hops after it.

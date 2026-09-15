@@ -105,6 +105,7 @@ describe('before the instance is claimed', () => {
       displayName: 'Lucia Brandt',
       role: 'admin',
       createdAt: NOW,
+      controlPresentation: false,
     });
     expect(rows.size).toBe(1);
   });

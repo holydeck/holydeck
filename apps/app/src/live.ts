@@ -12,8 +12,14 @@ import websocket from '@fastify/websocket';
 import { originOf, refuseAsForbidden, refuseAsStoreSaid, sessionCallFor, sessionFor } from './csrf.js';
 import { SessionError } from './sessions.js';
 
+import type { RouteNeed } from './authorization.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { SessionStore } from './sessions.js';
+
+// Public to the check every other route is behind: a socket proves itself in `proveHandshake` below,
+// against an origin and a ticket a WebSocket carries in no header, in an order that check depends on.
+// Asking a session of it here first would run the wrong check first, and would ask it a second time.
+const PUBLIC: RouteNeed = { kind: 'public' };
 
 export const LIVE_PATH = '/api/v1/live';
 
@@ -107,7 +113,7 @@ export async function serveLive(
   // way it serves everything else: to whoever asked.
   const proving = sessions === undefined ? {} : { preValidation: proveHandshake(sessions) };
 
-  app.get(LIVE_PATH, { websocket: true, ...proving }, (socket, request) => {
+  app.get(LIVE_PATH, { websocket: true, config: { need: PUBLIC }, ...proving }, (socket, request) => {
     // Graded here rather than by the versioned-surface hook, for two reasons that point the same way: a
     // refused handshake tells a browser client nothing it can read, and an HTTP refusal written onto a
     // connection that asked to stop being HTTP is a socket both ends then wait on.

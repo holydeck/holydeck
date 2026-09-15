@@ -25,9 +25,12 @@ import { notFound } from './failures.js';
 import type { AccountStore } from './accounts.js';
 import type { AttemptGate } from './attempts.js';
 import type { AuditEntry, AuditTrail } from './audit.js';
+import type { RouteNeed } from './authorization.js';
 import type { PasskeyStore } from './passkeys.js';
 import type { TotpStore } from './totp.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+
+const PUBLIC: RouteNeed = { kind: 'public' };
 
 /**
  * What an instance needs to know who anybody is: somewhere to keep the accounts, somewhere to record what
@@ -60,14 +63,14 @@ const gone = (request: FastifyRequest, reply: FastifyReply): FastifyReply => rep
 export function serveOnboarding(app: FastifyInstance, { identity }: OnboardingOptions): void {
   // Safe, so it is not behind the guard and does not need to be in `UNGUARDED`. It is also the only
   // place the bounds a password has to meet are published, so a client never has to hard-code them.
-  app.get(ONBOARDING_PATH, async (request, reply) => {
+  app.get(ONBOARDING_PATH, { config: { need: PUBLIC } }, async (request, reply) => {
     if (identity === undefined) return gone(request, reply);
     const correlation = correlationFor(CLAIM_PREFIX, request.id);
     if (await identity.accounts.claimed(accountContext(correlation))) return gone(request, reply);
     return successEnvelope(onboardingOffer(), request.id, CLIENT_WINDOW.current);
   });
 
-  app.post(ONBOARDING_PATH, async (request, reply) => {
+  app.post(ONBOARDING_PATH, { config: { need: PUBLIC } }, async (request, reply) => {
     if (identity === undefined) return gone(request, reply);
     const correlation = correlationFor(CLAIM_PREFIX, request.id);
 

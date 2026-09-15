@@ -30,17 +30,23 @@ import { accountContext } from './accounts.js';
 import { accountScope, attemptContext } from './attempts.js';
 import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
-import { originOf, provenSession, refuseAsForbidden, sessionCallFor, sessionFor } from './csrf.js';
+import { originOf, provenSession, refuseAsForbidden, sessionCallFor } from './csrf.js';
 import { passkeyContext } from './passkeys.js';
+import { permissionsFor } from './roles.js';
 import { sessionContext } from './sessions.js';
 import { totpContext } from './totp.js';
 import { authenticationOptions, challengeIn, verifiedAssertion } from './webauthn.js';
 
 import type { AuditEntry } from './audit.js';
+import type { RouteNeed } from './authorization.js';
 import type { Identity } from './onboarding.js';
 import type { SessionStore } from './sessions.js';
 import type { RelyingParty } from './webauthn.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+
+const PUBLIC: RouteNeed = { kind: 'public' };
+
+const SESSION: RouteNeed = { kind: 'session' };
 
 /** The one answer every refused sign-in takes, whatever it was refused for. */
 export const SIGN_IN_REFUSED = 'auth.sign_in_refused';
@@ -84,7 +90,7 @@ const recorded = async (request: FastifyRequest, what: string, write: () => Prom
 };
 
 export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }: SessionRoutesOptions): void {
-  app.post(SESSION_PATH, async (request, reply) => {
+  app.post(SESSION_PATH, { config: { need: PUBLIC } }, async (request, reply) => {
     const refused = (): FastifyReply =>
       reply
         .code(401)
@@ -180,7 +186,10 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
 
       await identity.passkeys.used(context, stored.id, verified.value.counter);
       await recorded(request, 'the sign-in gate could not forgive a scope', () => identity.attempts.forgiven(gate, asked));
-      const opened = await sessions.start(sessionContext(correlation), { actor: actorFor(stored.account), permissions: [] });
+      const opened = await sessions.start(sessionContext(correlation), {
+        actor: actorFor(stored.account),
+        permissions: permissionsFor(account),
+      });
       await note(actorFor(stored.account), { action: 'passkey.use', subject: stored.id, outcome: 'allowed' });
       return reply
         .code(201)
@@ -236,9 +245,12 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
     await recorded(request, 'the sign-in gate could not forgive a scope', () =>
       identity.attempts.forgiven(gate, asked),
     );
-    // What the operator may do is not granted here: a session says who, and the roles this server
-    // enforces say what. Granting nothing is the safe half of not knowing yet.
-    const opened = await sessions.start(sessionContext(correlation), { actor: actorFor(account.id), permissions: [] });
+    // What the operator may do is granted from the account this session was opened for, the same way a
+    // passkey sign-in above grants it: by the roles this server enforces, not by what a client claims.
+    const opened = await sessions.start(sessionContext(correlation), {
+      actor: actorFor(account.id),
+      permissions: permissionsFor(account),
+    });
     await note(actorFor(account.id), { action: 'session.signIn', subject: account.name, outcome: 'allowed' });
     return reply
       .code(201)
@@ -246,15 +258,14 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
       .send(successEnvelope(opened.record, request.id, CLIENT_WINDOW.current));
   });
 
-  // Safe, and so not behind the guard, which is why it reads the session for itself. It answers what a
-  // client needs to render an operator and to return a token with — never the identifier itself.
-  app.get(SESSION_PATH, async (request, reply) => {
-    const proven = await sessionFor(sessions, request, reply);
-    if (proven === undefined) return reply;
-    return successEnvelope(proven.record, request.id, CLIENT_WINDOW.current);
-  });
+  // Safe, and so not behind the guard, which is why the authorization check proves the session in its
+  // place. It answers what a client needs to render an operator and to return a token with — never the
+  // identifier itself.
+  app.get(SESSION_PATH, { config: { need: SESSION } }, (request) =>
+    successEnvelope(provenSession(request).record, request.id, CLIENT_WINDOW.current),
+  );
 
-  app.delete(SESSION_PATH, async (request, reply) => {
+  app.delete(SESSION_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const proven = provenSession(request);
     const ended = await proven.sessions.revoke(sessionCallFor(request), proven.token);
     return reply
@@ -262,7 +273,7 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
       .send(successEnvelope({ ended }, request.id, CLIENT_WINDOW.current));
   });
 
-  app.post(TICKET_PATH, async (request) => {
+  app.post(TICKET_PATH, { config: { need: SESSION } }, async (request) => {
     const proven = provenSession(request);
     const ticket = await proven.sessions.issueTicket(sessionCallFor(request), proven.token);
     return successEnvelope({ ticket, expiresInSeconds: TICKET_SECONDS }, request.id, CLIENT_WINDOW.current);

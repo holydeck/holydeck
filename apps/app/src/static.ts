@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { extname, join, relative, sep } from 'node:path';
 
+import type { RouteNeed } from './authorization.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+
+const PUBLIC: RouteNeed = { kind: 'public' };
 
 /**
  * Serving the built web client from the application's own origin.
@@ -163,7 +166,7 @@ export function withSecurityHeaders(app: FastifyInstance): void {
 export function serveWebClient(app: FastifyInstance, assets: ReadonlyMap<string, WebAsset>): void {
   for (const [path, asset] of assets) {
     for (const route of path === SHELL_PATH ? ['/', path] : [path]) {
-      app.get(route, (request, reply) => answer(request, reply, asset));
+      app.get(route, { config: { need: PUBLIC } }, (request, reply) => answer(request, reply, asset));
     }
   }
 }

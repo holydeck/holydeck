@@ -38,6 +38,9 @@ export const AUDIT_ACTIONS = [
   'passkey.name',
   'passkey.use',
   'passkey.revoke',
+  // Granting or revoking Control presentation, apart from the three roles. Nothing else an account holder
+  // is administered into yet has a trail of its own — role reassignment is a later release's.
+  'account.control',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

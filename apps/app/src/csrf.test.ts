@@ -11,7 +11,15 @@ import {
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { FORBIDDEN, SESSION_EXPIRED, UNGUARDED, guardMutations, mutatingRoutesOf, provenSession } from './csrf.js';
+import {
+  FORBIDDEN,
+  SESSION_EXPIRED,
+  UNGUARDED,
+  guardMutations,
+  mutatingRoutesOf,
+  provenSession,
+  rememberProvenSession,
+} from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { SessionError, sessionContext, sessionsOn } from './sessions.js';
 import { memorySessions } from '../test/helpers/sessions.js';
@@ -217,5 +225,22 @@ describe('the routes the guard covers', () => {
     await expect(open.inject({ method: 'POST', url: '/api/v1/open' })).resolves.toMatchObject({ statusCode: 200 });
     await expect(open.inject({ method: 'POST', url: '/api/v1/closed' })).resolves.toMatchObject({ statusCode: 401 });
     await open.close();
+  });
+
+  // A safe route proves its own session rather than being made to change something to get one from the
+  // guard above. What it stashes is read back through the same door a mutating route reads its own by.
+  test('what a safe route stashes for itself reads back exactly as a mutating route’s own does', async () => {
+    const session = await signedIn();
+    const guarded = { token: session.token, record: session.record, sessions: store };
+    const safe = Fastify({ logger: false });
+    guardMutations(safe, { sessions: store });
+    safe.get('/api/v1/safe', (request) => {
+      rememberProvenSession(request, guarded);
+      return { actor: provenSession(request).record.actor };
+    });
+    await safe.ready();
+    const response = await safe.inject({ method: 'GET', url: '/api/v1/safe' });
+    expect(response.json()).toEqual({ actor: guarded.record.actor });
+    await safe.close();
   });
 });

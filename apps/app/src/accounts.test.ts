@@ -168,9 +168,11 @@ describe('what the collection is read and written through', () => {
     await expect(dropAccountIndexOn(memory.db, 'account_email')).rejects.toMatchObject({ kind: 'schema' });
   });
 
-  test('reaches the store under a context that may create and read an account, and nothing else', () => {
+  test('reaches the store under a context that may create, read and update an account, and nothing else', () => {
     expect(FIRST_RUN.actor).toBe('system');
-    expect([...FIRST_RUN.permissions].sort()).toEqual([ACCOUNT_PERMISSIONS.create, ACCOUNT_PERMISSIONS.read].sort());
+    expect([...FIRST_RUN.permissions].sort()).toEqual(
+      [ACCOUNT_PERMISSIONS.create, ACCOUNT_PERMISSIONS.read, ACCOUNT_PERMISSIONS.update].sort(),
+    );
     expect(() => accountContext('no')).toThrow(ContextError);
   });
 });
@@ -205,7 +207,14 @@ describe('signing in', () => {
   test('the answer carries what a client may read, and neither the credential nor the founder marker', async () => {
     await store.claim(FIRST_RUN, CLAIM);
     const account = await store.authenticate(FIRST_RUN, { name: CLAIM.name, password: PASSWORD });
-    expect(Object.keys(account ?? {})).toEqual(['id', 'name', 'displayName', 'role', 'createdAt']);
+    expect(Object.keys(account ?? {})).toEqual([
+      'id',
+      'name',
+      'displayName',
+      'role',
+      'createdAt',
+      'controlPresentation',
+    ]);
   });
 
   test('a password that is not that account’s and a handle nobody holds are the same answer', async () => {
@@ -282,5 +291,56 @@ describe('reading an account back by the identifier history carries', () => {
     await expect(store.read(undefined, 'B'.repeat(22))).rejects.toBeInstanceOf(AccountError);
     const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.create] };
     await expect(store.read(blind, 'B'.repeat(22))).rejects.toMatchObject({ kind: 'permission' });
+  });
+});
+
+describe('administering Control presentation apart from role', () => {
+  test('a fresh claim holds it not at all, admin included', async () => {
+    const record = await store.claim(FIRST_RUN, CLAIM);
+    expect(record.controlPresentation).toBe(false);
+  });
+
+  test('a document written before the flag existed reads back as not holding it, not as a defect', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    const [stored] = storedAccounts(rows);
+    const legacy = Object.fromEntries(Object.entries(stored ?? {}).filter(([field]) => field !== 'controlPresentation'));
+    rows.set(claimed.id, legacy);
+    await expect(store.read(FIRST_RUN, claimed.id)).resolves.toMatchObject({ controlPresentation: false });
+  });
+
+  test('is granted, and the grant is what a later read answers with too', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await expect(store.grantControl(FIRST_RUN, claimed.id, true)).resolves.toMatchObject({
+      id: claimed.id,
+      controlPresentation: true,
+    });
+    await expect(store.read(FIRST_RUN, claimed.id)).resolves.toMatchObject({ controlPresentation: true });
+  });
+
+  test('is revoked the same way it is granted', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await store.grantControl(FIRST_RUN, claimed.id, true);
+    await expect(store.grantControl(FIRST_RUN, claimed.id, false)).resolves.toMatchObject({
+      controlPresentation: false,
+    });
+  });
+
+  test('answers nothing for an identifier no account holds, which is not a defect', async () => {
+    await expect(store.grantControl(FIRST_RUN, 'B'.repeat(22), true)).resolves.toBeUndefined();
+  });
+
+  test('a document that vanished between the write and the re-read answers as not found, not as a defect', async () => {
+    const memory = memoryAccounts();
+    const scoped = accountsOn(memory.db, { now: () => NOW, hash: weakly });
+    const claimed = await scoped.claim(FIRST_RUN, CLAIM);
+    const vanishing = { collection: (name: string) => ({ ...memory.db.collection(name), findOne: async () => null }) };
+    const racy = accountsOn(vanishing, { now: () => NOW, hash: weakly });
+    await expect(racy.grantControl(FIRST_RUN, claimed.id, true)).resolves.toBeUndefined();
+  });
+
+  test('is a write, and is refused without a context or without the permission to make one', async () => {
+    await expect(store.grantControl(undefined, 'B'.repeat(22), true)).rejects.toBeInstanceOf(AccountError);
+    const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.read] };
+    await expect(store.grantControl(blind, 'B'.repeat(22), true)).rejects.toMatchObject({ kind: 'permission' });
   });
 });

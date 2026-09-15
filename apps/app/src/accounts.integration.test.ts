@@ -186,10 +186,12 @@ describe('what the database lets this product do to an account', () => {
     expect(await limited.count(FIRST_RUN)).toBe(1);
   });
 
-  test('cannot change or remove an account, because the declaration leaves those out on purpose', async () => {
+  test('can change an account, granting Control presentation needs, but cannot remove one or drop the collection', async () => {
     const collection = restricted.db.collection<StoredAccount>(ACCOUNTS_COLLECTION);
+    await expect(collection.updateOne({ founder: true }, { $set: { role: 'member' } })).resolves.toMatchObject({
+      modifiedCount: 1,
+    });
     const attempts = {
-      update: () => collection.updateOne({ founder: true }, { $set: { role: 'member' } }),
       remove: () => collection.deleteOne({ founder: true }),
       drop: () => collection.drop(),
     };
@@ -197,6 +199,6 @@ describe('what the database lets this product do to an account', () => {
       await expect(attempt(), name).rejects.toThrow(/not authorized/u);
     }
     const [stored] = await restricted.root.collection<StoredAccount>(ACCOUNTS_COLLECTION).find({}).toArray();
-    expect(stored?.role).toBe('admin');
+    expect(stored?.role).toBe('member');
   });
 });

@@ -22,10 +22,14 @@ import type { Document, Filter } from './repositories.js';
 
 export const ACCOUNTS_COLLECTION = 'accounts';
 
-/** What an actor needs to reach the store. Creating an account is administration's; reading is anyone's. */
+/**
+ * What an actor needs to reach the store. Creating an account is administration's; reading is anyone's;
+ * updating is administration's too, and today the only thing it updates is Control presentation.
+ */
 export const ACCOUNT_PERMISSIONS = Object.freeze({
   create: 'accounts.create',
   read: 'accounts.read',
+  update: 'accounts.update',
 } as const);
 
 export type AccountNeed = keyof typeof ACCOUNT_PERMISSIONS;
@@ -33,7 +37,7 @@ export type AccountNeed = keyof typeof ACCOUNT_PERMISSIONS;
 /**
  * The database privileges this collection needs. No `remove`: an account is closed by being written
  * differently, never by disappearing, and a deployment granting exactly this makes that the database's
- * rule. `update` is not here either until something updates one, which is the release that adds it.
+ * rule.
  */
 export const ACCOUNT_ACTIONS: readonly string[] = Object.freeze([
   'createIndex',
@@ -41,6 +45,7 @@ export const ACCOUNT_ACTIONS: readonly string[] = Object.freeze([
   'find',
   'insert',
   'listIndexes',
+  'update',
 ]);
 
 export function accountPrivileges(): { readonly collection: string; readonly actions: readonly string[] } {
@@ -63,7 +68,17 @@ const DECLARED_INDEXES: readonly AccountIndex[] = [
 export const ACCOUNT_INDEXES = Object.freeze(DECLARED_INDEXES);
 
 /** Every field the collection holds: an account as a client reads it, and what the store keeps beside it. */
-const CARRIED = new Set<string>(['id', 'name', 'displayName', 'role', 'createdAt', '_id', 'credential', 'founder']);
+const CARRIED = new Set<string>([
+  'id',
+  'name',
+  'displayName',
+  'role',
+  'createdAt',
+  'controlPresentation',
+  '_id',
+  'credential',
+  'founder',
+]);
 
 export type AccountRefusal = 'context' | 'permission' | 'schema' | 'claimed';
 
@@ -83,6 +98,7 @@ export interface AccountCollection {
   insertOne(document: Document): Promise<{ insertedId: unknown }>;
   findOne(filter: Filter): Promise<Document | null>;
   countDocuments(filter: Filter): Promise<number>;
+  updateOne(filter: Filter, update: Document): Promise<{ matchedCount: number }>;
   createIndex(keys: Readonly<Record<string, 1 | -1>>, options?: Readonly<Record<string, unknown>>): Promise<string>;
   dropIndex(index: string): Promise<void>;
 }
@@ -133,6 +149,8 @@ export interface AccountStore {
   authenticate(context: unknown, credentials: SignIn): Promise<AccountRecord | undefined>;
   /** The account an actor names, for a surface already holding a session: never a way to look for one. */
   read(context: unknown, id: string): Promise<AccountRecord | undefined>;
+  /** Grants or revokes Control presentation for the named account. Nothing for an identifier no account holds. */
+  grantControl(context: unknown, id: string, granted: boolean): Promise<AccountRecord | undefined>;
 }
 
 export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore {
@@ -169,6 +187,9 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
       displayName: found['displayName'],
       role: found['role'],
       createdAt: found['createdAt'],
+      // Absent on a document written before this flag existed. Reading it back as not holding it is the
+      // migration: nothing anywhere is granted Control presentation by upgrading, only by being granted it.
+      controlPresentation: found['controlPresentation'] ?? false,
     });
     if (!parsed.ok) {
       const problems = parsed.problems.map((problem) => `${problem.path} ${problem.message}`).join('; ');
@@ -187,6 +208,8 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
         displayName: claim.displayName,
         role: 'admin',
         createdAt: options.now(),
+        // Explicit, not implicit: the founder is Admin by role, and Admin does not carry this by being it.
+        controlPresentation: false,
       });
       if (!parsed.ok) {
         const problems = parsed.problems.map((problem) => `${problem.path} ${problem.message}`).join('; ');
@@ -203,6 +226,7 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
           displayName: record.displayName,
           role: record.role,
           createdAt: record.createdAt,
+          controlPresentation: record.controlPresentation,
           credential,
           founder: true,
         });
@@ -227,6 +251,15 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
     async read(context, id) {
       permit(context, 'read');
       const found = await db.collection(ACCOUNTS_COLLECTION).findOne({ _id: id });
+      return found === null ? undefined : readBack(found);
+    },
+
+    async grantControl(context, id, granted) {
+      permit(context, 'update');
+      const rows = db.collection(ACCOUNTS_COLLECTION);
+      const { matchedCount } = await rows.updateOne({ _id: id }, { $set: { controlPresentation: granted } });
+      if (matchedCount === 0) return undefined;
+      const found = await rows.findOne({ _id: id });
       return found === null ? undefined : readBack(found);
     },
 

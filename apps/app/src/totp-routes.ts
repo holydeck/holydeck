@@ -29,8 +29,11 @@ import { notFound } from './failures.js';
 import { TotpError, totpContext } from './totp.js';
 
 import type { AuditAction } from './audit.js';
+import type { RouteNeed } from './authorization.js';
 import type { Identity } from './onboarding.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+
+const SESSION: RouteNeed = { kind: 'session' };
 
 /** A code that did not match: a wrong digit, a code already spent, and a code for nothing, in one answer. */
 export const TOTP_REFUSED = 'auth.totp_refused';
@@ -70,7 +73,12 @@ export function serveTotpRoutes(app: FastifyInstance, { identity }: TotpRoutesOp
   // them among the changes it covers rather than leaving four holes that appear only in some deployments.
   if (identity === undefined) {
     for (const [method, url] of ROUTES) {
-      app.route({ method, url, handler: (request, reply) => reply.code(404).send(notFound(request)) });
+      app.route({
+        method,
+        url,
+        config: { need: SESSION },
+        handler: (request, reply) => reply.code(404).send(notFound(request)),
+      });
     }
     return;
   }
@@ -113,7 +121,7 @@ export function serveTotpRoutes(app: FastifyInstance, { identity }: TotpRoutesOp
   const stateRefusal = (error: unknown, kind: 'state' | 'duplicate'): boolean =>
     error instanceof TotpError && error.kind === kind;
 
-  app.post(TOTP_PATH, async (request, reply) => {
+  app.post(TOTP_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const correlation = correlationFor(TOTP_PREFIX, request.id);
@@ -143,7 +151,7 @@ export function serveTotpRoutes(app: FastifyInstance, { identity }: TotpRoutesOp
       );
   });
 
-  app.post(TOTP_VERIFICATION_PATH, async (request, reply) => {
+  app.post(TOTP_VERIFICATION_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const presented = parseSecondFactor(request.body);
@@ -162,7 +170,7 @@ export function serveTotpRoutes(app: FastifyInstance, { identity }: TotpRoutesOp
     return reply.send(successEnvelope({ recoveryCodes: codes }, request.id, CLIENT_WINDOW.current));
   });
 
-  app.post(TOTP_RECOVERY_PATH, async (request, reply) => {
+  app.post(TOTP_RECOVERY_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const correlation = correlationFor(TOTP_PREFIX, request.id);
@@ -177,7 +185,7 @@ export function serveTotpRoutes(app: FastifyInstance, { identity }: TotpRoutesOp
     return reply.send(successEnvelope({ recoveryCodes: codes }, request.id, CLIENT_WINDOW.current));
   });
 
-  app.delete(TOTP_PATH, async (request, reply) => {
+  app.delete(TOTP_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const revoked = await identity.totp.revoke(totpContext(correlationFor(TOTP_PREFIX, request.id)), id);

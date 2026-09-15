@@ -31,6 +31,13 @@ export const memoryAccounts = (): { rows: Map<string, Document>; db: AccountDb; 
     },
     findOne: async (filter) => [...rows.values()].find((row) => matches(row, filter)) ?? null,
     countDocuments: async (filter) => [...rows.values()].filter((row) => matches(row, filter)).length,
+    updateOne: async (filter, update) => {
+      const row = [...rows.values()].find((candidate) => matches(candidate, filter));
+      if (row === undefined) return { matchedCount: 0 };
+      const set = update['$set'] as Document | undefined;
+      if (set !== undefined) rows.set(String(row['_id']), { ...row, ...set });
+      return { matchedCount: 1 };
+    },
     createIndex: async () => 'created',
     dropIndex: async () => undefined,
   };

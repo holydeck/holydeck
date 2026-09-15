@@ -4,6 +4,7 @@ import {
   ACCOUNT_ID_BYTES,
   ACCOUNT_NAME,
   ACCOUNT_ROLES,
+  ACCOUNTS_PATH,
   DISPLAY_NAME,
   ONBOARDING_PATH,
   PASSWORD,
@@ -13,6 +14,7 @@ import {
   isAccountName,
   onboardingOffer,
   parseAccountRecord,
+  parseControlGrant,
   parseInstanceClaim,
   parseSignIn,
   passwordProblem,
@@ -29,6 +31,7 @@ const RECORD: AccountRecord = {
   displayName: 'Andru Tharmarajah',
   role: 'admin',
   createdAt: '2026-09-13T09:30:00.000Z',
+  controlPresentation: false,
 };
 
 const CLAIM = { name: 'Andru ', displayName: ' Andru Tharmarajah ', password: 'a-long-enough-passphrase' };
@@ -86,6 +89,23 @@ describe('what an account is', () => {
       'account.displayName',
       'account.role',
       'account.createdAt',
+      'account.controlPresentation',
+    ]);
+  });
+
+  // Control presentation is administered on its own, apart from the three roles: an account carries
+  // whether it holds it as plainly as it carries its role, and neither an admin nor an editor is read as
+  // holding it just because a record happens to say so about their role.
+  it('carries whether it holds Control presentation, independently of its role', () => {
+    const grantedRecord = { ...RECORD, controlPresentation: true };
+    expect(parseAccountRecord(grantedRecord)).toEqual({ ok: true, value: grantedRecord });
+    expect(parseAccountRecord(RECORD)).toEqual({ ok: true, value: RECORD });
+  });
+
+  it('refuses a record whose Control presentation flag is not a plain boolean', () => {
+    const parsed = parseAccountRecord({ ...RECORD, controlPresentation: 'yes' });
+    expect(!parsed.ok && parsed.problems).toEqual([
+      { path: 'account.controlPresentation', code: FIELD_CODES.notABoolean, message: 'must be true or false' },
     ]);
   });
 
@@ -262,6 +282,38 @@ describe('signing in', () => {
     expect(parseSignIn({ name: '_andru_', password: 'a-passphrase-worth-typing' })).toEqual({
       ok: true,
       value: { name: '_andru_', password: 'a-passphrase-worth-typing' },
+    });
+  });
+});
+
+describe('granting or revoking Control presentation', () => {
+  it('is administered at one path, under the account it is granted or revoked for', () => {
+    expect(ACCOUNTS_PATH).toBe('/api/v1/accounts');
+  });
+
+  it('reads whether it is granted, and only that', () => {
+    expect(parseControlGrant({ granted: true })).toEqual({ ok: true, value: { granted: true } });
+    expect(parseControlGrant({ granted: false })).toEqual({ ok: true, value: { granted: false } });
+  });
+
+  it('refuses a body that is not an object before it looks for a field in one', () => {
+    expect(parseControlGrant('yes')).toEqual({
+      ok: false,
+      problems: [{ path: 'grant', code: FIELD_CODES.notAnObject, message: 'must be an object' }],
+    });
+  });
+
+  it('refuses a grant that does not say whether it is one', () => {
+    expect(parseControlGrant({})).toEqual({
+      ok: false,
+      problems: [{ path: 'grant.granted', code: FIELD_CODES.required, message: 'is required' }],
+    });
+  });
+
+  it('refuses a granted flag that is not a plain boolean', () => {
+    expect(parseControlGrant({ granted: 'true' })).toEqual({
+      ok: false,
+      problems: [{ path: 'grant.granted', code: FIELD_CODES.notABoolean, message: 'must be true or false' }],
     });
   });
 });
