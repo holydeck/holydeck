@@ -214,6 +214,7 @@ describe('signing in', () => {
       'role',
       'createdAt',
       'controlPresentation',
+      'disabled',
     ]);
   });
 
@@ -255,6 +256,13 @@ describe('signing in', () => {
     await expect(store.authenticate(FIRST_RUN, { name: CLAIM.name, password: PASSWORD })).rejects.toMatchObject({
       kind: 'schema',
     });
+  });
+
+  test('a disabled account is refused even with its own correct password, distinctly from one merely wrong', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await expect(store.authenticate(FIRST_RUN, { name: CLAIM.name, password: PASSWORD })).resolves.toEqual(claimed);
+    await store.disable(FIRST_RUN, claimed.id);
+    await expect(store.authenticate(FIRST_RUN, { name: CLAIM.name, password: PASSWORD })).resolves.toBeUndefined();
   });
 
   test('signing in reads an account, and is refused without a context or without the permission to', async () => {
@@ -342,5 +350,116 @@ describe('administering Control presentation apart from role', () => {
     await expect(store.grantControl(undefined, 'B'.repeat(22), true)).rejects.toBeInstanceOf(AccountError);
     const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.read] };
     await expect(store.grantControl(blind, 'B'.repeat(22), true)).rejects.toMatchObject({ kind: 'permission' });
+  });
+});
+
+describe('creating an account beyond the one the founder claims', () => {
+  const NEW_ACCOUNT = {
+    name: 'priya',
+    displayName: 'Priya Nair',
+    password: 'another-long-passphrase',
+    role: 'editor' as const,
+  };
+
+  test('creates an account of the role asked, neither founder nor disabled', async () => {
+    const record = await store.create(FIRST_RUN, NEW_ACCOUNT);
+    expect(record).toMatchObject({ name: 'priya', displayName: 'Priya Nair', role: 'editor', disabled: false });
+    expect(storedAccounts(rows).find((row) => row['_id'] === record.id)).toMatchObject({ founder: false });
+  });
+
+  test('keeps a derived credential for the account it creates, the same as claim does', async () => {
+    const record = await store.create(FIRST_RUN, NEW_ACCOUNT);
+    const stored = storedAccounts(rows).find((row) => row['_id'] === record.id);
+    expect(String(stored?.['credential'])).toMatch(/^scrypt\$/u);
+  });
+
+  test('refuses a name another created account already holds, as a duplicate rather than a claimed instance', async () => {
+    await store.create(FIRST_RUN, NEW_ACCOUNT);
+    const again = store.create(FIRST_RUN, { ...NEW_ACCOUNT, displayName: 'Someone Else' });
+    await expect(again).rejects.toBeInstanceOf(AccountError);
+    await expect(again).rejects.toMatchObject({ kind: 'duplicate' });
+    expect(await store.count(FIRST_RUN)).toBe(1);
+  });
+
+  test('refuses a name the founder itself already holds', async () => {
+    await store.claim(FIRST_RUN, CLAIM);
+    await expect(store.create(FIRST_RUN, { ...NEW_ACCOUNT, name: CLAIM.name })).rejects.toMatchObject({
+      kind: 'duplicate',
+    });
+  });
+
+  test('an account it would not read back as an account, before it writes one', async () => {
+    await expect(store.create(FIRST_RUN, { ...NEW_ACCOUNT, name: 'Priya' })).rejects.toMatchObject({ kind: 'schema' });
+    expect(rows.size).toBe(0);
+  });
+
+  test('a failure the database raised for some other reason, which is not a name already taken', async () => {
+    const broken = accountsOn(
+      { collection: () => ({ ...memoryAccounts().db.collection(ACCOUNTS_COLLECTION), insertOne: () => Promise.reject(new Error('the database is not there')) }) },
+      { now: () => NOW, hash: weakly },
+    );
+    await expect(broken.create(FIRST_RUN, NEW_ACCOUNT)).rejects.toThrow('the database is not there');
+  });
+
+  test('is a write, and is refused without a context or without the permission to make one', async () => {
+    await expect(store.create(undefined, NEW_ACCOUNT)).rejects.toBeInstanceOf(AccountError);
+    const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.read] };
+    await expect(store.create(blind, NEW_ACCOUNT)).rejects.toMatchObject({ kind: 'permission' });
+  });
+});
+
+describe('closing an account, and reopening it', () => {
+  test('is closed without being deleted or renamed, and a later read carries that', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await expect(store.disable(FIRST_RUN, claimed.id)).resolves.toMatchObject({ id: claimed.id, disabled: true });
+    await expect(store.read(FIRST_RUN, claimed.id)).resolves.toMatchObject({
+      disabled: true,
+      name: claimed.name,
+      displayName: claimed.displayName,
+    });
+  });
+
+  test('is reopened the same way it is closed', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await store.disable(FIRST_RUN, claimed.id);
+    await expect(store.restore(FIRST_RUN, claimed.id)).resolves.toMatchObject({ disabled: false });
+  });
+
+  test('a document written before the flag existed reads back as not closed, not as a defect', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    const [stored] = storedAccounts(rows);
+    const legacy = Object.fromEntries(Object.entries(stored ?? {}).filter(([field]) => field !== 'disabled'));
+    rows.set(claimed.id, legacy);
+    await expect(store.read(FIRST_RUN, claimed.id)).resolves.toMatchObject({ disabled: false });
+  });
+
+  test('answers nothing for an identifier no account holds, either way, which is not a defect', async () => {
+    await expect(store.disable(FIRST_RUN, 'B'.repeat(22))).resolves.toBeUndefined();
+    await expect(store.restore(FIRST_RUN, 'B'.repeat(22))).resolves.toBeUndefined();
+  });
+
+  test('is a write, and is refused without a context or without the permission to make one', async () => {
+    await expect(store.disable(undefined, 'B'.repeat(22))).rejects.toBeInstanceOf(AccountError);
+    const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.read] };
+    await expect(store.disable(blind, 'B'.repeat(22))).rejects.toMatchObject({ kind: 'permission' });
+    await expect(store.restore(blind, 'B'.repeat(22))).rejects.toMatchObject({ kind: 'permission' });
+  });
+});
+
+describe('reassigning which of the three roles an account holds', () => {
+  test('is granted, and a later read answers with the new role', async () => {
+    const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await expect(store.assignRole(FIRST_RUN, claimed.id, 'member')).resolves.toMatchObject({ role: 'member' });
+    await expect(store.read(FIRST_RUN, claimed.id)).resolves.toMatchObject({ role: 'member' });
+  });
+
+  test('answers nothing for an identifier no account holds, which is not a defect', async () => {
+    await expect(store.assignRole(FIRST_RUN, 'B'.repeat(22), 'editor')).resolves.toBeUndefined();
+  });
+
+  test('is a write, and is refused without a context or without the permission to make one', async () => {
+    await expect(store.assignRole(undefined, 'B'.repeat(22), 'editor')).rejects.toBeInstanceOf(AccountError);
+    const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.read] };
+    await expect(store.assignRole(blind, 'B'.repeat(22), 'editor')).rejects.toMatchObject({ kind: 'permission' });
   });
 });

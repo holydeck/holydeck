@@ -38,9 +38,13 @@ export const AUDIT_ACTIONS = [
   'passkey.name',
   'passkey.use',
   'passkey.revoke',
-  // Granting or revoking Control presentation, apart from the three roles. Nothing else an account holder
-  // is administered into yet has a trail of its own — role reassignment is a later release's.
+  // Granting or revoking Control presentation, apart from the three roles. An account being created,
+  // closed, reopened, or reassigned which of the three roles it holds has its own entry beside this one.
   'account.control',
+  'account.create',
+  'account.disable',
+  'account.restore',
+  'account.role',
   // A browser-container gaining a second (or third) authenticated slot, and the container's own pointer
   // moving between the slots it already holds. Neither entry ever carries a permission or a token.
   'session.slot.add',

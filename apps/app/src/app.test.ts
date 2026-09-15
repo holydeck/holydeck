@@ -83,6 +83,11 @@ describe('every route that changes something', () => {
       // The first route a permission gates, and not merely a proved session — still counted here, because
       // the guard it is behind is asked before the permission is.
       { method: 'PATCH', url: `${ACCOUNTS_PATH}/:id/control-presentation` },
+      // Behind the same permission: creating an account, closing or reopening one, and reassigning its
+      // role are all administration's, the same as granting or revoking Control presentation is.
+      { method: 'POST', url: ACCOUNTS_PATH },
+      { method: 'PATCH', url: `${ACCOUNTS_PATH}/:id/status` },
+      { method: 'PATCH', url: `${ACCOUNTS_PATH}/:id/role` },
       // Behind the same permission as the route above: issuing or revoking a Guest's invitation or an
       // output window's capability is Control presentation's, not merely a proved session's.
       { method: 'POST', url: GUEST_INVITATION_PATH },

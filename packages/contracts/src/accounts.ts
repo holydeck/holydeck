@@ -95,6 +95,8 @@ export interface AccountRecord {
   readonly createdAt: string;
   /** Administered on its own, apart from the three roles. Neither admin nor editor holds it implicitly. */
   readonly controlPresentation: boolean;
+  /** Not deleted, not renamed, kept in every other respect — this is the entire distinction of being closed. */
+  readonly disabled: boolean;
 }
 
 export function parseAccountRecord(value: unknown): Parsed<AccountRecord> {
@@ -106,6 +108,7 @@ export function parseAccountRecord(value: unknown): Parsed<AccountRecord> {
       role: reader.choice('role', ACCOUNT_ROLES),
       createdAt: reader.time('createdAt'),
       controlPresentation: reader.flag('controlPresentation'),
+      disabled: reader.flag('disabled'),
     };
     if (record.id !== '' && !isAccountId(record.id)) {
       reader.reject('id', FIELD_CODES.notAllowed, 'must be an opaque identifier this server issued');
@@ -122,6 +125,60 @@ export interface ControlGrant {
 
 export function parseControlGrant(value: unknown): Parsed<ControlGrant> {
   return parseObject(value, 'grant', (reader) => ({ granted: reader.flag('granted') }));
+}
+
+/** What an Admin creating an account beyond the one founder `claim()` made is asked for: a claim, plus a role. */
+export interface CreateAccount {
+  readonly name: string;
+  readonly displayName: string;
+  readonly password: string;
+  readonly role: AccountRole;
+}
+
+/**
+ * Graded exactly as `parseInstanceClaim` grades a first run's claim — the same handle, display name and
+ * password rules — because an account made here is subject to no laxer a rule than one made by claiming.
+ * Not `parseInstanceClaim` itself: that function is the onboarding claim, one account with one fixed role,
+ * and this one is a sibling for a different operation, an Admin naming the role a new account gets.
+ */
+export function parseCreateAccount(value: unknown): Parsed<CreateAccount> {
+  return parseObject(value, 'newAccount', (reader) => {
+    const typedName = reader.text('name');
+    const name = typedName.trim().toLowerCase();
+    if (typedName !== '' && !isAccountName(name)) reader.reject('name', FIELD_CODES.notAllowed, NAME_RULE);
+    const typedDisplayName = reader.text('displayName');
+    const displayName = typedDisplayName.trim();
+    if (typedDisplayName !== '' && displayName === '') {
+      reader.reject('displayName', FIELD_CODES.empty, 'must not be only spaces');
+    }
+    if (characters(displayName) > DISPLAY_NAME.maximum) {
+      reader.reject('displayName', FIELD_CODES.notAllowed, `must be at most ${DISPLAY_NAME.maximum} characters`);
+    }
+    const typedPassword = reader.text('password');
+    const password = typedPassword.normalize('NFKC');
+    const problem = typedPassword === '' ? undefined : passwordProblem(password);
+    if (problem !== undefined) reader.reject('password', problem.code, problem.message);
+    const role = reader.choice('role', ACCOUNT_ROLES);
+    return { name, displayName, password, role };
+  });
+}
+
+/** What closing an account or reopening it takes: the one flag that says which it now is. */
+export interface AccountStatus {
+  readonly disabled: boolean;
+}
+
+export function parseAccountStatus(value: unknown): Parsed<AccountStatus> {
+  return parseObject(value, 'status', (reader) => ({ disabled: reader.flag('disabled') }));
+}
+
+/** What reassigning an account's role takes: the one role it now holds, out of the three this system names. */
+export interface RoleAssignment {
+  readonly role: AccountRole;
+}
+
+export function parseRoleAssignment(value: unknown): Parsed<RoleAssignment> {
+  return parseObject(value, 'roleAssignment', (reader) => ({ role: reader.choice('role', ACCOUNT_ROLES) }));
 }
 
 /** What a first run is asked for: a handle to sign in under, a name to show, and a password. */

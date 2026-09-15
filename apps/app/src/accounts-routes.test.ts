@@ -1,6 +1,6 @@
 import { ACCOUNTS_PATH, actorFor } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
-import { VALIDATION_FAILED } from '@holydeck/contracts/http';
+import { UNEXPECTED_ERROR, VALIDATION_FAILED } from '@holydeck/contracts/http';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -43,6 +43,12 @@ const CLAIM = { name: 'lucia', displayName: 'Lucia Brandt', password: 'a-long-en
 
 const controlPath = (id: string): string => `${ACCOUNTS_PATH}/${id}/control-presentation`;
 
+const statusPath = (id: string): string => `${ACCOUNTS_PATH}/${id}/status`;
+
+const rolePath = (id: string): string => `${ACCOUNTS_PATH}/${id}/role`;
+
+const NEW_ACCOUNT = { name: 'nuwan', displayName: 'Nuwan Perera', password: 'a-long-enough-passphrase', role: 'editor' };
+
 let app: FastifyInstance;
 let sessions: SessionStore;
 let trail: FakeDb;
@@ -70,12 +76,32 @@ const asking = (url: string, payload: unknown, held: StartedSession = admin) =>
     payload: payload as InjectOptions['payload'],
   });
 
+const posting = (url: string, payload: unknown, held: StartedSession = admin) =>
+  app.inject({
+    method: 'POST',
+    url,
+    headers: {
+      [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
+      host: HOST,
+      'x-forwarded-proto': 'https',
+      origin: ORIGIN,
+      cookie: sessionCookie(held.token, 60),
+      [CSRF_HEADER]: held.record.csrf,
+    },
+    payload: payload as InjectOptions['payload'],
+  });
+
+// The founder always takes the first identifier this fixture hands out, so every existing test that
+// names the founder by `ID` keeps naming the same account; an account this suite creates takes the next.
+let nextIds: string[];
+
 beforeEach(async () => {
   trail = fakeDb();
   sessions = sessionsOn(memorySessions().db, { now });
+  nextIds = [ID, 'D'.repeat(22), 'E'.repeat(22), 'F'.repeat(22)];
   const accounts = accountsOn(memoryAccounts().db, {
     now,
-    newId: () => ID,
+    newId: () => nextIds.shift() ?? 'Y'.repeat(22),
     hash: async (password) => `test-hash:${password}`,
     verify: async (password, stored) => stored === `test-hash:${password}`,
   });
@@ -129,9 +155,107 @@ describe('granting and revoking Control presentation', () => {
   });
 });
 
-describe('who may ask it', () => {
-  test('every route here changes something, and so it is behind the guard', () => {
-    expect(mutatingRoutesOf(app)).toEqual([{ method: 'PATCH', url: controlPath(':id') }]);
+describe('creating an account beyond the one the founder claims', () => {
+  test('creates an account of the role asked, and never answers with the credential', async () => {
+    const response = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data).toMatchObject({
+      name: 'nuwan',
+      displayName: 'Nuwan Perera',
+      role: 'editor',
+      disabled: false,
+    });
+    expect(JSON.stringify(response.json().data)).not.toContain('credential');
+  });
+
+  test('refuses a name another account already holds, as a field problem rather than a new status code', async () => {
+    const response = await posting(ACCOUNTS_PATH, { ...NEW_ACCOUNT, name: CLAIM.name });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+    expect(response.json().error.fields[0].path).toBe('name');
+  });
+
+  test('a body that is not a valid new account is said plainly', async () => {
+    const response = await posting(ACCOUNTS_PATH, { ...NEW_ACCOUNT, role: 'archbishop' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+    expect(response.json().error.fields[0].path).toBe('newAccount.role');
+  });
+
+  test('a failure the store did not name as a duplicate is this server’s own, not a name refused', async () => {
+    identity = { ...identity, accounts: { ...identity.accounts, create: () => Promise.reject(new Error('the store is unreachable')) } };
+    await app.close();
+    app = Fastify({ logger: false });
+    withSafeErrors(app);
+    guardMutations(app, { sessions });
+    enforceAuthorization(app, { sessions });
+    serveAccountRoutes(app, { identity });
+    await app.ready();
+    const response = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    expect(response.statusCode).toBe(500);
+    expect(response.json().error.code).toBe(UNEXPECTED_ERROR);
+  });
+});
+
+describe('closing an account, and reopening it', () => {
+  test('disables the account named, and a later read answers with that', async () => {
+    const created = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    const id = created.json().data.id as string;
+    const response = await asking(statusPath(id), { disabled: true });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ id, disabled: true });
+  });
+
+  test('restores it the same way, when asked for disabled: false', async () => {
+    const created = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    const id = created.json().data.id as string;
+    await asking(statusPath(id), { disabled: true });
+    const response = await asking(statusPath(id), { disabled: false });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ id, disabled: false });
+  });
+
+  test('answers not-found for an account nothing holds', async () => {
+    const response = await asking(statusPath(UNKNOWN_ID), { disabled: true });
+    expect(response.statusCode).toBe(404);
+  });
+
+  test('a body that is not a status is said plainly', async () => {
+    const response = await asking(statusPath(ID), { disabled: 'yes' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.fields[0].path).toBe('status.disabled');
+  });
+});
+
+describe('reassigning an account’s role', () => {
+  test('assigns the role asked, and a later read answers with that', async () => {
+    const created = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    const id = created.json().data.id as string;
+    const response = await asking(rolePath(id), { role: 'member' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ id, role: 'member' });
+  });
+
+  test('answers not-found for an account nothing holds', async () => {
+    const response = await asking(rolePath(UNKNOWN_ID), { role: 'member' });
+    expect(response.statusCode).toBe(404);
+  });
+
+  test('a body that is not a role assignment is said plainly', async () => {
+    const response = await asking(rolePath(ID), { role: 'archbishop' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.fields[0].path).toBe('roleAssignment.role');
+  });
+});
+
+describe('who may ask any of it', () => {
+  test('every route here changes something, and so every one is behind the guard', () => {
+    expect(mutatingRoutesOf(app)).toEqual([
+      { method: 'PATCH', url: controlPath(':id') },
+      { method: 'POST', url: ACCOUNTS_PATH },
+      { method: 'PATCH', url: statusPath(':id') },
+      { method: 'PATCH', url: rolePath(':id') },
+    ]);
   });
 
   test('refuses a request that carries no session at all', async () => {
@@ -144,11 +268,17 @@ describe('who may ask it', () => {
     expect(response.statusCode).toBe(401);
   });
 
-  test('refuses a session that carries no accounts.manage permission, however the client hid the control', async () => {
+  test('refuses a session that carries no accounts.manage permission, for every route here', async () => {
     const guest = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [] });
-    const response = await asking(controlPath(ID), { granted: true }, guest);
-    expect(response.statusCode).toBe(403);
-    expect(response.json().error.code).toBe(FORBIDDEN);
+    for (const response of [
+      await asking(controlPath(ID), { granted: true }, guest),
+      await posting(ACCOUNTS_PATH, NEW_ACCOUNT, guest),
+      await asking(statusPath(ID), { disabled: true }, guest),
+      await asking(rolePath(ID), { role: 'member' }, guest),
+    ]) {
+      expect(response.statusCode).toBe(403);
+      expect(response.json().error.code).toBe(FORBIDDEN);
+    }
   });
 });
 
@@ -163,6 +293,32 @@ describe('the trail this route writes', () => {
     await asking(controlPath(UNKNOWN_ID), { granted: true });
     expect(entries()).toEqual([]);
   });
+
+  test('records who created an account, and for which new account', async () => {
+    const response = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    expect(actions()).toEqual(['account.create']);
+    expect(entries()[0]).toMatchObject({
+      actor: ADMINISTRATOR,
+      subject: actorFor(response.json().data.id as string),
+      outcome: 'allowed',
+    });
+  });
+
+  test('records that an account was disabled, and separately that one was restored', async () => {
+    const created = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    const id = created.json().data.id as string;
+    await asking(statusPath(id), { disabled: true });
+    await asking(statusPath(id), { disabled: false });
+    expect(actions()).toEqual(['account.create', 'account.disable', 'account.restore']);
+  });
+
+  test('names the role an account was assigned in the entry’s detail', async () => {
+    const created = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    const id = created.json().data.id as string;
+    await asking(rolePath(id), { role: 'member' });
+    expect(actions()).toEqual(['account.create', 'account.role']);
+    expect(entries()[1]).toMatchObject({ detail: 'now member' });
+  });
 });
 
 describe('what this surface refuses to answer at all', () => {
@@ -176,11 +332,13 @@ describe('what this surface refuses to answer at all', () => {
     return built;
   };
 
-  test('a deployment that keeps no accounts serves the path, and answers not-found from it', async () => {
+  test('a deployment that keeps no accounts serves every path, and answers not-found from each', async () => {
     await app.close();
     app = await serving(undefined);
-    const response = await asking(controlPath(ID), { granted: true });
-    expect(response.statusCode).toBe(404);
+    expect((await asking(controlPath(ID), { granted: true })).statusCode).toBe(404);
+    expect((await posting(ACCOUNTS_PATH, NEW_ACCOUNT)).statusCode).toBe(404);
+    expect((await asking(statusPath(ID), { disabled: true })).statusCode).toBe(404);
+    expect((await asking(rolePath(ID), { role: 'member' })).statusCode).toBe(404);
   });
 
   test('a trail that refuses an entry does not cost the account the grant', async () => {

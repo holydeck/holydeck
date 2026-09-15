@@ -13,6 +13,7 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
   role,
   createdAt: '2026-09-13T09:30:00.000Z',
   controlPresentation,
+  disabled: false,
 });
 
 describe('what a role grants', () => {

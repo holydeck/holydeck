@@ -14,8 +14,11 @@ import {
   isAccountName,
   onboardingOffer,
   parseAccountRecord,
+  parseAccountStatus,
   parseControlGrant,
+  parseCreateAccount,
   parseInstanceClaim,
+  parseRoleAssignment,
   parseSignIn,
   passwordProblem,
 } from './accounts.js';
@@ -32,6 +35,7 @@ const RECORD: AccountRecord = {
   role: 'admin',
   createdAt: '2026-09-13T09:30:00.000Z',
   controlPresentation: false,
+  disabled: false,
 };
 
 const CLAIM = { name: 'Andru ', displayName: ' Andru Tharmarajah ', password: 'a-long-enough-passphrase' };
@@ -90,6 +94,7 @@ describe('what an account is', () => {
       'account.role',
       'account.createdAt',
       'account.controlPresentation',
+      'account.disabled',
     ]);
   });
 
@@ -315,5 +320,102 @@ describe('granting or revoking Control presentation', () => {
       ok: false,
       problems: [{ path: 'grant.granted', code: FIELD_CODES.notABoolean, message: 'must be true or false' }],
     });
+  });
+});
+
+describe('creating an account beyond the one the founder claims', () => {
+  it('takes a handle, a name to show, a password and a role, graded the same as a claim', () => {
+    const parsed = parseCreateAccount({ ...CLAIM, role: 'editor' });
+    expect(parsed.ok && parsed.value).toEqual({
+      name: 'andru',
+      displayName: 'Andru Tharmarajah',
+      password: 'a-long-enough-passphrase',
+      role: 'editor',
+    });
+  });
+
+  it('names every field it is missing at once, the role among them', () => {
+    const parsed = parseCreateAccount({});
+    expect(!parsed.ok && parsed.problems.map((problem) => problem.path)).toEqual([
+      'newAccount.name',
+      'newAccount.displayName',
+      'newAccount.password',
+      'newAccount.role',
+    ]);
+  });
+
+  it('refuses a role nothing grants, rather than reading it as the first one', () => {
+    const parsed = parseCreateAccount({ ...CLAIM, role: 'owner' });
+    expect(!parsed.ok && parsed.problems).toEqual([
+      { path: 'newAccount.role', code: FIELD_CODES.notAllowed, message: expect.any(String) },
+    ]);
+  });
+
+  it('refuses a handle no account may be signed in under, once, and says which field', () => {
+    const parsed = parseCreateAccount({ ...CLAIM, name: 'an', role: 'editor' });
+    expect(!parsed.ok && parsed.problems).toEqual([
+      { path: 'newAccount.name', code: FIELD_CODES.notAllowed, message: expect.any(String) },
+    ]);
+  });
+
+  it('refuses a password the deployment would not store, and says so as a field problem', () => {
+    const parsed = parseCreateAccount({ ...CLAIM, password: 'short', role: 'editor' });
+    expect(!parsed.ok && parsed.problems).toEqual([
+      { path: 'newAccount.password', code: FIELD_CODES.tooSmall, message: expect.any(String) },
+    ]);
+  });
+
+  it('refuses a name to show that is nothing but spaces, which is a name nobody would recognise', () => {
+    const parsed = parseCreateAccount({ ...CLAIM, displayName: '   ', role: 'editor' });
+    expect(!parsed.ok && parsed.problems).toEqual([
+      { path: 'newAccount.displayName', code: FIELD_CODES.empty, message: expect.any(String) },
+    ]);
+    const long = parseCreateAccount({ ...CLAIM, displayName: 'x'.repeat(DISPLAY_NAME.maximum + 1), role: 'editor' });
+    expect(!long.ok && long.problems).toEqual([
+      { path: 'newAccount.displayName', code: FIELD_CODES.notAllowed, message: expect.any(String) },
+    ]);
+  });
+});
+
+describe('closing an account, and reopening it', () => {
+  it('reads whether it is now closed, and only that', () => {
+    expect(parseAccountStatus({ disabled: true })).toEqual({ ok: true, value: { disabled: true } });
+    expect(parseAccountStatus({ disabled: false })).toEqual({ ok: true, value: { disabled: false } });
+  });
+
+  it('refuses a body that does not say whether it is closed', () => {
+    expect(parseAccountStatus({})).toEqual({
+      ok: false,
+      problems: [{ path: 'status.disabled', code: FIELD_CODES.required, message: 'is required' }],
+    });
+  });
+
+  it('refuses a disabled flag that is not a plain boolean', () => {
+    expect(parseAccountStatus({ disabled: 'yes' })).toEqual({
+      ok: false,
+      problems: [{ path: 'status.disabled', code: FIELD_CODES.notABoolean, message: 'must be true or false' }],
+    });
+  });
+});
+
+describe('reassigning which of the three roles an account holds', () => {
+  it('reads the role it is now assigned, and only that', () => {
+    for (const role of ACCOUNT_ROLES) {
+      expect(parseRoleAssignment({ role })).toEqual({ ok: true, value: { role } });
+    }
+  });
+
+  it('refuses a body that does not name a role', () => {
+    expect(parseRoleAssignment({})).toEqual({
+      ok: false,
+      problems: [{ path: 'roleAssignment.role', code: FIELD_CODES.required, message: 'is required' }],
+    });
+  });
+
+  it('refuses a role nothing grants, rather than reading it as the first one', () => {
+    const parsed = parseRoleAssignment({ role: 'owner' });
+    expect(!parsed.ok && parsed.problems).toEqual([
+      { path: 'roleAssignment.role', code: FIELD_CODES.notAllowed, message: expect.any(String) },
+    ]);
   });
 });

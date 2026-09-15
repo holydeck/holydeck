@@ -14,7 +14,7 @@ import { randomBytes } from 'node:crypto';
 import { contextProblems, requestContext } from './context.js';
 import { hashPassword, verifyPassword } from './credentials.js';
 
-import type { AccountRecord, InstanceClaim, SignIn } from '@holydeck/contracts/accounts';
+import type { AccountRecord, AccountRole, CreateAccount, InstanceClaim, SignIn } from '@holydeck/contracts/accounts';
 import type { Db } from 'mongodb';
 
 import type { RequestContext } from './context.js';
@@ -75,12 +75,13 @@ const CARRIED = new Set<string>([
   'role',
   'createdAt',
   'controlPresentation',
+  'disabled',
   '_id',
   'credential',
   'founder',
 ]);
 
-export type AccountRefusal = 'context' | 'permission' | 'schema' | 'claimed';
+export type AccountRefusal = 'context' | 'permission' | 'schema' | 'claimed' | 'duplicate';
 
 /** Carries why the call was refused, so a caller can tell a defect from an instance already claimed. */
 export class AccountError extends Error {
@@ -151,6 +152,14 @@ export interface AccountStore {
   read(context: unknown, id: string): Promise<AccountRecord | undefined>;
   /** Grants or revokes Control presentation for the named account. Nothing for an identifier no account holds. */
   grantControl(context: unknown, id: string, granted: boolean): Promise<AccountRecord | undefined>;
+  /** Administers a new account into being, beyond the one founder `claim()` made. Refuses a name in use. */
+  create(context: unknown, input: CreateAccount): Promise<AccountRecord>;
+  /** Closes an account: kept, not deleted, and no longer able to authenticate. Nothing for an unknown id. */
+  disable(context: unknown, id: string): Promise<AccountRecord | undefined>;
+  /** Reopens a closed account. Nothing for an unknown id. */
+  restore(context: unknown, id: string): Promise<AccountRecord | undefined>;
+  /** Reassigns which of the three roles an account holds. Nothing for an unknown id. */
+  assignRole(context: unknown, id: string, role: AccountRole): Promise<AccountRecord | undefined>;
 }
 
 export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore {
@@ -190,12 +199,28 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
       // Absent on a document written before this flag existed. Reading it back as not holding it is the
       // migration: nothing anywhere is granted Control presentation by upgrading, only by being granted it.
       controlPresentation: found['controlPresentation'] ?? false,
+      // Same precedent: an account written before this flag existed reads back as not disabled, not as a
+      // defect. Nothing is closed by upgrading, only by being closed.
+      disabled: found['disabled'] ?? false,
     });
     if (!parsed.ok) {
       const problems = parsed.problems.map((problem) => `${problem.path} ${problem.message}`).join('; ');
       throw new AccountError('schema', `an account this store cannot read back: ${problems}`);
     }
     return parsed.value;
+  };
+
+  /**
+   * The one write shape `grantControl`, `disable`, `restore` and `assignRole` all are: set a field on the
+   * account an id names, and answer nothing for an id nothing holds — including the id that stopped
+   * holding it between this write and the read straight after.
+   */
+  const applyUpdate = async (id: string, set: Document): Promise<AccountRecord | undefined> => {
+    const rows = db.collection(ACCOUNTS_COLLECTION);
+    const { matchedCount } = await rows.updateOne({ _id: id }, { $set: set });
+    if (matchedCount === 0) return undefined;
+    const found = await rows.findOne({ _id: id });
+    return found === null ? undefined : readBack(found);
   };
 
   const store: AccountStore = {
@@ -210,6 +235,7 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
         createdAt: options.now(),
         // Explicit, not implicit: the founder is Admin by role, and Admin does not carry this by being it.
         controlPresentation: false,
+        disabled: false,
       });
       if (!parsed.ok) {
         const problems = parsed.problems.map((problem) => `${problem.path} ${problem.message}`).join('; ');
@@ -227,6 +253,7 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
           role: record.role,
           createdAt: record.createdAt,
           controlPresentation: record.controlPresentation,
+          disabled: record.disabled,
           credential,
           founder: true,
         });
@@ -239,12 +266,54 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
       return record;
     },
 
+    async create(context, input) {
+      permit(context, 'create');
+      const id = newId();
+      const parsed = parseAccountRecord({
+        id,
+        name: input.name,
+        displayName: input.displayName,
+        role: input.role,
+        createdAt: options.now(),
+        controlPresentation: false,
+        disabled: false,
+      });
+      if (!parsed.ok) {
+        const problems = parsed.problems.map((problem) => `${problem.path} ${problem.message}`).join('; ');
+        throw new AccountError('schema', `an account this store would not read back: ${problems}`);
+      }
+      const record = parsed.value;
+      const credential = await hash(input.password);
+      try {
+        await db.collection(ACCOUNTS_COLLECTION).insertOne({
+          _id: record.id,
+          name: record.name,
+          displayName: record.displayName,
+          role: record.role,
+          createdAt: record.createdAt,
+          controlPresentation: record.controlPresentation,
+          disabled: record.disabled,
+          credential,
+          founder: false,
+        });
+      } catch (error: unknown) {
+        if ((error as { code?: unknown }).code === DUPLICATE_KEY) {
+          throw new AccountError('duplicate', `${actorFor(record.id)} was not created: another account already uses that name`);
+        }
+        throw error;
+      }
+      return record;
+    },
+
     async authenticate(context, credentials) {
       permit(context, 'read');
       const found = await db.collection(ACCOUNTS_COLLECTION).findOne({ name: credentials.name });
       const stored = typeof found?.['credential'] === 'string' ? found['credential'] : await measuredAgainstNobody();
       const matches = await verify(credentials.password, stored);
-      if (found === null || !matches) return undefined;
+      // Checked only after `verify` resolves, so a disabled account's attempt costs exactly what any other
+      // account's does — no new timing oracle telling an attacker "this handle exists but is disabled"
+      // faster or slower than "this password is wrong".
+      if (found === null || !matches || found['disabled'] === true) return undefined;
       return readBack(found);
     },
 
@@ -256,11 +325,22 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
 
     async grantControl(context, id, granted) {
       permit(context, 'update');
-      const rows = db.collection(ACCOUNTS_COLLECTION);
-      const { matchedCount } = await rows.updateOne({ _id: id }, { $set: { controlPresentation: granted } });
-      if (matchedCount === 0) return undefined;
-      const found = await rows.findOne({ _id: id });
-      return found === null ? undefined : readBack(found);
+      return applyUpdate(id, { controlPresentation: granted });
+    },
+
+    async disable(context, id) {
+      permit(context, 'update');
+      return applyUpdate(id, { disabled: true });
+    },
+
+    async restore(context, id) {
+      permit(context, 'update');
+      return applyUpdate(id, { disabled: false });
+    },
+
+    async assignRole(context, id, role) {
+      permit(context, 'update');
+      return applyUpdate(id, { role });
     },
 
     async claimed(context) {
