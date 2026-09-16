@@ -32,6 +32,8 @@ export const GUARDED_FILES = [
   'apps/app/src/slide-layouts.ts',
   'packages/contracts/src/layouts.test.ts',
   'packages/contracts/src/layouts.ts',
+  'packages/renderer/src/transparency.test.ts',
+  'packages/renderer/test/helpers/composite.ts',
 ];
 
 /** The bare noun, anywhere in a word, unless "service" is what comes before it however it was spaced. */
