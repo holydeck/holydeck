@@ -42,6 +42,18 @@ export class MeasurementUnavailableError extends Error {
   }
 }
 
+/**
+ * Answers come back matched to requests by position and by nothing else, so a batch that returned a
+ * different number of them would hand one box the size measured for another — a wrong font size on a wall,
+ * arrived at silently. There is no recovery from that, only a refusal.
+ */
+export class MeasurementMismatchError extends Error {
+  constructor(requested: number, measured: number) {
+    super(`text measurement sent ${requested} requests and got ${measured} measurements back`);
+    this.name = 'MeasurementMismatchError';
+  }
+}
+
 export interface MeasurementPage {
   setViewport: (viewport: { width: number; height: number; deviceScaleFactor: number }) => Promise<unknown>;
   setContent: (html: string) => Promise<unknown>;
@@ -147,9 +159,16 @@ export interface PuppeteerLaunchOptions {
 }
 
 /**
- * Deliberately a near-copy of `@holydeck/core`'s launcher rather than an import of it: core carries a
- * scraper, a datastore and a templating engine, and the offline presenter that consumes this package has
- * no business loading any of them. The shared part is twenty lines; the coupling would be permanent.
+ * Deliberately a near-copy of `@holydeck/core`'s `createPuppeteerLauncher` rather than an import of it,
+ * and not for weight: that module pulls in nothing at runtime but its own error messages, and puppeteer is
+ * externalized by tsup in both packages. The reason is the page. Core's `BrowserPage` is shaped for its
+ * scraper — `setUserAgent`, `goto`, an `evaluate` typed around a URL — and a `MeasurementPage` needs
+ * `setViewport`, `setContent` and a generic `evaluate`. Importing core's launcher would mean either
+ * widening a scraper-facing contract to carry a presentation-rendering concern, tying two domains that
+ * have no reason to move together, or casting the session to a shape it does not have.
+ *
+ * The tripwire: if a third package ever needs this launch logic, that is when it gets extracted to a
+ * shared home. Two is not enough to extract for.
  */
 export function createPuppeteerMeasurementLauncher(options: PuppeteerLaunchOptions = {}): MeasurementLauncher {
   return async (): Promise<MeasurementSession> => {
@@ -216,6 +235,7 @@ export function createBrowserTextMeasurer(options: BrowserTextMeasurerOptions = 
     measure: async (requests: readonly MeasureRequest[]): Promise<readonly TextMetrics[]> => {
       if (requests.length === 0) return [];
       const metrics = await (await ready()).evaluate(measureInPage, requests);
+      if (metrics.length !== requests.length) throw new MeasurementMismatchError(requests.length, metrics.length);
       return metrics.map((entry) => ({
         widthPx: rounded(entry.widthPx),
         heightPx: rounded(entry.heightPx),

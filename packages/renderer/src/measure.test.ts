@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fakePage, fakeSession, layoutDocument, withDocument } from '../test/helpers/page.js';
 import {
   MEASUREMENT_DOCUMENT,
+  MeasurementMismatchError,
   REFERENCE_VIEWPORT,
   createBrowserTextMeasurer,
   createPuppeteerMeasurementLauncher,
@@ -123,6 +124,32 @@ describe('measuring in a real document', () => {
     expect(joined?.lineCount).toBe(1);
     expect(joined?.widthPx).toBe(100);
     expect(blank?.lineCount).toBe(1);
+  });
+
+  // Answers are matched to requests by position and nothing else, so a batch that came back a different
+  // length would silently hand box two the size that was measured for box three. That is a wrong slide on
+  // a wall, and it has to be an error rather than a smaller number.
+  it('refuses a batch of answers that does not line up with the requests it sent', async () => {
+    // A page that answers every request but the first: the same shape a batch dropped in transit has.
+    const short = {
+      ...fakePage(),
+      evaluate: <A, R>(fn: (argument: A) => R, argument: A): Promise<Awaited<R>> =>
+        Promise.resolve(
+          (Array.isArray(argument) ? argument.slice(1) : []).map(() => ({
+            widthPx: 10,
+            heightPx: 10,
+            lineCount: 1,
+          })) as unknown as Awaited<R>,
+        ),
+    };
+    const measurer = createBrowserTextMeasurer({ launch: () => Promise.resolve(fakeSession(short)) });
+
+    await expect(measurer.measure([request(), request({ fontSizePx: 20 })])).rejects.toBeInstanceOf(
+      MeasurementMismatchError,
+    );
+    await expect(measurer.measure([request(), request({ fontSizePx: 20 })])).rejects.toThrow(
+      /2 requests.*1 measurement/u,
+    );
   });
 
   it('asks for no browser at all when there is nothing to measure', async () => {

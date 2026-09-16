@@ -54,7 +54,7 @@ describe('resolving an output profile', () => {
     expect(resolveOutputProfile({ outputType: 'main' }).aspectRatio).toEqual(DEFAULT_ASPECT_RATIO);
   });
 
-  it('lets the readable floor rise per output type and never fall', () => {
+  it('lets a service raise the readable floor and never lower it', () => {
     const defaults = { ...administrativeDefaults, byOutputType: { stream: { minimumReadableHeightRatio: 0.06 } } };
 
     expect(resolveOutputProfile({ outputType: 'stream', defaults }).minimumReadableHeightRatio).toBe(0.06);
@@ -66,6 +66,32 @@ describe('resolving an output profile', () => {
       resolveOutputProfile({ outputType: 'stream', defaults, service: { minimumReadableHeightRatio: 0.01 } })
         .minimumReadableHeightRatio,
     ).toBe(0.06);
+  });
+
+  // REND-01: "administration defines an absolute minimum readable size per output type". A type that was
+  // given its own number has been given its floor; the global default is what a type without one falls
+  // back to, not a second floor underneath it. A stage display an administrator deliberately set lower
+  // than the wall is a configuration, not a mistake to be silently corrected upwards.
+  it('honours a per-output-type floor below the global default rather than raising it', () => {
+    const defaults = { ...administrativeDefaults, byOutputType: { stage: { minimumReadableHeightRatio: 0.02 } } };
+
+    expect(defaults.minimumReadableHeightRatio).toBeGreaterThan(0.02);
+    expect(resolveOutputProfile({ outputType: 'stage', defaults }).minimumReadableHeightRatio).toBe(0.02);
+    expect(
+      resolveOutputProfile({ outputType: 'stage', defaults, service: { minimumReadableHeightRatio: 0.01 } })
+        .minimumReadableHeightRatio,
+    ).toBe(0.02);
+  });
+
+  // The service number is the one value in this file that arrives from outside administration, and it used
+  // to be the one value that reached the auto-fit ladder without ever having been validated.
+  it('refuses a service floor that is out of range instead of handing it to auto-fit', () => {
+    expect(() => resolveOutputProfile({ outputType: 'main', service: { minimumReadableHeightRatio: 0.75 } })).toThrow(
+      RenderConfigurationError,
+    );
+    expect(() =>
+      resolveOutputProfile({ outputType: 'main', service: { minimumReadableHeightRatio: Number.NaN } }),
+    ).toThrow(/minimum readable height ratio/u);
   });
 
   it('freezes what it resolved', () => {

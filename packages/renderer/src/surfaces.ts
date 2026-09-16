@@ -108,6 +108,8 @@ export function renderForSurface(
   prepared: PreparedRenderModel,
   options: SurfaceOptions = {},
 ): SurfaceRender {
+  // Exhaustive on purpose: a fifth surface added to RENDER_SURFACES and forgotten here fails `tsc` on the
+  // `never` below, rather than quietly being served an offline render.
   switch (surface) {
     case 'editor-preview':
       return renderEditorPreview(prepared, options);
@@ -115,7 +117,13 @@ export function renderForSurface(
       return renderThumbnail(prepared, options);
     case 'output-view':
       return renderOutputView(prepared, options);
-    default:
+    case 'offline-render':
       return renderOfflineRender(prepared);
+    /* v8 ignore start -- unreachable while the switch is exhaustive; it exists to make it stay that way */
+    default: {
+      const unreachable: never = surface;
+      throw new TypeError(`unknown render surface ${String(unreachable)}`);
+    }
+    /* v8 ignore stop */
   }
 }

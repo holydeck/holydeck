@@ -150,7 +150,17 @@ export interface OutputProfileRequest {
 
 /**
  * Administration, then this output type, then the service — each layer overriding the one before, except
- * the readable floor, which only ever rises.
+ * the readable floor, which a service may only ever raise.
+ *
+ * The floor is resolved the same way the other two are: the output type's own number when administration
+ * gave it one, the global default when it did not. §11.6 says administration "defines an absolute minimum
+ * readable size per output type", so a type that was configured has been given its floor — a stage display
+ * set deliberately lower than the wall is a configuration, not a number to be corrected upwards by the
+ * global default. What does not fall is the service layer on top of it.
+ *
+ * Every number that leaves here has been through its validator, the service's included: the resolved floor
+ * is what the auto-fit ladder steps down to, and a `NaN` or an out-of-range fraction reaching it is a loop
+ * that does not terminate rather than a configuration error anybody can read.
  */
 export function resolveOutputProfile({
   outputType,
@@ -159,13 +169,15 @@ export function resolveOutputProfile({
 }: OutputProfileRequest): ResolvedOutputProfile {
   const perType = defaults.byOutputType[outputType] ?? {};
   const floor = validateMinimumReadableHeightRatio(
-    Math.max(defaults.minimumReadableHeightRatio, perType.minimumReadableHeightRatio ?? 0),
+    perType.minimumReadableHeightRatio ?? defaults.minimumReadableHeightRatio,
   );
 
   return Object.freeze({
     outputType,
     aspectRatio: validateAspectRatio(service?.aspectRatio ?? perType.aspectRatio ?? defaults.aspectRatio),
     safeArea: validateSafeArea(service?.safeArea ?? perType.safeArea ?? defaults.safeArea),
-    minimumReadableHeightRatio: Math.max(floor, service?.minimumReadableHeightRatio ?? 0),
+    minimumReadableHeightRatio: validateMinimumReadableHeightRatio(
+      Math.max(floor, service?.minimumReadableHeightRatio ?? 0),
+    ),
   });
 }

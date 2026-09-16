@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { stubMeasurer } from '../test/helpers/measurer.js';
 import { LYRIC, lyricBox, songModel } from '../test/helpers/model.js';
-import { autoFitText, chooseFit, fitLadder } from './auto-fit.js';
+import { MAX_FIT_LADDER_RUNGS, autoFitText, chooseFit, fitLadder } from './auto-fit.js';
+import { RenderConfigurationError } from './output-profile.js';
 import { prepareRenderModel } from './render-model.js';
 import { renderPrepared } from './renderer.js';
 
@@ -22,6 +23,25 @@ describe('the auto-fit ladder', () => {
 
   it('holds only the minimum when the requested size is already below it', () => {
     expect(fitLadder({ requestedFontSizePx: 20, minimumFontSizePx: 44 })).toEqual([44]);
+  });
+
+  // A step that is zero, negative or not a number never walks the ladder down, and the loop that builds it
+  // used to have nothing to stop it: it span for half a minute and then died on an array length. Failing
+  // on the argument is the same defect reported in a hundredth of a second and in words.
+  it('refuses a step that cannot walk the ladder down rather than spinning on it', () => {
+    for (const stepPx of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => fitLadder({ requestedFontSizePx: 96, minimumFontSizePx: 40, stepPx })).toThrow(
+        RenderConfigurationError,
+      );
+    }
+  });
+
+  // A step finer than the precision every rung is rounded to descends by nothing at all, which is the same
+  // runaway wearing a plausible-looking number.
+  it('refuses a step too fine to reach the floor before the ladder runs away', () => {
+    expect(() => fitLadder({ requestedFontSizePx: 96, minimumFontSizePx: 40, stepPx: 0.001 })).toThrow(
+      new RegExp(String(MAX_FIT_LADDER_RUNGS), 'u'),
+    );
   });
 });
 

@@ -326,7 +326,9 @@ export async function prepareRenderModel({
         importance: box.importance,
         frame,
         text: outcome.text,
-        font: box.font,
+        // A copy, because the prepared model is deep-frozen on the way out and the caller's own font spec
+        // is not this package's to freeze.
+        font: { ...box.font },
         fontSizePx: outcome.fontSizePx,
         requestedFontSizePx: outcome.requestedFontSizePx,
         minimumFontSizePx: outcome.minimumFontSizePx,

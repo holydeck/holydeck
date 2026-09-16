@@ -7,9 +7,12 @@ import {
   DEFAULT_SAFE_AREA,
   PROVISIONAL_MINIMUM_READABLE_HEIGHT_RATIO,
   administrativeDefaults,
+  canvasFor,
+  safeAreaOf,
 } from './output-profile.js';
 import { RenderModelError, isPreparedTextBox, prepareRenderModel } from './render-model.js';
 import { renderPrepared } from './renderer.js';
+import { RENDER_SURFACES, renderForSurface } from './surfaces.js';
 
 const prepare = async (options: Parameters<typeof prepareRenderModel>[0]) => prepareRenderModel(options);
 
@@ -61,6 +64,18 @@ describe('aspect ratio and safe area are inputs, frozen at preparation', () => {
     await expect(prepare({ model, measurer: stubMeasurer() })).rejects.toThrow(/box lyric on slide slide-1/u);
   });
 
+  // Freezing is a promise this package makes about the model it returns, not a licence to freeze the
+  // caller's own objects on the way past.
+  it('freezes its own copy of a font spec and leaves the caller’s object alone', async () => {
+    const font = { family: 'Inter', weight: 600, sizeRatio: 0.09, lineHeight: 1.2 };
+    const prepared = await prepare({ model: songModel([lyricBox({ font })]), measurer: stubMeasurer() });
+
+    expect(Object.isFrozen(font)).toBe(false);
+    expect(Object.isFrozen(textBoxOf(prepared).font)).toBe(true);
+    expect(textBoxOf(prepared).font).toEqual(font);
+    expect(textBoxOf(prepared).font).not.toBe(font);
+  });
+
   it('freezes the resolved profile so nothing re-resolves it mid-render', async () => {
     const prepared = await prepare({ model: songModel(), measurer: stubMeasurer() });
 
@@ -70,6 +85,37 @@ describe('aspect ratio and safe area are inputs, frozen at preparation', () => {
     expect(() => {
       (prepared.profile as { aspectRatio: unknown }).aspectRatio = { width: 1, height: 1 };
     }).toThrow(TypeError);
+  });
+
+  // The point of the split between preparation and rendering: rendering may not reach for a default. A
+  // model prepared against numbers that are nothing like the module's must come out of every surface
+  // carrying its own numbers, so a rendering step that quietly re-resolved the defaults would be caught
+  // here rather than the next time somebody overrode a ratio.
+  it('renders the ratio, canvas, safe area and floor it was prepared with, not the module defaults', async () => {
+    const service = {
+      aspectRatio: { width: 4, height: 3 },
+      safeArea: safeAreaOf(0.1),
+      minimumReadableHeightRatio: 0.08,
+    };
+    const prepared = await prepare({ model: songModel(), measurer: stubMeasurer(), service });
+    const frame = renderPrepared(prepared);
+
+    expect(frame.aspectRatio).toEqual({ width: 4, height: 3 });
+    expect(frame.aspectRatio).not.toEqual(DEFAULT_ASPECT_RATIO);
+    expect(frame.canvas).toEqual({ width: 1920, height: 1440 });
+    expect(frame.canvas).not.toEqual(canvasFor(DEFAULT_ASPECT_RATIO));
+    expect(frame.safeArea).toEqual({ x: 192, y: 144, width: 1536, height: 1152 });
+    expect(frame.safeArea).not.toEqual({ x: 96, y: 54, width: 1728, height: 972 });
+    expect(frame.minimumFontSizePx).toBe(0.08 * 1440);
+    expect(frame.minimumFontSizePx).not.toBe(PROVISIONAL_MINIMUM_READABLE_HEIGHT_RATIO * 1080);
+
+    for (const surface of RENDER_SURFACES) {
+      const surfaceFrame = renderForSurface(surface, prepared).frame;
+      expect(surfaceFrame.aspectRatio).toEqual({ width: 4, height: 3 });
+      expect(surfaceFrame.canvas).toEqual({ width: 1920, height: 1440 });
+      expect(surfaceFrame.safeArea).toEqual(frame.safeArea);
+      expect(surfaceFrame.minimumFontSizePx).toBe(0.08 * 1440);
+    }
   });
 
   it('keeps the values it was prepared with when the defaults change afterwards', async () => {

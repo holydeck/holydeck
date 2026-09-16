@@ -12,11 +12,21 @@
 
 import { FIT_TOLERANCE_PX, roundTo } from './internal/numbers.js';
 import { MEASUREMENT_PRECISION } from './measure.js';
+import { RenderConfigurationError } from './output-profile.js';
 
 import type { MeasureRequest, TextMeasurer, TextMetrics } from './measure.js';
 
 /** Default rung spacing. One pixel is finer than any display this renders to can show. */
 export const DEFAULT_FIT_STEP_PX = 1;
+
+/**
+ * How long a ladder may get before the inputs that produced it are treated as the defect they are. Nothing
+ * sane comes close: a full-height requested size walked down to a readable floor one tenth of a pixel at a
+ * time is still under two thousand rungs. A step finer than {@link MEASUREMENT_PRECISION} rounds to no
+ * descent at all, which is a loop that never ends, and this is what ends it — with the numbers that caused
+ * it, rather than after half a minute and an array-length crash.
+ */
+export const MAX_FIT_LADDER_RUNGS = 10_000;
 
 export interface FitLadderInput {
   readonly requestedFontSizePx: number;
@@ -57,6 +67,9 @@ export interface FitOutcome {
  * floor yields the floor alone: auto-fit only ever reduces, so there is nothing to walk down from.
  */
 export function fitLadder({ requestedFontSizePx, minimumFontSizePx, stepPx = DEFAULT_FIT_STEP_PX }: FitLadderInput): readonly number[] {
+  if (!Number.isFinite(stepPx) || stepPx <= 0) {
+    throw new RenderConfigurationError(`auto-fit step ${stepPx} is not a positive number of pixels to descend by`);
+  }
   const minimum = roundTo(minimumFontSizePx, MEASUREMENT_PRECISION);
   const requested = roundTo(requestedFontSizePx, MEASUREMENT_PRECISION);
   if (requested <= minimum) return [minimum];
@@ -65,6 +78,12 @@ export function fitLadder({ requestedFontSizePx, minimumFontSizePx, stepPx = DEF
   for (let index = 0; ; index += 1) {
     const rung = roundTo(requested - index * stepPx, MEASUREMENT_PRECISION);
     if (rung <= minimum) break;
+    if (rungs.length >= MAX_FIT_LADDER_RUNGS) {
+      throw new RenderConfigurationError(
+        `auto-fit from ${requested}px down to ${minimum}px in steps of ${stepPx}px needs more than ` +
+          `${MAX_FIT_LADDER_RUNGS} rungs; the step is too fine to descend`,
+      );
+    }
     rungs.push(rung);
   }
   rungs.push(minimum);
