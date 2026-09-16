@@ -18,6 +18,7 @@ export const WORKSPACES = [
   'packages/core',
   'packages/contracts',
   'packages/localization',
+  'packages/renderer',
   'apps/cli',
   'apps/corpus',
   'apps/app',

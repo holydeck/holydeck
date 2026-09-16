@@ -1,0 +1,63 @@
+{
+  "name": "@holydeck/renderer",
+  "version": "2026.9.2",
+  "description": "The one deterministic presentation renderer and its normalized render model (REND-01)",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./output-profile": {
+      "types": "./dist/output-profile.d.ts",
+      "import": "./dist/output-profile.js"
+    },
+    "./readiness": {
+      "types": "./dist/readiness.d.ts",
+      "import": "./dist/readiness.js"
+    },
+    "./measure": {
+      "types": "./dist/measure.d.ts",
+      "import": "./dist/measure.js"
+    },
+    "./auto-fit": {
+      "types": "./dist/auto-fit.d.ts",
+      "import": "./dist/auto-fit.js"
+    },
+    "./render-model": {
+      "types": "./dist/render-model.d.ts",
+      "import": "./dist/render-model.js"
+    },
+    "./renderer": {
+      "types": "./dist/renderer.d.ts",
+      "import": "./dist/renderer.js"
+    },
+    "./surfaces": {
+      "types": "./dist/surfaces.d.ts",
+      "import": "./dist/surfaces.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --coverage",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@holydeck/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.0",
+    "tsup": "^8.5.1",
+    "vitest": "^5.0.0"
+  },
+  "peerDependencies": {
+    "puppeteer": "^25.10.0"
+  },
+  "peerDependenciesMeta": {
+    "puppeteer": {
+      "optional": true
+    }
+  }
+}

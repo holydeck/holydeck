@@ -16,6 +16,7 @@ export const MANIFESTS = [
   'packages/contracts/package.json',
   'packages/core/package.json',
   'packages/localization/package.json',
+  'packages/renderer/package.json',
   'apps/app/package.json',
   'apps/cli/package.json',
   'apps/corpus/package.json',

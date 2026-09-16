@@ -13,6 +13,7 @@ export const EXPECTED_PACKAGE_NAMES = {
   'packages/contracts/package.json': '@holydeck/contracts',
   'packages/core/package.json': '@holydeck/core',
   'packages/localization/package.json': '@holydeck/localization',
+  'packages/renderer/package.json': '@holydeck/renderer',
   'apps/app/package.json': '@holydeck/app',
   'apps/cli/package.json': '@holydeck/cli',
   'apps/corpus/package.json': '@holydeck/corpus',
