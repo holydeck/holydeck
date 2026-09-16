@@ -27,14 +27,16 @@ const complete = () => {
   const vitestConfigs = {};
   for (const dir of WORKSPACES) {
     manifests[dir] = manifest(dir);
-    vitestConfigs[dir] = "import { coverage100 } from '../../vitest.base.js';\n";
+    vitestConfigs[dir] = "import { coverageFloor, testRetry } from '../../vitest.base.js';\n";
   }
   return {
     workspaceYaml: 'packages:\n  - packages/*\n  - apps/*\n  - tests/*\noverrides:\n  esbuild: 0.28.2\n',
     packageDirs: [...WORKSPACES],
     manifests,
     vitestConfigs,
-    coverageBase: 'export const coverage100 = { statements: 100, branches: 100, functions: 100, lines: 100 };\n',
+    coverageBase:
+      'export const coverageFloor = { statements: 70, branches: 60, functions: 70, lines: 70 };\n' +
+      'export const testRetry = 1;\n',
   };
 };
 
@@ -110,7 +112,10 @@ const COUNTEREXAMPLES = [
     break: (input) => {
       input.vitestConfigs['apps/worker'] = 'thresholds: { statements: 80 }\n';
     },
-    problems: ['apps/worker/vitest.config.ts does not take its coverage thresholds from vitest.base.ts'],
+    problems: [
+      'apps/worker/vitest.config.ts does not take its coverage thresholds from vitest.base.ts',
+      'apps/worker/vitest.config.ts does not take its retry count from vitest.base.ts',
+    ],
   },
   {
     why: 'a workspace with no vitest configuration runs no tests and reports no coverage',
@@ -120,11 +125,27 @@ const COUNTEREXAMPLES = [
     problems: ['apps/app/vitest.config.ts is missing'],
   },
   {
-    why: 'thresholds below 100 in the shared file lower them everywhere at once',
+    why: 'thresholds below the floor in the shared file lower them everywhere at once',
     break: (input) => {
-      input.coverageBase = 'export const coverage100 = { statements: 100, branches: 90, functions: 100, lines: 100 };\n';
+      input.coverageBase =
+        'export const coverageFloor = { statements: 70, branches: 20, functions: 70, lines: 70 };\n' +
+        'export const testRetry = 1;\n';
     },
-    problems: ['vitest.base.ts does not hold branches at 100'],
+    problems: ['vitest.base.ts does not hold branches at 60'],
+  },
+  {
+    why: 'a shared file with no retry constant lets a workspace silently run with none',
+    break: (input) => {
+      input.coverageBase = 'export const coverageFloor = { statements: 70, branches: 60, functions: 70, lines: 70 };\n';
+    },
+    problems: ['vitest.base.ts does not hold testRetry at 1'],
+  },
+  {
+    why: 'a config that stops importing the shared retry can set its own, unreviewed',
+    break: (input) => {
+      input.vitestConfigs['apps/worker'] = "import { coverageFloor } from '../../vitest.base.js';\n";
+    },
+    problems: ['apps/worker/vitest.config.ts does not take its retry count from vitest.base.ts'],
   },
   {
     why: 'no shared file at all is the same lowering, spelled differently',

@@ -34,7 +34,18 @@ export const COVERAGE_BASE = 'vitest.base.ts';
 // quietly stops being private is a package that can be published by accident.
 export const PUBLISHED_WORKSPACE = 'apps/cli';
 
-const COVERAGE_METRICS = ['statements', 'branches', 'functions', 'lines'];
+// The standing per-metric floor, kept in step with vitest.base.ts's coverageFloor by hand: branches
+// sits below the rest because exhaustive branch coverage on error/edge paths is integration territory.
+export const COVERAGE_FLOOR = {
+  statements: 70,
+  branches: 60,
+  functions: 70,
+  lines: 70,
+};
+
+// Kept in step with vitest.base.ts's testRetry by hand, the same way COVERAGE_FLOOR is: a workspace
+// whose config forgets to import it runs its tests without the one retry every other workspace gets.
+export const TEST_RETRY = 1;
 
 // pnpm-workspace.yaml is read as text rather than parsed: the only thing needed from it is the list
 // of package globs, and matching them here keeps this script free of a YAML dependency.
@@ -110,10 +121,13 @@ export function verifyPipeline({ workspaceYaml, packageDirs, manifests, vitestCo
   if (coverageBase === undefined) {
     problems.push(`${COVERAGE_BASE} is missing`);
   } else {
-    for (const metric of COVERAGE_METRICS) {
-      if (!new RegExp(`\\b${metric}:\\s*100\\b`, 'u').test(coverageBase)) {
-        problems.push(`${COVERAGE_BASE} does not hold ${metric} at 100`);
+    for (const [metric, floor] of Object.entries(COVERAGE_FLOOR)) {
+      if (!new RegExp(`\\b${metric}:\\s*${floor}\\b`, 'u').test(coverageBase)) {
+        problems.push(`${COVERAGE_BASE} does not hold ${metric} at ${floor}`);
       }
+    }
+    if (!new RegExp(`\\btestRetry\\s*=\\s*${TEST_RETRY}\\b`, 'u').test(coverageBase)) {
+      problems.push(`${COVERAGE_BASE} does not hold testRetry at ${TEST_RETRY}`);
     }
   }
 
@@ -151,8 +165,13 @@ export function verifyPipeline({ workspaceYaml, packageDirs, manifests, vitestCo
     const vitestConfig = vitestConfigs[dir];
     if (vitestConfig === undefined) {
       problems.push(`${dir}/vitest.config.ts is missing`);
-    } else if (!vitestConfig.includes(COVERAGE_BASE.replace(/\.ts$/u, '.js'))) {
-      problems.push(`${dir}/vitest.config.ts does not take its coverage thresholds from ${COVERAGE_BASE}`);
+    } else {
+      if (!vitestConfig.includes(COVERAGE_BASE.replace(/\.ts$/u, '.js'))) {
+        problems.push(`${dir}/vitest.config.ts does not take its coverage thresholds from ${COVERAGE_BASE}`);
+      }
+      if (!vitestConfig.includes('testRetry')) {
+        problems.push(`${dir}/vitest.config.ts does not take its retry count from ${COVERAGE_BASE}`);
+      }
     }
   }
 

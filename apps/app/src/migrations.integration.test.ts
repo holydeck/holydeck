@@ -55,7 +55,11 @@ beforeEach(async () => {
 });
 
 describe('migrating a real database', () => {
-  test('builds the indexes the durable records are read by', async () => {
+  // Real index builds on a just-started Mongo, run alongside eight other workspaces' suites, routinely
+  // outrun vitest's 5000ms default — and a timeout here doesn't cancel the in-flight migrate() call, so a
+  // retry would race its own abandoned attempt. Generous headroom is what keeps a retry from ever needing
+  // to happen at all.
+  test('builds the indexes the durable records are read by', { timeout: 20_000 }, async () => {
     expect(await migrate(db, CONTEXT, { now: clock })).toMatchObject({ recorded: SCHEMA_VERSION, pending: [] });
 
     expect(await indexNames('run_events')).toEqual(['_id_', 'run_order']);

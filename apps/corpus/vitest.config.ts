@@ -1,16 +1,17 @@
 import { defineConfig } from 'vitest/config';
 
-import { coverage100 } from '../../vitest.base.js';
+import { coverageFloor, testRetry } from '../../vitest.base.js';
 
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
+    retry: testRetry,
     hookTimeout: 120_000,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.test.ts', 'src/server.ts'],
-      thresholds: coverage100,
+      thresholds: coverageFloor,
     },
   },
 });

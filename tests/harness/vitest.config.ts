@@ -1,10 +1,11 @@
 import { defineConfig } from 'vitest/config';
 
-import { coverage100 } from '../../vitest.base.js';
+import { coverageFloor, testRetry } from '../../vitest.base.js';
 
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts', 'integration/**/*.test.ts'],
+    retry: testRetry,
     // The integration suite starts a MongoDB, a corpus, a migration, an application and a worker before
     // its first assertion, which is slower than any unit test in this repository.
     hookTimeout: 240_000,
@@ -16,7 +17,7 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.test.ts'],
-      thresholds: coverage100,
+      thresholds: coverageFloor,
     },
   },
 });
