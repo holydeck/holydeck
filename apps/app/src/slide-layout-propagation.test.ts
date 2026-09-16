@@ -83,7 +83,7 @@ describe('OUTDATED_REQUIRES', () => {
 });
 
 describe('composes with the existing revision rules', () => {
-  it('a pinned preview stays byte-identical after the Layout is edited further, while the current preview and isOutdated both move', async () => {
+  it("a pinned preview's body and revision stay unchanged after the Layout is edited further, while the current preview and isOutdated both move", async () => {
     const layouts = store();
     const created = await layouts.create(ADMIN, { name: 'Sermon point', body: ONE });
     const pinnedRevision = created.revision;
