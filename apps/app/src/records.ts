@@ -25,7 +25,17 @@ export const RECORDS = {
   auditEvents: {
     collection: 'audit_events',
     kind: 'append-only',
-    fields: { ...HISTORY, at: 'required', action: 'required', subject: 'required', outcome: 'required', detail: 'optional' },
+    fields: {
+      ...HISTORY,
+      at: 'required',
+      action: 'required',
+      subject: 'required',
+      outcome: 'required',
+      detail: 'optional',
+      requestTokens: 'optional',
+      responseTokens: 'optional',
+      durationMs: 'optional',
+    },
   },
   // Spec DATA-02: content bodies append hash-addressed revisions, each recording how it came to exist.
   contentRevisions: {
