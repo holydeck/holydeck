@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { canonicalJson } from './canonical.js';
 import {
+  BINDING_MODES,
   BOX_IMPORTANCES,
   BOX_KINDS,
+  CONTENT_KEYS,
+  CONTENT_KINDS,
   LAYOUT_NAME,
   parseSlideLayoutBody,
   parseSlideLayoutDraft,
@@ -10,11 +14,24 @@ import {
   SLIDE_LAYOUTS_PATH,
 } from './layouts.js';
 
+import type {
+  BoxBinding,
+  BoxFrame,
+  MediaBoxStyle,
+  MediaLayoutBox,
+  SlideLayoutBody,
+  TextBoxStyle,
+  TextLayoutBox,
+} from './layouts.js';
+
+const LYRIC_BINDING = { mode: 'keyed', contentKind: 'song', contentKey: 'lyricLine', languageKey: 'ta' } as const;
+
 const textBox = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   id: 'lyric',
   kind: 'text',
   importance: 'required',
   frame: { x: 0.1, y: 0.2, width: 0.8, height: 0.5 },
+  binding: { ...LYRIC_BINDING },
   style: { fontFamily: 'Inter', fontWeight: 600, sizeRatio: 0.08, lineHeight: 1.25, align: 'center', verticalAlign: 'center' },
   ...over,
 });
@@ -36,6 +53,20 @@ const problemsOf = (value: unknown): readonly string[] => {
 const messagesOf = (value: unknown): readonly string[] => {
   const parsed = parseSlideLayoutBody(value);
   return parsed.ok ? [] : parsed.problems.map((problem) => `${problem.path}: ${problem.message}`);
+};
+
+/** Every field name the first box of a Layout came back carrying. */
+const fieldsOf = (value: unknown): readonly string[] => {
+  const parsed = parseSlideLayoutBody(value);
+  return parsed.ok ? Object.keys(parsed.value.boxes[0] ?? {}) : [];
+};
+
+/** What the first box of a Layout is bound to, or nothing when it was refused or carries no binding. */
+const bindingOf = (value: unknown): BoxBinding | undefined => {
+  const parsed = parseSlideLayoutBody(value);
+  if (!parsed.ok) return undefined;
+  const box = parsed.value.boxes[0];
+  return box?.kind === 'text' ? box.binding : undefined;
 };
 
 describe('the shape a Slide Layout is', () => {
@@ -63,6 +94,7 @@ describe('the shape a Slide Layout is', () => {
             kind: 'text',
             importance: 'required',
             frame: { x: 0.1, y: 0.2, width: 0.8, height: 0.5 },
+            binding: { mode: 'keyed', contentKind: 'song', contentKey: 'lyricLine', languageKey: 'ta' },
             style: {
               fontFamily: 'Inter',
               fontWeight: 600,
@@ -77,11 +109,18 @@ describe('the shape a Slide Layout is', () => {
     });
   });
 
-  it('carries the opaque stand-in text a box has, and nothing at all where a box has none', () => {
-    const parsed = parseSlideLayoutBody({ boxes: [textBox({ placeholder: 'Verse 1' })] });
-    expect(parsed.ok && parsed.value.boxes[0]?.placeholder).toBe('Verse 1');
-    const bare = parseSlideLayoutBody({ boxes: [textBox()] });
-    expect(bare.ok && Object.keys(bare.value.boxes[0] ?? {})).not.toContain('placeholder');
+  it('carries the opaque stand-in a Media box has, and nothing at all where one has none', () => {
+    const parsed = parseSlideLayoutBody({ boxes: [mediaBox({ placeholder: 'still-01.jpg' })] });
+    const box = parsed.ok ? parsed.value.boxes[0] : undefined;
+    expect(box?.kind === 'media' && box.placeholder).toBe('still-01.jpg');
+    expect(fieldsOf({ boxes: [mediaBox()] })).not.toContain('placeholder');
+  });
+
+  // A Text box says what it says through its binding, so a stand-in on one is a second source of truth
+  // for the same words. It is not read, and never reaches the Layout that is stored.
+  it('reads no stand-in on a Text box, which says what it says through its binding', () => {
+    expect(parseSlideLayoutBody({ boxes: [textBox({ placeholder: 'Verse 1' })] }).ok).toBe(true);
+    expect(fieldsOf({ boxes: [textBox({ placeholder: 'Verse 1' })] })).not.toContain('placeholder');
   });
 });
 
@@ -184,6 +223,151 @@ describe('what a box carries besides its geometry', () => {
   it('refuses a box with no identifier, and two boxes sharing one', () => {
     expect(problemsOf({ boxes: [textBox({ id: '' })] })).toEqual(['layout.boxes.0.id: field.empty']);
     expect(problemsOf({ boxes: [textBox(), mediaBox({ id: 'lyric' })] })).toEqual(['layout.boxes: field.not_allowed']);
+  });
+});
+
+describe('what a Text box is bound to', () => {
+  it('names the kinds of content a box can be bound to, and the keys each kind offers', () => {
+    expect([...CONTENT_KINDS]).toEqual(['song', 'sermon', 'reading']);
+    expect([...BINDING_MODES]).toEqual(['keyed', 'static']);
+    expect([...CONTENT_KEYS.song]).toEqual(['title', 'lyricLine', 'author', 'copyright']);
+    expect([...CONTENT_KEYS.sermon]).toEqual(['title', 'point', 'scriptureRef', 'speaker']);
+    expect([...CONTENT_KEYS.reading]).toEqual(['reference', 'verseText', 'translation']);
+    // A closed vocabulary that a caller could add a key to is not a closed vocabulary.
+    expect(Object.isFrozen(CONTENT_KEYS)).toBe(true);
+    expect(Object.isFrozen(CONTENT_KEYS.song)).toBe(true);
+  });
+
+  it('binds a box to one named field of one kind of content, in one named language', () => {
+    expect(bindingOf({ boxes: [textBox()] })).toEqual({
+      mode: 'keyed',
+      contentKind: 'song',
+      contentKey: 'lyricLine',
+      languageKey: 'ta',
+    });
+  });
+
+  it('refuses a key the kind of content it is bound to does not offer, and says which it does', () => {
+    const bound = (over: Record<string, unknown>): Record<string, unknown> => textBox({ binding: { ...LYRIC_BINDING, ...over } });
+    expect(problemsOf({ boxes: [bound({ contentKey: 'chorus' })] })).toEqual([
+      'layout.boxes.0.binding.contentKey: field.not_allowed',
+    ]);
+    expect(messagesOf({ boxes: [bound({ contentKey: 'chorus' })] })).toEqual([
+      'layout.boxes.0.binding.contentKey: must be one of title, lyricLine, author, copyright',
+    ]);
+    // The key of another kind of content is exactly the mistake this catches, and it reads the same way.
+    expect(problemsOf({ boxes: [bound({ contentKey: 'speaker' })] })).toEqual([
+      'layout.boxes.0.binding.contentKey: field.not_allowed',
+    ]);
+    expect(problemsOf({ boxes: [bound({ contentKind: 'sermon', contentKey: 'speaker' })] })).toEqual([]);
+    expect(problemsOf({ boxes: [bound({ contentKey: undefined })] })).toEqual([
+      'layout.boxes.0.binding.contentKey: field.required',
+    ]);
+  });
+
+  // A kind this release does not have has no keys to grade a key against, so grading one anyway would
+  // answer a question nobody asked with the key list of whichever kind happened to be first.
+  it('refuses a kind of content this release does not have, and says nothing about its key', () => {
+    expect(problemsOf({ boxes: [textBox({ binding: { ...LYRIC_BINDING, contentKind: 'liturgy' } })] })).toEqual([
+      'layout.boxes.0.binding.contentKind: field.not_allowed',
+    ]);
+  });
+
+  it('refuses a binding with no language, because every Text box binds a language as well as a key', () => {
+    expect(problemsOf({ boxes: [textBox({ binding: { ...LYRIC_BINDING, languageKey: undefined } })] })).toEqual([
+      'layout.boxes.0.binding.languageKey: field.required',
+    ]);
+    expect(problemsOf({ boxes: [textBox({ binding: { ...LYRIC_BINDING, languageKey: '' } })] })).toEqual([
+      'layout.boxes.0.binding.languageKey: field.empty',
+    ]);
+    // Opaque on purpose: nothing here resolves a language against a registry that is not seeded yet.
+    expect(problemsOf({ boxes: [textBox({ binding: { ...LYRIC_BINDING, languageKey: 'not-a-language' } })] })).toEqual([]);
+  });
+
+  it('refuses a Text box nobody bound anything to, the way it refuses a box nobody positioned', () => {
+    expect(problemsOf({ boxes: [textBox({ binding: undefined })] })).toEqual(['layout.boxes.0.binding: field.required']);
+    expect(problemsOf({ boxes: [textBox({ binding: 'lyricLine' })] })).toEqual([
+      'layout.boxes.0.binding: field.not_an_object',
+    ]);
+    expect(problemsOf({ boxes: [textBox({ binding: { ...LYRIC_BINDING, mode: 'inherited' } })] })).toEqual([
+      'layout.boxes.0.binding.mode: field.not_allowed',
+    ]);
+  });
+
+  it('carries the fixed words of a static box, and reads no key or language on one', () => {
+    expect(bindingOf({ boxes: [textBox({ binding: { mode: 'static', text: 'Welcome' } })] })).toEqual({
+      mode: 'static',
+      text: 'Welcome',
+    });
+    // Everything a keyed binding would have been refused for, on a static one, read by nothing.
+    const cluttered = { mode: 'static', text: 'Welcome', contentKind: 'liturgy', contentKey: 'chorus', languageKey: '' };
+    expect(problemsOf({ boxes: [textBox({ binding: cluttered })] })).toEqual([]);
+    expect(bindingOf({ boxes: [textBox({ binding: cluttered })] })).toEqual({ mode: 'static', text: 'Welcome' });
+  });
+
+  it('refuses a static box with nothing to say', () => {
+    expect(problemsOf({ boxes: [textBox({ binding: { mode: 'static' } })] })).toEqual([
+      'layout.boxes.0.binding.text: field.required',
+    ]);
+    expect(problemsOf({ boxes: [textBox({ binding: { mode: 'static', text: '' } })] })).toEqual([
+      'layout.boxes.0.binding.text: field.empty',
+    ]);
+  });
+
+  // Binding is what a Text box says, and a Media box says nothing: no task has asked for one yet, and a
+  // Media box asked for a content key it cannot use would be a refusal nobody could act on.
+  it('asks a Media box for no binding at all, and reads none if one is there', () => {
+    expect(problemsOf({ boxes: [mediaBox()] })).toEqual([]);
+    expect(fieldsOf({ boxes: [mediaBox({ binding: { ...LYRIC_BINDING } })] })).not.toContain('binding');
+  });
+
+  it('keeps a Layout of keyed and static boxes byte-identical across a save and a read', () => {
+    const boxes = [
+      mediaBox(),
+      textBox({ id: 'lyric' }),
+      textBox({ id: 'title', binding: { mode: 'keyed', contentKind: 'sermon', contentKey: 'title', languageKey: 'en' } }),
+      textBox({ id: 'welcome', binding: { mode: 'static', text: 'Welcome' } }),
+    ];
+    const parsed = parseSlideLayoutBody({ boxes });
+    expect(parsed).toEqual({ ok: true, value: { boxes } });
+    expect(parsed.ok && canonicalJson(parsed.value)).toBe(canonicalJson({ boxes }));
+  });
+});
+
+// TMPL-03 asks for Slide Layouts that "remain background-transparent". The way that is kept here is by
+// having nothing to keep: no box, no style and no Layout carries a fill of its own, so whatever a group
+// puts behind a slide is what shows through wherever a box does not cover. A field added later would be
+// the moment the promise broke, so it is asserted in the types as well as on a value.
+type Fill = `background${string}` | `fill${string}` | `backdrop${string}`;
+
+type Transparent<T> = [Extract<keyof T, Fill>] extends [never] ? true : false;
+
+const TRANSPARENT: readonly boolean[] = [
+  true satisfies Transparent<SlideLayoutBody>,
+  true satisfies Transparent<TextLayoutBox>,
+  true satisfies Transparent<MediaLayoutBox>,
+  true satisfies Transparent<TextBoxStyle>,
+  true satisfies Transparent<MediaBoxStyle>,
+  true satisfies Transparent<BoxFrame>,
+];
+
+/** Every field name anywhere in a value, however deeply nested. */
+const namesIn = (value: unknown): readonly string[] =>
+  Array.isArray(value)
+    ? value.flatMap(namesIn)
+    : typeof value === 'object' && value !== null
+      ? Object.entries(value).flatMap(([name, held]) => [name, ...namesIn(held)])
+      : [];
+
+describe('a Slide Layout the group background shows through', () => {
+  it('carries no fill of its own, in its types or on a Layout built from every kind of box', () => {
+    expect(TRANSPARENT).toEqual([true, true, true, true, true, true]);
+    const parsed = parseSlideLayoutBody({
+      boxes: [mediaBox(), textBox(), textBox({ id: 'welcome', binding: { mode: 'static', text: 'Welcome' } })],
+    });
+    expect(parsed.ok).toBe(true);
+    const fills = parsed.ok ? namesIn(parsed.value).filter((name) => /^(?:background|fill|backdrop)/iu.test(name)) : [];
+    expect(fills).toEqual([]);
   });
 });
 

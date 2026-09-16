@@ -47,7 +47,7 @@ const text = {
   kind: 'text',
   frame: { x: 0.1, y: 0.1, width: 0.8, height: 0.3 },
   importance: 'required',
-  placeholder: 'Sermon point',
+  binding: { mode: 'keyed', contentKind: 'sermon', contentKey: 'title', languageKey: 'en' },
   style: {
     fontFamily: 'Inter',
     fontWeight: 600,
@@ -64,6 +64,7 @@ const backdrop = {
   frame: { x: 0, y: 0, width: 1, height: 1 },
   importance: 'decoration',
   style: { fit: 'cover', opacity: 0.6 },
+  placeholder: 'sermon-still.jpg',
 };
 
 const DRAFT = { name: 'Sermon point', boxes: [text] };

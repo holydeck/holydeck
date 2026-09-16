@@ -11,10 +11,21 @@
 // reason this lives in the contracts rather than beside its routes — the renderer, the application and
 // whatever admin surface arrives later all have to agree what a frame means, and none of them may own it.
 //
-// What a box says and what language it says it in is deliberately not here. A box carries an opaque
-// stand-in for what will be shown in it — sample words, a file name — and nothing that binds it to a
-// content kind or a language; that binding is TMPL-03's, and it extends this shape rather than replacing
-// it.
+// What a Text box says and what language it says it in is its binding (TMPL-03). A box is bound one of
+// two ways and never both: keyed, to one named field of one kind of content in one named language, so a
+// Layout is a shape songs and sermons are poured into rather than a slide with words in it; or static,
+// to words the Layout itself holds, for the box that says "Welcome" on every service of the year. A
+// Media box binds nothing yet and carries the opaque stand-in a Text box no longer needs — a file name,
+// a note to whoever fills it.
+//
+// The keys are a closed vocabulary here rather than live data on purpose: what a song has is a property
+// of what a song is, and a Layout authored against a key that later stops existing is a Layout that
+// breaks silently. The language key is the opposite — an opaque string, checked for being there and
+// nothing else, because the registry it names (§11.5) has nothing in it until SEED-01 seeds it.
+//
+// Nothing here carries a fill, a colour or a background, and that absence is the whole of TMPL-03's
+// "Slide Layouts remain background-transparent": a Layout has no ground of its own to paint, so what a
+// group puts behind a slide is what shows through wherever no box covers.
 
 import {
   FIELD_CODES,
@@ -46,6 +57,44 @@ export type TextAlignment = (typeof TEXT_ALIGNMENTS)[number];
 export const MEDIA_FITS = ['contain', 'cover'] as const;
 
 export type MediaFit = (typeof MEDIA_FITS)[number];
+
+/** The two ways a Text box is given something to say. A box is bound one way, never both. */
+export const BINDING_MODES = ['keyed', 'static'] as const;
+
+export type BindingMode = (typeof BINDING_MODES)[number];
+
+/** The kinds of content a Layout is authored against. A fourth arrives when a requirement asks for one. */
+export const CONTENT_KINDS = ['song', 'sermon', 'reading'] as const;
+
+export type ContentKind = (typeof CONTENT_KINDS)[number];
+
+// One entry per kind, and the list is closed for the reason in the header: these are the fields a song
+// or a sermon has, not rows somebody can add to. A key is added here when the content it names exists.
+export const CONTENT_KEYS: Readonly<Record<ContentKind, readonly string[]>> = Object.freeze({
+  song: Object.freeze(['title', 'lyricLine', 'author', 'copyright']),
+  sermon: Object.freeze(['title', 'point', 'scriptureRef', 'speaker']),
+  reading: Object.freeze(['reference', 'verseText', 'translation']),
+});
+
+/** A box filled from content: one field of one kind, in one language of that content's own list. */
+export type KeyedBinding = {
+  readonly mode: 'keyed';
+  readonly contentKind: ContentKind;
+  readonly contentKey: string;
+  /**
+   * Which language of the content fills this box. Opaque here: the registry §11.5 describes is seeded
+   * by SEED-01, and until then there is nothing to resolve a key against but its own presence.
+   */
+  readonly languageKey: string;
+};
+
+/** A box the Layout itself fills: the words are the Layout's, and no content is read for it. */
+export type StaticBinding = {
+  readonly mode: 'static';
+  readonly text: string;
+};
+
+export type BoxBinding = KeyedBinding | StaticBinding;
 
 /** The weights a face is asked for, as CSS numbers them. Neither end is a weight any face refuses. */
 export const FONT_WEIGHT: Range = Object.freeze({ minimum: 100, maximum: 900 });
@@ -89,21 +138,24 @@ type BoxFields = {
   readonly id: string;
   readonly frame: BoxFrame;
   readonly importance: BoxImportance;
-  /**
-   * What stands in for the content until something is bound to this box: sample words, a file name, a
-   * note to whoever fills it. Opaque on purpose — nothing reads it as a content or a language key.
-   */
-  readonly placeholder?: string;
 };
 
 export type TextLayoutBox = BoxFields & {
   readonly kind: 'text';
+  /** What this box says. Required: a Text box nobody bound is a box with nothing in it at all. */
+  readonly binding: BoxBinding;
   readonly style: TextBoxStyle;
 };
 
 export type MediaLayoutBox = BoxFields & {
   readonly kind: 'media';
   readonly style: MediaBoxStyle;
+  /**
+   * What stands in for the asset until one is bound to this box: a file name, a note to whoever fills
+   * it. Opaque on purpose — nothing reads it as a content or a language key. No requirement has asked
+   * for Media binding yet, which is why this is still what a Media box carries.
+   */
+  readonly placeholder?: string;
 };
 
 export type LayoutBox = TextLayoutBox | MediaLayoutBox;
@@ -172,6 +224,50 @@ export const parseBoxFrame: ParseFn<BoxFrame> = (value, path) =>
 
 const FRAME_FALLBACK: BoxFrame = { x: 0, y: 0, width: 1, height: 1 };
 
+/**
+ * The content field a box is filled from. Graded against the keys its own kind offers, and only when the
+ * kind was one this release has: a key held against whichever kind happened to be first would answer a
+ * question nobody asked. A key that was missing or was not text is left at that, for the same reason a
+ * missing width is not also reported as reaching past the edge of the slide.
+ */
+const boundKey = (reader: FieldReader, kind: ContentKind | undefined): string => {
+  const before = reader.problems.length;
+  const key = reader.text('contentKey');
+  if (kind === undefined || reader.problems.length > before) return key;
+  const offered = CONTENT_KEYS[kind];
+  if (!offered.includes(key)) {
+    reader.reject('contentKey', FIELD_CODES.notAllowed, `must be one of ${offered.join(', ')}`);
+  }
+  return key;
+};
+
+const keyed = (reader: FieldReader): KeyedBinding => {
+  const before = reader.problems.length;
+  const contentKind = reader.choice('contentKind', CONTENT_KINDS);
+  const known = reader.problems.length === before;
+  return {
+    mode: 'keyed',
+    contentKind,
+    contentKey: boundKey(reader, known ? contentKind : undefined),
+    // Present and non-empty, and nothing further: §11.5's registry is SEED-01's to fill, and a key is
+    // refused here for being absent rather than for naming a language nobody has added yet.
+    languageKey: reader.text('languageKey'),
+  };
+};
+
+const BINDING_FALLBACK: BoxBinding = { mode: 'static', text: '' };
+
+export const parseBoxBinding: ParseFn<BoxBinding> = (value, path) =>
+  parseObject(value, path, (reader) => {
+    const before = reader.problems.length;
+    const mode = reader.choice('mode', BINDING_MODES);
+    // A binding bound a way this release does not have is one whose other fields it cannot read either:
+    // which of them belong is exactly what the mode decides.
+    if (reader.problems.length > before) return BINDING_FALLBACK;
+    // Otherwise the mode decides what is read, and a static box is never asked for a key or a language.
+    return mode === 'static' ? { mode, text: reader.text('text') } : keyed(reader);
+  });
+
 const parseTextBoxStyle: ParseFn<TextBoxStyle> = (value, path) =>
   parseObject(value, path, (reader) => ({
     fontFamily: reader.text('fontFamily'),
@@ -217,18 +313,29 @@ export const parseLayoutBox: ParseFn<LayoutBox> = (value, path) =>
       id,
       frame: reader.parsed('frame', parseBoxFrame, FRAME_FALLBACK),
       importance: reader.choice('importance', BOX_IMPORTANCES),
-      ...optional('placeholder', reader.optionalText('placeholder')),
     };
     // A box of a kind this release does not have is a box whose style it cannot grade either. Its style is
     // required and left at that: six complaints about type on a box that was never a Text box help nobody.
+    // Nor is it asked for a binding, which only one of the two kinds has.
     if (!known) {
       reader.present('style');
-      return { ...fields, kind: 'text', style: TEXT_STYLE_FALLBACK };
+      return { ...fields, kind: 'text', binding: BINDING_FALLBACK, style: TEXT_STYLE_FALLBACK };
     }
-    // Otherwise the kind decides which style is read, so a Media box is never graded against type it has none of.
+    // Otherwise the kind decides what is read, so a Media box is never graded against type it has none of,
+    // and a Text box is never left carrying a stand-in beside the binding that supersedes it.
     return kind === 'media'
-      ? { ...fields, kind, style: reader.parsed('style', parseMediaBoxStyle, MEDIA_STYLE_FALLBACK) }
-      : { ...fields, kind, style: reader.parsed('style', parseTextBoxStyle, TEXT_STYLE_FALLBACK) };
+      ? {
+          ...fields,
+          kind,
+          style: reader.parsed('style', parseMediaBoxStyle, MEDIA_STYLE_FALLBACK),
+          ...optional('placeholder', reader.optionalText('placeholder')),
+        }
+      : {
+          ...fields,
+          kind,
+          binding: reader.parsed('binding', parseBoxBinding, BINDING_FALLBACK),
+          style: reader.parsed('style', parseTextBoxStyle, TEXT_STYLE_FALLBACK),
+        };
   });
 
 const optional = (name: string, value: string | undefined): Record<string, string> =>

@@ -35,6 +35,7 @@ const text = {
   kind: 'text',
   importance: 'required',
   frame: { x: 0.1, y: 0.2, width: 0.8, height: 0.5 },
+  binding: { mode: 'keyed', contentKind: 'song', contentKey: 'lyricLine', languageKey: 'ta' },
   style: {
     fontFamily: 'Inter',
     fontWeight: 600,
