@@ -34,6 +34,7 @@
     "@fastify/websocket": "^11.3.0",
     "@holydeck/contracts": "workspace:*",
     "@holydeck/localization": "workspace:*",
+    "@holydeck/renderer": "workspace:*",
     "@simplewebauthn/server": "^14.0.1",
     "fastify": "^5.12.3",
     "mongodb": "^6.21.0",

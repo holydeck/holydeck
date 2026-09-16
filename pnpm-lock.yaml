@@ -160,6 +160,9 @@ importers:
       '@holydeck/localization':
         specifier: workspace:*
         version: link:../../packages/localization
+      '@holydeck/renderer':
+        specifier: workspace:*
+        version: link:../../packages/renderer
       '@simplewebauthn/server':
         specifier: ^14.0.1
         version: 14.0.1
