@@ -117,10 +117,15 @@ describe('the shape a Slide Layout is', () => {
   });
 
   // A Text box says what it says through its binding, so a stand-in on one is a second source of truth
-  // for the same words. It is not read, and never reaches the Layout that is stored.
-  it('reads no stand-in on a Text box, which says what it says through its binding', () => {
-    expect(parseSlideLayoutBody({ boxes: [textBox({ placeholder: 'Verse 1' })] }).ok).toBe(true);
-    expect(fieldsOf({ boxes: [textBox({ placeholder: 'Verse 1' })] })).not.toContain('placeholder');
+  // for the same words. It is refused rather than dropped, because dropping it would let whoever sent it
+  // go on believing it had been honoured.
+  it('refuses a stand-in on a Text box, which says what it says through its binding', () => {
+    expect(problemsOf({ boxes: [textBox({ placeholder: 'Verse 1' })] })).toEqual([
+      'layout.boxes.0.placeholder: field.not_allowed',
+    ]);
+    expect(messagesOf({ boxes: [textBox({ placeholder: 'Verse 1' })] })).toEqual([
+      'layout.boxes.0.placeholder: must not stand in for what a Text box is bound to',
+    ]);
   });
 });
 
@@ -217,6 +222,20 @@ describe('what a box carries besides its geometry', () => {
     ]);
     expect(problemsOf({ boxes: [mediaBox({ style: { fit: 'cover' } })] })).toEqual([
       'layout.boxes.0.style.opacity: field.required',
+    ]);
+  });
+
+  // The order a Media box is read in is a decision rather than an accident: the stand-in is read after the
+  // style it accompanies, and a box of a kind this release does not have is graded on neither. Pinned so
+  // that moving either read is a change somebody made on purpose.
+  it('grades a Media box in the order it reads it, and an unknown kind on nothing else at all', () => {
+    expect(problemsOf({ boxes: [mediaBox({ style: {}, placeholder: 7 })] })).toEqual([
+      'layout.boxes.0.style.fit: field.required',
+      'layout.boxes.0.style.opacity: field.required',
+      'layout.boxes.0.placeholder: field.not_text',
+    ]);
+    expect(problemsOf({ boxes: [mediaBox({ kind: 'chart', placeholder: 7 })] })).toEqual([
+      'layout.boxes.0.kind: field.not_allowed',
     ]);
   });
 

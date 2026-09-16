@@ -321,21 +321,25 @@ export const parseLayoutBox: ParseFn<LayoutBox> = (value, path) =>
       reader.present('style');
       return { ...fields, kind: 'text', binding: BINDING_FALLBACK, style: TEXT_STYLE_FALLBACK };
     }
-    // Otherwise the kind decides what is read, so a Media box is never graded against type it has none of,
-    // and a Text box is never left carrying a stand-in beside the binding that supersedes it.
-    return kind === 'media'
-      ? {
-          ...fields,
-          kind,
-          style: reader.parsed('style', parseMediaBoxStyle, MEDIA_STYLE_FALLBACK),
-          ...optional('placeholder', reader.optionalText('placeholder')),
-        }
-      : {
-          ...fields,
-          kind,
-          binding: reader.parsed('binding', parseBoxBinding, BINDING_FALLBACK),
-          style: reader.parsed('style', parseTextBoxStyle, TEXT_STYLE_FALLBACK),
-        };
+    // Otherwise the kind decides what is read. A Text box says what it says through its binding, and one
+    // carrying a stand-in as well would leave two sources for the same words; it is refused rather than
+    // dropped, because dropping it would let whoever sent it go on believing it had been honoured.
+    if (kind === 'text') {
+      reader.absent('placeholder', FIELD_CODES.notAllowed, 'must not stand in for what a Text box is bound to');
+      return {
+        ...fields,
+        kind,
+        binding: reader.parsed('binding', parseBoxBinding, BINDING_FALLBACK),
+        style: reader.parsed('style', parseTextBoxStyle, TEXT_STYLE_FALLBACK),
+      };
+    }
+    // A Media box is never graded against type it has none of, and carries the stand-in after its style.
+    return {
+      ...fields,
+      kind,
+      style: reader.parsed('style', parseMediaBoxStyle, MEDIA_STYLE_FALLBACK),
+      ...optional('placeholder', reader.optionalText('placeholder')),
+    };
   });
 
 const optional = (name: string, value: string | undefined): Record<string, string> =>
