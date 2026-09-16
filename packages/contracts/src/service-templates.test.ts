@@ -195,6 +195,49 @@ describe('instantiate', () => {
     if (outcome.ok) throw new Error('expected instantiation to be refused');
     expect(outcome.errors.map((error) => error.entryId)).toEqual(['a', 'b']);
   });
+
+  const TYPED_CUSTOM_SLIDE: ServiceTemplateBody = {
+    sections: [
+      {
+        id: 's',
+        name: 'S',
+        entries: [{ id: 'slide-1', slot: 'typed', itemKind: 'custom-slide', required: true }],
+      },
+    ],
+  };
+
+  it('refuses a fill that pins content onto a typed custom-slide slot', () => {
+    const outcome = instantiate(TYPED_CUSTOM_SLIDE, [
+      { entryId: 'slide-1', title: 'Not allowed', content: { id: 'song-x', revision: '1', hash: undefined } },
+    ]);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('expected instantiation to be refused');
+    expect(outcome.errors).toEqual([
+      {
+        entryId: 'slide-1',
+        kind: 'content-not-allowed',
+        message: 'slide-1 is a custom slide and must not be filled with pinned content',
+      },
+    ]);
+  });
+
+  it('instantiates a typed custom-slide slot filled without content, and the result round-trips through conversion', () => {
+    const outcome = instantiate(TYPED_CUSTOM_SLIDE, [{ entryId: 'slide-1', title: 'Welcome', content: undefined }]);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) throw new Error('expected instantiation to succeed');
+    expect(outcome.items).toEqual([{ id: 'slide-1', kind: 'custom-slide', title: 'Welcome', content: undefined }]);
+
+    const converted = templateFromService({
+      id: 'service-x',
+      title: 'X',
+      date: '2026-09-20',
+      site: 'main',
+      state: 'upcoming',
+      sections: [{ id: 's', name: 'S', items: outcome.items }],
+    });
+    const parsed = parseServiceTemplateBody(converted);
+    expect(parsed.ok).toBe(true);
+  });
 });
 
 const SERVICE: Service = {

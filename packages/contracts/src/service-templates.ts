@@ -115,7 +115,7 @@ export type EntryFill = {
 
 export type InstantiationError = {
   readonly entryId: string;
-  readonly kind: 'unfilled-required-slot';
+  readonly kind: 'unfilled-required-slot' | 'content-not-allowed';
   readonly message: string;
 };
 
@@ -147,6 +147,14 @@ export function instantiate(body: ServiceTemplateBody, fills: readonly EntryFill
             message: `${entry.id} is a required slot and was not filled`,
           });
         }
+        continue;
+      }
+      if (entry.itemKind === AUTHORED_IN_PLACE && fill.content !== undefined) {
+        errors.push({
+          entryId: entry.id,
+          kind: 'content-not-allowed',
+          message: `${entry.id} is a custom slide and must not be filled with pinned content`,
+        });
         continue;
       }
       items.push({ id: entry.id, kind: entry.itemKind, title: fill.title, content: fill.content });
