@@ -20,6 +20,7 @@ describe('the durable record classes', () => {
       'preparedSnapshots',
       'runEvents',
       'schemaMigrations',
+      'serviceTemplates',
       'slideLayouts',
     ]);
     const collections = CLASSES.map(([, record]) => record.collection);

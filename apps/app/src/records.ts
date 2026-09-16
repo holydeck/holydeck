@@ -61,6 +61,15 @@ export const RECORDS = {
     kind: 'append-only',
     fields: { ...HISTORY, version: 'required', direction: 'required', attempt: 'required', phase: 'required', at: 'required', detail: 'optional' },
   },
+  // Spec TMPL-04: a Service Template's own stamp — its name, and when and by whom it was defined. No
+  // update verb exists for one yet, because no requirement says what changing or archiving one does (see
+  // service-templates.ts's own header); each Service Template is therefore exactly one row, keyed by its
+  // own identifier rather than a growing stamp history like `slideLayouts`.
+  serviceTemplates: {
+    collection: 'service_templates',
+    kind: 'append-only',
+    fields: { ...HISTORY, name: 'required', createdAt: 'required', createdBy: 'required' },
+  },
   // Spec TMPL-01: a Slide Layout's own stamp and name, apart from the boxes it holds. Append-only like
   // everything else, so its lifecycle is a history of stamps rather than one row edited in place: the
   // standing stamp is the highest `sequence` a `layoutId` has, and a second writer claiming that same

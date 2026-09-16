@@ -57,6 +57,10 @@
       "types": "./dist/revisions.d.ts",
       "import": "./dist/revisions.js"
     },
+    "./service-templates": {
+      "types": "./dist/service-templates.d.ts",
+      "import": "./dist/service-templates.js"
+    },
     "./snapshots": {
       "types": "./dist/snapshots.d.ts",
       "import": "./dist/snapshots.js"

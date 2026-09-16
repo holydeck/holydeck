@@ -14,6 +14,7 @@ export default defineConfig({
     'src/layouts.ts',
     'src/portable.ts',
     'src/revisions.ts',
+    'src/service-templates.ts',
     'src/sessions.ts',
     'src/snapshots.ts',
     'src/services.ts',
