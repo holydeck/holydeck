@@ -15,8 +15,15 @@ export const ACCOUNTS_MANAGE = 'accounts.manage';
 /** Views and changes the settings file. Admin's alone, by role — the same as accounts. */
 export const SETTINGS_MANAGE = 'settings.manage';
 
+/**
+ * Creates, versions, archives and brings back Slide Layouts (spec TMPL-01, which gives them to Admin).
+ * Spelled `layouts.` rather than `slideLayouts.` on purpose: the record class of the same name already
+ * owns `slideLayouts.read` and `slideLayouts.append`, and the two vocabularies stay told apart by sight.
+ */
+export const LAYOUTS_MANAGE = 'layouts.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
-  admin: [ACCOUNTS_MANAGE, SETTINGS_MANAGE],
+  admin: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE],
   editor: [],
   member: [],
 };

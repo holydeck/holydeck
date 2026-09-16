@@ -84,6 +84,20 @@ describe('FieldReader', () => {
     expect(problemsOf({ a: 0 }, (reader) => reader.optionalWholeNumber('a', 1))).toEqual(['payload.a: field.too_small']);
   });
 
+  it('reads a number that need not be whole and refuses one outside the range it is a share of', () => {
+    expect(new FieldReader({ a: 0.25 }, '').ratio('a')).toBe(0.25);
+    expect(new FieldReader({ a: 1 }, '').ratio('a')).toBe(1);
+    expect(problemsOf({ a: '0.25' }, (reader) => reader.ratio('a'))).toEqual(['payload.a: field.not_a_number']);
+    expect(problemsOf({ a: Number.NaN }, (reader) => reader.ratio('a'))).toEqual(['payload.a: field.not_a_number']);
+    expect(problemsOf({ a: Number.POSITIVE_INFINITY }, (reader) => reader.ratio('a'))).toEqual([
+      'payload.a: field.not_a_number',
+    ]);
+    expect(problemsOf({ a: -0.1 }, (reader) => reader.ratio('a'))).toEqual(['payload.a: field.too_small']);
+    expect(problemsOf({ a: 1.5 }, (reader) => reader.ratio('a'))).toEqual(['payload.a: field.too_large']);
+    expect(new FieldReader({ a: 1.4 }, '').ratio('a', { minimum: 1, maximum: 4 })).toBe(1.4);
+    expect(problemsOf({}, (reader) => reader.ratio('a'))).toEqual(['payload.a: field.required']);
+  });
+
   it('reads a flag and refuses a value that merely looks true', () => {
     expect(new FieldReader({ a: false }, '').flag('a')).toBe(false);
     expect(problemsOf({ a: 'true' }, (reader) => reader.flag('a'))).toEqual(['payload.a: field.not_a_boolean']);

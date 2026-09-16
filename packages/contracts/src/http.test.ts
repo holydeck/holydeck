@@ -62,6 +62,7 @@ describe('the released message codes', () => {
       ['resource.not_found', 404],
       ['client.update_required', 426],
       ['command.stale_state_revision', 409],
+      ['slide_layout.state_conflict', 409],
       ['corpus.reference.malformed', 422],
       ['corpus.reference.not_found', 404],
       ['corpus.translation.unknown', 404],

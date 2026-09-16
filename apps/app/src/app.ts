@@ -13,6 +13,7 @@ import { serveOnboarding } from './onboarding.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
 import { serveSettingsRoutes } from './settings-routes.js';
+import { serveSlideLayoutRoutes } from './slide-layout-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
@@ -21,6 +22,7 @@ import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { Identity } from './onboarding.js';
 import type { SettingsAdmin } from './settings-admin.js';
+import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
 import type { WebAsset } from './static.js';
@@ -43,6 +45,8 @@ export interface AppOptions {
   capabilities?: CapabilityStore;
   /** Where the settings file is written and hot-reloaded. Without it, there is nothing to administer. */
   settingsAdmin?: SettingsAdmin;
+  /** Where Slide Layouts are kept. Without it, there is none to create, version or archive. */
+  slideLayouts?: SlideLayoutStore;
 }
 
 /**
@@ -61,6 +65,7 @@ export function buildApp({
   identity,
   capabilities,
   settingsAdmin,
+  slideLayouts,
 }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
@@ -143,6 +148,10 @@ export function buildApp({
   // Behind the same permission as the account surface: reading or changing the settings file is Admin's
   // alone, the same as administering an account is.
   serveSettingsRoutes(app, { settingsAdmin, identity });
+
+  // Behind the same permission again, by a vocabulary of its own: a Slide Layout is Admin's to create,
+  // to save forward and to stop offering, and nobody else's to change.
+  serveSlideLayoutRoutes(app, { slideLayouts, identity });
 
   if (web !== undefined) serveWebClient(app, web);
 

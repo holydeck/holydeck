@@ -45,6 +45,10 @@
       "types": "./dist/entities.d.ts",
       "import": "./dist/entities.js"
     },
+    "./layouts": {
+      "types": "./dist/layouts.d.ts",
+      "import": "./dist/layouts.js"
+    },
     "./portable": {
       "types": "./dist/portable.d.ts",
       "import": "./dist/portable.js"

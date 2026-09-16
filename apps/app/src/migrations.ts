@@ -12,6 +12,7 @@ import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } fr
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
+import { LAYOUT_INDEXES, LAYOUT_RECORD } from './slide-layouts.js';
 import { TOTP_INDEXES, createTotpIndexOn, dropTotpIndexOn } from './totp.js';
 import { createIndexOn, dropIndexOn, repositoriesOn, RepositoryError } from './repositories.js';
 
@@ -204,6 +205,20 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...CAPABILITY_INDEXES].reverse()) await api.dropCapabilityIndex(index.name);
+    },
+  },
+  // A Slide Layout is a record class, unlike the seven above, so its index is built through the same
+  // `createIndex` the durable records use rather than through a helper of its own.
+  {
+    version: 9,
+    name: 'the index a Slide Layout’s standing stamp is found by',
+    async up(api) {
+      for (const index of LAYOUT_INDEXES) {
+        await api.createIndex(LAYOUT_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...LAYOUT_INDEXES].reverse()) await api.dropIndex(LAYOUT_RECORD, index.name);
     },
   },
 ]);

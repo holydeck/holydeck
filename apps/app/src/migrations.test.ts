@@ -99,6 +99,7 @@ describe('the shipped migrations', () => {
       'schema_migrations',
       'sessions',
       'sign_in_attempts',
+      'slide_layouts',
       'totp_credentials',
     ]);
 

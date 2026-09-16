@@ -60,8 +60,9 @@ export const AUDIT_ACTIONS = [
   // The settings file, administered as the one thing it is: a change is recorded once, naming only
   // which fields it touched and never a value — viewing it is never audited, the same as any other GET.
   'settings.update',
-  // Reserved for the content surface T42+ builds. Exercised only by this task's own tests today — no
-  // production caller exists yet.
+  // Every change to a piece of content, whatever the surface: `slide-layout-routes.ts` is its first
+  // caller, and names the Layout in the subject and the direction in the detail rather than adding a
+  // verb per surface. The content surfaces after it join this action instead of inventing their own.
   'content.change',
   // Reserved for the presentation-run surface T76+ builds. Exercised only by this task's own tests today.
   'presentation.run',

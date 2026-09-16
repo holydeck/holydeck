@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { ACCOUNTS_PATH, ONBOARDING_PATH } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE } from '@holydeck/contracts/clients';
 import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
+import { SLIDE_LAYOUTS_PATH } from '@holydeck/contracts/layouts';
 import { SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
 import { TOTP_PATH, TOTP_RECOVERY_PATH, TOTP_VERIFICATION_PATH } from '@holydeck/contracts/totp';
 import { PASSKEY_OPTIONS_PATH, PASSKEY_PATH } from '@holydeck/contracts/webauthn';
@@ -14,6 +15,7 @@ import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
+import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
@@ -97,6 +99,12 @@ describe('every route that changes something', () => {
       { method: 'DELETE', url: `${CAPABILITIES_PATH}/:capabilityId` },
       // Behind the same permission as the account surface: changing the settings file is Admin's alone.
       { method: 'PATCH', url: SETTINGS_PATH },
+      // And the Layouts a service is drawn from: creating one, saving its boxes forward, bringing an
+      // earlier version back and taking one out of use are all Admin's, by a permission of their own.
+      { method: 'POST', url: SLIDE_LAYOUTS_PATH },
+      { method: 'PUT', url: LAYOUT_BOXES_PATH },
+      { method: 'POST', url: `${LAYOUT_REVISIONS_PATH}/:revision` },
+      { method: 'PATCH', url: `${SLIDE_LAYOUTS_PATH}/:id/status` },
     ]);
   });
 

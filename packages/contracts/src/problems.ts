@@ -19,13 +19,24 @@ export const FIELD_CODES = {
   empty: 'field.empty',
   notText: 'field.not_text',
   notAWholeNumber: 'field.not_a_whole_number',
+  notANumber: 'field.not_a_number',
   notABoolean: 'field.not_a_boolean',
   notAList: 'field.not_a_list',
   notAnObject: 'field.not_an_object',
   notATime: 'field.not_a_time',
   notAllowed: 'field.not_allowed',
   tooSmall: 'field.too_small',
+  tooLarge: 'field.too_large',
 } as const;
+
+/** The closed interval a number is read within. Both ends are allowed values, never merely approached. */
+export interface Range {
+  readonly minimum: number;
+  readonly maximum: number;
+}
+
+/** What a share of something is, unless a caller says otherwise: none of it to all of it. */
+export const UNIT_RANGE: Range = Object.freeze({ minimum: 0, maximum: 1 });
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -37,6 +48,9 @@ const asText = (raw: unknown): string | undefined => (typeof raw === 'string' ? 
 
 const asWholeNumber = (raw: unknown): number | undefined =>
   typeof raw === 'number' && Number.isInteger(raw) ? raw : undefined;
+
+const asNumber = (raw: unknown): number | undefined =>
+  typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
 
 const asFlag = (raw: unknown): boolean | undefined => (typeof raw === 'boolean' ? raw : undefined);
 
@@ -127,6 +141,17 @@ export class FieldReader {
 
   #atLeast(name: string, value: number, minimum: number): number {
     if (value < minimum) this.reject(name, FIELD_CODES.tooSmall, `must be at least ${minimum}`);
+    return value;
+  }
+
+  /**
+   * Reads a number that need not be whole, within a closed range — the reader geometry is expressed in,
+   * where a coordinate is a share of the slide rather than a count of pixels nobody has measured yet.
+   */
+  ratio(name: string, range: Range = UNIT_RANGE): number {
+    const value = this.#required(name, range.minimum, asNumber, FIELD_CODES.notANumber, 'must be a number');
+    if (value < range.minimum) this.reject(name, FIELD_CODES.tooSmall, `must be at least ${range.minimum}`);
+    else if (value > range.maximum) this.reject(name, FIELD_CODES.tooLarge, `must be at most ${range.maximum}`);
     return value;
   }
 

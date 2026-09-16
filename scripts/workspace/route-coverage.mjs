@@ -31,6 +31,7 @@ export const KNOWN_INTEGRATION_GAPS = {
     'registration and authentication need a WebAuthn authenticator, which the harness (raw fetch, no ' +
     'browser) cannot provide — likely belongs in tests/harness/e2e instead',
   'settings-routes.ts': 'no harness test reads or changes settings over HTTP',
+  'slide-layout-routes.ts': 'no harness test creates, versions or archives a Slide Layout over HTTP',
   'totp-routes.ts': 'no harness test drives TOTP setup or verification over HTTP',
 };
 

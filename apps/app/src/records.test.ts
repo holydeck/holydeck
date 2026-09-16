@@ -20,6 +20,7 @@ describe('the durable record classes', () => {
       'preparedSnapshots',
       'runEvents',
       'schemaMigrations',
+      'slideLayouts',
     ]);
     const collections = CLASSES.map(([, record]) => record.collection);
     expect(new Set(collections).size).toBe(collections.length);

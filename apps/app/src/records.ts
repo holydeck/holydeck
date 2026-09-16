@@ -61,6 +61,15 @@ export const RECORDS = {
     kind: 'append-only',
     fields: { ...HISTORY, version: 'required', direction: 'required', attempt: 'required', phase: 'required', at: 'required', detail: 'optional' },
   },
+  // Spec TMPL-01: a Slide Layout's own stamp and name, apart from the boxes it holds. Append-only like
+  // everything else, so its lifecycle is a history of stamps rather than one row edited in place: the
+  // standing stamp is the highest `sequence` a `layoutId` has, and a second writer claiming that same
+  // ordinal is a duplicate key rather than a lost change.
+  slideLayouts: {
+    collection: 'slide_layouts',
+    kind: 'append-only',
+    fields: { ...HISTORY, layoutId: 'required', sequence: 'required', at: 'required', name: 'required', stamp: 'required' },
+  },
 } as const satisfies Readonly<Record<string, RecordClass>>;
 
 export type RecordName = keyof typeof RECORDS;

@@ -11,6 +11,7 @@ export default defineConfig({
     'src/live.ts',
     'src/jobs.ts',
     'src/entities.ts',
+    'src/layouts.ts',
     'src/portable.ts',
     'src/revisions.ts',
     'src/sessions.ts',
