@@ -40,14 +40,16 @@ import type { LayoutBox, SlideLayoutBody, TextBoxStyle, TextLayoutBox } from '@h
 export type BoxSelection = readonly string[];
 
 /** The only fields a shared edit may touch. Geometry and bindings stay a one-box-at-a-time decision. */
-export const EDITABLE_TEXT_STYLE_FIELDS: readonly string[] = [
-  'fontFamily',
-  'fontWeight',
-  'sizeRatio',
-  'lineHeight',
-  'align',
-  'verticalAlign',
-];
+const EDITABLE_TEXT_STYLE_FIELD_SET = {
+  fontFamily: true,
+  fontWeight: true,
+  sizeRatio: true,
+  lineHeight: true,
+  align: true,
+  verticalAlign: true,
+} satisfies Record<keyof TextBoxStyle, true>;
+
+export const EDITABLE_TEXT_STYLE_FIELDS: readonly string[] = Object.keys(EDITABLE_TEXT_STYLE_FIELD_SET);
 
 export type SelectionRefusalKind = 'not-editable' | 'below-minimum-size';
 
@@ -61,7 +63,7 @@ export class SelectionError extends Error {
     super(message);
     this.name = 'SelectionError';
     this.kind = kind;
-    this.boxIds = boxIds;
+    this.boxIds = Object.freeze([...boxIds]);
   }
 }
 
@@ -112,9 +114,10 @@ export function applySharedTextStyle(
   const chosen = new Set(selection);
   const isSelected = isSelectedText(chosen);
   const merged = body.boxes.map((box) => (isSelected(box) ? { ...box, style: mergeStyle(box.style, patch) } : box));
+  const selectedMerged = merged.filter(isSelected);
 
   const floor = administrativeDefaults.minimumReadableHeightRatio;
-  const offending = merged.filter(isSelected).filter((box) => box.style.sizeRatio < floor);
+  const offending = selectedMerged.filter((box) => box.style.sizeRatio < floor);
   if (offending.length > 0) {
     const boxIds = offending.map((box) => box.id);
     throw new SelectionError(
@@ -124,7 +127,7 @@ export function applySharedTextStyle(
     );
   }
 
-  return { body: { boxes: merged }, affected: merged.filter(isSelected).map((box) => box.id) };
+  return { body: { boxes: merged }, affected: selectedMerged.map((box) => box.id) };
 }
 
 export type FieldAgreement<T> = { readonly agrees: true; readonly value: T } | { readonly agrees: false };

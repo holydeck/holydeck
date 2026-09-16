@@ -153,8 +153,12 @@ describe('a property the selection disagrees about', () => {
   });
 });
 
-describe('one application, at most one Slide Layout revision', () => {
-  it('asserts the revision count, not the rendered result', async () => {
+describe('composes with the existing revision rules', () => {
+  // Proves this module's single computed body flows through layouts.version() like any other
+  // save — not that this module enforces "at most one revision" itself. It's pure and always
+  // returns exactly one body, so that guarantee is layouts.version()'s dedup-by-hash, already
+  // covered by slide-layouts.test.ts.
+  it('one applySharedTextStyle call produces at most one appended revision', async () => {
     const db = fakeDb();
     const layouts = slideLayoutsOn(db, { now: () => '2026-09-16T00:00:00.000Z', newId: () => 'layout-1' });
     const context = slideLayoutContext('account:tester', 'req-1');
