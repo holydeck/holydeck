@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@holydeck/app": "workspace:*",
     "@holydeck/contracts": "workspace:*",
     "@holydeck/corpus": "workspace:*",
