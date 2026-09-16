@@ -1,5 +1,5 @@
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
-import { SLIDE_LAYOUT_CONFLICT, VALIDATION_FAILED } from '@holydeck/contracts/http';
+import { ENTITY_CONFLICT, VALIDATION_FAILED } from '@holydeck/contracts/http';
 import { SLIDE_LAYOUTS_PATH } from '@holydeck/contracts/layouts';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
 import Fastify from 'fastify';
@@ -205,7 +205,13 @@ describe('creating a Slide Layout', () => {
     expect((await creating(DRAFT)).statusCode).toBe(201);
     const second = await creating({ name: 'Another arrangement', boxes: [backdrop] });
     expect(second.statusCode).toBe(409);
-    expect(second.json().error.code).toBe(SLIDE_LAYOUT_CONFLICT);
+    expect(second.json().error.code).toBe(ENTITY_CONFLICT);
+    // A 409 says nothing of the loser's was written, so the Layout that won the identifier has to be
+    // exactly what it was: its own boxes, its own name, and a history that did not grow.
+    const standing = await previewing('layout-twice');
+    expect(standing.json().data).toMatchObject({ name: 'Sermon point', revision: 1 });
+    expect(standing.json().data.body.boxes).toEqual([text]);
+    expect((await listing('layout-twice')).json().data.revisions).toHaveLength(1);
   });
 
   test('a trail that refuses an entry does not cost the Layout', async () => {
@@ -293,7 +299,7 @@ describe('saving a Slide Layout forward', () => {
     await statusing(id, { archived: true });
     const response = await versioning(id, { boxes: [text, backdrop] });
     expect(response.statusCode).toBe(409);
-    expect(response.json().error.code).toBe(SLIDE_LAYOUT_CONFLICT);
+    expect(response.json().error.code).toBe(ENTITY_CONFLICT);
   });
 
   test('answers with this server’s own fault when the stamp under it is unreadable', async () => {
@@ -327,7 +333,7 @@ describe('archiving a Slide Layout and bringing it back', () => {
     await statusing(id, { archived: true });
     const again = await statusing(id, { archived: true });
     expect(again.statusCode).toBe(409);
-    expect(again.json().error.code).toBe(SLIDE_LAYOUT_CONFLICT);
+    expect(again.json().error.code).toBe(ENTITY_CONFLICT);
   });
 
   test('refuses a body that says nothing about being archived, and a Layout nobody created', async () => {
@@ -398,7 +404,7 @@ describe('the history a Slide Layout keeps', () => {
     await statusing(id, { archived: true });
     const response = await restoring(id, '1');
     expect(response.statusCode).toBe(409);
-    expect(response.json().error.code).toBe(SLIDE_LAYOUT_CONFLICT);
+    expect(response.json().error.code).toBe(ENTITY_CONFLICT);
   });
 
   test('answers not-found for an ordinal this Layout never had, and refuses one that is not an ordinal', async () => {

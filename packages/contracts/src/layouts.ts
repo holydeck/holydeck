@@ -128,15 +128,23 @@ export type SlideLayoutStatus = {
   readonly archived: boolean;
 };
 
+/** What a frame side of none is refused with: the rule is about the slide, and so is the sentence. */
+const NO_ROOM = 'must leave some of the slide to draw in';
+
+/** What a type size of none is refused with. The same rule, about type rather than about the slide. */
+const NO_TYPE = 'must be a size type can be read at';
+
 /**
  * A fraction that has to leave something behind: a box a slide wide is a box, a box no wide is not one.
  * The extra rule is applied only when the field itself was read, so a missing width is reported once.
+ * What the fraction is a fraction of decides the sentence, because a font size answered with a complaint
+ * about the slide sends whoever has to fix it to look at the frame.
  */
-const extent = (reader: FieldReader, name: string): number => {
+const extent = (reader: FieldReader, name: string, refusal: string): number => {
   const before = reader.problems.length;
   const value = reader.ratio(name);
   if (reader.problems.length === before && value === 0) {
-    reader.reject(name, FIELD_CODES.tooSmall, 'must leave some of the slide to draw in');
+    reader.reject(name, FIELD_CODES.tooSmall, refusal);
   }
   return value;
 };
@@ -147,8 +155,8 @@ export const parseBoxFrame: ParseFn<BoxFrame> = (value, path) =>
     const frame = {
       x: reader.ratio('x'),
       y: reader.ratio('y'),
-      width: extent(reader, 'width'),
-      height: extent(reader, 'height'),
+      width: extent(reader, 'width', NO_ROOM),
+      height: extent(reader, 'height', NO_ROOM),
     };
     // Only when all four were read: a box whose width is missing has not also been placed past the edge.
     if (reader.problems.length === before) {
@@ -168,7 +176,7 @@ const parseTextBoxStyle: ParseFn<TextBoxStyle> = (value, path) =>
   parseObject(value, path, (reader) => ({
     fontFamily: reader.text('fontFamily'),
     fontWeight: weight(reader),
-    sizeRatio: extent(reader, 'sizeRatio'),
+    sizeRatio: extent(reader, 'sizeRatio', NO_TYPE),
     lineHeight: reader.ratio('lineHeight', LINE_HEIGHT),
     align: reader.choice('align', TEXT_ALIGNMENTS),
     verticalAlign: reader.choice('verticalAlign', TEXT_ALIGNMENTS),

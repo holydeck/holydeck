@@ -11,7 +11,7 @@
 // bringing it back, which is the same refusal `slide-layouts.ts` gets from the stamp underneath it.
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
-import { SLIDE_LAYOUT_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
+import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import {
   SLIDE_LAYOUTS_PATH,
   parseSlideLayoutBody,
@@ -159,7 +159,7 @@ export function serveSlideLayoutRoutes(
     const parsed = parseSlideLayoutDraft(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const answer = await settled(() => layouts.create(call(request), parsed.value));
-    if (!answer.ok) return reply.code(409).send(errorEnvelope(SLIDE_LAYOUT_CONFLICT, answer.message, request.id));
+    if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     await note(request, answer.value.stamp.id, 'allowed', 'created');
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
@@ -190,7 +190,7 @@ export function serveSlideLayoutRoutes(
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
     const answer = await settled(() => layouts.version(call(request), id, parsed.value));
-    if (!answer.ok) return reply.code(409).send(errorEnvelope(SLIDE_LAYOUT_CONFLICT, answer.message, request.id));
+    if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     // A save that changed nothing is not a change, and the trail is a record of changes.
     if (answer.value.appended) await note(request, id, 'allowed', `saved revision ${answer.value.revision}`);
@@ -202,7 +202,7 @@ export function serveSlideLayoutRoutes(
     if (revision === undefined) return reply.code(422).send(validationFailure(request.id, NOT_AN_ORDINAL));
     const id = idIn(request);
     const answer = await settled(() => layouts.restoreVersion(call(request), id, revision));
-    if (!answer.ok) return reply.code(409).send(errorEnvelope(SLIDE_LAYOUT_CONFLICT, answer.message, request.id));
+    if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     const restored = answer.value;
     if (restored.appended) {
@@ -217,9 +217,9 @@ export function serveSlideLayoutRoutes(
     const id = idIn(request);
     const context = call(request);
     const answer = await settled(() =>
-      parsed.value.archived ? layouts.archive(context, id) : layouts.restore(context, id),
+      parsed.value.archived ? layouts.archive(context, id) : layouts.unarchive(context, id),
     );
-    if (!answer.ok) return reply.code(409).send(errorEnvelope(SLIDE_LAYOUT_CONFLICT, answer.message, request.id));
+    if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     // The direction is in the detail rather than in two actions, because the content surface names one.
     await note(request, id, 'allowed', parsed.value.archived ? 'archived' : 'brought back');

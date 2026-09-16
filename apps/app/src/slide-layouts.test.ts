@@ -74,6 +74,9 @@ const store = (): { db: FakeDb; layouts: SlideLayoutStore } => {
 
 const rows = (db: FakeDb, collection: string): Document[] => db.rows.get(collection) ?? [];
 
+/** What the database says when a second writer has already taken the key a write is aimed at. */
+const duplicateKey = (): Error => Object.assign(new Error('E11000 duplicate key'), { code: 11_000 });
+
 const refused = async (call: Promise<unknown>): Promise<SlideLayoutError> => {
   try {
     await call;
@@ -134,6 +137,23 @@ describe('creating a Slide Layout', () => {
     expect(rows(db, REVISIONS)).toHaveLength(0);
   });
 
+  it('refuses an identifier another Layout already stands on, before writing a box of its own', async () => {
+    const { db, layouts } = store();
+    const first = await layouts.create(ADMIN, DRAFT);
+    const twice = slideLayoutsOn(db, {
+      now: () => new Date(START).toISOString(),
+      newId: () => first.stamp.id,
+    });
+
+    const error = await refused(twice.create(ADMIN, { name: 'Another arrangement', body: TWO }));
+
+    expect(error.kind).toBe('conflict');
+    // The Layout that stands on the identifier is the one that was there: its boxes are its own.
+    expect((await layouts.preview(ADMIN, first.stamp.id))?.body).toEqual(ONE);
+    expect(rows(db, REVISIONS)).toHaveLength(1);
+    expect(rows(db, STAMPS)).toHaveLength(1);
+  });
+
   it('refuses an actor the records layer would not let append', async () => {
     const { layouts } = store();
     const reader = requestContext({ actor: ADMINISTRATOR, permissions: [], correlationId: 'req-0f9c2a41' });
@@ -164,7 +184,7 @@ describe('previewing a Slide Layout', () => {
     expect(await layouts.preview(ADMIN, 'layout-404')).toBeUndefined();
     expect(await layouts.version(ADMIN, 'layout-404', ONE)).toBeUndefined();
     expect(await layouts.archive(ADMIN, 'layout-404')).toBeUndefined();
-    expect(await layouts.restore(ADMIN, 'layout-404')).toBeUndefined();
+    expect(await layouts.unarchive(ADMIN, 'layout-404')).toBeUndefined();
     expect(await layouts.restoreVersion(ADMIN, 'layout-404', 1)).toBeUndefined();
     expect(await layouts.history(ADMIN, 'layout-404')).toEqual([]);
   });
@@ -237,6 +257,33 @@ describe('versioning a Slide Layout', () => {
     expect(archived.kind).toBe('state');
     expect(archived.message).toContain(created.stamp.id);
   });
+
+  it('publishes nothing at all when it loses the race for the ordinal it was stamping', async () => {
+    const { db, layouts } = store();
+    const created = await layouts.create(ADMIN, DRAFT);
+    const before = await layouts.history(ADMIN, created.stamp.id);
+    // Exactly what a second writer reaching the same ordinal produces, and nothing else: the stamp
+    // collides on its unique key while the revision store is untouched.
+    db.failOn = (collection) => (collection === STAMPS ? duplicateKey() : undefined);
+
+    const error = await refused(layouts.version(ADMIN, created.stamp.id, TWO));
+
+    expect(error.kind).toBe('conflict');
+    db.failOn = undefined;
+    // A caller told it lost is a caller nothing of whose was written: the boxes it sent are not standing.
+    expect(await layouts.history(ADMIN, created.stamp.id)).toEqual(before);
+    expect((await layouts.preview(ADMIN, created.stamp.id))?.body).toEqual(ONE);
+  });
+
+  it('refuses a Layout stamped over boxes that are not there, rather than starting them over', async () => {
+    const { db, layouts } = store();
+    const created = await layouts.create(ADMIN, DRAFT);
+    db.rows.set(REVISIONS, []);
+    const error = await refused(layouts.version(ADMIN, created.stamp.id, TWO));
+    expect(error.kind).toBe('corrupt');
+    expect(error.message).toContain(created.stamp.id);
+    expect(rows(db, STAMPS)).toHaveLength(1);
+  });
 });
 
 describe('archiving a Slide Layout and bringing it back', () => {
@@ -268,10 +315,10 @@ describe('archiving a Slide Layout and bringing it back', () => {
     const { layouts } = store();
     const created = await layouts.create(ADMIN, DRAFT);
     await layouts.archive(ADMIN, created.stamp.id);
-    const restored = await layouts.restore(ADMIN, created.stamp.id);
+    const restored = await layouts.unarchive(ADMIN, created.stamp.id);
     expect(restored?.stamp.archivedAt).toBeUndefined();
     expect(restored?.stamp.archivedBy).toBeUndefined();
-    const error = await refused(layouts.restore(ADMIN, created.stamp.id));
+    const error = await refused(layouts.unarchive(ADMIN, created.stamp.id));
     expect(error.kind).toBe('state');
     expect(error.message).toContain('is not archived');
   });
@@ -317,6 +364,21 @@ describe('restoring an earlier version of the boxes', () => {
     });
     expect(rows(db, REVISIONS)).toHaveLength(1);
     expect(rows(db, STAMPS)).toHaveLength(1);
+  });
+
+  it('publishes nothing at all when it loses the race for the ordinal it was stamping', async () => {
+    const { db, layouts } = store();
+    const created = await layouts.create(ADMIN, DRAFT);
+    await layouts.version(ADMIN, created.stamp.id, TWO);
+    const before = await layouts.history(ADMIN, created.stamp.id);
+    db.failOn = (collection) => (collection === STAMPS ? duplicateKey() : undefined);
+
+    const error = await refused(layouts.restoreVersion(ADMIN, created.stamp.id, 1));
+
+    expect(error.kind).toBe('conflict');
+    db.failOn = undefined;
+    expect(await layouts.history(ADMIN, created.stamp.id)).toEqual(before);
+    expect((await layouts.preview(ADMIN, created.stamp.id))?.body).toEqual(TWO);
   });
 });
 

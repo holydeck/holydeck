@@ -30,6 +30,18 @@ test('leaves the two compounds the glossary allows, however they are spelled', (
   assert.deepEqual(verifyTerminology(withSource(text)), []);
 });
 
+test('leaves the compound alone however far apart the two words were set', () => {
+  assert.deepEqual(bareNounsIn('Service  Template'), []);
+  assert.deepEqual(bareNounsIn('Service \t Template'), []);
+});
+
+test('leaves a word the noun is merely the tail of, which is not the noun at all', () => {
+  assert.deepEqual(bareNounsIn('we contemplate the order'), []);
+  assert.deepEqual(bareNounsIn('contemplated'), []);
+  assert.deepEqual(bareNounsIn('contemplates'), []);
+  assert.deepEqual(bareNounsIn('contemplative'), []);
+});
+
 test('catches the bare noun inside an identifier, which is where it does most of its damage', () => {
   const problems = verifyTerminology(withSource('export const layoutTemplateId = 1;\n'));
   assert.equal(problems.length, 1);

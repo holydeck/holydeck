@@ -25,11 +25,15 @@ export const STALE_STATE_REVISION = 'command.stale_state_revision';
 export const NOT_FOUND = 'resource.not_found';
 
 /**
- * Archiving a Slide Layout that is already hidden, bringing back one that was never hidden, or saving one
- * a second writer has moved on since. All three are a request that disagrees with the state it is aimed
- * at, which is what 409 says — and none of them is the stale state revision a live command carries.
+ * Archiving an entity that is already hidden, bringing back one that was never hidden, or saving one a
+ * second writer has moved on since. All three are a request that disagrees with the state it is aimed at,
+ * which is what 409 says — and none of them is the stale state revision a live command carries.
+ *
+ * Named for the situation rather than for the first entity to reach it: every versioned surface after
+ * Slide Layouts refuses the same three things, and a code per entity would say the same sentence in as
+ * many ways as there are entities.
  */
-export const SLIDE_LAYOUT_CONFLICT = 'slide_layout.state_conflict';
+export const ENTITY_CONFLICT = 'entity.state_conflict';
 
 /**
  * The one code a fault of this server's own takes. A client is told that the request did not happen and
@@ -59,7 +63,7 @@ export const MESSAGE_CODES: readonly MessageCode[] = [
   { code: NOT_FOUND, status: 404, stable: true, since: 1 },
   { code: UPDATE_REQUIRED, status: 426, stable: true, since: 1 },
   { code: STALE_STATE_REVISION, status: 409, stable: true, since: 1 },
-  { code: SLIDE_LAYOUT_CONFLICT, status: 409, stable: true, since: 1 },
+  { code: ENTITY_CONFLICT, status: 409, stable: true, since: 1 },
   // The corpus boundary. These are what a client learns when the application could not read the corpus;
   // the corpus's own codes and wording stay behind the boundary, and `./corpus.js` holds the translation.
   { code: 'corpus.reference.malformed', status: 422, stable: true, since: 1 },

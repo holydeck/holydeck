@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ENTITY_CONFLICT,
   MESSAGE_CODES,
   REMOVED_CODES,
   STALE_STATE_REVISION,
@@ -62,7 +63,7 @@ describe('the released message codes', () => {
       ['resource.not_found', 404],
       ['client.update_required', 426],
       ['command.stale_state_revision', 409],
-      ['slide_layout.state_conflict', 409],
+      ['entity.state_conflict', 409],
       ['corpus.reference.malformed', 422],
       ['corpus.reference.not_found', 404],
       ['corpus.translation.unknown', 404],
@@ -72,10 +73,11 @@ describe('the released message codes', () => {
       ['corpus.unexpected_error', 500],
       ['server.unexpected_error', 500],
     ]);
-    expect([VALIDATION_FAILED, UPDATE_REQUIRED, STALE_STATE_REVISION]).toEqual([
+    expect([VALIDATION_FAILED, UPDATE_REQUIRED, STALE_STATE_REVISION, ENTITY_CONFLICT]).toEqual([
       'request.validation_failed',
       'client.update_required',
       'command.stale_state_revision',
+      'entity.state_conflict',
     ]);
   });
 

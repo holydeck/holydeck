@@ -12,9 +12,17 @@
 // the highest sequence a Layout has. Two writers reaching the same ordinal collide on the key rather than
 // on the record, so the loser is told it lost instead of quietly overwriting the winner.
 //
-// Order of writing matters once and is settled here: the boxes are written before the stamp. A revision no
-// stamp names is invisible and costs a row; a stamp no revision answers would be a Layout that cannot be
-// drawn, which is a Layout the product would have to special-case forever.
+// Which of the two writes goes first is decided per verb, because the two orders fail differently and only
+// one of the two failures is survivable on each path. `create` writes the boxes first: a revision no stamp
+// names is invisible and costs a row, while a stamp no revision answers would be a Layout that cannot be
+// drawn. `version` and `restoreVersion` write the stamp first, because the Layout they change already has
+// boxes — a stamp whose revision never arrived leaves it exactly as drawable as it was, while a revision
+// whose stamp lost the race would already be the standing content of a call this store answered with a
+// refusal, which is the one outcome nothing downstream can correct. What holds on all three paths is the
+// property a 409 states: a caller told it lost the race is a caller nothing of whose was written.
+//
+// Stamping first means the question the revision store answers by comparing addresses — did the boxes
+// actually change? — is asked here before either write, because a save that changes nothing stamps nothing.
 
 import { randomBytes } from 'node:crypto';
 
@@ -31,7 +39,7 @@ import { parseSlideLayoutBody, parseSlideLayoutDraft } from '@holydeck/contracts
 import { requestContext } from './context.js';
 import { permissionsFor } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
-import { REVISION_PERMISSIONS, RevisionError, revisionsOn } from './revisions.js';
+import { REVISION_PERMISSIONS, RevisionError, addressOf, revisionsOn } from './revisions.js';
 
 import type { EntityStamp } from '@holydeck/contracts/entities';
 import type { SlideLayoutBody, SlideLayoutDraft } from '@holydeck/contracts/layouts';
@@ -119,7 +127,11 @@ export interface SlideLayoutStore {
   restoreVersion(context: unknown, id: string, revision: number): Promise<RestoredVersion | undefined>;
   /** Stops offering it where Layouts are chosen. Its boxes and its history are untouched. */
   archive(context: unknown, id: string): Promise<SlideLayoutRecord | undefined>;
-  restore(context: unknown, id: string): Promise<SlideLayoutRecord | undefined>;
+  /**
+   * Offers it again. Named for the undoing of `archive` rather than "restore", because the other restore
+   * in this store's vocabulary — `restoreVersion` — is about the boxes, and this one never touches them.
+   */
+  unarchive(context: unknown, id: string): Promise<SlideLayoutRecord | undefined>;
   history(context: unknown, id: string): Promise<readonly RevisionRecord[]>;
 }
 
@@ -254,19 +266,33 @@ export function slideLayoutsOn(db: RepositoryDb, options: SlideLayoutOptions): S
     return parsed.value;
   };
 
-  /** A version saved forward, and the stamp touched only when something was actually appended. */
+  /**
+   * A version saved forward: the stamp first and the boxes after it, for the reason the header settles.
+   * `hash` is the address the boxes about to be saved will be stored under, and it is what answers whether
+   * this is a change at all — asked here rather than left to the revision store, because by the time the
+   * store could answer it the stamp would already be written.
+   */
   const saved = async (
     context: unknown,
+    id: string,
     row: StampRow,
+    hash: string,
     save: () => Promise<{ readonly appended: boolean; readonly revision: RevisionRecord }>,
   ): Promise<VersionOutcome> => {
     const at = options.now();
     // Before anything is written: an archived Layout is one nothing changes, and `touchedStamp` says so.
     const touched = touchedStamp(row.stamp, { at, by: author(context).actor });
-    const outcome = await save();
-    if (!outcome.appended) return { appended: false, revision: outcome.revision.revision };
+    const held = await revisions.current(context, id);
+    // A stamp is only ever written after the boxes it names, so a Layout that has one has boxes. One that
+    // does not is a Layout whose history went somewhere this product cannot write, and saying so is the
+    // only honest answer: starting its history over would bury whatever took it.
+    if (held === undefined) {
+      throw new SlideLayoutError('corrupt', `${id} is stamped as a Slide Layout and holds no boxes at all`);
+    }
+    if (held.hash === hash) return { appended: false, revision: held.revision };
     await stampOnto(context, touched, row.name, row.sequence + 1);
-    return { appended: true, revision: outcome.revision.revision };
+    const outcome = await save();
+    return { appended: outcome.appended, revision: outcome.revision.revision };
   };
 
   const restamp = async (
@@ -285,6 +311,13 @@ export function slideLayoutsOn(db: RepositoryDb, options: SlideLayoutOptions): S
       own(async () => {
         const { name, body } = readDraft(draft);
         const id = newId();
+        // Here the boxes go first, so this is the one path where appending them onto a Layout somebody
+        // else already stands on would make the loser's boxes the winner's content. The unique key behind
+        // the stamp still catches two creations minting one identifier in the same instant; this catches
+        // an identifier that was already taken before either of them started.
+        if ((await standing(context, id)) !== undefined) {
+          throw new SlideLayoutError('conflict', `${id} is a Slide Layout another writer named first`);
+        }
         const at = options.now();
         const outcome = await revisions.save(context, { contentId: id, body, origin: 'manual-checkpoint' });
         const stamp = createdStamp({ id, kind: 'slideLayout', at, by: author(context).actor });
@@ -309,7 +342,7 @@ export function slideLayoutsOn(db: RepositoryDb, options: SlideLayoutOptions): S
         const boxes = readBody(body);
         const row = await standing(context, id);
         if (row === undefined) return undefined;
-        return saved(context, row, () =>
+        return saved(context, id, row, addressOf(boxes), () =>
           revisions.save(context, { contentId: id, body: boxes, origin: 'manual-checkpoint' }),
         );
       }),
@@ -322,13 +355,16 @@ export function slideLayoutsOn(db: RepositoryDb, options: SlideLayoutOptions): S
         // it is the same question `preview` asks, and it is answered the same way.
         const target = await revisions.read(context, id, revision);
         if (target === undefined) return undefined;
-        const outcome = await saved(context, row, () => revisions.restore(context, { contentId: id, revision }));
+        const outcome = await saved(context, id, row, target.hash, () =>
+          revisions.restore(context, { contentId: id, revision }),
+        );
         return { ...outcome, from: revision };
       }),
 
     archive: (context, id) => own(() => restamp(context, id, (row, at, by) => archivedStamp(row.stamp, { at, by }))),
 
-    restore: (context, id) => own(() => restamp(context, id, (row, at, by) => restoredStamp(row.stamp, { at, by }))),
+    unarchive: (context, id) =>
+      own(() => restamp(context, id, (row, at, by) => restoredStamp(row.stamp, { at, by }))),
 
     history: (context, id) => own(() => revisions.history(context, id)),
   };

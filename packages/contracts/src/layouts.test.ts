@@ -33,6 +33,11 @@ const problemsOf = (value: unknown): readonly string[] => {
   return parsed.ok ? [] : parsed.problems.map((problem) => `${problem.path}: ${problem.code}`);
 };
 
+const messagesOf = (value: unknown): readonly string[] => {
+  const parsed = parseSlideLayoutBody(value);
+  return parsed.ok ? [] : parsed.problems.map((problem) => `${problem.path}: ${problem.message}`);
+};
+
 describe('the shape a Slide Layout is', () => {
   it('names the two kinds of box and the two ways one is graded against the safe area', () => {
     expect([...BOX_KINDS]).toEqual(['text', 'media']);
@@ -154,6 +159,17 @@ describe('what a box carries besides its geometry', () => {
       'layout.boxes.0.style.lineHeight: field.too_small',
     ]);
     expect(problemsOf({ boxes: [textBox({ style: undefined })] })).toEqual(['layout.boxes.0.style: field.required']);
+  });
+
+  it('tells a type size of none what a type size is, rather than talking about the slide', () => {
+    const style = textBox().style as Record<string, unknown>;
+    expect(messagesOf({ boxes: [textBox({ style: { ...style, sizeRatio: 0 } })] })).toEqual([
+      'layout.boxes.0.style.sizeRatio: must be a size type can be read at',
+    ]);
+    // The same rule on a frame is about the slide, which is where that sentence belongs and the only place.
+    expect(messagesOf({ boxes: [textBox({ frame: { x: 0, y: 0, width: 0, height: 0.5 } })] })).toEqual([
+      'layout.boxes.0.frame.width: must leave some of the slide to draw in',
+    ]);
   });
 
   it('refuses a Media style that would draw nothing or refuse to be seen through', () => {

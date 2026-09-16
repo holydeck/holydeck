@@ -10,8 +10,14 @@
 //
 // The match is a case-insensitive substring rather than a whole word, because the bare noun does most of
 // its damage inside an identifier — `layoutTemplateId`, `TEMPLATES`, `template_id` — and a whole-word
-// match would read every one of those as something else. The one exception is the compound itself:
-// "template" directly after "service", with or without a separator between them, is the allowed term.
+// match would read every one of those as something else. Two things are not the bare noun, and a census
+// that says they are is a census somebody switches off:
+//
+//   - the compound itself, "template" after "service", however many spaces or separators were set between
+//     the two words;
+//   - a longer word the noun is merely the tail of. `contemplate` is one word and `layoutTemplate` is two,
+//     and what tells them apart is the capital: a lower-case noun carrying on from a lower-case letter is
+//     the middle of somebody else's word.
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -28,10 +34,17 @@ export const GUARDED_FILES = [
   'packages/contracts/src/layouts.ts',
 ];
 
-/** The bare noun, anywhere in a word, unless "service" is what comes directly before it. */
-const BARE_NOUN = /(?<!service[ \t_-]?)template/giu;
+/** The bare noun, anywhere in a word, unless "service" is what comes before it however it was spaced. */
+const BARE_NOUN = /(?<!service[\s_-]*)template/giu;
+
+/** A word carrying on to the left of the noun, in the same case, which makes the noun part of it. */
+const CARRIES_ON = /[a-z]$/u;
 
 export const CORRECTION = 'the term is Slide Layout or Service Template, never the bare noun';
+
+/** Whether what was matched is the noun itself rather than the tail of a longer lower-case word. */
+const isBareNoun = (line, match) =>
+  match[0] !== match[0].toLowerCase() || !CARRIES_ON.test(line.slice(0, match.index));
 
 /** Every line of the source that says the bare noun, with the column it says it at. */
 export function bareNounsIn(text) {
@@ -39,6 +52,7 @@ export function bareNounsIn(text) {
   const lines = text.split('\n');
   for (const [at, line] of lines.entries()) {
     for (const match of line.matchAll(BARE_NOUN)) {
+      if (!isBareNoun(line, match)) continue;
       found.push({ line: at + 1, column: match.index + 1, said: match[0] });
     }
   }
