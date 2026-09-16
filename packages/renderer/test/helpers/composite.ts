@@ -4,8 +4,9 @@
 // slide's own ground first, where the layout lands, and then its boxes over it, in paint order.
 //
 // The point of reading the ground off the prepared slide rather than assuming it is absent is that this
-// is the mechanism that would notice one arriving. A slide that grew a background field would paint it
-// here, the backdrop would stop showing through, and the suite would say so.
+// is the mechanism that would notice one arriving. A slide that grew a field of its own named for a
+// ground would paint it here, the backdrop would stop showing through, and the suite would say so. What
+// it notices is bounded, though, and deliberately so — see `FILL`.
 
 import type { Canvas } from '../../src/output-profile.js';
 import type { PixelFrame, PreparedSlide } from '../../src/render-model.js';
@@ -13,7 +14,12 @@ import type { PixelFrame, PreparedSlide } from '../../src/render-model.js';
 /** What is in a cell nothing was painted over: the group background, showing through. */
 export const BACKDROP = 'backdrop';
 
-/** Any field by which a slide could carry a ground of its own. */
+/**
+ * The names a ground would arrive under, matched at the front of a field name and nowhere else. This is
+ * a net with a known mesh, not a proof: `fillOf` casts it over the slide's own fields only, so a ground
+ * nested inside another field, or named something else entirely, would pass through it. Widening either
+ * end would catch fields that are not grounds, so the mesh stays as it is and the limit is written down.
+ */
 const FILL = /^(?:background|fill|backdrop)/iu;
 
 export interface Grid {
@@ -21,7 +27,7 @@ export interface Grid {
   readonly rows: number;
 }
 
-/** The ground a prepared slide paints under its boxes, or nothing when it carries none. */
+/** The ground a prepared slide paints under its boxes, or nothing when no field of its own names one. */
 export const fillOf = (slide: PreparedSlide): string | undefined => {
   const found = Object.entries(slide).find(([name]) => FILL.test(name));
   return found === undefined ? undefined : String(found[1]);
