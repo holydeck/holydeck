@@ -115,7 +115,7 @@ export type EntryFill = {
 
 export type InstantiationError = {
   readonly entryId: string;
-  readonly kind: 'unfilled-required-slot' | 'content-not-allowed';
+  readonly kind: 'unfilled-required-slot' | 'content-not-allowed' | 'content-required';
   readonly message: string;
 };
 
@@ -149,11 +149,20 @@ export function instantiate(body: ServiceTemplateBody, fills: readonly EntryFill
         }
         continue;
       }
-      if (entry.itemKind === AUTHORED_IN_PLACE && fill.content !== undefined) {
+      if (entry.itemKind === AUTHORED_IN_PLACE) {
+        if (fill.content !== undefined) {
+          errors.push({
+            entryId: entry.id,
+            kind: 'content-not-allowed',
+            message: `${entry.id} is a custom slide and must not be filled with pinned content`,
+          });
+          continue;
+        }
+      } else if (fill.content === undefined) {
         errors.push({
           entryId: entry.id,
-          kind: 'content-not-allowed',
-          message: `${entry.id} is a custom slide and must not be filled with pinned content`,
+          kind: 'content-required',
+          message: `${entry.id} must be filled with pinned content`,
         });
         continue;
       }

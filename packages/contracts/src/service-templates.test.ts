@@ -221,6 +221,24 @@ describe('instantiate', () => {
     ]);
   });
 
+  it('refuses a fill that omits content for a reusable-content typed slot', () => {
+    const reusableContent: ServiceTemplateBody = {
+      sections: [
+        {
+          id: 's',
+          name: 'S',
+          entries: [{ id: 'song-2', slot: 'typed', itemKind: 'song', required: true }],
+        },
+      ],
+    };
+    const outcome = instantiate(reusableContent, [{ entryId: 'song-2', title: 'Untitled', content: undefined }]);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('expected instantiation to be refused');
+    expect(outcome.errors).toEqual([
+      { entryId: 'song-2', kind: 'content-required', message: 'song-2 must be filled with pinned content' },
+    ]);
+  });
+
   it('instantiates a typed custom-slide slot filled without content, and the result round-trips through conversion', () => {
     const outcome = instantiate(TYPED_CUSTOM_SLIDE, [{ entryId: 'slide-1', title: 'Welcome', content: undefined }]);
     expect(outcome.ok).toBe(true);
