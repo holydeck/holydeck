@@ -64,6 +64,14 @@ export const AUDIT_ACTIONS = [
   // caller, and names the Layout in the subject and the direction in the detail rather than adding a
   // verb per surface. The content surfaces after it join this action instead of inventing their own.
   'content.change',
+  // A Service's own history: creating, duplicating, scheduling, archiving/unarchiving, and editing
+  // its sections and items. `services.ts` is the only caller — no routes task exists yet to carry
+  // this the way `accounts-routes.ts` carries `account.*`, so the store appends these itself.
+  'service.create',
+  'service.duplicate',
+  'service.schedule',
+  'service.archive',
+  'service.edit',
   // Reserved for the presentation-run surface T76+ builds. Exercised only by this task's own tests today.
   'presentation.run',
   // Reserved for the backup surface T100+ builds. Exercised only by this task's own tests today.
@@ -125,6 +133,11 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'authorization.refuse': 'authorization',
   'settings.update': 'settings',
   'content.change': 'content',
+  'service.create': 'content',
+  'service.duplicate': 'content',
+  'service.schedule': 'content',
+  'service.archive': 'content',
+  'service.edit': 'content',
   'presentation.run': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',

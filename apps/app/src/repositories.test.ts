@@ -246,7 +246,7 @@ describe('the set of repositories', () => {
   it('cannot be handed a collection nothing declares', () => {
     const { db } = fakeDb();
     const set = repositoriesOn(db) as unknown as Record<string, unknown>;
-    expect(set['services']).toBeUndefined();
+    expect(set['unknown']).toBeUndefined();
   });
 
   it('offers no way to rewrite or delete a durable record', () => {
@@ -270,7 +270,7 @@ describe('the set of repositories', () => {
 
   it('reports a class nobody ships when the name arrived as data', () => {
     const { db } = fakeDb();
-    const error = thrown(() => createIndexOn(db, 'services', { runId: 1 }));
+    const error = thrown(() => createIndexOn(db, 'unknown', { runId: 1 }));
     expect(error.kind).toBe('schema');
   });
 });

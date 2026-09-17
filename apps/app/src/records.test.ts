@@ -21,6 +21,7 @@ describe('the durable record classes', () => {
       'runEvents',
       'schemaMigrations',
       'serviceTemplates',
+      'services',
       'slideLayouts',
     ]);
     const collections = CLASSES.map(([, record]) => record.collection);
@@ -84,8 +85,8 @@ describe('looking a record class up', () => {
   });
 
   it('refuses a name that arrived as data rather than guessing at a collection', () => {
-    expect(() => recordFor('services')).toThrow(RecordError);
-    expect(() => recordFor('services')).toThrow('there is no durable record class named services');
+    expect(() => recordFor('unknown')).toThrow(RecordError);
+    expect(() => recordFor('unknown')).toThrow('there is no durable record class named unknown');
   });
 });
 

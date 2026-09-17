@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { FIELD_CODES } from './problems.js';
-import { ITEM_KINDS, SERVICE_STATES, SERVICE_STATE_LABELS, parseRevisionRef, parseService } from './services.js';
+import { ITEM_KINDS, SERVICE_STATES, SERVICE_STATE_LABELS, parseRevisionRef, parseService, parseServiceDraft } from './services.js';
 
 // A service in the vocabulary specification 4 settles, with the revision and hash shapes the phase
 // fixtures record. The product repository holds no phase artifacts, so the values are written out here.
@@ -39,6 +39,33 @@ const defective = (change: (value: ReturnType<typeof service>) => void) => {
   change(value);
   return codes(value);
 };
+
+describe('reading a service draft', () => {
+  it('reads the title, date, site, and ordered sections without requiring an id or state', () => {
+    const { title, date, site, sections } = service();
+    const draft = { title, date, site, sections };
+    expect(parseServiceDraft(draft)).toEqual({ ok: true, value: draft });
+  });
+
+  it('rejects an impossible date with the same problem as a full service', () => {
+    const invalid = { ...service(), date: '2026-09-31' };
+    expect(parseServiceDraft(invalid)).toEqual(parseService(invalid));
+    expect(parseServiceDraft(invalid).ok).toBe(false);
+  });
+
+  it('never reads or carries an id or state supplied with a draft', () => {
+    const { title, date, site, sections } = service();
+    const parsed = parseServiceDraft({
+      title, date, site, sections,
+      get id() { throw new Error('a draft has no id'); },
+      get state() { throw new Error('a draft has no state'); },
+    });
+    expect(parsed).toEqual({ ok: true, value: { title, date, site, sections } });
+    if (!parsed.ok) throw new Error('the draft was refused');
+    expect(parsed.value).not.toHaveProperty('id');
+    expect(parsed.value).not.toHaveProperty('state');
+  });
+});
 
 describe('the vocabulary a service is written in', () => {
   it('names the four lifecycle states, each with the words the product calls it by', () => {

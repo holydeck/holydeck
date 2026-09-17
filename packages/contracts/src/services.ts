@@ -1,7 +1,7 @@
 // The domain payloads a service is written in: the service itself, its ordered sections, the items in
 // them, and the references by which an item pins one immutable revision of reusable content.
 
-import { FIELD_CODES, type ParseFn, type Parsed, parseObject } from './problems.js';
+import { FIELD_CODES, type FieldReader, type ParseFn, type Parsed, parseObject } from './problems.js';
 
 export const SERVICE_STATES = ['upcoming', 'presenting', 'completed', 'archived'] as const;
 export type ServiceState = (typeof SERVICE_STATES)[number];
@@ -48,6 +48,14 @@ export type Service = {
   readonly sections: readonly ServiceSection[];
 };
 
+/** A new Service: everything `create` needs, before it has an id or has ever changed state. */
+export type ServiceDraft = {
+  readonly title: string;
+  readonly date: string;
+  readonly site: string;
+  readonly sections: readonly ServiceSection[];
+};
+
 // A digest names the algorithm that produced it, so a stored hash stays readable when the algorithm
 // changes and two digests of different algorithms can never be compared as if they were the same thing.
 const HASH = /^[a-z][a-z0-9]*-[0-9a-f]{8,64}$/u;
@@ -56,7 +64,7 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/u;
 
 // A service is dated by the day it is held on, not by an instant, and the day has to exist: the built-in
 // parser rolls a 31st of September over into October rather than refusing it, so the day is read back.
-const isCalendarDay = (value: string): boolean => {
+export const isCalendarDay = (value: string): boolean => {
   if (!DAY.test(value)) return false;
   const time = Date.parse(`${value}T00:00:00Z`);
   return !Number.isNaN(time) && new Date(time).toISOString().startsWith(value);
@@ -100,21 +108,29 @@ const sectionParser = (seenSections: Set<string>, seenItems: Set<string>): Parse
       return { id, name: reader.text('name'), items: reader.parsedList('items', itemParser(seenItems)) };
     });
 
+const eventFields = (reader: FieldReader): Omit<ServiceDraft, 'sections'> => {
+  const title = reader.text('title');
+  const date = reader.text('date');
+  if (date !== '' && !isCalendarDay(date)) {
+    reader.reject('date', FIELD_CODES.notAllowed, 'must be a calendar day such as 2026-09-13');
+  }
+  return { title, date, site: reader.text('site') };
+};
+
+const draftFields = (reader: FieldReader): ServiceDraft => ({
+  ...eventFields(reader),
+  sections: reader.parsedList('sections', sectionParser(new Set(), new Set())),
+});
+
+export function parseServiceDraft(value: unknown): Parsed<ServiceDraft> {
+  return parseObject(value, 'service', draftFields);
+}
+
 export function parseService(value: unknown): Parsed<Service> {
-  return parseObject(value, 'service', (reader) => {
-    const id = reader.text('id');
-    const title = reader.text('title');
-    const date = reader.text('date');
-    if (date !== '' && !isCalendarDay(date)) {
-      reader.reject('date', FIELD_CODES.notAllowed, 'must be a calendar day such as 2026-09-13');
-    }
-    return {
-      id,
-      title,
-      date,
-      site: reader.text('site'),
-      state: reader.choice('state', SERVICE_STATES),
-      sections: reader.parsedList('sections', sectionParser(new Set(), new Set())),
-    };
-  });
+  return parseObject(value, 'service', (reader) => ({
+    id: reader.text('id'),
+    ...eventFields(reader),
+    state: reader.choice('state', SERVICE_STATES),
+    sections: reader.parsedList('sections', sectionParser(new Set(), new Set())),
+  }));
 }

@@ -70,6 +70,25 @@ export const RECORDS = {
     kind: 'append-only',
     fields: { ...HISTORY, name: 'required', createdAt: 'required', createdBy: 'required' },
   },
+  // Spec SERV-01: a Service's own stamp, kept as a history of stamps like `slideLayouts` rather than
+  // one row edited in place — a Service has no separately-versioned body to delegate to, so its
+  // sections and items are written inline on the same stamped row.
+  services: {
+    collection: 'services',
+    kind: 'append-only',
+    fields: {
+      ...HISTORY,
+      serviceId: 'required',
+      sequence: 'required',
+      at: 'required',
+      title: 'required',
+      date: 'required',
+      site: 'required',
+      state: 'required',
+      sections: 'required',
+      stamp: 'required',
+    },
+  },
   // Spec TMPL-01: a Slide Layout's own stamp and name, apart from the boxes it holds. Append-only like
   // everything else, so its lifecycle is a history of stamps rather than one row edited in place: the
   // standing stamp is the highest `sequence` a `layoutId` has, and a second writer claiming that same
