@@ -22,6 +22,7 @@ import { probeCorpusIsClosed } from './corpus.js';
 import { serveLive } from './live.js';
 import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
+import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
 import { sessionDb, sessionsOn } from './sessions.js';
@@ -92,12 +93,16 @@ if (settings.values.mongoUrl !== '') {
   // its neighbors above, nothing here holds onto what it returns. T54 builds the store, not its HTTP surface.
   mediaLibraryOn(repositoryDb(store.db()), {
     now,
+    queue: queueOn(queueDb(store.db()), { now }),
     mediaRoot: settings.values.mediaRoot,
     write: async (root, key, bytes) => {
       await mkdir(root, { recursive: true });
       const path = join(root, key);
       await writeFile(path, bytes);
       return path;
+    },
+    async read(_root, key) {
+      return new Uint8Array(await readFile(key));
     },
   });
   settingsAdmin = settingsAdminOn(settings, {

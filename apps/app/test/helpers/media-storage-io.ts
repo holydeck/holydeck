@@ -13,5 +13,10 @@ export function fakeMediaStorageIO(): FakeMediaStorageIO {
       writes.push({ root, key, bytes });
       return `${root}/${key}`;
     },
+    async read(_root, key) {
+      const found = writes.find((write) => `${write.root}/${write.key}` === key);
+      if (found === undefined) throw new Error(`${key} was not stored`);
+      return found.bytes;
+    },
   };
 }

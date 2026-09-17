@@ -6,15 +6,27 @@
 // check reads. The decision lives here rather than in the entry point so that both answers are read back
 // by a test, since an entry point is only ever run by running the worker.
 
+import { mediaIngestOn } from './media-ingest.js';
+
+import type { MediaIngestOptions } from './media-ingest.js';
 import type { Handler } from './runner.js';
 
 export type Handlers = Readonly<Record<string, Handler>>;
 
 /**
- * The kinds of job this build knows how to run. Empty until a task registers one — media ingestion is the
- * first — and a worker with nothing registered parks rather than leasing work it would only fail.
+ * The kinds of job this build knows how to run. A worker with nothing registered parks rather than leasing
+ * work it would only fail.
  */
-export const HANDLERS: Handlers = Object.freeze({});
+const unconfiguredMediaIngest: Handler = async () => {
+  throw new Error('media ingestion has not been configured');
+};
+
+/** The kinds this build registers before the entry point supplies their deployment dependencies. */
+export const HANDLERS: Handlers = Object.freeze({ 'media-ingest': unconfiguredMediaIngest });
+
+export function handlersOn(mediaIngest: MediaIngestOptions): Handlers {
+  return Object.freeze({ ...HANDLERS, 'media-ingest': mediaIngestOn(mediaIngest) });
+}
 
 export type Work =
   | { readonly runs: 'jobs'; readonly kinds: readonly string[] }

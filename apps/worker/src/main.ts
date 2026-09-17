@@ -1,15 +1,19 @@
 import { accessSync, constants, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import { readSettingsText } from '@holydeck/app/boot';
+import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
 import { queueDb, queueOn, workerContext } from '@holydeck/app/queue';
+import { repositoryDb } from '@holydeck/app/repositories';
 import { loadSettings, settingsPath } from '@holydeck/app/settings';
 import { MongoClient } from 'mongodb';
 
 import { HEARTBEAT_INTERVAL_MS, heartbeatPath, heartbeatText } from './heartbeat.js';
+import { ffmpegPosterGenerator } from './poster-generator.js';
 import { runnerOn } from './runner.js';
 import { assertUsablePaths, workerPaths } from './runtime.js';
-import { HANDLERS, workToDo } from './work.js';
+import { HANDLERS, handlersOn, workToDo } from './work.js';
 
 const path = settingsPath(process.env);
 const settings = loadSettings({
@@ -81,11 +85,30 @@ if (work.runs === 'nothing') {
   const name = `worker-${process.pid}`;
   const store = new MongoClient(settings.values.mongoUrl);
   await store.connect();
+  const mediaStorage = {
+    async write(root: string, key: string, bytes: Uint8Array): Promise<string> {
+      mkdirSync(root, { recursive: true });
+      const path = join(root, key);
+      await writeFile(path, bytes);
+      return path;
+    },
+    async read(_root: string, key: string): Promise<Uint8Array> {
+      return new Uint8Array(await readFile(key));
+    },
+  };
+  const queue = queueOn(queueDb(store.db()), { now });
+  const handlers = handlersOn({
+    context: mediaContext('system', name),
+    media: mediaLibraryOn(repositoryDb(store.db()), { now, queue, mediaRoot: settings.values.mediaRoot, ...mediaStorage }),
+    storage: mediaStorage,
+    mediaRoot: settings.values.mediaRoot,
+    poster: ffmpegPosterGenerator(),
+  });
   const runner = runnerOn({
-    queue: queueOn(queueDb(store.db()), { now }),
+    queue,
     context: workerContext(name),
     worker: name,
-    handlers: HANDLERS,
+    handlers,
     now,
     sleep: (ms) =>
       new Promise((resolve) => {

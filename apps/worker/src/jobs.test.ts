@@ -8,6 +8,7 @@ const leased = () => ({
   id: 'job-2',
   kind: 'transcode',
   idempotencyKey: 'transcode:media-4',
+  payload: {},
   state: 'leased',
   attempt: 2,
   retryLimit: 5,

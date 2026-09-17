@@ -20,6 +20,14 @@
     "./queue": {
       "types": "./dist/queue.d.ts",
       "import": "./dist/queue.js"
+    },
+    "./media": {
+      "types": "./dist/media.d.ts",
+      "import": "./dist/media.js"
+    },
+    "./repositories": {
+      "types": "./dist/repositories.d.ts",
+      "import": "./dist/repositories.js"
     }
   },
   "scripts": {

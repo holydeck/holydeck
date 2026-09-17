@@ -1,18 +1,21 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { EntityError, archivedStamp, createdStamp, parseEntityStamp, restoredStamp } from '@holydeck/contracts/entities';
+import { EntityError, archivedStamp, createdStamp, parseEntityStamp, restoredStamp, touchedStamp } from '@holydeck/contracts/entities';
 import { parseMediaManifestEntry, sniffMediaType } from '@holydeck/contracts/media';
 
 import { requestContext } from './context.js';
+import { QUEUE_PERMISSIONS } from './queue.js';
 import { permissionsFor } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 
 import type { EntityStamp } from '@holydeck/contracts/entities';
 import type { MediaManifestEntry } from '@holydeck/contracts/media';
 import type { RequestContext } from './context.js';
+import type { Queue } from './queue.js';
 import type { Document, RepositoryDb } from './repositories.js';
 
 export const MEDIA_ASSET_RECORD = 'mediaAssets';
+export const MEDIA_INGEST_KIND = 'media-ingest';
 
 export const MEDIA_ASSET_PERMISSIONS = permissionsFor(MEDIA_ASSET_RECORD);
 
@@ -36,6 +39,8 @@ const STAMP_SEPARATOR = '#';
 export interface MediaStorageIO {
   /** Stores bytes below this deployment's configured media root and returns their durable handle. */
   write(root: string, key: string, bytes: Uint8Array): Promise<string>;
+  /** Reads bytes from a durable handle returned by write. */
+  read(root: string, key: string): Promise<Uint8Array>;
 }
 
 export type MediaRefusal = 'schema' | 'invalid-type' | 'duplicate' | 'state' | 'corrupt';
@@ -70,9 +75,14 @@ export interface MediaLibrary {
   list(context: unknown): Promise<readonly MediaRecord[]>;
   archive(context: unknown, id: string): Promise<MediaRecord | undefined>;
   restore(context: unknown, id: string): Promise<MediaRecord | undefined>;
+  startProcessing(context: unknown, id: string): Promise<MediaRecord | undefined>;
+  completeProcessing(context: unknown, id: string, derivatives: MediaManifestEntry['derivatives']): Promise<MediaRecord | undefined>;
+  failProcessing(context: unknown, id: string): Promise<MediaRecord | undefined>;
+  retryProcessing(context: unknown, id: string): Promise<MediaRecord | undefined>;
 }
 
 export interface MediaLibraryOptions extends MediaStorageIO {
+  readonly queue: Pick<Queue, 'enqueue'>;
   readonly now: () => string;
   readonly mediaRoot: string;
   readonly newId?: () => string;
@@ -83,7 +93,7 @@ const ID_BYTES = 16;
 const HASH = (bytes: Uint8Array): string => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
 export function mediaContext(actor: string, correlationId: string): RequestContext {
-  return requestContext({ actor, permissions: Object.values(MEDIA_ASSET_PERMISSIONS), correlationId });
+  return requestContext({ actor, permissions: [...Object.values(MEDIA_ASSET_PERMISSIONS), QUEUE_PERMISSIONS.enqueue], correlationId });
 }
 
 function refusalFor(error: unknown): unknown {
@@ -164,6 +174,24 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
     storageKey: row.storageKey,
   });
 
+  const processing = async (
+    context: unknown,
+    id: string,
+    state: MediaManifestEntry['processingState'],
+    derivatives: MediaManifestEntry['derivatives'],
+  ): Promise<MediaRecord | undefined> => {
+    const row = await standing(context, id);
+    if (row === undefined) return undefined;
+    const manifest: MediaManifestEntry = { ...row.manifest, processingState: state, derivatives };
+    const parsed = parseMediaManifestEntry(manifest, 'manifest');
+    if (!parsed.ok) throw new MediaError('schema', 'the generated media manifest is invalid');
+    return append(
+      context,
+      { ...row, stamp: touchedStamp(row.stamp, { at: options.now(), by: author(context).actor }), manifest: parsed.value },
+      row.sequence + 1,
+    );
+  };
+
   return {
     upload: (context, upload) =>
       own(async () => {
@@ -181,7 +209,17 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
         const parsed = parseMediaManifestEntry(manifest, 'manifest');
         if (!parsed.ok) throw new MediaError('schema', 'the generated media manifest is invalid');
         const storageKey = await options.write(options.mediaRoot, id, upload.bytes);
-        return append(context, { stamp: createdStamp({ id, kind: 'mediaAsset', at: options.now(), by: actor }), manifest: parsed.value, storageKey }, 1);
+        const record = await append(
+          context,
+          { stamp: createdStamp({ id, kind: 'mediaAsset', at: options.now(), by: actor }), manifest: parsed.value, storageKey },
+          1,
+        );
+        await options.queue.enqueue(context, {
+          kind: MEDIA_INGEST_KIND,
+          idempotencyKey: `${MEDIA_INGEST_KIND}:${id}`,
+          payload: { assetId: id },
+        });
+        return record;
       }),
 
     inspect: (context, id) => own(async () => {
@@ -203,6 +241,48 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
         const row = await standing(context, id);
         if (row === undefined) return undefined;
         return append(context, { ...row, stamp: restoredStamp(row.stamp, { at: options.now(), by: author(context).actor }) }, row.sequence + 1);
+      }),
+
+    startProcessing: (context, id) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined || row.manifest.processingState === 'processing' || row.manifest.processingState === 'ready') {
+          return row === undefined ? undefined : publicOf(row);
+        }
+        if (row.manifest.processingState !== 'pending') {
+          throw new MediaError('state', `${id} is ${row.manifest.processingState}, not pending`);
+        }
+        return processing(context, id, 'processing', []);
+      }),
+
+    completeProcessing: (context, id, derivatives) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        if (row.manifest.processingState !== 'processing') {
+          throw new MediaError('state', `${id} is ${row.manifest.processingState}, not processing`);
+        }
+        return processing(context, id, 'ready', derivatives);
+      }),
+
+    failProcessing: (context, id) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        if (row.manifest.processingState !== 'processing') {
+          throw new MediaError('state', `${id} is ${row.manifest.processingState}, not processing`);
+        }
+        return processing(context, id, 'failed', []);
+      }),
+
+    retryProcessing: (context, id) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        if (row.manifest.processingState !== 'failed') {
+          throw new MediaError('state', `${id} is ${row.manifest.processingState}, not failed`);
+        }
+        return processing(context, id, 'pending', []);
       }),
   };
 }

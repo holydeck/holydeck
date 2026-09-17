@@ -23,6 +23,7 @@ const leased = (fields: Partial<LeasedJob> = {}): LeasedJob => ({
   heartbeatAt: NOW,
   lastError: undefined,
   ...fields,
+  payload: fields.payload ?? {},
 });
 
 const settled = (job: LeasedJob, state: 'succeeded' | 'failed', lastError?: string): JobRecord => ({

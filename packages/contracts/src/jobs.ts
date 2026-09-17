@@ -3,7 +3,7 @@
 // prove it is alive, a lease belongs to one worker, an attempt never passes its own retry limit — while
 // claiming, reclaiming and retrying are the queue's behaviour and belong with it.
 
-import { FIELD_CODES, type FieldReader, type Parsed, parseObject } from './problems.js';
+import { FIELD_CODES, isRecord, type FieldReader, type Parsed, type ParseFn, parseObject } from './problems.js';
 
 export const JOB_STATES = ['queued', 'leased', 'succeeded', 'failed'] as const;
 export type JobState = (typeof JOB_STATES)[number];
@@ -13,6 +13,7 @@ export const JOB_FIELDS = [
   'id',
   'kind',
   'idempotencyKey',
+  'payload',
   'state',
   'attempt',
   'retryLimit',
@@ -25,6 +26,9 @@ export const JOB_FIELDS = [
 
 export type JobField = (typeof JOB_FIELDS)[number];
 
+/** Work-specific data, carried with the job rather than inferred from its idempotency key. */
+export type JobPayload = Readonly<Record<string, unknown>>;
+
 // An administrator is shown the whole record rather than a chosen part of it: the queue decision asks the
 // operator screen to answer which worker holds a job and which work it is, and a projection that dropped
 // the kind or the lease holder answered neither. A job holds no secret — its key names work, not a person
@@ -35,6 +39,7 @@ type JobFields = {
   readonly id: string;
   readonly kind: string;
   readonly idempotencyKey: string;
+  readonly payload: JobPayload;
   readonly attempt: number;
   readonly retryLimit: number;
   readonly queuedAt: string;
@@ -79,11 +84,19 @@ const readIdempotencyKey = (reader: FieldReader, kind: string): string => {
   return key;
 };
 
+const parsePayload: ParseFn<JobPayload> = (value, path) =>
+  isRecord(value) ? { ok: true, value } : { ok: false, problems: [{ path, code: FIELD_CODES.notAnObject, message: 'must be an object' }] };
+
+// A job may carry no work data of its own, so an absent payload is not the same refusal as one that is
+// present but the wrong shape: only the second is a problem this record reports.
+const readPayload = (reader: FieldReader): JobPayload => reader.optionalParsed('payload', parsePayload) ?? {};
+
 export function parseJobRecord(value: unknown): Parsed<JobRecord> {
   return parseObject(value, 'job', (reader) => {
     const id = reader.text('id');
     const kind = readKind(reader);
     const idempotencyKey = readIdempotencyKey(reader, kind);
+    const payload = readPayload(reader);
     const state = reader.choice('state', JOB_STATES);
     const attempt = reader.wholeNumber('attempt', 1);
     const retryLimit = reader.wholeNumber('retryLimit', 1);
@@ -99,6 +112,7 @@ export function parseJobRecord(value: unknown): Parsed<JobRecord> {
       id,
       kind,
       idempotencyKey,
+      payload,
       attempt,
       retryLimit,
       queuedAt,

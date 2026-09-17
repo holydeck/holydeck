@@ -9,6 +9,7 @@ const queued = () => ({
   id: 'job-1',
   kind: 'prepare',
   idempotencyKey: 'prepare:service-1:rev-5',
+  payload: {},
   state: 'queued',
   attempt: 1,
   retryLimit: 5,
@@ -20,6 +21,7 @@ const leased = () => ({
   id: 'job-2',
   kind: 'transcode',
   idempotencyKey: 'transcode:media-4',
+  payload: {},
   state: 'leased',
   attempt: 2,
   retryLimit: 5,
@@ -52,6 +54,7 @@ describe('what a queue is allowed to hold', () => {
       'id',
       'kind',
       'idempotencyKey',
+      'payload',
       'state',
       'attempt',
       'retryLimit',
@@ -89,6 +92,10 @@ describe('reading one job record', () => {
     expect(parseJobRecord(succeeded)).toEqual({ ok: true, value: succeeded });
   });
 
+  it('defaults to no payload when a job carries none', () => {
+    expect(parseJobRecord(without(queued(), 'payload'))).toEqual({ ok: true, value: queued() });
+  });
+
   it('refuses a record that is not a record', () => {
     expect(parseJobRecord([])).toEqual({
       ok: false,
@@ -104,6 +111,10 @@ describe('reading one job record', () => {
     expect(codes({ ...queued(), idempotencyKey: 'transcode:media-4' })).toEqual([
       `job.idempotencyKey=${FIELD_CODES.notAllowed}`,
     ]);
+  });
+
+  it('refuses work data that is not an object', () => {
+    expect(codes({ ...queued(), payload: 'media-4' })).toEqual([`job.payload=${FIELD_CODES.notAnObject}`]);
   });
 
   it('refuses a kind that is not a name, and a state the queue never declared', () => {

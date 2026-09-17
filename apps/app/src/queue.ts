@@ -14,7 +14,7 @@ import { JOB_FIELDS, JOB_STATES, parseJobRecord } from '@holydeck/contracts/jobs
 
 import { contextProblems, requestContext } from './context.js';
 
-import type { JobRecord, JobState, LeasedJob } from '@holydeck/contracts/jobs';
+import type { JobPayload, JobRecord, JobState, LeasedJob } from '@holydeck/contracts/jobs';
 import type { Db } from 'mongodb';
 
 import type { RequestContext } from './context.js';
@@ -192,6 +192,7 @@ export function enqueueDocument(input: {
   readonly id: string;
   readonly kind: string;
   readonly idempotencyKey: string;
+  readonly payload: JobPayload;
   readonly retryLimit: number;
   readonly queuedAt: string;
 }): Document {
@@ -199,6 +200,7 @@ export function enqueueDocument(input: {
     _id: input.id,
     kind: input.kind,
     idempotencyKey: input.idempotencyKey,
+    payload: input.payload,
     state: 'queued',
     attempt: 1,
     retryLimit: input.retryLimit,
@@ -280,7 +282,7 @@ export interface QueueOptions {
 export interface Queue {
   enqueue(
     context: unknown,
-    input: { readonly kind: string; readonly idempotencyKey: string; readonly retryLimit?: number },
+    input: { readonly kind: string; readonly idempotencyKey: string; readonly payload?: JobPayload; readonly retryLimit?: number },
   ): Promise<{ readonly id: string; readonly created: boolean }>;
   claim(
     context: unknown,
@@ -355,11 +357,11 @@ export function queueOn(db: QueueDb, options: QueueOptions): Queue {
   };
 
   const queue: Queue = {
-    async enqueue(context, { kind, idempotencyKey, retryLimit = DEFAULT_RETRY_LIMIT }) {
+    async enqueue(context, { kind, idempotencyKey, payload = {}, retryLimit = DEFAULT_RETRY_LIMIT }) {
       permit(context, 'enqueue');
       whole(retryLimit, Number.MAX_SAFE_INTEGER, 'a retry limit is a count of attempts');
       const id = newId();
-      const document = enqueueDocument({ id, kind, idempotencyKey, retryLimit, queuedAt: clock() });
+      const document = enqueueDocument({ id, kind, idempotencyKey, payload, retryLimit, queuedAt: clock() });
       // Graded before the database holds it: a job the contract refuses is a job no worker could read back.
       jobFrom(document);
       const family = familyFilter(idempotencyKey);
