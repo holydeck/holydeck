@@ -30,7 +30,7 @@
 import { outstandingIn, parseShelfEntry, shelfKey } from '@holydeck/contracts/collaboration';
 
 import { permissionsFor } from './records.js';
-import { repositoriesOn } from './repositories.js';
+import { RepositoryError, repositoriesOn } from './repositories.js';
 import { RevisionError } from './revisions.js';
 
 import type { ResolvedConflict, ShelfEntry, ShelvedConflict } from '@holydeck/contracts/collaboration';
@@ -179,19 +179,27 @@ export function conflictShelfOn(db: RepositoryDb, options: ConflictShelfOptions)
         return await revisions.save(context, input);
       } catch (error) {
         if (!(error instanceof RevisionError) || error.kind !== 'conflict') throw error;
-        await records.append(
-          context,
-          documentOf({
-            kind: 'shelved',
-            contentId: input.contentId,
-            sequence: await nextPlace(context, input.contentId),
-            attempted,
-            origin: input.origin,
-            body: input.body,
-            at: options.now(),
-            ...authorOf(context),
-          }),
-        );
+        try {
+          await records.append(
+            context,
+            documentOf({
+              kind: 'shelved',
+              contentId: input.contentId,
+              sequence: await nextPlace(context, input.contentId),
+              attempted,
+              origin: input.origin,
+              body: input.body,
+              at: options.now(),
+              ...authorOf(context),
+            }),
+          );
+        } catch (shelfError) {
+          // Two losers on the same content at the same instant can both compute the same next
+          // place and collide on the shelf's own unique index. That collision is the shelf
+          // failing to shelve a loss, not a new refusal to report: the caller still needs
+          // exactly the error below, so only this one recognized shape is swallowed here.
+          if (!(shelfError instanceof RepositoryError) || shelfError.kind !== 'duplicate') throw shelfError;
+        }
         // The very error the revision store made, passed on untouched: every caller that reads
         // `kind === 'conflict'` today reads exactly what it read before this wrapper existed.
         throw error;

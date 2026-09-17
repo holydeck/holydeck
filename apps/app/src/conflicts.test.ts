@@ -12,6 +12,7 @@ import {
 } from './conflicts.js';
 import { requestContext } from './context.js';
 import { RECORDS } from './records.js';
+import { RepositoryError } from './repositories.js';
 import { REVISION_PERMISSIONS, RevisionError, revisionsOn } from './revisions.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
@@ -74,6 +75,29 @@ const racing = (run: () => Promise<unknown>): RepositoryDb => {
           const other = pending;
           pending = undefined;
           if (other !== undefined) await other();
+          return inner.insertOne(document);
+        },
+      };
+    },
+  };
+};
+
+/**
+ * Lets a rival row land on the shelf between one writer's next-place read and its own insert — the only
+ * way two losers on the same content collide on the shelf's own key rather than on the revision's.
+ */
+const racingShelf = (rival: Document): RepositoryDb => {
+  let pending: Document | undefined = rival;
+  return {
+    collection(name: string): RepositoryCollection {
+      const inner = db.collection(name);
+      if (name !== SHELF) return inner;
+      return {
+        ...inner,
+        async insertOne(document: Document) {
+          const other = pending;
+          pending = undefined;
+          if (other !== undefined) await inner.insertOne(other);
           return inner.insertOne(document);
         },
       };
@@ -187,6 +211,39 @@ describe('an edit that loses its race', () => {
     const held = await shelf.entries(ADA, SONG);
     expect(held.map((entry) => entry.sequence)).toEqual([1, 2]);
     expect(await shelf.outstanding(ADA, SONG)).toHaveLength(2);
+  });
+
+  test('is still refused with the original conflict when a rival fills the very place it was aiming for', async () => {
+    // The place Ada's own append is about to claim, taken by a rival between her next-place read and
+    // her insert — exactly what two simultaneous losers on the same content produce between them.
+    const rival: Document = {
+      _id: shelfKey(SONG, 1),
+      contentId: SONG,
+      sequence: 1,
+      kind: 'shelved',
+      attempted: 2,
+      origin: 'autosave',
+      body: { title: 'Andru', stanzas: ['Yaar ivar'] },
+      at: now(),
+      actor: 'account:b2c9',
+      correlationId: 'req-b2c9',
+    };
+    const raced = conflictShelfOn(racingShelf(rival), { now });
+    const contested = revisionsOn(racing(() => revisions.save(GRACE, { contentId: SONG, body: GRACES, origin: 'autosave' })), {
+      now,
+    });
+
+    const error = await raced
+      .saveWithConflictPreservation(ADA, contested, { contentId: SONG, body: ADAS, origin: 'autosave' })
+      .catch((failure: unknown) => failure);
+
+    expect(error).toBeInstanceOf(RevisionError);
+    expect((error as RevisionError).kind).toBe('conflict');
+    expect(error).not.toBeInstanceOf(RepositoryError);
+
+    // the rival's row stands; Ada's own attempt lost the place and left nothing behind rather than
+    // overwriting it.
+    expect(rows(SHELF)).toEqual([rival]);
   });
 
   test('shelves one content’s losses apart from another’s', async () => {
