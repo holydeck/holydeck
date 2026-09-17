@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { resolveSlide } from '@holydeck/contracts/slide-groups';
+
 import { requestContext } from './context.js';
 import { LIBRARY_PERMISSIONS } from './library.js';
 import { RECORDS } from './records.js';
@@ -30,11 +32,17 @@ const SLIDE_A: Slide = { id: 'slide-1', enabled: true, label: 'Welcome' };
 
 const SLIDE_B: Slide = { id: 'slide-2', enabled: true, label: 'Verse' };
 
-const CUSTOM: SlideGroupBody = { mode: 'custom', enabled: true, slides: [SLIDE_A, SLIDE_B] };
+const CUSTOM: SlideGroupBody = {
+  mode: 'custom',
+  enabled: true,
+  slideLayoutId: 'layout-a',
+  slides: [SLIDE_A, SLIDE_B],
+};
 
 const GENERATED: SlideGroupBody = {
   mode: 'generated',
   enabled: true,
+  slideLayoutId: 'layout-a',
   slides: [SLIDE_A],
   generatedFrom: { songId: 'song-1' },
 };
@@ -75,7 +83,7 @@ describe('the lifecycle of a slide group or a reusable slide', () => {
     expect(rows(db, REVISIONS)).toHaveLength(1);
     const id = created.stamp.id;
 
-    const edited = await groups.edit(ADMIN, id, { mode: 'custom', enabled: true, slides: [SLIDE_A] });
+    const edited = await groups.edit(ADMIN, id, { mode: 'custom', enabled: true, slideLayoutId: 'layout-a', slides: [SLIDE_A] });
     expect(edited?.body.slides).toEqual([SLIDE_A]);
     expect((await groups.current(ADMIN, id))?.body.slides).toEqual([SLIDE_A]);
 
@@ -104,7 +112,7 @@ describe('the lifecycle of a slide group or a reusable slide', () => {
 
   it('creates a reusableSlide the same way, as a one-Slide group', async () => {
     const { groups } = store();
-    const body: SlideGroupBody = { mode: 'custom', enabled: true, slides: [SLIDE_A] };
+    const body: SlideGroupBody = { mode: 'custom', enabled: true, slideLayoutId: 'layout-a', slides: [SLIDE_A] };
     const created = await groups.create(ADMIN, 'reusableSlide', 'Scripture card', body);
     expect(created.stamp.kind).toBe('reusableSlide');
     expect(created.body.slides).toEqual([SLIDE_A]);
@@ -120,6 +128,10 @@ describe('the lifecycle of a slide group or a reusable slide', () => {
     expect(await groups.enableSlide(ADMIN, 'nope', SLIDE_A.id)).toBeUndefined();
     expect(await groups.disableSlide(ADMIN, 'nope', SLIDE_A.id)).toBeUndefined();
     expect(await groups.duplicateSlide(ADMIN, 'nope', SLIDE_A.id)).toBeUndefined();
+    expect(await groups.overrideSlideLayout(ADMIN, 'nope', SLIDE_A.id, 'layout-x')).toBeUndefined();
+    expect(await groups.clearSlideLayoutOverride(ADMIN, 'nope', SLIDE_A.id)).toBeUndefined();
+    expect(await groups.overrideSlideBackground(ADMIN, 'nope', SLIDE_A.id, 'navy')).toBeUndefined();
+    expect(await groups.clearSlideBackgroundOverride(ADMIN, 'nope', SLIDE_A.id)).toBeUndefined();
     expect(await groups.reorderSlides(ADMIN, 'nope', [])).toBeUndefined();
     expect(await groups.regenerate(ADMIN, 'nope', GENERATED)).toBeUndefined();
     expect(await groups.history(ADMIN, 'nope')).toEqual([]);
@@ -177,7 +189,12 @@ describe('a custom group is never overwritten by regeneration, symmetrically', (
     const { groups } = store();
     const created = await groups.create(ADMIN, 'slideGroup', 'Song words', GENERATED);
     const duplicated = await groups.duplicate(ADMIN, created.stamp.id);
-    expect(duplicated?.body).toEqual({ mode: 'custom', enabled: true, slides: GENERATED.slides });
+    expect(duplicated?.body).toEqual({
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: GENERATED.slideLayoutId,
+      slides: GENERATED.slides,
+    });
     expect(duplicated?.body.generatedFrom).toBeUndefined();
   });
 });
@@ -229,6 +246,103 @@ describe('a stamp with no body is corrupt, not missing', () => {
   });
 });
 
+describe("a slide inherits its group's background and Slide Layout by default (SLID-02)", () => {
+  it('resolves from the group as it currently stands, not a value copied at slide creation', async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Backgrounds', {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      background: 'navy',
+      slides: [SLIDE_A],
+    });
+    const id = created.stamp.id;
+    const current = async () => (await groups.current(ADMIN, id))!;
+
+    const first = await current();
+    expect(resolveSlide(first.body, first.body.slides[0]!)).toEqual({
+      slideLayoutId: { value: 'layout-a', source: 'inherited' },
+      background: { value: 'navy', source: 'inherited' },
+    });
+
+    // The group's own default moves; a non-overriding slide's resolved value moves with it —
+    // proof this is a live read, not a value copied onto the slide when it was created.
+    await groups.edit(ADMIN, id, {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-b',
+      background: 'crimson',
+      slides: [SLIDE_A],
+    });
+    const second = await current();
+    expect(resolveSlide(second.body, second.body.slides[0]!)).toEqual({
+      slideLayoutId: { value: 'layout-b', source: 'inherited' },
+      background: { value: 'crimson', source: 'inherited' },
+    });
+  });
+
+  it('lets an explicit override win, visibly marked, independent of the other field', async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Overrides', {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      background: 'navy',
+      slides: [SLIDE_A],
+    });
+    const id = created.stamp.id;
+
+    await groups.overrideSlideLayout(ADMIN, id, SLIDE_A.id, 'layout-c');
+    const afterLayout = (await groups.current(ADMIN, id))!;
+    expect(resolveSlide(afterLayout.body, afterLayout.body.slides[0]!)).toEqual({
+      slideLayoutId: { value: 'layout-c', source: 'override' },
+      background: { value: 'navy', source: 'inherited' },
+    });
+
+    await groups.overrideSlideBackground(ADMIN, id, SLIDE_A.id, 'crimson');
+    const afterBoth = (await groups.current(ADMIN, id))!;
+    expect(resolveSlide(afterBoth.body, afterBoth.body.slides[0]!)).toEqual({
+      slideLayoutId: { value: 'layout-c', source: 'override' },
+      background: { value: 'crimson', source: 'override' },
+    });
+  });
+
+  it("removing an override restores inheritance without touching the group's own default", async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Reversible', {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      background: 'navy',
+      slides: [SLIDE_A],
+    });
+    const id = created.stamp.id;
+
+    await groups.overrideSlideLayout(ADMIN, id, SLIDE_A.id, 'layout-c');
+    await groups.overrideSlideBackground(ADMIN, id, SLIDE_A.id, 'crimson');
+
+    await groups.clearSlideLayoutOverride(ADMIN, id, SLIDE_A.id);
+    await groups.clearSlideBackgroundOverride(ADMIN, id, SLIDE_A.id);
+
+    const restored = (await groups.current(ADMIN, id))!;
+    expect(restored.body.slideLayoutId).toBe('layout-a');
+    expect(restored.body.background).toBe('navy');
+    expect(restored.body.slides[0]?.slideLayoutId).toBeUndefined();
+    expect(restored.body.slides[0]?.background).toBeUndefined();
+    expect(resolveSlide(restored.body, restored.body.slides[0]!)).toEqual({
+      slideLayoutId: { value: 'layout-a', source: 'inherited' },
+      background: { value: 'navy', source: 'inherited' },
+    });
+  });
+
+  it('refuses overriding a slide the group does not hold', async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Guarded', CUSTOM);
+    const error = await refused(groups.overrideSlideLayout(ADMIN, created.stamp.id, 'nope', 'layout-x'));
+    expect(error.kind).toBe('schema');
+  });
+});
+
 describe('the permission boundary between naming an item and holding its body', () => {
   it.each([
     'current',
@@ -239,6 +353,10 @@ describe('the permission boundary between naming an item and holding its body', 
     'enableSlide',
     'disableSlide',
     'duplicateSlide',
+    'overrideSlideLayout',
+    'clearSlideLayoutOverride',
+    'overrideSlideBackground',
+    'clearSlideBackgroundOverride',
     'reorderSlides',
     'regenerate',
     'history',
@@ -263,6 +381,10 @@ describe('the permission boundary between naming an item and holding its body', 
       enableSlide: () => groups.enableSlide(reader, id, SLIDE_A.id),
       disableSlide: () => groups.disableSlide(reader, id, SLIDE_A.id),
       duplicateSlide: () => groups.duplicateSlide(reader, id, SLIDE_A.id),
+      overrideSlideLayout: () => groups.overrideSlideLayout(reader, id, SLIDE_A.id, 'layout-x'),
+      clearSlideLayoutOverride: () => groups.clearSlideLayoutOverride(reader, id, SLIDE_A.id),
+      overrideSlideBackground: () => groups.overrideSlideBackground(reader, id, SLIDE_A.id, 'navy'),
+      clearSlideBackgroundOverride: () => groups.clearSlideBackgroundOverride(reader, id, SLIDE_A.id),
       reorderSlides: () => groups.reorderSlides(reader, id, [SLIDE_A.id, SLIDE_B.id]),
       regenerate: () => groups.regenerate(reader, id, GENERATED),
       history: () => groups.history(reader, id),
@@ -283,13 +405,17 @@ describe('this store never touches the audit trail', () => {
     const { db, groups } = store();
     const created = await groups.create(ADMIN, 'slideGroup', 'Quiet', CUSTOM);
     const id = created.stamp.id;
-    await groups.edit(ADMIN, id, { mode: 'custom', enabled: true, slides: [SLIDE_A] });
+    await groups.edit(ADMIN, id, { mode: 'custom', enabled: true, slideLayoutId: 'layout-a', slides: [SLIDE_A] });
     await groups.enable(ADMIN, id);
     await groups.disable(ADMIN, id);
     await groups.enableSlide(ADMIN, id, SLIDE_A.id);
     await groups.disableSlide(ADMIN, id, SLIDE_A.id);
     const dup = await groups.duplicateSlide(ADMIN, id, SLIDE_A.id);
     await groups.reorderSlides(ADMIN, id, dup!.body.slides.map((slide) => slide.id).reverse());
+    await groups.overrideSlideLayout(ADMIN, id, SLIDE_A.id, 'layout-c');
+    await groups.overrideSlideBackground(ADMIN, id, SLIDE_A.id, 'crimson');
+    await groups.clearSlideLayoutOverride(ADMIN, id, SLIDE_A.id);
+    await groups.clearSlideBackgroundOverride(ADMIN, id, SLIDE_A.id);
     await groups.duplicate(ADMIN, id);
     await groups.history(ADMIN, id);
     expect(rows(db, AUDIT)).toEqual([]);

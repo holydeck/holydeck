@@ -94,6 +94,24 @@ export interface SlideGroupStore {
   enableSlide(context: unknown, id: string, slideId: string): Promise<SlideGroupRecord | undefined>;
   disableSlide(context: unknown, id: string, slideId: string): Promise<SlideGroupRecord | undefined>;
   duplicateSlide(context: unknown, id: string, slideId: string): Promise<SlideGroupRecord | undefined>;
+  /** Sets this slide's own Slide Layout, overriding its group's default (SLID-02). */
+  overrideSlideLayout(
+    context: unknown,
+    id: string,
+    slideId: string,
+    slideLayoutId: string,
+  ): Promise<SlideGroupRecord | undefined>;
+  /** Removes this slide's Slide Layout override, restoring inheritance from its group. */
+  clearSlideLayoutOverride(context: unknown, id: string, slideId: string): Promise<SlideGroupRecord | undefined>;
+  /** Sets this slide's own background, overriding its group's default (SLID-02). */
+  overrideSlideBackground(
+    context: unknown,
+    id: string,
+    slideId: string,
+    background: string,
+  ): Promise<SlideGroupRecord | undefined>;
+  /** Removes this slide's background override, restoring inheritance from its group. */
+  clearSlideBackgroundOverride(context: unknown, id: string, slideId: string): Promise<SlideGroupRecord | undefined>;
   /** slideIds must name exactly the group's current slides, once each — mirrors services.ts's reorderItems. */
   reorderSlides(context: unknown, id: string, slideIds: readonly string[]): Promise<SlideGroupRecord | undefined>;
   /** Refuses on a custom group. */
@@ -180,6 +198,20 @@ const withChangedSlide = (
   return slides.map((slide, i) => (i === index ? change(slide) : slide));
 };
 
+const withoutSlideLayoutOverride = (slides: readonly Slide[], slideId: string): readonly Slide[] =>
+  withChangedSlide(slides, slideId, (slide) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped on purpose, via rest
+    const { slideLayoutId, ...rest } = slide;
+    return rest;
+  });
+
+const withoutBackgroundOverride = (slides: readonly Slide[], slideId: string): readonly Slide[] =>
+  withChangedSlide(slides, slideId, (slide) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped on purpose, via rest
+    const { background, ...rest } = slide;
+    return rest;
+  });
+
 const withDuplicatedSlide = (slides: readonly Slide[], slideId: string, freshId: string): readonly Slide[] => {
   const index = locateSlide(slides, slideId);
   const next = [...slides];
@@ -255,7 +287,15 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
         if (row === undefined) return undefined;
         // Breaks the link to whatever pinned inputs a generated source was projected from: nothing
         // downstream could reproduce it, so a duplicate is always a starting point for customizing.
-        const body: SlideGroupBody = { mode: 'custom', enabled: row.body.enabled, slides: row.body.slides };
+        // The group's own inheritance defaults (slideLayoutId, background) are not provenance —
+        // they carry forward exactly like `enabled` and `slides` do.
+        const body: SlideGroupBody = {
+          mode: 'custom',
+          enabled: row.body.enabled,
+          slideLayoutId: row.body.slideLayoutId,
+          slides: row.body.slides,
+          ...(row.body.background === undefined ? {} : { background: row.body.background }),
+        };
         const record = await library.create(context, { kind: row.stamp.kind as LibraryKind, title: row.title });
         return save(context, record, record.stamp.id, body);
       }),
@@ -295,6 +335,38 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
         const row = await standing(context, id);
         if (row === undefined) return undefined;
         const slides = withDuplicatedSlide(row.body.slides, slideId, newId());
+        return save(context, row, id, { ...row.body, slides });
+      }),
+
+    overrideSlideLayout: (context, id, slideId, slideLayoutId) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        const slides = withChangedSlide(row.body.slides, slideId, (slide) => ({ ...slide, slideLayoutId }));
+        return save(context, row, id, { ...row.body, slides });
+      }),
+
+    clearSlideLayoutOverride: (context, id, slideId) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        const slides = withoutSlideLayoutOverride(row.body.slides, slideId);
+        return save(context, row, id, { ...row.body, slides });
+      }),
+
+    overrideSlideBackground: (context, id, slideId, background) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        const slides = withChangedSlide(row.body.slides, slideId, (slide) => ({ ...slide, background }));
+        return save(context, row, id, { ...row.body, slides });
+      }),
+
+    clearSlideBackgroundOverride: (context, id, slideId) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        const slides = withoutBackgroundOverride(row.body.slides, slideId);
         return save(context, row, id, { ...row.body, slides });
       }),
 
