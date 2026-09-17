@@ -77,6 +77,13 @@ export interface SlideGroupRecord {
   readonly body: SlideGroupBody;
 }
 
+/** What `regenerate` hands back: the usual record, plus which of the *previous* slides carried a
+ *  live override at the moment the wholesale replace dropped it. Visibility only — it does not
+ *  change which overrides get cleared, or when; `regenerate` still replaces `slides` unconditionally. */
+export interface RegeneratedSlideGroupRecord extends SlideGroupRecord {
+  readonly clearedOverrideSlideIds: readonly string[];
+}
+
 export interface SlideGroupStore {
   create(
     context: unknown,
@@ -115,7 +122,7 @@ export interface SlideGroupStore {
   /** slideIds must name exactly the group's current slides, once each — mirrors services.ts's reorderItems. */
   reorderSlides(context: unknown, id: string, slideIds: readonly string[]): Promise<SlideGroupRecord | undefined>;
   /** Refuses on a custom group. */
-  regenerate(context: unknown, id: string, body: SlideGroupBody): Promise<SlideGroupRecord | undefined>;
+  regenerate(context: unknown, id: string, body: SlideGroupBody): Promise<RegeneratedSlideGroupRecord | undefined>;
   history(context: unknown, id: string): Promise<readonly SlideGroupRecord[]>;
 }
 
@@ -343,7 +350,7 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
         const row = await standing(context, id);
         if (row === undefined) return undefined;
         const slides = withChangedSlide(row.body.slides, slideId, (slide) => ({ ...slide, slideLayoutId }));
-        return save(context, row, id, { ...row.body, slides });
+        return save(context, row, id, readBody({ ...row.body, slides }));
       }),
 
     clearSlideLayoutOverride: (context, id, slideId) =>
@@ -359,7 +366,7 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
         const row = await standing(context, id);
         if (row === undefined) return undefined;
         const slides = withChangedSlide(row.body.slides, slideId, (slide) => ({ ...slide, background }));
-        return save(context, row, id, { ...row.body, slides });
+        return save(context, row, id, readBody({ ...row.body, slides }));
       }),
 
     clearSlideBackgroundOverride: (context, id, slideId) =>
@@ -385,7 +392,13 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
         if (row.body.mode === 'custom') {
           throw new SlideGroupError('state', `${id} is a custom group and is never overwritten by regeneration`);
         }
-        return save(context, row, id, readBody(body));
+        // The wholesale replace below is unchanged; this only names, from the slides about to be
+        // discarded, which ones held a live override — so the caller learns what was dropped.
+        const clearedOverrideSlideIds = row.body.slides
+          .filter((slide) => slide.slideLayoutId !== undefined || slide.background !== undefined)
+          .map((slide) => slide.id);
+        const record = await save(context, row, id, readBody(body));
+        return { ...record, clearedOverrideSlideIds };
       }),
 
     history: (context, id) =>

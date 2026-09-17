@@ -64,7 +64,13 @@ export const parseSlide: ParseFn<Slide> = (value, path) =>
     const enabled = reader.flag('enabled');
     const label = reader.text('label');
     const slideLayoutId = reader.optionalText('slideLayoutId');
+    // An override that is present must actually override something — the same emptiness rule
+    // `SlideGroupBody.slideLayoutId` (the required, group-level field) already enforces via
+    // `reader.text`. `optionalText` has no such check on its own, because "absent" already
+    // means "inherit" here; this only closes the gap for a present-but-empty value.
+    if (slideLayoutId === '') reader.reject('slideLayoutId', FIELD_CODES.empty, 'must not be empty');
     const background = reader.optionalText('background');
+    if (background === '') reader.reject('background', FIELD_CODES.empty, 'must not be empty');
     return {
       id,
       enabled,

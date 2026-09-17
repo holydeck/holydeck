@@ -27,6 +27,24 @@ describe('reading a Slide', () => {
     const overridden = { ...SLIDE, slideLayoutId: 'layout-b', background: 'crimson' };
     expect(parseSlide(overridden, 'slide')).toEqual({ ok: true, value: overridden });
   });
+
+  it('refuses a present-but-empty slideLayoutId or background override, like the group’s own required field', () => {
+    const emptyLayout = parseSlide({ ...SLIDE, slideLayoutId: '' }, 'slide');
+    expect(emptyLayout.ok).toBe(false);
+    expect(!emptyLayout.ok && emptyLayout.problems).toContainEqual({
+      path: 'slide.slideLayoutId',
+      code: FIELD_CODES.empty,
+      message: 'must not be empty',
+    });
+
+    const emptyBackground = parseSlide({ ...SLIDE, background: '' }, 'slide');
+    expect(emptyBackground.ok).toBe(false);
+    expect(!emptyBackground.ok && emptyBackground.problems).toContainEqual({
+      path: 'slide.background',
+      code: FIELD_CODES.empty,
+      message: 'must not be empty',
+    });
+  });
 });
 
 describe('reading a SlideGroupBody', () => {

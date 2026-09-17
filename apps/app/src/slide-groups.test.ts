@@ -162,6 +162,26 @@ describe('a generated group is a deterministic projection', () => {
     expect(regenerated?.body).toEqual(changed);
     expect(rows(db, REVISIONS)).toHaveLength(2);
   });
+
+  it('regenerating a group with zero overrides signals nothing was cleared', async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Song words', GENERATED);
+    const id = created.stamp.id;
+    const regenerated = await groups.regenerate(ADMIN, id, GENERATED);
+    expect(regenerated?.clearedOverrideSlideIds).toEqual([]);
+  });
+
+  it('names exactly the slide that held a live override at the moment regenerate replaced it', async () => {
+    const { groups } = store();
+    const twoSlides: SlideGroupBody = { ...GENERATED, slides: [SLIDE_A, SLIDE_B] };
+    const created = await groups.create(ADMIN, 'slideGroup', 'Song words', twoSlides);
+    const id = created.stamp.id;
+    await groups.overrideSlideBackground(ADMIN, id, SLIDE_A.id, 'crimson');
+
+    const regenerated = await groups.regenerate(ADMIN, id, twoSlides);
+    expect(regenerated?.clearedOverrideSlideIds).toEqual([SLIDE_A.id]);
+    expect(regenerated?.body.slides[0]?.background).toBeUndefined();
+  });
 });
 
 describe('a custom group is never overwritten by regeneration, symmetrically', () => {
@@ -340,6 +360,45 @@ describe("a slide inherits its group's background and Slide Layout by default (S
     const created = await groups.create(ADMIN, 'slideGroup', 'Guarded', CUSTOM);
     const error = await refused(groups.overrideSlideLayout(ADMIN, created.stamp.id, 'nope', 'layout-x'));
     expect(error.kind).toBe('schema');
+  });
+
+  it('refuses an empty-string override, the same way the group’s own slideLayoutId already is', async () => {
+    const { db, groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Guarded', CUSTOM);
+    const id = created.stamp.id;
+    const before = rows(db, REVISIONS).length;
+
+    const emptyLayout = await refused(groups.overrideSlideLayout(ADMIN, id, SLIDE_A.id, ''));
+    expect(emptyLayout.kind).toBe('schema');
+    expect(emptyLayout.message).toContain('must not be empty');
+
+    const emptyBackground = await refused(groups.overrideSlideBackground(ADMIN, id, SLIDE_A.id, ''));
+    expect(emptyBackground.kind).toBe('schema');
+    expect(emptyBackground.message).toContain('must not be empty');
+
+    expect(rows(db, REVISIONS)).toHaveLength(before);
+    const current = await groups.current(ADMIN, id);
+    expect(current?.body.slides[0]?.slideLayoutId).toBeUndefined();
+    expect(current?.body.slides[0]?.background).toBeUndefined();
+  });
+
+  it('refuses a non-string override value at the write boundary, leaving the group readable', async () => {
+    const { db, groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Guarded', CUSTOM);
+    const id = created.stamp.id;
+    const before = rows(db, REVISIONS).length;
+
+    const badLayout = await refused(groups.overrideSlideLayout(ADMIN, id, SLIDE_A.id, 42 as unknown as string));
+    expect(badLayout.kind).toBe('schema');
+
+    const badBackground = await refused(
+      groups.overrideSlideBackground(ADMIN, id, SLIDE_A.id, 42 as unknown as string),
+    );
+    expect(badBackground.kind).toBe('schema');
+
+    expect(rows(db, REVISIONS)).toHaveLength(before);
+    const current = await groups.current(ADMIN, id);
+    expect(current?.body).toEqual(CUSTOM);
   });
 });
 
