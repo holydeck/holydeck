@@ -21,6 +21,7 @@ import { randomBytes } from 'node:crypto';
 
 import { EntityError, archivedStamp, createdStamp, parseEntityStamp, restoredStamp, touchedStamp } from '@holydeck/contracts/entities';
 import {
+  SHORTCUT_KEYS,
   SLIDE_LABEL_KIND,
   conflictsWith,
   parseSlideLabelDraft,
@@ -162,6 +163,9 @@ const recordOf = (stamp: EntityStamp, draft: SlideLabelDraft): SlideLabelRecord 
 
 const entryOf = (row: SlideLabelRecord): SlideLabelEntry => ({ id: row.stamp.id, ...draftOf(row) });
 
+/** Whether a stored value is one of the keys this build ships, asked of the one closed list there is. */
+const isShortcut = (value: unknown): value is ShortcutKey => SHORTCUT_KEYS.some((key) => key === value);
+
 export function slideLabelsOn(db: RepositoryDb, options: SlideLabelOptions): SlideLabelStore {
   const records = repositoriesOn(db)[SLIDE_LABEL_RECORD];
   const newId = options.newId ?? ((): string => randomBytes(LABEL_ID_BYTES).toString('base64url'));
@@ -184,11 +188,20 @@ export function slideLabelsOn(db: RepositoryDb, options: SlideLabelOptions): Sli
     if (!parsed.ok) {
       throw new SlideLabelError('corrupt', `a slide label holds a stamp this code cannot read: ${problems(parsed.problems)}`);
     }
+    // Graded on the way out for the same reason the name and the ordinal are: a key this build does not
+    // ship is a key nothing can be jumped to by, and reading it back unchecked would let it reach the
+    // catalogue rules as though an Admin had claimed it.
+    if (shortcut !== undefined && !isShortcut(shortcut)) {
+      throw new SlideLabelError(
+        'corrupt',
+        `a slide label is stamped with ${JSON.stringify(shortcut)}, which is not a shortcut this code ships`,
+      );
+    }
     return {
       stamp: parsed.value,
       name,
       sequence,
-      ...(shortcut === undefined ? {} : { shortcut: shortcut as ShortcutKey }),
+      ...(shortcut === undefined ? {} : { shortcut }),
     };
   };
 

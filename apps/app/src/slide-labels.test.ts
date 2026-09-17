@@ -295,6 +295,16 @@ describe('a stored label this build cannot read is corrupt, not absent', () => {
     expect(error.message).toContain('entity.kind');
   });
 
+  it('refuses a row bound to a key this build does not ship, rather than offering it', async () => {
+    const { db, labels } = store();
+    await labels.create(ADMIN, { name: 'Verse', shortcut: '1' });
+    const [row] = rows(db);
+    db.rows.set(LABELS, [{ ...row, shortcut: 'F13' }]);
+    const error = await refused(labels.catalogue(ADMIN));
+    expect(error.kind).toBe('corrupt');
+    expect(error.message).toContain('F13');
+  });
+
   it('refuses a row that is missing the identifier a catalogue is grouped by', async () => {
     const { db, labels } = store();
     await labels.create(ADMIN, { name: 'Verse', shortcut: '1' });
