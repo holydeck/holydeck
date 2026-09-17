@@ -8,7 +8,13 @@ import {
   restoredStamp,
   touchedStamp,
 } from '@holydeck/contracts/entities';
-import { isCalendarDay, parseService, parseServiceDraft } from '@holydeck/contracts/services';
+import {
+  SERVICE_STATE_LABELS,
+  isCalendarDay,
+  isCanonicalTransition,
+  parseService,
+  parseServiceDraft,
+} from '@holydeck/contracts/services';
 
 import { auditOn } from './audit.js';
 import { contextProblems, requestContext } from './context.js';
@@ -75,6 +81,7 @@ export interface ServiceStore {
   duplicate(context: unknown, id: string): Promise<ServiceRecord | undefined>;
   /** Changes the date only. Never touches state. */
   schedule(context: unknown, id: string, date: string): Promise<ServiceRecord | undefined>;
+  transition(context: unknown, id: string, toState: ServiceState): Promise<ServiceRecord | undefined>;
   /** Changes sections/items. Never touches title, date, site, or state. */
   edit(context: unknown, id: string, sections: readonly ServiceSection[]): Promise<ServiceRecord | undefined>;
   /** Appends one new item, whole (including its own id), to a named section. */
@@ -357,6 +364,27 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
         const stamp = touchedStamp(row.stamp, { at: options.now(), by: author(context).actor });
         const record = await stampOnto(context, stamp, { ...row, date }, row.sequence + 1);
         return audited(context, record, 'service.schedule', 'Scheduled a Service');
+      }),
+
+    transition: (context, id, toState) =>
+      own(async () => {
+        requireAuditPermission(context);
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        if (!isCanonicalTransition(row.state, toState)) {
+          throw new ServiceError(
+            'state',
+            `a Service cannot move from ${row.state} to ${toState}; only the next canonical ADR 0002 step is allowed`,
+          );
+        }
+        const stamp = touchedStamp(row.stamp, { at: options.now(), by: author(context).actor });
+        const record = await stampOnto(context, stamp, { ...row, state: toState }, row.sequence + 1);
+        return audited(
+          context,
+          record,
+          'service.transition',
+          `Transitioned a Service to ${SERVICE_STATE_LABELS[toState]}`,
+        );
       }),
 
     edit: (context, id, sections) =>

@@ -14,6 +14,23 @@ export const SERVICE_STATE_LABELS: Record<ServiceState, string> = {
   archived: 'Archived',
 };
 
+// ADR 0002: the lifecycle advances one canonical step at a time and never runs backward;
+// Archived is terminal. Named once here so the store's transition guard — and T74/T79, which
+// enforce the ADR's other two invariants — read the same table instead of re-deriving it.
+const NEXT_STATE: Readonly<Record<ServiceState, ServiceState | undefined>> = {
+  upcoming: 'presenting',
+  presenting: 'completed',
+  completed: 'archived',
+  archived: undefined,
+};
+
+/** Whether `to` is the single next step in ADR 0002's canonical lifecycle after `from`. */
+export const isCanonicalTransition = (from: ServiceState, to: ServiceState): boolean =>
+  NEXT_STATE[from] === to;
+
+/** ADR 0002 / SERV-03: join access follows Presenting alone. */
+export const joinAllowedFor = (state: ServiceState): boolean => state === 'presenting';
+
 export const ITEM_KINDS = ['song', 'sermon', 'reading', 'media', 'slide-group', 'custom-slide'] as const;
 export type ItemKind = (typeof ITEM_KINDS)[number];
 

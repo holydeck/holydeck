@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import { FIELD_CODES } from './problems.js';
-import { ITEM_KINDS, SERVICE_STATES, SERVICE_STATE_LABELS, parseRevisionRef, parseService, parseServiceDraft } from './services.js';
+import {
+  ITEM_KINDS,
+  SERVICE_STATES,
+  SERVICE_STATE_LABELS,
+  isCanonicalTransition,
+  joinAllowedFor,
+  parseRevisionRef,
+  parseService,
+  parseServiceDraft,
+} from './services.js';
+
+import type { ServiceState } from './services.js';
 
 // A service in the vocabulary specification 4 settles, with the revision and hash shapes the phase
 // fixtures record. The product repository holds no phase artifacts, so the values are written out here.
@@ -102,8 +113,39 @@ describe('the vocabulary a service is written in', () => {
     ]);
   });
 
+  it('never carries the superseded draft / presenting / ended / locked naming spec 8.1 replaced', () => {
+    expect(SERVICE_STATES).toEqual(['upcoming', 'presenting', 'completed', 'archived']);
+    expect(SERVICE_STATES).not.toContain('draft');
+    expect(SERVICE_STATES).not.toContain('ended');
+    expect(SERVICE_STATES).not.toContain('locked');
+  });
+
   it('names every kind of entry a service order can carry', () => {
     expect(ITEM_KINDS).toEqual(['song', 'sermon', 'reading', 'media', 'slide-group', 'custom-slide']);
+  });
+});
+
+describe('the canonical lifecycle steps ADR 0002 allows', () => {
+  const table: readonly [ServiceState, ServiceState, boolean][] = [
+    ['upcoming', 'presenting', true],
+    ['presenting', 'completed', true],
+    ['completed', 'archived', true],
+    ['completed', 'presenting', false],
+    ['upcoming', 'completed', false],
+    ['archived', 'upcoming', false],
+  ];
+
+  it.each(table)('%s to %s is %s, per ADR 0002', (from, to, allowed) => {
+    expect(isCanonicalTransition(from, to)).toBe(allowed);
+  });
+});
+
+describe('joinAllowedFor', () => {
+  it('allows joining only while a service is presenting', () => {
+    expect(joinAllowedFor('presenting')).toBe(true);
+    for (const state of SERVICE_STATES.filter((candidate) => candidate !== 'presenting')) {
+      expect(joinAllowedFor(state)).toBe(false);
+    }
   });
 });
 

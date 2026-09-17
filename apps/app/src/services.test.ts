@@ -246,6 +246,65 @@ describe('scheduling and editing a Service', () => {
   });
 });
 
+describe('transitioning a Service through its lifecycle', () => {
+  it('advances upcoming through presenting and completed to archived, auditing every step', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    expect(created.state).toBe('upcoming');
+
+    const presenting = await services.transition(ADMIN, created.stamp.id, 'presenting');
+    expect(presenting?.state).toBe('presenting');
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(presenting);
+    expect(rows(db, STAMPS).map((row) => row['sequence'])).toEqual([1, 2]);
+
+    const completed = await services.transition(ADMIN, created.stamp.id, 'completed');
+    expect(completed?.state).toBe('completed');
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(completed);
+    expect(rows(db, STAMPS).map((row) => row['sequence'])).toEqual([1, 2, 3]);
+
+    const archived = await services.transition(ADMIN, created.stamp.id, 'archived');
+    expect(archived?.state).toBe('archived');
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(archived);
+    expect(rows(db, STAMPS).map((row) => row['sequence'])).toEqual([1, 2, 3, 4]);
+
+    expect(actions(db)).toEqual([
+      'service.create', 'service.transition', 'service.transition', 'service.transition',
+    ]);
+  });
+
+  it('refuses a skipped step', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    expect((await refused(services.transition(ADMIN, created.stamp.id, 'completed'))).kind).toBe('state');
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(created);
+    expect(rows(db, STAMPS)).toHaveLength(1);
+    expect(actions(db)).toEqual(['service.create']);
+  });
+
+  it('refuses a backward step', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    await services.transition(ADMIN, created.stamp.id, 'presenting');
+    const completed = await services.transition(ADMIN, created.stamp.id, 'completed');
+    expect((await refused(services.transition(ADMIN, created.stamp.id, 'presenting'))).kind).toBe('state');
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(completed);
+    expect(rows(db, STAMPS)).toHaveLength(3);
+  });
+
+  it('refuses every transition out of archived, its terminal state', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    await services.transition(ADMIN, created.stamp.id, 'presenting');
+    await services.transition(ADMIN, created.stamp.id, 'completed');
+    const archived = await services.transition(ADMIN, created.stamp.id, 'archived');
+    for (const toState of ['upcoming', 'presenting', 'completed', 'archived'] as const) {
+      expect((await refused(services.transition(ADMIN, created.stamp.id, toState))).kind).toBe('state');
+    }
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(archived);
+    expect(rows(db, STAMPS)).toHaveLength(4);
+  });
+});
+
 describe('changing items within a Service', () => {
   it('appends a caller-supplied item to the named section and reloads the new stamp', async () => {
     const { db, services } = store();
@@ -426,6 +485,7 @@ describe('archiving a Service and bringing it back', () => {
     expect((await refused(services.archive(ADMIN, created.stamp.id))).kind).toBe('state');
     expect((await refused(services.edit(ADMIN, created.stamp.id, []))).kind).toBe('state');
     expect((await refused(services.schedule(ADMIN, created.stamp.id, '2026-09-20'))).kind).toBe('state');
+    expect((await refused(services.transition(ADMIN, created.stamp.id, 'presenting'))).kind).toBe('state');
     expect(rows(db, STAMPS)).toHaveLength(2);
     expect(actions(db)).toEqual(['service.create', 'service.archive']);
   });
@@ -433,7 +493,7 @@ describe('archiving a Service and bringing it back', () => {
 
 describe('reading and refusing Service changes', () => {
   it.each([
-    'duplicate', 'schedule', 'edit', 'archive', 'unarchive',
+    'duplicate', 'schedule', 'transition', 'edit', 'archive', 'unarchive',
     'addItem', 'removeItem', 'enableItem', 'disableItem', 'duplicateItem', 'reorderItems',
   ] as const)(
     'refuses %s without audit permission before writing a service row', async (change) => {
@@ -447,6 +507,7 @@ describe('reading and refusing Service changes', () => {
       const changes = {
         duplicate: () => services.duplicate(writer, id),
         schedule: () => services.schedule(writer, id, '2026-09-20'),
+        transition: () => services.transition(writer, id, 'presenting'),
         edit: () => services.edit(writer, id, []),
         addItem: () => services.addItem(writer, id, 'section-1', { ...SECTIONS[0]!.items[0]!, id: 'item-5' }),
         removeItem: () => services.removeItem(writer, id, 'item-3'),
@@ -472,6 +533,7 @@ describe('reading and refusing Service changes', () => {
     expect(await services.current(ADMIN, 'service-404')).toBeUndefined();
     expect(await services.duplicate(ADMIN, 'service-404')).toBeUndefined();
     expect(await services.schedule(ADMIN, 'service-404', '2026-09-20')).toBeUndefined();
+    expect(await services.transition(ADMIN, 'service-404', 'presenting')).toBeUndefined();
     expect(await services.edit(ADMIN, 'service-404', [])).toBeUndefined();
     expect(await services.addItem(ADMIN, 'service-404', 'section-2', SECTIONS[0]!.items[0]!)).toBeUndefined();
     expect(await services.removeItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();

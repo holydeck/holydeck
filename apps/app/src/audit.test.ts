@@ -138,6 +138,7 @@ describe('the context the trail is written under', () => {
       'service.schedule',
       'service.archive',
       'service.edit',
+      'service.transition',
       'service.item.add',
       'service.item.remove',
       'service.item.enable',
