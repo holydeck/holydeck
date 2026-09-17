@@ -159,6 +159,10 @@ export class FieldReader {
     return this.#required(name, false, asFlag, FIELD_CODES.notABoolean, 'must be true or false');
   }
 
+  optionalFlag(name: string): boolean | undefined {
+    return this.#optional(name, asFlag, FIELD_CODES.notABoolean, 'must be true or false');
+  }
+
   textList(name: string): readonly string[] {
     const raw = this.#required<readonly unknown[]>(name, [], asList, FIELD_CODES.notAList, 'must be a list');
     const values: string[] = [];

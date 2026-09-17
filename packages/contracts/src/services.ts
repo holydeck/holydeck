@@ -30,6 +30,7 @@ export type ServiceItem = {
   readonly id: string;
   readonly kind: ItemKind;
   readonly title: string;
+  readonly enabled: boolean;
   readonly content: RevisionRef | undefined;
 };
 
@@ -88,13 +89,14 @@ const itemParser = (seenItems: Set<string>): ParseFn<ServiceItem> => (value, pat
     seenItems.add(id);
     const kind = reader.choice('kind', ITEM_KINDS);
     const title = reader.text('title');
+    const enabled = reader.optionalFlag('enabled') ?? true;
     // Reusable content is pinned to an explicit revision; a custom slide has no reusable content to pin,
     // and one that claims to would leave two sources for what a slide shows.
     if (kind === AUTHORED_IN_PLACE) {
       reader.absent('content', FIELD_CODES.notAllowed, 'must not be pinned by a custom slide');
-      return { id, kind, title, content: undefined };
+      return { id, kind, title, enabled, content: undefined };
     }
-    return { id, kind, title, content: reader.parsed('content', parseRevisionRef, undefined) };
+    return { id, kind, title, enabled, content: reader.parsed('content', parseRevisionRef, undefined) };
   });
 
 const sectionParser = (seenSections: Set<string>, seenItems: Set<string>): ParseFn<ServiceSection> =>

@@ -163,8 +163,8 @@ describe('instantiate', () => {
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error('expected instantiation to succeed');
     expect(outcome.items).toEqual([
-      { id: 'opener', kind: 'custom-slide', title: 'Welcome slide', content: undefined },
-      { id: 'song-1', kind: 'song', title: 'Amazing Grace', content: SONG_FILL.content },
+      { id: 'opener', kind: 'custom-slide', title: 'Welcome slide', enabled: true, content: undefined },
+      { id: 'song-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: SONG_FILL.content },
     ]);
   });
 
@@ -243,7 +243,7 @@ describe('instantiate', () => {
     const outcome = instantiate(TYPED_CUSTOM_SLIDE, [{ entryId: 'slide-1', title: 'Welcome', content: undefined }]);
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error('expected instantiation to succeed');
-    expect(outcome.items).toEqual([{ id: 'slide-1', kind: 'custom-slide', title: 'Welcome', content: undefined }]);
+    expect(outcome.items).toEqual([{ id: 'slide-1', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined }]);
 
     const converted = templateFromService({
       id: 'service-x',
@@ -269,11 +269,12 @@ const SERVICE: Service = {
       id: 'welcome',
       name: 'Welcome',
       items: [
-        { id: 'opener', kind: 'custom-slide', title: 'Welcome slide', content: undefined },
+        { id: 'opener', kind: 'custom-slide', title: 'Welcome slide', enabled: true, content: undefined },
         {
           id: 'song-1',
           kind: 'song',
           title: 'Amazing Grace',
+          enabled: true,
           content: { id: 'song-amazing-grace', revision: '3', hash: undefined },
         },
       ],

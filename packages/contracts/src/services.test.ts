@@ -16,14 +16,14 @@ const service = () => ({
       id: 'section-1',
       name: 'Worship',
       items: [
-        { id: 'item-1', kind: 'song', title: 'Amazing Grace', content: { id: 'song-4', revision: 'rev-5', hash: 'fnv1a-6fe1d1e9' } },
-        { id: 'item-2', kind: 'custom-slide', title: 'Welcome' },
+        { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song-4', revision: 'rev-5', hash: 'fnv1a-6fe1d1e9' } },
+        { id: 'item-2', kind: 'custom-slide', title: 'Welcome', enabled: true },
       ],
     },
     {
       id: 'section-2',
       name: 'Word',
-      items: [{ id: 'item-3', kind: 'sermon', title: 'Grace', content: { id: 'sermon-2', revision: 'rev-9' } }],
+      items: [{ id: 'item-3', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 'rev-9' } }],
     },
   ],
 });
@@ -64,6 +64,30 @@ describe('reading a service draft', () => {
     if (!parsed.ok) throw new Error('the draft was refused');
     expect(parsed.value).not.toHaveProperty('id');
     expect(parsed.value).not.toHaveProperty('state');
+  });
+});
+
+describe('an item’s enabled flag', () => {
+  it('defaults true when the wire omits it, and round-trips false when set', () => {
+    const omitted = service();
+    delete (omitted.sections[0]!.items[0] as { enabled?: boolean }).enabled;
+    const parsed = parseService(omitted);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error('expected the service to parse');
+    expect(parsed.value.sections[0]!.items[0]!.enabled).toBe(true);
+
+    const disabled = service();
+    disabled.sections[0]!.items[0]!.enabled = false;
+    const reparsed = parseService(disabled);
+    expect(reparsed.ok).toBe(true);
+    if (!reparsed.ok) throw new Error('expected the service to parse');
+    expect(reparsed.value.sections[0]!.items[0]!.enabled).toBe(false);
+  });
+
+  it('refuses a value that merely looks like a flag', () => {
+    expect(defective((value) => ((value.sections[0]!.items[0] as { enabled: unknown }).enabled = 'true'))).toEqual([
+      `service.sections.0.items.0.enabled=${FIELD_CODES.notABoolean}`,
+    ]);
   });
 });
 

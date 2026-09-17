@@ -16,7 +16,7 @@ import { permissionsFor } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 
 import type { EntityStamp } from '@holydeck/contracts/entities';
-import type { ServiceDraft, ServiceSection, ServiceState } from '@holydeck/contracts/services';
+import type { ServiceDraft, ServiceItem, ServiceSection, ServiceState } from '@holydeck/contracts/services';
 
 import type { AuditAction } from './audit.js';
 import type { RequestContext } from './context.js';
@@ -77,6 +77,25 @@ export interface ServiceStore {
   schedule(context: unknown, id: string, date: string): Promise<ServiceRecord | undefined>;
   /** Changes sections/items. Never touches title, date, site, or state. */
   edit(context: unknown, id: string, sections: readonly ServiceSection[]): Promise<ServiceRecord | undefined>;
+  /** Appends one new item, whole (including its own id), to a named section. */
+  addItem(context: unknown, id: string, sectionId: string, item: ServiceItem): Promise<ServiceRecord | undefined>;
+  /** Drops one item from wherever it lives in this Service. Never touches the global content its
+   *  RevisionRef names — that content is untouched by construction, since this only ever rewrites
+   *  the `services` record. */
+  removeItem(context: unknown, id: string, itemId: string): Promise<ServiceRecord | undefined>;
+  enableItem(context: unknown, id: string, itemId: string): Promise<ServiceRecord | undefined>;
+  /** A disabled item stays in the Service; only presentation order (a later task) skips it. */
+  disableItem(context: unknown, id: string, itemId: string): Promise<ServiceRecord | undefined>;
+  /** A fresh id and a copy placed right after the original, in the same section. Its RevisionRef, if
+   *  any, is copied verbatim — never the content it points to. */
+  duplicateItem(context: unknown, id: string, itemId: string): Promise<ServiceRecord | undefined>;
+  /** Reorders one section's items. `itemIds` must name exactly that section's current items, once each. */
+  reorderItems(
+    context: unknown,
+    id: string,
+    sectionId: string,
+    itemIds: readonly string[],
+  ): Promise<ServiceRecord | undefined>;
   archive(context: unknown, id: string): Promise<ServiceRecord | undefined>;
   unarchive(context: unknown, id: string): Promise<ServiceRecord | undefined>;
   current(context: unknown, id: string): Promise<ServiceRecord | undefined>;
@@ -95,6 +114,83 @@ const readable = (problem: { readonly path: string; readonly message: string }):
 
 const problems = (list: readonly { readonly path: string; readonly message: string }[]): string =>
   list.map(readable).join('; ');
+
+interface ItemAddress {
+  readonly sectionIndex: number;
+  readonly itemIndex: number;
+}
+
+const locateItem = (sections: readonly ServiceSection[], itemId: string): ItemAddress => {
+  for (const [sectionIndex, section] of sections.entries()) {
+    const itemIndex = section.items.findIndex((item) => item.id === itemId);
+    if (itemIndex !== -1) return { sectionIndex, itemIndex };
+  }
+  throw new ServiceError('schema', `${itemId} does not name an item in this Service`);
+};
+
+const locateSection = (sections: readonly ServiceSection[], sectionId: string): number => {
+  const sectionIndex = sections.findIndex((section) => section.id === sectionId);
+  if (sectionIndex === -1) throw new ServiceError('schema', `${sectionId} does not name a section in this Service`);
+  return sectionIndex;
+};
+
+const withAddedItem = (
+  sections: readonly ServiceSection[],
+  sectionId: string,
+  item: ServiceItem,
+): readonly ServiceSection[] => {
+  const sectionIndex = locateSection(sections, sectionId);
+  return sections.map((section, index) =>
+    index === sectionIndex ? { ...section, items: [...section.items, item] } : section,
+  );
+};
+
+const withoutItem = (sections: readonly ServiceSection[], itemId: string): readonly ServiceSection[] => {
+  locateItem(sections, itemId);
+  return sections.map((section) => ({ ...section, items: section.items.filter((item) => item.id !== itemId) }));
+};
+
+const withChangedItem = (
+  sections: readonly ServiceSection[],
+  itemId: string,
+  change: (item: ServiceItem) => ServiceItem,
+): readonly ServiceSection[] => {
+  const { sectionIndex, itemIndex } = locateItem(sections, itemId);
+  return sections.map((section, index) => {
+    if (index !== sectionIndex) return section;
+    return { ...section, items: section.items.map((item, i) => (i === itemIndex ? change(item) : item)) };
+  });
+};
+
+const withDuplicatedItem = (
+  sections: readonly ServiceSection[],
+  itemId: string,
+  freshId: string,
+): readonly ServiceSection[] => {
+  const { sectionIndex, itemIndex } = locateItem(sections, itemId);
+  return sections.map((section, index) => {
+    if (index !== sectionIndex) return section;
+    const items = [...section.items];
+    items.splice(itemIndex + 1, 0, { ...items[itemIndex]!, id: freshId });
+    return { ...section, items };
+  });
+};
+
+const withReorderedItems = (
+  sections: readonly ServiceSection[],
+  sectionId: string,
+  itemIds: readonly string[],
+): readonly ServiceSection[] => {
+  const sectionIndex = locateSection(sections, sectionId);
+  const section = sections[sectionIndex]!;
+  const byId = new Map(section.items.map((item) => [item.id, item] as const));
+  const matches = itemIds.length === section.items.length && itemIds.every((id) => byId.has(id));
+  if (!matches) {
+    throw new ServiceError('schema', `reorder must name exactly ${sectionId}'s current items, once each`);
+  }
+  const items = itemIds.map((id) => byId.get(id)!);
+  return sections.map((current, index) => (index === sectionIndex ? { ...current, items } : current));
+};
 
 function refusalFor(error: unknown): unknown {
   if (error instanceof EntityError) return new ServiceError('state', error.message);
@@ -223,6 +319,22 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
     return audited(context, record, 'service.archive', detail);
   };
 
+  const mutateItems = async (
+    context: unknown,
+    id: string,
+    action: AuditAction,
+    detail: string,
+    compute: (sections: readonly ServiceSection[]) => readonly ServiceSection[],
+  ): Promise<ServiceRecord | undefined> => {
+    requireAuditPermission(context);
+    const row = await standing(context, id);
+    if (row === undefined) return undefined;
+    const draft = readDraft({ title: row.title, date: row.date, site: row.site, sections: compute(row.sections) });
+    const stamp = touchedStamp(row.stamp, { at: options.now(), by: author(context).actor });
+    const record = await stampOnto(context, stamp, { ...draft, state: row.state }, row.sequence + 1);
+    return audited(context, record, action, detail);
+  };
+
   return {
     create: (context, draft) => own(() => create(context, draft, 'service.create')),
 
@@ -257,6 +369,48 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
         const record = await stampOnto(context, stamp, { ...draft, state: row.state }, row.sequence + 1);
         return audited(context, record, 'service.edit', 'Edited a Service’s sections and items');
       }),
+
+    addItem: (context, id, sectionId, item) =>
+      own(() =>
+        mutateItems(context, id, 'service.item.add', 'Added an item to a Service', (sections) =>
+          withAddedItem(sections, sectionId, item),
+        ),
+      ),
+
+    removeItem: (context, id, itemId) =>
+      own(() =>
+        mutateItems(context, id, 'service.item.remove', 'Removed an item from a Service', (sections) =>
+          withoutItem(sections, itemId),
+        ),
+      ),
+
+    enableItem: (context, id, itemId) =>
+      own(() =>
+        mutateItems(context, id, 'service.item.enable', 'Enabled a Service item', (sections) =>
+          withChangedItem(sections, itemId, (item) => ({ ...item, enabled: true })),
+        ),
+      ),
+
+    disableItem: (context, id, itemId) =>
+      own(() =>
+        mutateItems(context, id, 'service.item.disable', 'Disabled a Service item', (sections) =>
+          withChangedItem(sections, itemId, (item) => ({ ...item, enabled: false })),
+        ),
+      ),
+
+    duplicateItem: (context, id, itemId) =>
+      own(() =>
+        mutateItems(context, id, 'service.item.duplicate', 'Duplicated a Service item', (sections) =>
+          withDuplicatedItem(sections, itemId, newId()),
+        ),
+      ),
+
+    reorderItems: (context, id, sectionId, itemIds) =>
+      own(() =>
+        mutateItems(context, id, 'service.item.reorder', 'Reordered a Service section’s items', (sections) =>
+          withReorderedItems(sections, sectionId, itemIds),
+        ),
+      ),
 
     archive: (context, id) =>
       own(() => restamp(context, id, (row, at, by) => archivedStamp(row.stamp, { at, by }), 'Archived a Service')),

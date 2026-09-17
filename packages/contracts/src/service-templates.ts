@@ -135,7 +135,7 @@ export function instantiate(body: ServiceTemplateBody, fills: readonly EntryFill
   for (const section of body.sections) {
     for (const entry of section.entries) {
       if (entry.slot === 'fixed') {
-        items.push({ id: entry.id, kind: entry.itemKind, title: entry.title, content: entry.content });
+        items.push({ id: entry.id, kind: entry.itemKind, title: entry.title, enabled: true, content: entry.content });
         continue;
       }
       const fill = fillById.get(entry.id);
@@ -166,7 +166,7 @@ export function instantiate(body: ServiceTemplateBody, fills: readonly EntryFill
         });
         continue;
       }
-      items.push({ id: entry.id, kind: entry.itemKind, title: fill.title, content: fill.content });
+      items.push({ id: entry.id, kind: entry.itemKind, title: fill.title, enabled: true, content: fill.content });
     }
   }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, items };

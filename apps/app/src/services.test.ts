@@ -30,14 +30,14 @@ const AUDIT = RECORDS.auditEvents.collection;
 const SECTIONS: readonly ServiceSection[] = [
   {
     id: 'section-2', name: 'Worship', items: [
-      { id: 'item-3', kind: 'song', title: 'Amazing Grace', content: { id: 'song-4', revision: 'rev-5', hash: 'fnv1a-6fe1d1e9' } },
-      { id: 'item-1', kind: 'custom-slide', title: 'Welcome', content: undefined },
+      { id: 'item-3', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song-4', revision: 'rev-5', hash: 'fnv1a-6fe1d1e9' } },
+      { id: 'item-1', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined },
     ],
   },
   {
     id: 'section-1', name: 'Word', items: [
-      { id: 'item-4', kind: 'sermon', title: 'Grace', content: { id: 'sermon-2', revision: 'rev-9', hash: undefined } },
-      { id: 'item-2', kind: 'reading', title: 'John 1', content: { id: 'reading-1', revision: 'rev-2', hash: 'fnv1a-12345678' } },
+      { id: 'item-4', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 'rev-9', hash: undefined } },
+      { id: 'item-2', kind: 'reading', title: 'John 1', enabled: true, content: { id: 'reading-1', revision: 'rev-2', hash: 'fnv1a-12345678' } },
     ],
   },
 ];
@@ -246,6 +246,157 @@ describe('scheduling and editing a Service', () => {
   });
 });
 
+describe('changing items within a Service', () => {
+  it('appends a caller-supplied item to the named section and reloads the new stamp', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const item = { ...SECTIONS[0]!.items[1]!, id: 'item-5' };
+    const added = await services.addItem(ADMIN, created.stamp.id, 'section-1', item);
+    expect(added).toEqual({
+      ...created,
+      sections: [SECTIONS[0], { ...SECTIONS[1], items: [...SECTIONS[1]!.items, item] }],
+      stamp: { ...created.stamp, updatedAt: '2026-09-13T09:30:02.000Z' },
+    });
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(added);
+    expect(rows(db, STAMPS).map((row) => row['sequence'])).toEqual([1, 2]);
+    expect(rows(db, STAMPS)[0]?.['sections']).toEqual(SECTIONS);
+    expect(actions(db)).toEqual(['service.create', 'service.item.add']);
+    expect(rows(db, AUDIT)[1]).toMatchObject({
+      subject: subjectFor(created.stamp.id), outcome: 'allowed', actor: ADMINISTRATOR,
+      correlationId: ADMIN.correlationId, detail: 'Added an item to a Service',
+    });
+  });
+
+  it.each([
+    SECTIONS[0]!.items[0]!,
+    { ...SECTIONS[0]!.items[1]!, id: 'item-5', content: SECTIONS[0]!.items[0]!.content },
+  ])('refuses an added item that violates a draft invariant: %j', async (item) => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    expect((await refused(services.addItem(ADMIN, created.stamp.id, 'section-1', item))).kind).toBe('schema');
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(created);
+    expect(rows(db, STAMPS)).toHaveLength(1);
+    expect(actions(db)).toEqual(['service.create']);
+  });
+
+  it('removes an item wherever it lives without disturbing the other items', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const removed = await services.removeItem(ADMIN, created.stamp.id, 'item-4');
+    expect(removed?.sections).toEqual([
+      SECTIONS[0], { ...SECTIONS[1], items: [SECTIONS[1]!.items[1]] },
+    ]);
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(removed);
+    expect(rows(db, STAMPS)[0]?.['sections']).toEqual(SECTIONS);
+    expect(actions(db)).toEqual(['service.create', 'service.item.remove']);
+  });
+
+  it('never touches any content-storing collection when an item is removed', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    await services.removeItem(ADMIN, created.stamp.id, 'item-3');
+    expect([...db.rows.keys()].sort()).toEqual(['audit_events', 'services']);
+  });
+
+  it('retains the referenced global content when its item is removed', async () => {
+    const { db, services } = store();
+    const content = [{ _id: 'rev-5', entityId: 'song-4', body: { title: 'Amazing Grace' } }];
+    db.rows.set(RECORDS.contentRevisions.collection, structuredClone(content));
+    const created = await services.create(ADMIN, DRAFT);
+    await services.removeItem(ADMIN, created.stamp.id, 'item-3');
+    expect(rows(db, RECORDS.contentRevisions.collection)).toEqual(content);
+  });
+
+  it('disables and enables an item in place without removing or reordering it', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const disabled = await services.disableItem(ADMIN, created.stamp.id, 'item-2');
+    expect(disabled?.sections[1]?.items).toHaveLength(SECTIONS[1]!.items.length);
+    expect(disabled?.sections).toEqual([
+      SECTIONS[0],
+      { ...SECTIONS[1], items: [SECTIONS[1]!.items[0], { ...SECTIONS[1]!.items[1], enabled: false }] },
+    ]);
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(disabled);
+    const enabled = await services.enableItem(ADMIN, created.stamp.id, 'item-2');
+    expect(enabled?.sections[1]?.items).toHaveLength(SECTIONS[1]!.items.length);
+    expect(enabled?.sections[1]?.items[1]?.enabled).toBe(true);
+    expect(enabled?.sections).toEqual(SECTIONS);
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(enabled);
+    expect(rows(db, STAMPS).map((row) => row['sequence'])).toEqual([1, 2, 3]);
+    expect(actions(db)).toEqual(['service.create', 'service.item.disable', 'service.item.enable']);
+  });
+
+  it('duplicates a disabled item adjacent to its original with a fresh id and the same pinned reference', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const disabled = await services.disableItem(ADMIN, created.stamp.id, 'item-3');
+    const source = disabled!.sections[0]!.items[0]!;
+    const duplicated = await services.duplicateItem(ADMIN, created.stamp.id, source.id);
+    const copy = duplicated?.sections[0]?.items[1];
+    expect(copy?.id).not.toBe(source.id);
+    expect(copy).toEqual({ ...source, id: 'service-2' });
+    expect(copy?.content).toEqual(source.content);
+    expect(duplicated?.sections).toEqual([
+      { ...SECTIONS[0], items: [source, copy, SECTIONS[0]!.items[1]] }, SECTIONS[1],
+    ]);
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(duplicated);
+    expect(actions(db)).toEqual(['service.create', 'service.item.disable', 'service.item.duplicate']);
+    expect([...db.rows.keys()].sort()).toEqual(['audit_events', 'services']);
+  });
+
+  it('refuses a duplicate whose minted id is already an item in another section', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const collision = servicesOn(db, { now: () => new Date(START).toISOString(), newId: () => 'item-4' });
+    expect((await refused(collision.duplicateItem(ADMIN, created.stamp.id, 'item-3'))).kind).toBe('schema');
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(created);
+    expect(rows(db, STAMPS)).toHaveLength(1);
+    expect(actions(db)).toEqual(['service.create']);
+  });
+
+  it('reorders exactly the items in one section and preserves the others', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const reordered = await services.reorderItems(ADMIN, created.stamp.id, 'section-2', ['item-1', 'item-3']);
+    expect(reordered?.sections).toEqual([
+      { ...SECTIONS[0], items: [...SECTIONS[0]!.items].reverse() }, SECTIONS[1],
+    ]);
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(reordered);
+    expect(actions(db)).toEqual(['service.create', 'service.item.reorder']);
+  });
+
+  it.each([
+    ['item-3'], ['item-3', 'item-3'], ['item-3', 'item-404'], ['item-3', 'item-4'],
+  ])('refuses an incomplete or repeated item order: %j', async (...itemIds) => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    expect((await refused(services.reorderItems(ADMIN, created.stamp.id, 'section-2', itemIds))).kind).toBe('schema');
+    expect(await services.current(ADMIN, created.stamp.id)).toEqual(created);
+    expect(rows(db, STAMPS)).toHaveLength(1);
+    expect(actions(db)).toEqual(['service.create']);
+  });
+
+  it.each(['addItem', 'removeItem', 'enableItem', 'disableItem', 'duplicateItem', 'reorderItems'] as const)(
+    'refuses %s with an unknown section or item without writing', async (change) => {
+      const { db, services } = store();
+      const created = await services.create(ADMIN, DRAFT);
+      const id = created.stamp.id;
+      const changes = {
+        addItem: () => services.addItem(ADMIN, id, 'section-404', SECTIONS[0]!.items[0]!),
+        removeItem: () => services.removeItem(ADMIN, id, 'item-404'),
+        enableItem: () => services.enableItem(ADMIN, id, 'item-404'),
+        disableItem: () => services.disableItem(ADMIN, id, 'item-404'),
+        duplicateItem: () => services.duplicateItem(ADMIN, id, 'item-404'),
+        reorderItems: () => services.reorderItems(ADMIN, id, 'section-404', []),
+      };
+      expect((await refused(changes[change]())).kind).toBe('schema');
+      expect(await services.current(ADMIN, id)).toEqual(created);
+      expect(rows(db, STAMPS)).toHaveLength(1);
+      expect(actions(db)).toEqual(['service.create']);
+    },
+  );
+});
+
 describe('archiving a Service and bringing it back', () => {
   it('appends archive and unarchive stamps and audits both as service.archive', async () => {
     const { db, services } = store();
@@ -281,7 +432,10 @@ describe('archiving a Service and bringing it back', () => {
 });
 
 describe('reading and refusing Service changes', () => {
-  it.each(['duplicate', 'schedule', 'edit', 'archive', 'unarchive'] as const)(
+  it.each([
+    'duplicate', 'schedule', 'edit', 'archive', 'unarchive',
+    'addItem', 'removeItem', 'enableItem', 'disableItem', 'duplicateItem', 'reorderItems',
+  ] as const)(
     'refuses %s without audit permission before writing a service row', async (change) => {
       const { db, services } = store();
       const created = await services.create(ADMIN, DRAFT);
@@ -294,6 +448,12 @@ describe('reading and refusing Service changes', () => {
         duplicate: () => services.duplicate(writer, id),
         schedule: () => services.schedule(writer, id, '2026-09-20'),
         edit: () => services.edit(writer, id, []),
+        addItem: () => services.addItem(writer, id, 'section-1', { ...SECTIONS[0]!.items[0]!, id: 'item-5' }),
+        removeItem: () => services.removeItem(writer, id, 'item-3'),
+        enableItem: () => services.enableItem(writer, id, 'item-3'),
+        disableItem: () => services.disableItem(writer, id, 'item-3'),
+        duplicateItem: () => services.duplicateItem(writer, id, 'item-3'),
+        reorderItems: () => services.reorderItems(writer, id, 'section-2', ['item-1', 'item-3']),
         archive: () => services.archive(writer, id),
         unarchive: () => services.unarchive(writer, id),
       };
@@ -313,6 +473,12 @@ describe('reading and refusing Service changes', () => {
     expect(await services.duplicate(ADMIN, 'service-404')).toBeUndefined();
     expect(await services.schedule(ADMIN, 'service-404', '2026-09-20')).toBeUndefined();
     expect(await services.edit(ADMIN, 'service-404', [])).toBeUndefined();
+    expect(await services.addItem(ADMIN, 'service-404', 'section-2', SECTIONS[0]!.items[0]!)).toBeUndefined();
+    expect(await services.removeItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
+    expect(await services.enableItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
+    expect(await services.disableItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
+    expect(await services.duplicateItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
+    expect(await services.reorderItems(ADMIN, 'service-404', 'section-2', [])).toBeUndefined();
     expect(await services.archive(ADMIN, 'service-404')).toBeUndefined();
     expect(await services.unarchive(ADMIN, 'service-404')).toBeUndefined();
     expect(rows(db, STAMPS)).toEqual([]);
@@ -357,11 +523,15 @@ describe('reading and refusing Service changes', () => {
 });
 
 describe('what the Service store is reached through', () => {
-  it('declares its permissions, audit subject, and the five content-category actions', () => {
+  it('declares its permissions, audit subject, and the content-category actions', () => {
     expect(SERVICE_PERMISSIONS).toEqual({ read: 'services.read', append: 'services.append' });
     expect(ADMIN.permissions).toEqual(['services.read', 'services.append', 'auditEvents.append']);
     expect(subjectFor('service-1')).toBe('service:service-1');
-    for (const action of ['service.create', 'service.duplicate', 'service.schedule', 'service.archive', 'service.edit'] as const) {
+    for (const action of [
+      'service.create', 'service.duplicate', 'service.schedule', 'service.archive', 'service.edit',
+      'service.item.add', 'service.item.remove', 'service.item.enable', 'service.item.disable',
+      'service.item.duplicate', 'service.item.reorder',
+    ] as const) {
       expect(CATEGORY_OF[action]).toBe('content');
     }
   });

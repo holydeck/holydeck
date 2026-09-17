@@ -72,6 +72,14 @@ export const AUDIT_ACTIONS = [
   'service.schedule',
   'service.archive',
   'service.edit',
+  // A Service item's own history: adding, removing, enabling, disabling, duplicating, and reordering
+  // items within a Service's sections. Same caller as the service-level actions above — `services.ts`.
+  'service.item.add',
+  'service.item.remove',
+  'service.item.enable',
+  'service.item.disable',
+  'service.item.duplicate',
+  'service.item.reorder',
   // Reserved for the presentation-run surface T76+ builds. Exercised only by this task's own tests today.
   'presentation.run',
   // Reserved for the backup surface T100+ builds. Exercised only by this task's own tests today.
@@ -138,6 +146,12 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'service.schedule': 'content',
   'service.archive': 'content',
   'service.edit': 'content',
+  'service.item.add': 'content',
+  'service.item.remove': 'content',
+  'service.item.enable': 'content',
+  'service.item.disable': 'content',
+  'service.item.duplicate': 'content',
+  'service.item.reorder': 'content',
   'presentation.run': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',

@@ -35,4 +35,21 @@ describe('Services in a real database', () => {
 
     await expect(services.current(ADMIN, created.stamp.id)).resolves.toEqual(created);
   });
+
+  it('keeps a disabled item after reloading through a real database', async () => {
+    const created = await services.create(ADMIN, {
+      title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall',
+      sections: [
+        {
+          id: 'section-1', name: 'Worship',
+          items: [{ id: 'item-1', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined }],
+        },
+      ],
+    });
+
+    await services.disableItem(ADMIN, created.stamp.id, 'item-1');
+
+    const current = await services.current(ADMIN, created.stamp.id);
+    expect(current?.sections[0]?.items[0]).toEqual({ id: 'item-1', kind: 'custom-slide', title: 'Welcome', enabled: false });
+  });
 });

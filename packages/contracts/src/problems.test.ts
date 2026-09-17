@@ -104,6 +104,15 @@ describe('FieldReader', () => {
     expect(problemsOf({}, (reader) => reader.flag('a'))).toEqual(['payload.a: field.required']);
   });
 
+  it('reads an optional flag and leaves it undefined when absent', () => {
+    expect(new FieldReader({}, '').optionalFlag('a')).toBeUndefined();
+    expect(new FieldReader({ a: true }, '').optionalFlag('a')).toBe(true);
+    expect(new FieldReader({ a: false }, '').optionalFlag('a')).toBe(false);
+    expect(problemsOf({ a: 'true' }, (reader) => reader.optionalFlag('a'))).toEqual([
+      'payload.a: field.not_a_boolean',
+    ]);
+  });
+
   it('reads a list of text and refuses a list holding anything else', () => {
     expect(new FieldReader({ a: ['x'] }, '').textList('a')).toEqual(['x']);
     expect(new FieldReader({ a: [] }, '').textList('a')).toEqual([]);
