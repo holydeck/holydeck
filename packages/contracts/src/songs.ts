@@ -246,11 +246,14 @@ export const parseSongProvenance: ParseFn<SongProvenance> = (value, path) =>
     };
   });
 
-/** The languages the song is sung in: each one real, and each one declared once. */
-const readLanguages = (reader: FieldReader): readonly string[] => {
+/**
+ * The languages the song is sung in: each one real, and each one declared once. Nothing at all when the
+ * field was refused, so that a `languages` nobody can read is not then held against every line of the song.
+ */
+const readLanguages = (reader: FieldReader): readonly string[] | undefined => {
   const before = reader.problems.length;
   const keys = reader.textList('languages');
-  if (reader.problems.length > before) return keys;
+  if (reader.problems.length > before) return undefined;
   const seen = new Set<string>();
   for (const [index, key] of keys.entries()) {
     if (!isContentLanguageKey(key)) {
@@ -266,9 +269,11 @@ const readLanguages = (reader: FieldReader): readonly string[] => {
 /**
  * The sections, and the two rules that are about the song rather than about one section: no two sections
  * share an identifier, and no section says something in a language the song never declared. Both are asked
- * only of sections that were all read, for the reason `layouts.ts` asks its own list rules that way.
+ * only of sections that were all read, for the reason `layouts.ts` asks its own list rules that way; the
+ * second is asked only when the song's languages were read too, since there is otherwise nothing to hold a
+ * line against.
  */
-const readSections = (reader: FieldReader, languages: readonly string[]): readonly LyricSection[] => {
+const readSections = (reader: FieldReader, languages: readonly string[] | undefined): readonly LyricSection[] => {
   const before = reader.problems.length;
   const sections = reader.parsedList('sections', parseLyricSection);
   if (reader.problems.length > before) return sections;
@@ -278,6 +283,7 @@ const readSections = (reader: FieldReader, languages: readonly string[]): readon
       reader.reject(`sections.${index}.id`, FIELD_CODES.notAllowed, `must not name a second section ${section.id}`);
     }
     seen.add(section.id);
+    if (languages === undefined) continue;
     for (const [at, text] of section.text.entries()) {
       if (!languages.includes(text.languageKey)) {
         reader.reject(
@@ -301,7 +307,7 @@ export function parseSongBody(value: unknown): Parsed<SongBody> {
     const metadata = reader.optionalParsed('metadata', parseSongMetadata);
     return {
       titles,
-      languages,
+      languages: languages ?? [],
       sections,
       provenance,
       ...(metadata === undefined ? {} : { metadata }),

@@ -151,6 +151,14 @@ describe('the languages a song declares', () => {
     ]);
   });
 
+  it('refuses a languages field that is not a list, and says nothing about the lines it cannot judge', () => {
+    expect(problemsOf(song({ languages: TA }))).toEqual(['song.languages: field.not_a_list']);
+  });
+
+  it('refuses a language that is not text, and still says nothing about the lines it cannot judge', () => {
+    expect(problemsOf(song({ languages: [TA, 7] }))).toEqual(['song.languages.1: field.not_text']);
+  });
+
   it('refuses a text with no language key at all, and says nothing further about the key', () => {
     const section = { ...VERSE, text: [{ text: 'Muthal vari' }] };
     expect(problemsOf(song({ sections: [section] }))).toEqual(['song.sections.0.text.0.languageKey: field.required']);
