@@ -3,15 +3,19 @@
 // entries LANG-01 itself needs — Tamil and Romanized Tamil, spec §11.5's own stated default for a
 // song — so a language block is keyed to something real rather than a string typed inline.
 // `fallbackFont` is T50's: the T11 legal decision settled on shipping no bundled/licensed webfont,
-// so it names a CSS font stack of faces already installed on supported platforms instead. Active/
-// archive state, and populating the registry beyond these two entries, are still SEED-01/T59's
-// job: `contentLanguage`'s `EntityPolicy` in `entities.ts` already reserves that requirement, and
-// this file does not anticipate it.
+// so it names a CSS font stack of faces already installed on supported platforms instead.
 //
-// This is a compile-time, in-code list, not the persisted `contentLanguage` entity `entities.ts`
-// stubs — it never goes through `library.js`/`revisions.js` and carries no `EntityStamp`. There
-// is nothing here for a future SEED-01 store to migrate away from, only a shape it will match or
-// replace outright once a real, administrable registry exists.
+// `CONTENT_LANGUAGES` below stays exactly what it was: a compile-time list nothing but a Layout's
+// own `languageKey` presence check (`isContentLanguageKey`) reads. Active/archive state and a real,
+// administrable registry are SEED-01/T59's: `apps/app/src/content-languages.ts` stamps each entry
+// as the persisted `contentLanguage` entity `entities.ts` already reserves a policy for, seeded from
+// the two entries here. `ContentLanguageDraft`/`parseContentLanguageDraft` below are that store's
+// payload shape, kept in contracts because a shape a store validates against belongs beside the
+// entity kind it is stamped as, the same way `slide-labels.ts` keeps `SlideLabelDraft`.
+
+import { type FieldReader, type ParseFn, parseObject } from './problems.js';
+
+import type { EntityKind } from './entities.js';
 
 /** One entry of the content-language registry: a stable key, a name to show, the script it's
  *  written in, and the CSS font stack that script renders through. */
@@ -21,6 +25,24 @@ export interface ContentLanguage {
   readonly script: string;
   readonly fallbackFont: string;
 }
+
+/** The kind the persisted registry stamps each entry as, named once for the store that administers it. */
+export const CONTENT_LANGUAGE_KIND = 'contentLanguage' satisfies EntityKind;
+
+/** What an Admin hands in to define or re-save one registry entry. The key is the entity's own
+ *  identifier, chosen once at creation and never part of a later edit. */
+export interface ContentLanguageDraft {
+  readonly displayName: string;
+  readonly script: string;
+  readonly fallbackFont: string;
+}
+
+export const parseContentLanguageDraft: ParseFn<ContentLanguageDraft> = (value, path) =>
+  parseObject(value, path, (reader: FieldReader) => ({
+    displayName: reader.text('displayName'),
+    script: reader.text('script'),
+    fallbackFont: reader.text('fallbackFont'),
+  }));
 
 /**
  * The T11 legal decision: HolyDeck ships no bundled or licensed webfont for Tamil script. Both

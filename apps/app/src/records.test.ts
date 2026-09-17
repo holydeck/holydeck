@@ -17,6 +17,7 @@ describe('the durable record classes', () => {
     expect([...RECORD_NAMES]).toEqual([
       'auditEvents',
       'conflictShelf',
+      'contentLanguages',
       'contentLibrary',
       'contentRevisions',
       'mediaAssets',

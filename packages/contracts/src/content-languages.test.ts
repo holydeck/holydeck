@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { CONTENT_LANGUAGES, TAMIL_FALLBACK_FONT_STACK, isContentLanguageKey } from './content-languages.js';
+import {
+  CONTENT_LANGUAGES,
+  CONTENT_LANGUAGE_KIND,
+  TAMIL_FALLBACK_FONT_STACK,
+  isContentLanguageKey,
+  parseContentLanguageDraft,
+} from './content-languages.js';
 
 describe('the content-language registry (LANG-01)', () => {
   it('carries Tamil and Romanized Tamil, the languages spec §11.5 names for a song', () => {
@@ -127,5 +133,28 @@ describe('the Tamil fallback font stack (T50)', () => {
       expect(language?.fallbackFont, key).toBeTruthy();
       expect(language?.fallbackFont, key).toBe(TAMIL_FALLBACK_FONT_STACK);
     }
+  });
+});
+
+describe('a persisted registry entry (SEED-01/T59)', () => {
+  it('is named once, as an entity kind entities.ts already reserves a policy for', () => {
+    expect(CONTENT_LANGUAGE_KIND).toBe('contentLanguage');
+  });
+
+  it('reads the three fields SEED-01 seeds from CONTENT_LANGUAGES, and nothing else', () => {
+    const [tamil] = CONTENT_LANGUAGES;
+    const parsed = parseContentLanguageDraft(
+      { displayName: tamil!.displayName, script: tamil!.script, fallbackFont: tamil!.fallbackFont },
+      'contentLanguage',
+    );
+    expect(parsed).toEqual({
+      ok: true,
+      value: { displayName: tamil!.displayName, script: tamil!.script, fallbackFont: tamil!.fallbackFont },
+    });
+  });
+
+  it('refuses a draft missing a required field', () => {
+    const parsed = parseContentLanguageDraft({ displayName: 'Tamil', script: 'Tamil' }, 'contentLanguage');
+    expect(parsed.ok).toBe(false);
   });
 });

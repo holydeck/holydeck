@@ -10,6 +10,7 @@ import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './acc
 import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
 import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } from './capabilities.js';
 import { SHELF_INDEXES, SHELF_RECORD } from './conflicts.js';
+import { CONTENT_LANGUAGE_INDEXES, CONTENT_LANGUAGE_RECORD } from './content-languages.js';
 import { LIBRARY_INDEXES, LIBRARY_RECORD } from './library.js';
 import { MEDIA_ASSET_RECORD, MEDIA_INDEXES } from './media.js';
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
@@ -301,6 +302,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...SHELF_INDEXES].reverse()) await api.dropIndex(SHELF_RECORD, index.name);
+    },
+  },
+  {
+    version: 16,
+    name: 'the index a content language’s standing stamp is found by',
+    async up(api) {
+      for (const index of CONTENT_LANGUAGE_INDEXES) {
+        await api.createIndex(CONTENT_LANGUAGE_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...CONTENT_LANGUAGE_INDEXES].reverse()) await api.dropIndex(CONTENT_LANGUAGE_RECORD, index.name);
     },
   },
 ]);

@@ -59,6 +59,24 @@ export const RECORDS = {
       revision: 'optional',
     },
   },
+  // Spec SEED-01 with §11: the persisted content-language registry — one row per change to one key,
+  // the same append-only stamp history `slideLabels` keeps, and for the same reason. A language has
+  // no separately versioned body at all: its display name, script and fallback font are the whole of
+  // it, so all three are written inline on the stamped row, exactly as a label's name is.
+  contentLanguages: {
+    collection: 'content_languages',
+    kind: 'append-only',
+    fields: {
+      ...HISTORY,
+      languageKey: 'required',
+      sequence: 'required',
+      at: 'required',
+      displayName: 'required',
+      script: 'required',
+      fallbackFont: 'required',
+      stamp: 'required',
+    },
+  },
   // Spec CONT-01: the discoverability index for reusable content — one row per stamp change, the same
   // append-only shape `slideLayouts` uses. `contentId` is deliberately the same word `contentRevisions`
   // already uses for its own key, not a domain-suffixed name like `layoutId`/`serviceId`: this table's
