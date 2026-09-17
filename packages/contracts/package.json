@@ -49,6 +49,10 @@
       "types": "./dist/layouts.d.ts",
       "import": "./dist/layouts.js"
     },
+    "./library": {
+      "types": "./dist/library.d.ts",
+      "import": "./dist/library.js"
+    },
     "./portable": {
       "types": "./dist/portable.d.ts",
       "import": "./dist/portable.js"

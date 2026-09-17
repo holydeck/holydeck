@@ -37,6 +37,16 @@ export const RECORDS = {
       durationMs: 'optional',
     },
   },
+  // Spec CONT-01: the discoverability index for reusable content — one row per stamp change, the same
+  // append-only shape `slideLayouts` uses. `contentId` is deliberately the same word `contentRevisions`
+  // already uses for its own key, not a domain-suffixed name like `layoutId`/`serviceId`: this table's
+  // entire purpose is minting the identifier a later revision (T47/T51/T64) is saved under, and calling
+  // it anything else would hide that the two tables share a key space.
+  contentLibrary: {
+    collection: 'content_library',
+    kind: 'append-only',
+    fields: { ...HISTORY, contentId: 'required', sequence: 'required', at: 'required', title: 'required', stamp: 'required' },
+  },
   // Spec DATA-02: content bodies append hash-addressed revisions, each recording how it came to exist.
   contentRevisions: {
     collection: 'content_revisions',

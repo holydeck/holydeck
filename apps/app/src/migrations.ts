@@ -9,6 +9,7 @@
 import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './accounts.js';
 import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
 import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } from './capabilities.js';
+import { LIBRARY_INDEXES, LIBRARY_RECORD } from './library.js';
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { SERVICE_INDEXES, SERVICE_RECORD } from './services.js';
@@ -232,6 +233,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...SERVICE_INDEXES].reverse()) await api.dropIndex(SERVICE_RECORD, index.name);
+    },
+  },
+  {
+    version: 11,
+    name: 'the index a library item’s standing stamp is found by',
+    async up(api) {
+      for (const index of LIBRARY_INDEXES) {
+        await api.createIndex(LIBRARY_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...LIBRARY_INDEXES].reverse()) await api.dropIndex(LIBRARY_RECORD, index.name);
     },
   },
 ]);

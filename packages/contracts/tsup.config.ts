@@ -12,6 +12,7 @@ export default defineConfig({
     'src/jobs.ts',
     'src/entities.ts',
     'src/layouts.ts',
+    'src/library.ts',
     'src/portable.ts',
     'src/revisions.ts',
     'src/service-templates.ts',

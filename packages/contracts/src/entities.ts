@@ -35,7 +35,17 @@ export const DELETION_RULES = ['never', 'purge-after-grace'] as const;
 
 export type DeletionRule = (typeof DELETION_RULES)[number];
 
-export const ENTITY_KINDS = ['contentLanguage', 'mediaAsset', 'service', 'slideLayout', 'song'] as const;
+export const ENTITY_KINDS = [
+  'contentLanguage',
+  'mediaAsset',
+  'reading',
+  'reusableSlide',
+  'sermon',
+  'service',
+  'slideGroup',
+  'slideLayout',
+  'song',
+] as const;
 
 export type EntityKind = (typeof ENTITY_KINDS)[number];
 
@@ -76,6 +86,33 @@ export const ENTITY_POLICIES: Readonly<Record<EntityKind, EntityPolicy>> = Objec
     portable: false,
     requirement: 'MEDI-01',
   },
+  reading: {
+    kind: 'reading',
+    schemaVersion: 1,
+    archive: 'hidden',
+    deletion: 'never',
+    graceDays: undefined,
+    portable: false,
+    requirement: 'CONT-01',
+  },
+  reusableSlide: {
+    kind: 'reusableSlide',
+    schemaVersion: 1,
+    archive: 'hidden',
+    deletion: 'never',
+    graceDays: undefined,
+    portable: false,
+    requirement: 'CONT-01',
+  },
+  sermon: {
+    kind: 'sermon',
+    schemaVersion: 1,
+    archive: 'hidden',
+    deletion: 'never',
+    graceDays: undefined,
+    portable: false,
+    requirement: 'CONT-01',
+  },
   service: {
     kind: 'service',
     schemaVersion: 1,
@@ -86,6 +123,15 @@ export const ENTITY_POLICIES: Readonly<Record<EntityKind, EntityPolicy>> = Objec
     graceDays: undefined,
     portable: false,
     requirement: 'SERV-03 with DELT-01',
+  },
+  slideGroup: {
+    kind: 'slideGroup',
+    schemaVersion: 1,
+    archive: 'hidden',
+    deletion: 'never',
+    graceDays: undefined,
+    portable: false,
+    requirement: 'CONT-01',
   },
   slideLayout: {
     kind: 'slideLayout',
