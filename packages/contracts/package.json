@@ -73,6 +73,10 @@
       "types": "./dist/services.d.ts",
       "import": "./dist/services.js"
     },
+    "./slide-groups": {
+      "types": "./dist/slide-groups.d.ts",
+      "import": "./dist/slide-groups.js"
+    },
     "./sessions": {
       "types": "./dist/sessions.d.ts",
       "import": "./dist/sessions.js"
