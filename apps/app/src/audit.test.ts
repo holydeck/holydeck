@@ -145,6 +145,7 @@ describe('the context the trail is written under', () => {
       'service.item.disable',
       'service.item.duplicate',
       'service.item.reorder',
+      'service.item.revise',
       'presentation.run',
       'backup.run',
       'restore.run',

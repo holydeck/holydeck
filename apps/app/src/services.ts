@@ -18,11 +18,13 @@ import {
 
 import { auditOn } from './audit.js';
 import { contextProblems, requestContext } from './context.js';
+import { LIBRARY_RECORD, libraryOn } from './library.js';
 import { permissionsFor } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
+import { REVISION_RECORD, revisionsOn } from './revisions.js';
 
 import type { EntityStamp } from '@holydeck/contracts/entities';
-import type { ServiceDraft, ServiceItem, ServiceSection, ServiceState } from '@holydeck/contracts/services';
+import type { RevisionRef, ServiceDraft, ServiceItem, ServiceSection, ServiceState } from '@holydeck/contracts/services';
 
 import type { AuditAction } from './audit.js';
 import type { RequestContext } from './context.js';
@@ -59,7 +61,12 @@ export class ServiceError extends Error {
 export function serviceContext(actor: string, correlationId: string): RequestContext {
   return requestContext({
     actor,
-    permissions: [...Object.values(SERVICE_PERMISSIONS), permissionsFor('auditEvents').append],
+    permissions: [
+      ...Object.values(SERVICE_PERMISSIONS),
+      permissionsFor('auditEvents').append,
+      permissionsFor(LIBRARY_RECORD).read,
+      permissionsFor(REVISION_RECORD).read,
+    ],
     correlationId,
   });
 }
@@ -72,6 +79,14 @@ export interface ServiceRecord {
   readonly state: ServiceState;
   readonly sections: readonly ServiceSection[];
 }
+
+export type ItemContentDrift = {
+  readonly itemId: string;
+  readonly contentId: string;
+  readonly pinnedRevision: number;
+  readonly latestRevision: number;
+  readonly drifted: boolean;
+};
 
 export interface ServiceStore {
   create(context: unknown, draft: ServiceDraft): Promise<ServiceRecord>;
@@ -103,6 +118,15 @@ export interface ServiceStore {
     sectionId: string,
     itemIds: readonly string[],
   ): Promise<ServiceRecord | undefined>;
+  /** Moves one item's content reference onto a later revision of the same content, chosen by ordinal.
+   *  Refuses an item with no content reference (every 'custom-slide' item, and any item nothing has
+   *  ever pinned), an id that names no library item, or an ordinal that names no revision of it.
+   *  Recorded with actor and time, like every other item mutator (ADR 0005: opt-in only). */
+  reviseItem(context: unknown, id: string, itemId: string, revision: number): Promise<ServiceRecord | undefined>;
+  /** Every item's pinned revision against the latest one its content currently has. Read-only: nothing
+   *  here, or anywhere else in this store, ever moves an item onto a newer revision by itself — that is
+   *  `reviseItem`'s job alone (ADR 0005). */
+  contentDrift(context: unknown, id: string): Promise<readonly ItemContentDrift[] | undefined>;
   archive(context: unknown, id: string): Promise<ServiceRecord | undefined>;
   unarchive(context: unknown, id: string): Promise<ServiceRecord | undefined>;
   current(context: unknown, id: string): Promise<ServiceRecord | undefined>;
@@ -121,6 +145,14 @@ const readable = (problem: { readonly path: string; readonly message: string }):
 
 const problems = (list: readonly { readonly path: string; readonly message: string }[]): string =>
   list.map(readable).join('; ');
+
+const revisionOrdinalOf = (ref: RevisionRef): number => {
+  const ordinal = Number(ref.revision);
+  if (!Number.isInteger(ordinal) || ordinal < 1) {
+    throw new ServiceError('corrupt', `${ref.id}@${ref.revision} is pinned to a revision this code cannot read`);
+  }
+  return ordinal;
+};
 
 interface ItemAddress {
   readonly sectionIndex: number;
@@ -239,6 +271,8 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
   const records = repositoriesOn(db)[SERVICE_RECORD];
   const trail = auditOn(db, { now: options.now });
   const newId = options.newId ?? ((): string => randomBytes(SERVICE_ID_BYTES).toString('base64url'));
+  const library = libraryOn(db, { now: options.now });
+  const revisions = revisionsOn(db, { now: options.now });
 
   const author = (context: unknown): Pick<RequestContext, 'actor' | 'correlationId'> => {
     const { actor, correlationId } = context as RequestContext;
@@ -439,6 +473,51 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
           withReorderedItems(sections, sectionId, itemIds),
         ),
       ),
+
+    reviseItem: (context, id, itemId, revision) =>
+      own(async () => {
+        requireAuditPermission(context);
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        const { sectionIndex, itemIndex } = locateItem(row.sections, itemId);
+        const current = row.sections[sectionIndex]!.items[itemIndex]!.content;
+        if (current === undefined) {
+          throw new ServiceError('schema', `${itemId} has no content reference to revise`);
+        }
+        const found = await library.get(context, current.id);
+        if (found === undefined) {
+          throw new ServiceError('schema', `${current.id} does not name a library item this Service can reference`);
+        }
+        const target = await revisions.read(context, current.id, revision);
+        if (target === undefined) {
+          throw new ServiceError('schema', `${current.id} has no revision ${revision}`);
+        }
+        const ref: RevisionRef = { id: current.id, revision: String(revision), hash: target.hash };
+        const draft = readDraft({
+          title: row.title, date: row.date, site: row.site,
+          sections: withChangedItem(row.sections, itemId, (item) => ({ ...item, content: ref })),
+        });
+        const stamp = touchedStamp(row.stamp, { at: options.now(), by: author(context).actor });
+        const record = await stampOnto(context, stamp, { ...draft, state: row.state }, row.sequence + 1);
+        return audited(context, record, 'service.item.revise', `Revised ${itemId} onto content revision ${revision}`);
+      }),
+
+    contentDrift: (context, id) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        const refs = row.sections.flatMap((section) =>
+          section.items.flatMap((item) => (item.content === undefined ? [] : [{ itemId: item.id, content: item.content }])),
+        );
+        return Promise.all(
+          refs.map(async ({ itemId, content }) => {
+            const pinnedRevision = revisionOrdinalOf(content);
+            const latest = await revisions.current(context, content.id);
+            const latestRevision = latest?.revision ?? pinnedRevision;
+            return { itemId, contentId: content.id, pinnedRevision, latestRevision, drifted: latestRevision !== pinnedRevision };
+          }),
+        );
+      }),
 
     archive: (context, id) =>
       own(() => restamp(context, id, (row, at, by) => archivedStamp(row.stamp, { at, by }), 'Archived a Service')),

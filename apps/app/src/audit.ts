@@ -82,6 +82,7 @@ export const AUDIT_ACTIONS = [
   'service.item.disable',
   'service.item.duplicate',
   'service.item.reorder',
+  'service.item.revise',
   // Reserved for the presentation-run surface T76+ builds. Exercised only by this task's own tests today.
   'presentation.run',
   // Reserved for the backup surface T100+ builds. Exercised only by this task's own tests today.
@@ -155,6 +156,7 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'service.item.disable': 'content',
   'service.item.duplicate': 'content',
   'service.item.reorder': 'content',
+  'service.item.revise': 'content',
   'presentation.run': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',

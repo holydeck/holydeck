@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 
 import { CATEGORY_OF } from './audit.js';
 import { requestContext } from './context.js';
+import { libraryContext, libraryOn } from './library.js';
 import { RECORDS } from './records.js';
 import { RepositoryError } from './repositories.js';
+import { REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
 import {
   SERVICE_INDEXES,
   SERVICE_PERMISSIONS,
@@ -584,15 +586,222 @@ describe('reading and refusing Service changes', () => {
   });
 });
 
+describe('revising an item onto a later content revision', () => {
+  const setup = async (): Promise<{
+    db: FakeDb;
+    services: ServiceStore;
+    revisions: ReturnType<typeof revisionsOn>;
+    REV: ReturnType<typeof requestContext>;
+    sections: readonly ServiceSection[];
+    serviceId: string;
+    songContentId: string;
+    readingContentId: string;
+    firstHash: string;
+  }> => {
+    const db = fakeDb();
+    let tick = 0;
+    const now = (): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString();
+    let librarySerial = 0;
+    const library = libraryOn(db, { now, newId: () => `content-${(librarySerial += 1)}` });
+    const revisions = revisionsOn(db, { now });
+    const services = servicesOn(db, { now, newId: () => 'service-1' });
+    const LIB = libraryContext(ADMINISTRATOR, 'req-lib');
+    const REV = requestContext({
+      actor: ADMINISTRATOR,
+      permissions: [REVISION_PERMISSIONS.append, REVISION_PERMISSIONS.read],
+      correlationId: 'req-rev',
+    });
+
+    const song = await library.create(LIB, { kind: 'song', title: 'Amazing Grace' });
+    const reading = await library.create(LIB, { kind: 'reading', title: 'John 1' });
+    const rev1 = await revisions.save(REV, { contentId: song.stamp.id, body: { verse: 1 }, origin: 'autosave' });
+    await revisions.save(REV, { contentId: song.stamp.id, body: { verse: 2 }, origin: 'autosave' });
+    await revisions.save(REV, { contentId: reading.stamp.id, body: { text: 'In the beginning' }, origin: 'autosave' });
+
+    const sections: readonly ServiceSection[] = [
+      {
+        id: 'section-1', name: 'Worship', items: [
+          { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: song.stamp.id, revision: '1', hash: rev1.revision.hash } },
+          { id: 'item-2', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined },
+          { id: 'item-3', kind: 'reading', title: 'John 1', enabled: true, content: { id: reading.stamp.id, revision: '1', hash: undefined } },
+          { id: 'item-4', kind: 'sermon', title: 'Ghost', enabled: true, content: { id: 'ghost-content', revision: '1', hash: undefined } },
+        ],
+      },
+    ];
+    const created = await services.create(serviceContext(ADMINISTRATOR, 'req-svc'), {
+      title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections,
+    });
+
+    return {
+      db, services, revisions, REV, sections,
+      serviceId: created.stamp.id, songContentId: song.stamp.id, readingContentId: reading.stamp.id,
+      firstHash: rev1.revision.hash,
+    };
+  };
+
+  it('does not drift when a newer revision is created after the item was pinned', async () => {
+    const { services, revisions, REV, serviceId, songContentId, firstHash } = await setup();
+    await revisions.save(REV, { contentId: songContentId, body: { verse: 3 }, origin: 'autosave' });
+    const content = (await services.current(ADMIN, serviceId))?.sections[0]?.items[0]?.content;
+    expect(content).toEqual({ id: songContentId, revision: '1', hash: firstHash });
+  });
+
+  it('surfaces drift without applying it, and excludes items with no content reference', async () => {
+    const { services, revisions, REV, serviceId, songContentId, readingContentId, firstHash } = await setup();
+    await revisions.save(REV, { contentId: songContentId, body: { verse: 3 }, origin: 'autosave' });
+    const drift = await services.contentDrift(ADMIN, serviceId);
+    expect(drift).toEqual([
+      { itemId: 'item-1', contentId: songContentId, pinnedRevision: 1, latestRevision: 3, drifted: true },
+      { itemId: 'item-3', contentId: readingContentId, pinnedRevision: 1, latestRevision: 1, drifted: false },
+      { itemId: 'item-4', contentId: 'ghost-content', pinnedRevision: 1, latestRevision: 1, drifted: false },
+    ]);
+    const content = (await services.current(ADMIN, serviceId))?.sections[0]?.items[0]?.content;
+    expect(content).toEqual({ id: songContentId, revision: '1', hash: firstHash });
+  });
+
+  it('records actor and time when opting into a newer revision, and clears the drift', async () => {
+    const { db, services, revisions, REV, serviceId, songContentId } = await setup();
+    const rev3 = await revisions.save(REV, { contentId: songContentId, body: { verse: 3 }, origin: 'autosave' });
+    const stampsBefore = rows(db, STAMPS).length;
+    const revised = await services.reviseItem(ADMIN, serviceId, 'item-1', 3);
+    expect(revised?.sections[0]?.items[0]?.content).toEqual({ id: songContentId, revision: '3', hash: rev3.revision.hash });
+    expect(await services.current(ADMIN, serviceId)).toEqual(revised);
+    expect(rows(db, STAMPS)).toHaveLength(stampsBefore + 1);
+    const auditRows = rows(db, AUDIT);
+    expect(auditRows[auditRows.length - 1]).toMatchObject({
+      action: 'service.item.revise', subject: subjectFor(serviceId), outcome: 'allowed',
+      actor: ADMINISTRATOR, correlationId: ADMIN.correlationId,
+    });
+    const drift = await services.contentDrift(ADMIN, serviceId);
+    expect(drift?.find((entry) => entry.itemId === 'item-1')?.drifted).toBe(false);
+  });
+
+  it('returns nothing for reviseItem and contentDrift on an unknown service id, without writing', async () => {
+    const { db, services } = store();
+    expect(await services.reviseItem(ADMIN, 'service-404', 'item-1', 1)).toBeUndefined();
+    expect(await services.contentDrift(ADMIN, 'service-404')).toBeUndefined();
+    expect(rows(db, STAMPS)).toEqual([]);
+    expect(actions(db)).toEqual([]);
+  });
+
+  describe('refusing to revise an item', () => {
+    it('refuses a custom-slide item, which has no content reference', async () => {
+      const { db, services, serviceId } = await setup();
+      const error = await refused(services.reviseItem(ADMIN, serviceId, 'item-2', 1));
+      expect(error.kind).toBe('schema');
+      expect(error.message).toContain('no content reference');
+      expect(rows(db, STAMPS)).toHaveLength(1);
+      expect(actions(db)).toEqual(['service.create']);
+    });
+
+    it('refuses a content id the library never created', async () => {
+      const { db, services, serviceId } = await setup();
+      const error = await refused(services.reviseItem(ADMIN, serviceId, 'item-4', 1));
+      expect(error.kind).toBe('schema');
+      expect(error.message).toContain('does not name a library item');
+      expect(rows(db, STAMPS)).toHaveLength(1);
+      expect(actions(db)).toEqual(['service.create']);
+    });
+
+    it('refuses a revision ordinal that was never saved', async () => {
+      const { db, services, serviceId } = await setup();
+      const error = await refused(services.reviseItem(ADMIN, serviceId, 'item-1', 99));
+      expect(error.kind).toBe('schema');
+      expect(error.message).toContain('has no revision');
+      expect(rows(db, STAMPS)).toHaveLength(1);
+      expect(actions(db)).toEqual(['service.create']);
+    });
+
+    it('refuses an unknown item id the same way every other item verb does', async () => {
+      const { db, services, serviceId } = await setup();
+      const error = await refused(services.reviseItem(ADMIN, serviceId, 'item-404', 1));
+      expect(error.kind).toBe('schema');
+      expect(error.message).toContain('does not name an item in this Service');
+      expect(rows(db, STAMPS)).toHaveLength(1);
+      expect(actions(db)).toEqual(['service.create']);
+    });
+  });
+
+  it('refuses reviseItem for a context missing library/revision read access, naming contentLibrary', async () => {
+    const { db, services, serviceId } = await setup();
+    const partial = requestContext({
+      actor: ADMINISTRATOR,
+      permissions: [...Object.values(SERVICE_PERMISSIONS), 'auditEvents.append'],
+      correlationId: 'req-partial',
+    });
+    await expect(services.reviseItem(partial, serviceId, 'item-1', 2)).rejects.toMatchObject({
+      name: 'RepositoryError', kind: 'permission', message: expect.stringContaining('contentLibrary'),
+    });
+    expect(rows(db, STAMPS)).toHaveLength(1);
+  });
+});
+
+describe('content revisions adopt a new layout only by explicit opt-in (ADR 0005)', () => {
+  it('never moves an item onto a newer revision except through reviseItem', async () => {
+    // ADR 0005's decision, verbatim: "content revisions adopt a new layout only by explicit
+    // opt-in." (adrs/0005-slide-layout-propagation.md; adrs/index.json lists this task under
+    // ADR 0005's enforcedBy alongside T40, which enforces the layout side of the same rule.)
+    const db = fakeDb();
+    let tick = 0;
+    const now = (): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString();
+    let librarySerial = 0;
+    const library = libraryOn(db, { now, newId: () => `content-${(librarySerial += 1)}` });
+    const revisions = revisionsOn(db, { now });
+    const services = servicesOn(db, { now, newId: () => 'service-1' });
+    const LIB = libraryContext(ADMINISTRATOR, 'req-lib');
+    const REV = requestContext({
+      actor: ADMINISTRATOR,
+      permissions: [REVISION_PERMISSIONS.append, REVISION_PERMISSIONS.read],
+      correlationId: 'req-rev',
+    });
+
+    const song = await library.create(LIB, { kind: 'song', title: 'Amazing Grace' });
+    const rev1 = await revisions.save(REV, { contentId: song.stamp.id, body: { verse: 1 }, origin: 'autosave' });
+    const rev2 = await revisions.save(REV, { contentId: song.stamp.id, body: { verse: 2 }, origin: 'autosave' });
+    const sections: readonly ServiceSection[] = [
+      {
+        id: 'section-1', name: 'Worship',
+        items: [{ id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: song.stamp.id, revision: '1', hash: rev1.revision.hash } }],
+      },
+    ];
+    const created = await services.create(serviceContext(ADMINISTRATOR, 'req-svc'), {
+      title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections,
+    });
+    const serviceId = created.stamp.id;
+    const pinned = { id: song.stamp.id, revision: '1', hash: rev1.revision.hash };
+    const contentOf = async (): Promise<unknown> =>
+      (await services.current(ADMIN, serviceId))?.sections[0]?.items[0]?.content;
+
+    await services.edit(ADMIN, serviceId, sections);
+    expect(await contentOf()).toEqual(pinned);
+
+    const extraItem = { id: 'item-5', kind: 'custom-slide', title: 'Extra', enabled: true, content: undefined } as const;
+    await services.addItem(ADMIN, serviceId, 'section-1', extraItem);
+    expect(await contentOf()).toEqual(pinned);
+
+    await services.archive(ADMIN, serviceId);
+    expect(await contentOf()).toEqual(pinned);
+    await services.unarchive(ADMIN, serviceId);
+    expect(await contentOf()).toEqual(pinned);
+
+    const revised = await services.reviseItem(ADMIN, serviceId, 'item-1', 2);
+    expect(revised?.sections[0]?.items[0]?.content).toEqual({ id: song.stamp.id, revision: '2', hash: rev2.revision.hash });
+    expect(await contentOf()).toEqual(revised?.sections[0]?.items[0]?.content);
+  });
+});
+
 describe('what the Service store is reached through', () => {
   it('declares its permissions, audit subject, and the content-category actions', () => {
     expect(SERVICE_PERMISSIONS).toEqual({ read: 'services.read', append: 'services.append' });
-    expect(ADMIN.permissions).toEqual(['services.read', 'services.append', 'auditEvents.append']);
+    expect(ADMIN.permissions).toEqual([
+      'services.read', 'services.append', 'auditEvents.append',
+      'contentLibrary.read', 'contentRevisions.read',
+    ]);
     expect(subjectFor('service-1')).toBe('service:service-1');
     for (const action of [
       'service.create', 'service.duplicate', 'service.schedule', 'service.archive', 'service.edit',
       'service.item.add', 'service.item.remove', 'service.item.enable', 'service.item.disable',
-      'service.item.duplicate', 'service.item.reorder',
+      'service.item.duplicate', 'service.item.reorder', 'service.item.revise',
     ] as const) {
       expect(CATEGORY_OF[action]).toBe('content');
     }
