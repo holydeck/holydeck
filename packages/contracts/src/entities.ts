@@ -43,6 +43,7 @@ export const ENTITY_KINDS = [
   'sermon',
   'service',
   'slideGroup',
+  'slideLabel',
   'slideLayout',
   'song',
 ] as const;
@@ -132,6 +133,18 @@ export const ENTITY_POLICIES: Readonly<Record<EntityKind, EntityPolicy>> = Objec
     graceDays: undefined,
     portable: false,
     requirement: 'CONT-01',
+  },
+  slideLabel: {
+    kind: 'slideLabel',
+    schemaVersion: 1,
+    // One entry of the global catalogue an Editor chooses a slide's label from, so archiving one has to
+    // stop it being offered while every slide already labelled with it keeps reading. Administered rather
+    // than authored: it travels with a deployment's own configuration, never inside an exported song.
+    archive: 'hidden',
+    deletion: 'never',
+    graceDays: undefined,
+    portable: false,
+    requirement: 'LABL-01',
   },
   slideLayout: {
     kind: 'slideLayout',

@@ -23,6 +23,7 @@ describe('the durable record classes', () => {
       'schemaMigrations',
       'serviceTemplates',
       'services',
+      'slideLabels',
       'slideLayouts',
     ]);
     const collections = CLASSES.map(([, record]) => record.collection);

@@ -101,6 +101,7 @@ describe('the shipped migrations', () => {
       'services',
       'sessions',
       'sign_in_attempts',
+      'slide_labels',
       'slide_layouts',
       'totp_credentials',
     ]);

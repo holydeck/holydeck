@@ -81,6 +81,10 @@
       "types": "./dist/slide-groups.d.ts",
       "import": "./dist/slide-groups.js"
     },
+    "./slide-labels": {
+      "types": "./dist/slide-labels.d.ts",
+      "import": "./dist/slide-labels.js"
+    },
     "./songs": {
       "types": "./dist/songs.d.ts",
       "import": "./dist/songs.js"

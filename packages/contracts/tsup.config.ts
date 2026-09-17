@@ -21,6 +21,7 @@ export default defineConfig({
     'src/services.ts',
     'src/content-languages.ts',
     'src/slide-groups.ts',
+    'src/slide-labels.ts',
     'src/songs.ts',
     'src/totp.ts',
     'src/webauthn.ts',

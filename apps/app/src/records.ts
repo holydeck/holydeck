@@ -99,6 +99,17 @@ export const RECORDS = {
       stamp: 'required',
     },
   },
+  // Spec LABL-01: one row per change to one entry of the global slide-label catalogue — the same
+  // append-only stamp history `slideLayouts` keeps, and for the same reason. A label has no separately
+  // versioned body at all: what it is called and which live key jumps to it are the whole of it, so both
+  // are written inline on the stamped row. `shortcut` is the one optional field, because a label that is
+  // assignable without being reachable by a single keypress is a label with no key rather than a label
+  // with an empty one.
+  slideLabels: {
+    collection: 'slide_labels',
+    kind: 'append-only',
+    fields: { ...HISTORY, labelId: 'required', sequence: 'required', at: 'required', name: 'required', shortcut: 'optional', stamp: 'required' },
+  },
   // Spec TMPL-01: a Slide Layout's own stamp and name, apart from the boxes it holds. Append-only like
   // everything else, so its lifecycle is a history of stamps rather than one row edited in place: the
   // standing stamp is the highest `sequence` a `layoutId` has, and a second writer claiming that same
