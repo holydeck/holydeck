@@ -199,6 +199,11 @@ describe('FieldReader', () => {
     ]);
   });
 
+  it('names what the payload carried, so a rule can refuse a field it was never offered', () => {
+    expect(new FieldReader({ a: 1, b: undefined }, 'payload').names).toEqual(['a', 'b']);
+    expect(new FieldReader({}, 'payload').names).toEqual([]);
+  });
+
   it('takes a problem a payload rule found that no field type can express', () => {
     const reader = new FieldReader({}, 'payload');
     reader.reject('a', 'job.lease_missing', 'is leased with no expiry');

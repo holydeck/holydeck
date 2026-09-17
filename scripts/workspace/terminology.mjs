@@ -32,6 +32,8 @@ export const GUARDED_FILES = [
   'apps/app/src/slide-layouts.ts',
   'packages/contracts/src/layouts.test.ts',
   'packages/contracts/src/layouts.ts',
+  'packages/contracts/src/songs.test.ts',
+  'packages/contracts/src/songs.ts',
   'packages/renderer/src/transparency.test.ts',
   'packages/renderer/test/helpers/composite.ts',
 ];

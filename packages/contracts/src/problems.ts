@@ -83,6 +83,11 @@ export class FieldReader {
     return this.#problems;
   }
 
+  /** Every name the payload actually carried, for a rule that refuses a field it was never offered. */
+  get names(): readonly string[] {
+    return Object.keys(this.#source);
+  }
+
   path(name: string): string {
     return this.#base === '' ? name : `${this.#base}.${name}`;
   }
