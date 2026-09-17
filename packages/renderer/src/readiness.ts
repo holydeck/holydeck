@@ -20,6 +20,8 @@ export const READINESS_CODES = [
   'decoration.outsideSafeArea',
   /** The authored layout's ratio is not the resolved output ratio, so the frame is letterboxed. */
   'layout.ratioMismatch',
+  /** A media box asks to play louder than the resolved bound; the bound was used instead. */
+  'media.volumeAboveBound',
 ] as const;
 
 export type ReadinessCode = (typeof READINESS_CODES)[number];

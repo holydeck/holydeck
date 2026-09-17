@@ -12,18 +12,20 @@
 // against one reference canvas — never against a surface's own viewport — which is why a 320px thumbnail
 // and a 4K output view wrap a lyric in exactly the same place.
 //
-// Administration owns the ratio, the margins and the readable floor, and a service may override them.
-// Items and slides may not, and this file refuses a model that tries: a slide carrying an `aspectRatio`
-// is a defect in whatever produced it, not a preference to be honoured.
+// Administration owns the ratio, the margins, the readable floor and the volume bound, and a service may
+// override them. Items and slides may not, and this file refuses a model that tries: a slide carrying an
+// `aspectRatio` is a defect in whatever produced it, not a preference to be honoured.
 
 import { autoFitStyle, chooseFit, fitLadder, fitRequests } from './auto-fit.js';
 import { deepFreeze } from './internal/freeze.js';
 import { geometry, roundTo } from './internal/numbers.js';
+import { mediaRectFor } from './media-fit.js';
 import { MEASUREMENT_PRECISION } from './measure.js';
 import { canvasFor, resolveOutputProfile } from './output-profile.js';
 import { blocker, readinessOf, warning } from './readiness.js';
 
 import type { FitConstraints } from './auto-fit.js';
+import type { IntrinsicSize, MediaFit } from './media-fit.js';
 import type { MeasureRequest, TextMeasurer, TextMetrics } from './measure.js';
 import type {
   AdministrativeRenderDefaults,
@@ -32,7 +34,10 @@ import type {
   ResolvedOutputProfile,
   ServiceRenderOverrides,
 } from './output-profile.js';
-import type { Readiness, ReadinessFinding } from './readiness.js';
+import type { FindingSite, Readiness, ReadinessFinding } from './readiness.js';
+
+export type { IntrinsicSize, MediaFit } from './media-fit.js';
+export { MEDIA_FITS } from './media-fit.js';
 
 export class RenderModelError extends Error {
   constructor(message: string) {
@@ -86,7 +91,40 @@ export interface DecorationBox {
   readonly importance: BoxImportance;
 }
 
-export type SlideBox = TextBox | DecorationBox;
+/** A still and a moving picture are laid out identically; only the second one can be heard. */
+export type MediaKind = 'image' | 'video';
+
+/** MEDI-02's audio settings. A caller's request, not the last word: the volume is bounded below. */
+export interface MediaAudio {
+  readonly loop: boolean;
+  readonly muted: boolean;
+  /** As a fraction of the output's own volume, bounded by the resolved profile. */
+  readonly volume: number;
+}
+
+/**
+ * What the presenting surface saw happen. A pure function cannot observe a browser refusing to autoplay
+ * or a file failing to load, so the surface that did observe it hands the fact back in and re-prepares;
+ * nothing here goes looking.
+ */
+export type MediaPlaybackState = 'ok' | 'autoplay-blocked' | 'load-error';
+
+export interface MediaBox {
+  readonly id: string;
+  readonly kind: 'media';
+  readonly mediaKind: MediaKind;
+  readonly frame: NormalizedFrame;
+  readonly fit: MediaFit;
+  readonly importance: BoxImportance;
+  /** Supplied by the caller: this package reads no files and measures no pictures. */
+  readonly intrinsicSize: IntrinsicSize;
+  /** Video only; an image carrying one is a defect in whatever produced the box. */
+  readonly audio?: MediaAudio;
+  /** Absent means nothing has gone wrong, which is the same thing as `'ok'`. */
+  readonly playbackState?: MediaPlaybackState;
+}
+
+export type SlideBox = TextBox | DecorationBox | MediaBox;
 
 export interface SlideInput {
   readonly id: string;
@@ -126,10 +164,46 @@ export interface PreparedDecorationBox extends PreparedBoxBase {
   readonly kind: 'decoration';
 }
 
-export type PreparedBox = PreparedTextBox | PreparedDecorationBox;
+/**
+ * The audio a surface plays, after the bound has been applied. The request is kept beside the answer for
+ * the same reason a text box keeps its requested size beside the size it got: an editor showing why the
+ * volume is not what the item asked for needs both numbers, not a finding to parse.
+ */
+export interface PreparedMediaAudio {
+  readonly loop: boolean;
+  readonly muted: boolean;
+  /** The volume to play at: what was asked for, clamped into the bound. */
+  readonly volume: number;
+  readonly requestedVolume: number;
+  readonly maximumVolume: number;
+}
 
-/** Narrows a prepared box to the half that carries type, for callers walking a slide. */
+/**
+ * What a surface may offer somebody standing in front of a stalled slide. `'none'` is the ordinary case;
+ * the other two say which affordance recovers this particular failure, so the surface shows a way back
+ * rather than a dead rectangle. Never absent, whatever the playback state.
+ */
+export type MediaRecovery = 'none' | 'resume-playback' | 'retry-load';
+
+export interface PreparedMediaBox extends PreparedBoxBase {
+  readonly kind: 'media';
+  readonly mediaKind: MediaKind;
+  readonly fit: MediaFit;
+  readonly intrinsicSize: IntrinsicSize;
+  /** Where the media itself lands inside `frame`. `cover` and `original` may reach past it. */
+  readonly mediaRect: PixelFrame;
+  readonly audio?: PreparedMediaAudio;
+  readonly playbackState: MediaPlaybackState;
+  readonly recovery: MediaRecovery;
+}
+
+export type PreparedBox = PreparedTextBox | PreparedDecorationBox | PreparedMediaBox;
+
+/** Narrows a prepared box to the one that carries type, for callers walking a slide. */
 export const isPreparedTextBox = (box: PreparedBox): box is PreparedTextBox => box.kind === 'text';
+
+/** Narrows a prepared box to the one that carries a picture. */
+export const isPreparedMediaBox = (box: PreparedBox): box is PreparedMediaBox => box.kind === 'media';
 
 export interface PreparedSlide {
   readonly id: string;
@@ -160,17 +234,11 @@ export interface PreparationRequest {
   readonly stepPx?: number;
 }
 
-const letterboxFor = (canvas: Canvas, ratio: AspectRatio): PixelFrame => {
-  const shape = ratio.width / ratio.height;
-  const width = Math.min(canvas.width, canvas.height * shape);
-  const height = width / shape;
-  return {
-    x: geometry((canvas.width - width) / 2),
-    y: geometry((canvas.height - height) / 2),
-    width: geometry(width),
-    height: geometry(height),
-  };
-};
+// Letterboxing a layout is the same computation a `contain` media box gets: scale a shape to fit inside
+// a rectangle whole, and centre it. One function, so the bars beside a 4:3 layout and the bars beside a
+// 4:3 video cannot land in different places.
+const letterboxFor = (canvas: Canvas, ratio: AspectRatio): PixelFrame =>
+  mediaRectFor({ x: 0, y: 0, width: canvas.width, height: canvas.height }, ratio, 'contain');
 
 const frameWithin = (host: PixelFrame, frame: NormalizedFrame): PixelFrame => ({
   x: geometry(host.x + frame.x * host.width),
@@ -195,6 +263,92 @@ const refuseOwnRatio = (holder: object, what: string): void => {
   if ('aspectRatio' in holder) {
     throw new RenderModelError(`${what} carries an aspect ratio of its own; only administration and a service may set one`);
   }
+};
+
+// An image has no soundtrack to configure, so audio settings on one are a producer's mistake rather than
+// a preference — refused for the same reason a slide's own aspect ratio is, and not quietly dropped. A
+// volume that is not a number is refused here too: clamping it would leave a `NaN` in a frame whose bytes
+// are supposed to be comparable.
+const refuseUnplayableAudio = (box: MediaBox, what: string): void => {
+  if (box.audio === undefined) return;
+  if (box.mediaKind !== 'video') {
+    throw new RenderModelError(`${what} is an image carrying audio settings; only a video can be heard`);
+  }
+  if (!Number.isFinite(box.audio.volume)) {
+    throw new RenderModelError(`${what} asks to play at a volume of ${box.audio.volume}, which is not a number`);
+  }
+};
+
+/** Which affordance gets a stalled slide going again. Every state has one, including the good one. */
+const RECOVERY: Readonly<Record<MediaPlaybackState, MediaRecovery>> = Object.freeze({
+  ok: 'none',
+  'autoplay-blocked': 'resume-playback',
+  'load-error': 'retry-load',
+});
+
+/**
+ * The volume a surface actually plays at. Out-of-bound is clamped and said out loud rather than thrown:
+ * the same shape as text below the readable floor, for the same reason — the slide still shows, and an
+ * editor gets to see what was corrected instead of an error page in place of the service.
+ */
+const boundedAudio = (
+  audio: MediaAudio | undefined,
+  maximumVolume: number,
+  site: FindingSite,
+  findings: ReadinessFinding[],
+): PreparedMediaAudio | undefined => {
+  if (audio === undefined) return undefined;
+
+  if (audio.volume > maximumVolume) {
+    findings.push(
+      warning(
+        'media.volumeAboveBound',
+        site,
+        `the item asks to play at ${audio.volume}, above the resolved bound of ${maximumVolume}; the bound ` +
+          'was used instead',
+      ),
+    );
+  }
+
+  return {
+    loop: audio.loop,
+    muted: audio.muted,
+    volume: Math.min(Math.max(audio.volume, 0), maximumVolume),
+    requestedVolume: audio.volume,
+    maximumVolume,
+  };
+};
+
+/**
+ * A media box, decided. The geometry is computed the same way whatever the playback state says, because a
+ * box that failed to load still occupies its rectangle: a surface with a frame to draw can put a way back
+ * inside it, and a surface handed nothing can only leave a hole.
+ */
+const prepareMedia = (
+  box: MediaBox,
+  frame: PixelFrame,
+  maximumVolume: number,
+  site: FindingSite,
+  findings: ReadinessFinding[],
+): PreparedMediaBox => {
+  const playbackState = box.playbackState ?? 'ok';
+  const audio = boundedAudio(box.audio, maximumVolume, site, findings);
+
+  return {
+    id: box.id,
+    kind: 'media',
+    importance: box.importance,
+    frame,
+    mediaKind: box.mediaKind,
+    fit: box.fit,
+    // A copy, for the same reason the font spec is copied: the prepared model is frozen on the way out
+    // and the caller's own object is not this package's to freeze.
+    intrinsicSize: { width: box.intrinsicSize.width, height: box.intrinsicSize.height },
+    mediaRect: mediaRectFor(frame, box.intrinsicSize, box.fit),
+    ...(audio === undefined ? {} : { audio }),
+    playbackState,
+    recovery: RECOVERY[playbackState],
+  };
 };
 
 /**
@@ -249,7 +403,9 @@ export async function prepareRenderModel({
     refuseOwnRatio(slide, `slide ${slide.id}`);
     const letterbox = letterboxOf(slide);
     for (const box of slide.boxes) {
-      refuseOwnRatio(box, `box ${box.id} on slide ${slide.id}`);
+      const what = `box ${box.id} on slide ${slide.id}`;
+      refuseOwnRatio(box, what);
+      if (box.kind === 'media') refuseUnplayableAudio(box, what);
       if (box.kind !== 'text') continue;
       const frame = frameWithin(letterbox, box.frame);
       const { ladder } = fitFor(box, frame, profile, canvas, stepPx);
@@ -288,7 +444,8 @@ export async function prepareRenderModel({
         );
       }
 
-      if (box.kind !== 'text') return { id: box.id, kind: 'decoration', importance: box.importance, frame };
+      if (box.kind === 'decoration') return { id: box.id, kind: 'decoration', importance: box.importance, frame };
+      if (box.kind === 'media') return prepareMedia(box, frame, profile.maximumAudioVolume, site, findings);
 
       const { constraints, ladder } = fitFor(box, frame, profile, canvas, stepPx);
       const outcome = chooseFit({

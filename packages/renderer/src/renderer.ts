@@ -15,13 +15,23 @@ import { canonicalJson } from '@holydeck/contracts/canonical';
 import { deepFreeze } from './internal/freeze.js';
 import { geometry } from './internal/numbers.js';
 
+import type { MediaFit } from './media-fit.js';
 import type { AspectRatio, Canvas } from './output-profile.js';
 import type { Readiness, ReadinessFinding } from './readiness.js';
-import type { BoxImportance, PixelFrame, PreparedBox, PreparedRenderModel } from './render-model.js';
+import type {
+  BoxImportance,
+  MediaKind,
+  MediaPlaybackState,
+  MediaRecovery,
+  PixelFrame,
+  PreparedBox,
+  PreparedMediaAudio,
+  PreparedRenderModel,
+} from './render-model.js';
 
 export interface RenderedBox {
   readonly id: string;
-  readonly kind: 'text' | 'decoration';
+  readonly kind: 'text' | 'decoration' | 'media';
   readonly importance: BoxImportance;
   /** Paint order, which is declaration order; a surface reordering boxes would be a different render. */
   readonly order: number;
@@ -32,6 +42,14 @@ export interface RenderedBox {
   readonly fontSizePx?: number;
   readonly lineHeightPx?: number;
   readonly lineCount?: number;
+  readonly mediaKind?: MediaKind;
+  readonly fit?: MediaFit;
+  /** Where to draw the picture inside `frame`; `cover` and `original` reach past it, and are clipped. */
+  readonly mediaRect?: PixelFrame;
+  readonly audio?: PreparedMediaAudio;
+  readonly playbackState?: MediaPlaybackState;
+  /** What to offer somebody in front of a stalled box, so a failure is never a blank rectangle. */
+  readonly recovery?: MediaRecovery;
 }
 
 export interface RenderedSlide {
@@ -56,6 +74,20 @@ export interface RenderFrame {
 const paintBox = (box: PreparedBox, order: number): RenderedBox => {
   const common = { id: box.id, importance: box.importance, order, frame: box.frame };
   if (box.kind === 'decoration') return { ...common, kind: 'decoration' };
+  // A media box is painted whatever its playback state says, geometry and all. Withholding the rectangle
+  // from a surface because the file would not load is how a slide becomes a hole nobody can act on.
+  if (box.kind === 'media') {
+    return {
+      ...common,
+      kind: 'media',
+      mediaKind: box.mediaKind,
+      fit: box.fit,
+      mediaRect: box.mediaRect,
+      ...(box.audio === undefined ? {} : { audio: box.audio }),
+      playbackState: box.playbackState,
+      recovery: box.recovery,
+    };
+  }
   return {
     ...common,
     kind: 'text',

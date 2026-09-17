@@ -1,18 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
 import { stubMeasurer } from '../test/helpers/measurer.js';
-import { LYRIC, lyricBox, songModel } from '../test/helpers/model.js';
+import { LYRIC, MEDIA_FRAME_PX, lyricBox, mediaBox, songModel } from '../test/helpers/model.js';
 import {
   DEFAULT_ASPECT_RATIO,
+  DEFAULT_MAXIMUM_AUDIO_VOLUME,
   DEFAULT_SAFE_AREA,
   PROVISIONAL_MINIMUM_READABLE_HEIGHT_RATIO,
   administrativeDefaults,
   canvasFor,
   safeAreaOf,
 } from './output-profile.js';
-import { RenderModelError, isPreparedTextBox, prepareRenderModel } from './render-model.js';
+import {
+  MEDIA_FITS,
+  RenderModelError,
+  isPreparedMediaBox,
+  isPreparedTextBox,
+  prepareRenderModel,
+} from './render-model.js';
 import { renderPrepared } from './renderer.js';
 import { RENDER_SURFACES, renderForSurface } from './surfaces.js';
+
+import type { IntrinsicSize, MediaFit, MediaKind, MediaPlaybackState, MediaRecovery } from './render-model.js';
 
 const prepare = async (options: Parameters<typeof prepareRenderModel>[0]) => prepareRenderModel(options);
 
@@ -20,6 +29,13 @@ const prepare = async (options: Parameters<typeof prepareRenderModel>[0]) => pre
 const textBoxOf = (prepared: Awaited<ReturnType<typeof prepareRenderModel>>) => {
   const box = prepared.slides[0]?.boxes[0];
   if (box === undefined || !isPreparedTextBox(box)) throw new Error('the fixture prepared no text box');
+  return box;
+};
+
+/** The same, for the box that carries a picture. */
+const mediaBoxOf = (prepared: Awaited<ReturnType<typeof prepareRenderModel>>) => {
+  const box = prepared.slides[0]?.boxes[0];
+  if (box === undefined || !isPreparedMediaBox(box)) throw new Error('the fixture prepared no media box');
   return box;
 };
 
@@ -205,4 +221,220 @@ describe('the minimum readable size is a floor, not a suggestion', () => {
     expect(textBoxOf(raised).minimumFontSizePx).toBe(108);
     expect(textBoxOf(lowered).minimumFontSizePx).toBe(PROVISIONAL_MINIMUM_READABLE_HEIGHT_RATIO * 1080);
   });
+});
+
+/** Wider than its frame and taller than its frame: the two ways a picture can disagree with its box. */
+const WIDER: IntrinsicSize = { width: 1600, height: 400 };
+const TALLER: IntrinsicSize = { width: 400, height: 1600 };
+
+/**
+ * Hand-computed from the 192,216 768x432 frame rather than derived from the code, so a formula that
+ * changed would be caught here instead of being echoed back.
+ */
+const FITTED: readonly {
+  readonly fit: MediaFit;
+  readonly intrinsicSize: IntrinsicSize;
+  readonly rect: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+}[] = [
+  // Intrinsic pixels, centred, spilling out of both ends of a frame narrower than the picture.
+  { fit: 'original', intrinsicSize: WIDER, rect: { x: -224, y: 232, width: 1600, height: 400 } },
+  { fit: 'original', intrinsicSize: TALLER, rect: { x: 376, y: -368, width: 400, height: 1600 } },
+  // Scaled by the smaller of 768/1600 and 432/400, which is 0.48: the whole picture, inside the frame.
+  { fit: 'contain', intrinsicSize: WIDER, rect: { x: 192, y: 336, width: 768, height: 192 } },
+  { fit: 'contain', intrinsicSize: TALLER, rect: { x: 522, y: 216, width: 108, height: 432 } },
+  // Scaled by the larger of the two, which is 1.08: the frame filled, with the picture cropped by it.
+  { fit: 'cover', intrinsicSize: WIDER, rect: { x: -288, y: 216, width: 1728, height: 432 } },
+  { fit: 'cover', intrinsicSize: TALLER, rect: { x: 192, y: -1104, width: 768, height: 3072 } },
+  // The frame itself, proportions abandoned.
+  { fit: 'stretch', intrinsicSize: WIDER, rect: { x: 192, y: 216, width: 768, height: 432 } },
+  { fit: 'stretch', intrinsicSize: TALLER, rect: { x: 192, y: 216, width: 768, height: 432 } },
+];
+
+const MEDIA_KINDS: readonly MediaKind[] = ['image', 'video'];
+
+describe('where a picture lands inside the box that holds it', () => {
+  it('has a hand-computed rectangle for every mode the package declares', () => {
+    expect([...new Set(FITTED.map((row) => row.fit))]).toEqual([...MEDIA_FITS]);
+  });
+
+  for (const mediaKind of MEDIA_KINDS) {
+    for (const { fit, intrinsicSize, rect } of FITTED) {
+      const shape = intrinsicSize.width > intrinsicSize.height ? 'wider' : 'taller';
+
+      it(`fits a ${shape}-than-its-frame ${mediaKind} with ${fit}`, async () => {
+        const prepared = await prepare({
+          model: songModel([mediaBox({ mediaKind, fit, intrinsicSize })]),
+          measurer: stubMeasurer(),
+        });
+        const box = mediaBoxOf(prepared);
+
+        expect(box.frame).toEqual(MEDIA_FRAME_PX);
+        expect(box.mediaRect).toEqual(rect);
+        expect(box.fit).toBe(fit);
+        expect(box.mediaKind).toBe(mediaKind);
+        expect(box.intrinsicSize).toEqual(intrinsicSize);
+      });
+    }
+  }
+
+  // The property each of the two scaled modes exists for, asserted as a relation rather than as numbers,
+  // so it holds for sizes nobody wrote a row for.
+  it('keeps contain inside the frame and lets cover reach past it on exactly one axis', async () => {
+    for (const intrinsicSize of [WIDER, TALLER]) {
+      const inside = mediaBoxOf(
+        await prepare({ model: songModel([mediaBox({ fit: 'contain', intrinsicSize })]), measurer: stubMeasurer() }),
+      ).mediaRect;
+      const over = mediaBoxOf(
+        await prepare({ model: songModel([mediaBox({ fit: 'cover', intrinsicSize })]), measurer: stubMeasurer() }),
+      ).mediaRect;
+      const { x, y, width, height } = MEDIA_FRAME_PX;
+
+      expect(inside.x).toBeGreaterThanOrEqual(x);
+      expect(inside.y).toBeGreaterThanOrEqual(y);
+      expect(inside.x + inside.width).toBeLessThanOrEqual(x + width);
+      expect(inside.y + inside.height).toBeLessThanOrEqual(y + height);
+
+      expect(over.x).toBeLessThanOrEqual(x);
+      expect(over.y).toBeLessThanOrEqual(y);
+      expect(over.x + over.width).toBeGreaterThanOrEqual(x + width);
+      expect(over.y + over.height).toBeGreaterThanOrEqual(y + height);
+    }
+  });
+
+  it('copies the intrinsic size it was handed rather than freezing the caller’s object', async () => {
+    const intrinsicSize = { width: 1600, height: 400 };
+    const prepared = await prepare({ model: songModel([mediaBox({ intrinsicSize })]), measurer: stubMeasurer() });
+
+    expect(Object.isFrozen(intrinsicSize)).toBe(false);
+    expect(mediaBoxOf(prepared).intrinsicSize).toEqual(intrinsicSize);
+    expect(mediaBoxOf(prepared).intrinsicSize).not.toBe(intrinsicSize);
+  });
+
+  it('refuses a picture with no size to scale', async () => {
+    await expect(
+      prepare({ model: songModel([mediaBox({ intrinsicSize: { width: 0, height: 400 } })]), measurer: stubMeasurer() }),
+    ).rejects.toThrow(/not two positive numbers/u);
+  });
+});
+
+describe('how loud a slide is allowed to be', () => {
+  const video = (volume: number, rest: { loop: boolean; muted: boolean } = { loop: false, muted: false }) =>
+    mediaBox({ id: 'clip', mediaKind: 'video', fit: 'cover', audio: { ...rest, volume } });
+
+  it('passes loop, mute and an in-bound volume through untouched', async () => {
+    const prepared = await prepare({
+      model: songModel([video(0.6, { loop: true, muted: true })]),
+      measurer: stubMeasurer(),
+    });
+
+    expect(mediaBoxOf(prepared).audio).toEqual({
+      loop: true,
+      muted: true,
+      volume: 0.6,
+      requestedVolume: 0.6,
+      maximumVolume: DEFAULT_MAXIMUM_AUDIO_VOLUME,
+    });
+    expect(prepared.findings).toEqual([]);
+    expect(prepared.readiness).toBe('ready');
+  });
+
+  it('clamps a volume above the resolved bound and says so instead of throwing', async () => {
+    const prepared = await prepare({
+      model: songModel([video(0.9, { loop: true, muted: false })]),
+      measurer: stubMeasurer(),
+      service: { maximumAudioVolume: 0.5 },
+    });
+
+    expect(mediaBoxOf(prepared).audio).toEqual({
+      loop: true,
+      muted: false,
+      volume: 0.5,
+      requestedVolume: 0.9,
+      maximumVolume: 0.5,
+    });
+    expect(prepared.findings).toContainEqual(
+      expect.objectContaining({ code: 'media.volumeAboveBound', severity: 'warning', boxId: 'clip' }),
+    );
+    expect(prepared.readiness).toBe('warned');
+  });
+
+  it('takes the bound from the output type when administration set one for it', async () => {
+    const defaults = { ...administrativeDefaults, byOutputType: { main: { maximumAudioVolume: 0.25 } } };
+    const prepared = await prepare({ model: songModel([video(0.4)]), measurer: stubMeasurer(), defaults });
+
+    expect(mediaBoxOf(prepared).audio?.volume).toBe(0.25);
+    expect(mediaBoxOf(prepared).audio?.maximumVolume).toBe(0.25);
+  });
+
+  it('leaves a box with no audio settings carrying none', async () => {
+    const prepared = await prepare({ model: songModel([mediaBox()]), measurer: stubMeasurer() });
+
+    expect(mediaBoxOf(prepared).audio).toBeUndefined();
+    expect(prepared.findings).toEqual([]);
+  });
+
+  it('refuses audio settings on a picture that cannot be heard', async () => {
+    await expect(
+      prepare({
+        model: songModel([mediaBox({ audio: { loop: false, muted: false, volume: 0.5 } })]),
+        measurer: stubMeasurer(),
+      }),
+    ).rejects.toThrow(/only a video can be heard/u);
+  });
+
+  // A clamp would leave the `NaN` in the frame, and a frame whose bytes are supposed to be comparable
+  // cannot carry one.
+  it('refuses a volume that is not a number rather than clamping it', async () => {
+    await expect(
+      prepare({ model: songModel([video(Number.NaN)]), measurer: stubMeasurer() }),
+    ).rejects.toBeInstanceOf(RenderModelError);
+  });
+});
+
+describe('a media box the surface could not play', () => {
+  const STATES: readonly { readonly state: MediaPlaybackState; readonly recovery: MediaRecovery }[] = [
+    { state: 'ok', recovery: 'none' },
+    { state: 'autoplay-blocked', recovery: 'resume-playback' },
+    { state: 'load-error', recovery: 'retry-load' },
+  ];
+
+  const preparing = async (playbackState?: MediaPlaybackState) =>
+    mediaBoxOf(
+      await prepare({
+        model: songModel([
+          mediaBox({
+            id: 'clip',
+            mediaKind: 'video',
+            fit: 'cover',
+            intrinsicSize: WIDER,
+            audio: { loop: true, muted: false, volume: 0.4 },
+            ...(playbackState === undefined ? {} : { playbackState }),
+          }),
+        ]),
+        measurer: stubMeasurer(),
+      }),
+    );
+
+  it('reads a box that was never told anything went wrong as playing', async () => {
+    const box = await preparing();
+
+    expect(box.playbackState).toBe('ok');
+    expect(box.recovery).toBe('none');
+  });
+
+  for (const { state, recovery } of STATES) {
+    it(`keeps the whole box, and names the way back, when playback is ${state}`, async () => {
+      const box = await preparing(state);
+      const playing = await preparing('ok');
+
+      expect(box.playbackState).toBe(state);
+      expect(box.recovery).toBe(recovery);
+      // Not a blank frame, not a placeholder, not an omitted box: the same rectangle a playing one gets.
+      expect(box.mediaRect).toEqual(playing.mediaRect);
+      expect(box.mediaRect).toEqual({ x: -288, y: 216, width: 1728, height: 432 });
+      expect(box.frame).toEqual(MEDIA_FRAME_PX);
+      expect(box.audio).toEqual(playing.audio);
+      expect(box.kind).toBe('media');
+    });
+  }
 });

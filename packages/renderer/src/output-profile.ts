@@ -1,8 +1,9 @@
-// The three numbers every rendered frame in this system is measured against: the output aspect ratio,
-// the safe-area margins, and the absolute minimum readable text size. REND-01 says administration owns
-// all three and a service may override them, while items and slides may not — so they are resolved once,
-// here, and frozen. Nothing downstream re-reads a default; it reads the profile that came out of this
-// file, which is why two surfaces cannot quietly disagree about the shape of the canvas they draw on.
+// The numbers every rendered frame in this system is measured against: the output aspect ratio, the
+// safe-area margins, the absolute minimum readable text size, and the loudest a slide's own audio may
+// play. REND-01 says administration owns them and a service may override them, while items and slides
+// may not — so they are resolved once, here, and frozen. Nothing downstream re-reads a default; it reads
+// the profile that came out of this file, which is why two surfaces cannot quietly disagree about the
+// shape of the canvas they draw on.
 //
 // There is deliberately no settings route or admin screen behind this. No task owns one yet, so the
 // defaults are a constructable value a caller passes in, not a row somebody has to have written first.
@@ -53,6 +54,14 @@ export const DEFAULT_SAFE_AREA_MARGIN = 0.05;
 export const PROVISIONAL_MINIMUM_READABLE_HEIGHT_RATIO = 0.04;
 
 /**
+ * The loudest a slide's own media may play, as a fraction of the output's own volume. One is "as loud as
+ * the output is turned up", which is the only number that cannot surprise anybody the first time a
+ * service plays a video; a house that wants its slides quieter than its band lowers this rather than
+ * editing every item.
+ */
+export const DEFAULT_MAXIMUM_AUDIO_VOLUME = 1;
+
+/**
  * The canvas every measurement and every frame is expressed against. Surfaces scale this at paint time;
  * none of them measures at its own pixel size, because two surfaces measuring separately is exactly the
  * divergence REND-01 forbids.
@@ -72,24 +81,29 @@ export interface OutputTypeDefaults {
   readonly aspectRatio?: AspectRatio;
   readonly safeArea?: SafeAreaMargins;
   readonly minimumReadableHeightRatio?: number;
+  readonly maximumAudioVolume?: number;
 }
 
 export interface AdministrativeRenderDefaults {
   readonly aspectRatio: AspectRatio;
   readonly safeArea: SafeAreaMargins;
   readonly minimumReadableHeightRatio: number;
+  readonly maximumAudioVolume: number;
   readonly byOutputType: Readonly<Record<string, OutputTypeDefaults>>;
 }
 
 /**
- * What a service may override. The minimum is here too, but only ever upwards: §11.6 says service and
- * item settings "may not go below the administrative floor", so a lower number is clamped rather than
- * refused — a service asking for less readable text gets the floor, not an error page.
+ * What a service may override. The readable minimum is here too, but only ever upwards: §11.6 says
+ * service and item settings "may not go below the administrative floor", so a lower number is clamped
+ * rather than refused — a service asking for less readable text gets the floor, not an error page. The
+ * volume bound is the same rule with the comparison mirrored, because it is a ceiling rather than a
+ * floor: a service may be quieter than administration allows and never louder.
  */
 export interface ServiceRenderOverrides {
   readonly aspectRatio?: AspectRatio;
   readonly safeArea?: SafeAreaMargins;
   readonly minimumReadableHeightRatio?: number;
+  readonly maximumAudioVolume?: number;
 }
 
 export interface ResolvedOutputProfile {
@@ -97,12 +111,14 @@ export interface ResolvedOutputProfile {
   readonly aspectRatio: AspectRatio;
   readonly safeArea: SafeAreaMargins;
   readonly minimumReadableHeightRatio: number;
+  readonly maximumAudioVolume: number;
 }
 
 export const administrativeDefaults: AdministrativeRenderDefaults = Object.freeze({
   aspectRatio: DEFAULT_ASPECT_RATIO,
   safeArea: DEFAULT_SAFE_AREA,
   minimumReadableHeightRatio: PROVISIONAL_MINIMUM_READABLE_HEIGHT_RATIO,
+  maximumAudioVolume: DEFAULT_MAXIMUM_AUDIO_VOLUME,
   byOutputType: Object.freeze({}),
 });
 
@@ -137,6 +153,17 @@ export function validateMinimumReadableHeightRatio(ratio: number): number {
   return ratio;
 }
 
+/**
+ * Zero is allowed and one is the ceiling: an administrator who wants slide audio silent has said so, and
+ * a bound above the output's own volume is a number nothing could honour.
+ */
+export function validateMaximumAudioVolume(volume: number): number {
+  if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+    throw new RenderConfigurationError(`maximum audio volume ${volume} is not a fraction of the output volume`);
+  }
+  return volume;
+}
+
 /** The reference canvas for a ratio. Integer pixels, so the same ratio is the same canvas everywhere. */
 export function canvasFor(ratio: AspectRatio, width: number = REFERENCE_CANVAS_WIDTH): Canvas {
   return Object.freeze({ width, height: Math.round((width * ratio.height) / ratio.width) });
@@ -150,7 +177,8 @@ export interface OutputProfileRequest {
 
 /**
  * Administration, then this output type, then the service — each layer overriding the one before, except
- * the readable floor, which a service may only ever raise.
+ * the readable floor, which a service may only ever raise, and the volume bound, which it may only ever
+ * lower.
  *
  * The floor is resolved the same way the other two are: the output type's own number when administration
  * gave it one, the global default when it did not. §11.6 says administration "defines an absolute minimum
@@ -171,6 +199,7 @@ export function resolveOutputProfile({
   const floor = validateMinimumReadableHeightRatio(
     perType.minimumReadableHeightRatio ?? defaults.minimumReadableHeightRatio,
   );
+  const ceiling = validateMaximumAudioVolume(perType.maximumAudioVolume ?? defaults.maximumAudioVolume);
 
   return Object.freeze({
     outputType,
@@ -179,5 +208,6 @@ export function resolveOutputProfile({
     minimumReadableHeightRatio: validateMinimumReadableHeightRatio(
       Math.max(floor, service?.minimumReadableHeightRatio ?? 0),
     ),
+    maximumAudioVolume: validateMaximumAudioVolume(Math.min(ceiling, service?.maximumAudioVolume ?? ceiling)),
   });
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_ASPECT_RATIO,
+  DEFAULT_MAXIMUM_AUDIO_VOLUME,
   DEFAULT_SAFE_AREA,
   PROVISIONAL_MINIMUM_READABLE_HEIGHT_RATIO,
   REFERENCE_CANVAS_WIDTH,
@@ -11,6 +12,7 @@ import {
   resolveOutputProfile,
   safeAreaOf,
   validateAspectRatio,
+  validateMaximumAudioVolume,
   validateMinimumReadableHeightRatio,
   validateSafeArea,
 } from './output-profile.js';
@@ -20,6 +22,7 @@ describe('the administrative defaults', () => {
     expect(administrativeDefaults.aspectRatio).toEqual({ width: 16, height: 9 });
     expect(administrativeDefaults.safeArea).toEqual({ top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 });
     expect(administrativeDefaults.minimumReadableHeightRatio).toBe(PROVISIONAL_MINIMUM_READABLE_HEIGHT_RATIO);
+    expect(administrativeDefaults.maximumAudioVolume).toBe(DEFAULT_MAXIMUM_AUDIO_VOLUME);
     expect(Object.isFrozen(administrativeDefaults)).toBe(true);
   });
 
@@ -94,6 +97,36 @@ describe('resolving an output profile', () => {
     ).toThrow(/minimum readable height ratio/u);
   });
 
+  // The volume bound is the readable floor with the comparison mirrored: administration, then the output
+  // type, then the service — and because it is a ceiling rather than a floor, the service layer may only
+  // ever bring it down. A house that wants quieter slides than administration allows gets them; one that
+  // wants louder ones does not.
+  it('lets a service lower the volume bound and never raise it', () => {
+    const defaults = { ...administrativeDefaults, byOutputType: { stream: { maximumAudioVolume: 0.8 } } };
+
+    expect(resolveOutputProfile({ outputType: 'stream', defaults }).maximumAudioVolume).toBe(0.8);
+    expect(resolveOutputProfile({ outputType: 'main', defaults }).maximumAudioVolume).toBe(
+      DEFAULT_MAXIMUM_AUDIO_VOLUME,
+    );
+    expect(
+      resolveOutputProfile({ outputType: 'stream', defaults, service: { maximumAudioVolume: 0.3 } })
+        .maximumAudioVolume,
+    ).toBe(0.3);
+    expect(
+      resolveOutputProfile({ outputType: 'stream', defaults, service: { maximumAudioVolume: 1 } })
+        .maximumAudioVolume,
+    ).toBe(0.8);
+  });
+
+  it('refuses a volume bound that is not a fraction of the output volume', () => {
+    const defaults = { ...administrativeDefaults, byOutputType: { stream: { maximumAudioVolume: 4 } } };
+
+    expect(() => resolveOutputProfile({ outputType: 'stream', defaults })).toThrow(RenderConfigurationError);
+    expect(() => resolveOutputProfile({ outputType: 'main', service: { maximumAudioVolume: -1 } })).toThrow(
+      /maximum audio volume/u,
+    );
+  });
+
   it('freezes what it resolved', () => {
     const profile = resolveOutputProfile({ outputType: 'main' });
     expect(Object.isFrozen(profile)).toBe(true);
@@ -124,5 +157,14 @@ describe('validating what an administrator or a service asked for', () => {
     expect(() => validateMinimumReadableHeightRatio(0)).toThrow(RenderConfigurationError);
     expect(() => validateMinimumReadableHeightRatio(0.75)).toThrow(RenderConfigurationError);
     expect(validateMinimumReadableHeightRatio(0.04)).toBe(0.04);
+  });
+
+  // Silence is a number an administrator may mean, unlike an unreadable font size, so zero passes here
+  // where it is refused above.
+  it('refuses a volume bound outside the output’s own volume and accepts silence', () => {
+    expect(() => validateMaximumAudioVolume(1.5)).toThrow(RenderConfigurationError);
+    expect(() => validateMaximumAudioVolume(Number.NaN)).toThrow(/maximum audio volume/u);
+    expect(validateMaximumAudioVolume(0)).toBe(0);
+    expect(validateMaximumAudioVolume(1)).toBe(1);
   });
 });

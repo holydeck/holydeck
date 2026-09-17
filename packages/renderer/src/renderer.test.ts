@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { stubMeasurer } from '../test/helpers/measurer.js';
-import { LYRIC, lyricBox, songModel } from '../test/helpers/model.js';
+import { LYRIC, MEDIA_FRAME_PX, lyricBox, mediaBox, songModel } from '../test/helpers/model.js';
 import { prepareRenderModel } from './render-model.js';
 import { frameBytes, renderPrepared, serializeFrame } from './renderer.js';
 
-import type { DecorationBox, RenderModelInput } from './render-model.js';
+import type { DecorationBox, MediaPlaybackState, RenderModelInput } from './render-model.js';
 
 const decoration = (overrides: Partial<DecorationBox> = {}): DecorationBox => ({
   id: 'flourish',
@@ -68,6 +68,77 @@ describe('the rendered frame', () => {
     expect(serializeFrame(one)).toBe(serializeFrame(two));
     expect(Buffer.from(frameBytes(one))).toEqual(Buffer.from(frameBytes(two)));
     expect(serializeFrame(one)).not.toBe(serializeFrame(other));
+  });
+});
+
+describe('the media a surface is handed to paint', () => {
+  it('carries the rectangle, the mode and the audio, and decides nothing else', async () => {
+    const frame = await render(
+      songModel([
+        mediaBox({
+          id: 'clip',
+          mediaKind: 'video',
+          fit: 'contain',
+          intrinsicSize: { width: 1600, height: 400 },
+          audio: { loop: true, muted: false, volume: 0.6 },
+        }),
+      ]),
+    );
+    const box = frame.slides[0]?.boxes[0];
+
+    expect(box).toMatchObject({
+      kind: 'media',
+      mediaKind: 'video',
+      fit: 'contain',
+      frame: MEDIA_FRAME_PX,
+      mediaRect: { x: 192, y: 336, width: 768, height: 192 },
+      playbackState: 'ok',
+      recovery: 'none',
+    });
+    expect(box?.audio).toEqual({ loop: true, muted: false, volume: 0.6, requestedVolume: 0.6, maximumVolume: 1 });
+    expect(box?.text).toBeUndefined();
+    expect(box?.fontSizePx).toBeUndefined();
+  });
+
+  it('leaves an image with no audio on it at all', async () => {
+    const frame = await render(songModel([mediaBox({ fit: 'stretch' })]));
+    const box = frame.slides[0]?.boxes[0];
+
+    expect(box?.kind).toBe('media');
+    expect(box?.mediaKind).toBe('image');
+    expect(box?.mediaRect).toEqual(MEDIA_FRAME_PX);
+    expect(box?.audio).toBeUndefined();
+  });
+
+  // The failure cases the surface feeds back in: still a whole box, still in paint order beside the
+  // lyric, still holding the rectangle a playing clip would have — plus the affordance that recovers it.
+  it.each<readonly [MediaPlaybackState, string]>([
+    ['autoplay-blocked', 'resume-playback'],
+    ['load-error', 'retry-load'],
+  ])('paints a %s box whole rather than blanking it', async (playbackState, recovery) => {
+    const boxes = (state?: MediaPlaybackState) => [
+      lyricBox(),
+      mediaBox({
+        id: 'clip',
+        mediaKind: 'video',
+        fit: 'cover',
+        intrinsicSize: { width: 400, height: 1600 },
+        ...(state === undefined ? {} : { playbackState: state }),
+      }),
+    ];
+    const frame = await render(songModel(boxes(playbackState)));
+    const playing = await render(songModel(boxes()));
+    const box = frame.slides[0]?.boxes[1];
+
+    expect(frame.slides[0]?.boxes.map((painted) => [painted.id, painted.order])).toEqual([
+      ['lyric', 0],
+      ['clip', 1],
+    ]);
+    expect(box?.playbackState).toBe(playbackState);
+    expect(box?.recovery).toBe(recovery);
+    expect(box?.mediaRect).toEqual({ x: 192, y: -1104, width: 768, height: 3072 });
+    expect(box?.mediaRect).toEqual(playing.slides[0]?.boxes[1]?.mediaRect);
+    expect(box?.frame).toEqual(MEDIA_FRAME_PX);
   });
 });
 

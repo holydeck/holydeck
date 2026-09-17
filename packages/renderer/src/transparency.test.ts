@@ -9,7 +9,9 @@ import { renderPrepared } from './renderer.js';
 import type { Canvas } from './output-profile.js';
 import type {
   DecorationBox,
+  MediaBox,
   PreparedDecorationBox,
+  PreparedMediaBox,
   PreparedRenderModel,
   PreparedSlide,
   PreparedTextBox,
@@ -32,10 +34,12 @@ const TRANSPARENT: readonly boolean[] = [
   true satisfies Transparent<SlideInput>,
   true satisfies Transparent<TextBox>,
   true satisfies Transparent<DecorationBox>,
+  true satisfies Transparent<MediaBox>,
   true satisfies Transparent<PreparedRenderModel>,
   true satisfies Transparent<PreparedSlide>,
   true satisfies Transparent<PreparedTextBox>,
   true satisfies Transparent<PreparedDecorationBox>,
+  true satisfies Transparent<PreparedMediaBox>,
   true satisfies Transparent<RenderFrame>,
   true satisfies Transparent<RenderedSlide>,
   true satisfies Transparent<RenderedBox>,
@@ -135,7 +139,7 @@ describe('a slide the group background shows through', () => {
   });
 
   it('carries no ground of its own in the model it is prepared from or the frame it is rendered to', async () => {
-    expect(TRANSPARENT).toEqual(Array.from({ length: 11 }, () => true));
+    expect(TRANSPARENT).toEqual(Array.from({ length: 13 }, () => true));
     expect(fillOf(await preparing())).toBeUndefined();
 
     const prepared = await prepareRenderModel({ model, measurer: stubMeasurer() });
