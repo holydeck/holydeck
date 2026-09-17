@@ -67,7 +67,6 @@ export interface MediaRecord {
 export interface MediaLibrary {
   upload(context: unknown, upload: MediaUpload): Promise<MediaRecord>;
   inspect(context: unknown, id: string): Promise<MediaRecord | undefined>;
-  get(context: unknown, id: string): Promise<MediaRecord | undefined>;
   list(context: unknown): Promise<readonly MediaRecord[]>;
   archive(context: unknown, id: string): Promise<MediaRecord | undefined>;
   restore(context: unknown, id: string): Promise<MediaRecord | undefined>;
@@ -186,11 +185,6 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
       }),
 
     inspect: (context, id) => own(async () => {
-      const row = await standing(context, id);
-      return row === undefined ? undefined : publicOf(row);
-    }),
-
-    get: (context, id) => own(async () => {
       const row = await standing(context, id);
       return row === undefined ? undefined : publicOf(row);
     }),

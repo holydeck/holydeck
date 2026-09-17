@@ -57,7 +57,6 @@ describe('the media library', () => {
     expect(io.writes).toHaveLength(1);
     expect(io.writes[0]).toMatchObject({ root: '/media', key: 'media-1' });
     expect(await media.inspect(ADMIN, 'media-1')).toEqual(uploaded);
-    expect(await media.get(ADMIN, 'media-1')).toEqual(uploaded);
     expect(await media.list(ADMIN)).toEqual([uploaded]);
   });
 
