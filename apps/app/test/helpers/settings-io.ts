@@ -8,9 +8,14 @@ export interface FakeSettingsIO extends SettingsAdminIO {
   readonly writes: Array<{ path: string; text: string }>;
   readonly renames: Array<{ from: string; to: string }>;
   readonly watchedDirs: string[];
+  readonly writabilityChecks: string[];
   closed: boolean;
   /** Makes the next `rename()` call reject, as if a crash landed between the write and the replace. */
   failNextRename(reason?: string): void;
+  /** Marks a path as one this fake filesystem refuses to write into, until told otherwise. */
+  markUnwritable(path: string): void;
+  /** Reverses `markUnwritable`, as if the path became writable again. */
+  markWritable(path: string): void;
   /** Calls the listener the module registered through `watch()`, as if the directory just changed. */
   emit(eventType: string, filename: string | null): Promise<void>;
 }
@@ -21,6 +26,8 @@ export function fakeSettingsIO(initial: Record<string, string> = {}): FakeSettin
   const writes: Array<{ path: string; text: string }> = [];
   const renames: Array<{ from: string; to: string }> = [];
   const watchedDirs: string[] = [];
+  const writabilityChecks: string[] = [];
+  const unwritable = new Set<string>();
   let listener: Listener | undefined;
   let renameFailure: string | undefined;
 
@@ -29,6 +36,7 @@ export function fakeSettingsIO(initial: Record<string, string> = {}): FakeSettin
     writes,
     renames,
     watchedDirs,
+    writabilityChecks,
     closed: false,
 
     async readFile(path) {
@@ -62,8 +70,21 @@ export function fakeSettingsIO(initial: Record<string, string> = {}): FakeSettin
       return { close: () => { io.closed = true; } };
     },
 
+    async writable(path) {
+      writabilityChecks.push(path);
+      return !unwritable.has(path);
+    },
+
     failNextRename(reason = 'the filesystem refused the rename') {
       renameFailure = reason;
+    },
+
+    markUnwritable(path) {
+      unwritable.add(path);
+    },
+
+    markWritable(path) {
+      unwritable.delete(path);
     },
 
     async emit(eventType, filename) {

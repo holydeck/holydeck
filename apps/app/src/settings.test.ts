@@ -33,6 +33,7 @@ describe('precedence', () => {
       port: 'default',
       dataDir: 'default',
       mediaRoot: 'default',
+      resticRepository: 'default',
       locale: 'default',
       corpusUrl: 'default',
       corpusToken: 'default',
@@ -51,6 +52,7 @@ describe('precedence', () => {
       port: 'file',
       dataDir: 'default',
       mediaRoot: 'default',
+      resticRepository: 'default',
       locale: 'file',
       corpusUrl: 'default',
       corpusToken: 'default',
@@ -72,6 +74,7 @@ describe('precedence', () => {
       HOLYDECK_PORT: '8080',
       HOLYDECK_DATA_DIR: '/srv/holydeck',
       HOLYDECK_MEDIA_ROOT: '/srv/media',
+      HOLYDECK_RESTIC_REPOSITORY: '/srv/restic',
       HOLYDECK_LOCALE: 'ta',
       HOLYDECK_CORPUS_URL: 'http://corpus:8080',
       HOLYDECK_CORPUS_TOKEN: 'c'.repeat(24),
@@ -82,13 +85,14 @@ describe('precedence', () => {
       port: 8080,
       dataDir: '/srv/holydeck',
       mediaRoot: '/srv/media',
+      resticRepository: '/srv/restic',
       locale: 'ta',
       corpusUrl: 'http://corpus:8080',
       corpusToken: 'c'.repeat(24),
       mongoUrl: 'mongodb://mongo:27017/holydeck',
       timezone: 'Asia/Tokyo',
     });
-    expect(Object.values(loaded.sources)).toEqual(['env', 'env', 'env', 'env', 'env', 'env', 'env', 'env']);
+    expect(Object.values(loaded.sources)).toEqual(Array(9).fill('env'));
   });
 });
 
@@ -152,6 +156,55 @@ describe('the settings path', () => {
     expect(settingsPath({ HOLYDECK_SETTINGS_PATH: '/etc/holydeck/settings.yaml' })).toBe(
       '/etc/holydeck/settings.yaml',
     );
+  });
+});
+
+describe('the Restic repository, configured separately from the media root', () => {
+  it('defaults to a path under /data/holydeck, distinct from the media root', () => {
+    const loaded = load();
+    expect(loaded.values.resticRepository).toBe('/data/holydeck/restic');
+    expect(loaded.sources.resticRepository).toBe('default');
+  });
+
+  it('is overridden by the file', () => {
+    const loaded = load('resticRepository: /mnt/nas/restic\n');
+    expect(loaded.values.resticRepository).toBe('/mnt/nas/restic');
+    expect(loaded.sources.resticRepository).toBe('file');
+  });
+
+  it('is overridden by the environment, over the file', () => {
+    const loaded = load('resticRepository: /mnt/nas/restic\n', { HOLYDECK_RESTIC_REPOSITORY: '/srv/restic' });
+    expect(loaded.values.resticRepository).toBe('/srv/restic');
+    expect(loaded.sources.resticRepository).toBe('env');
+  });
+
+  it('is configured independently of the media root, each free to move without the other', () => {
+    const loaded = load('mediaRoot: /mnt/nas/media\nresticRepository: /mnt/nas/restic\n');
+    expect(loaded.values.mediaRoot).toBe('/mnt/nas/media');
+    expect(loaded.values.resticRepository).toBe('/mnt/nas/restic');
+  });
+
+  it('rejects a relative path the same way every other path field does', () => {
+    expect(problemsOf('resticRepository: relative/restic\n')).toEqual([
+      'resticRepository: expected an absolute path, got "relative/restic"',
+    ]);
+  });
+});
+
+describe('the media root and the Restic repository accept a filesystem path only', () => {
+  it('has no backend-selection field: the settings schema names nothing an object-storage address could fill', () => {
+    expect(Object.keys(DEFAULT_SETTINGS)).toEqual([
+      'port', 'dataDir', 'mediaRoot', 'resticRepository', 'locale', 'corpusUrl', 'corpusToken', 'mongoUrl', 'timezone',
+    ]);
+  });
+
+  it('rejects an object-storage address the same way it rejects any other non-absolute value', () => {
+    expect(problemsOf('mediaRoot: s3://bucket/media\n')).toEqual([
+      'mediaRoot: expected an absolute path, got "s3://bucket/media"',
+    ]);
+    expect(problemsOf('resticRepository: s3://bucket/restic\n')).toEqual([
+      'resticRepository: expected an absolute path, got "s3://bucket/restic"',
+    ]);
   });
 });
 

@@ -30,6 +30,7 @@ const settings: LoadedSettings = {
     port: 'default',
     dataDir: 'default',
     mediaRoot: 'default',
+    resticRepository: 'default',
     locale: 'default',
     corpusUrl: 'default',
     corpusToken: 'default',

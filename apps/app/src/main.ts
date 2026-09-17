@@ -1,5 +1,5 @@
-import { readFileSync, watch } from 'node:fs';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { constants, readFileSync, watch } from 'node:fs';
+import { access, readFile, rename, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { MongoClient } from 'mongodb';
@@ -91,6 +91,14 @@ if (settings.values.mongoUrl !== '') {
     writeFile,
     rename,
     watch,
+    writable: async (path) => {
+      try {
+        await access(path, constants.W_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     env: process.env,
   });
   const watcher = settingsAdmin.watch();

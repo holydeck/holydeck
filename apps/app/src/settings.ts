@@ -16,6 +16,8 @@ export interface Settings {
   port: number;
   dataDir: string;
   mediaRoot: string;
+  /** Where `restic` keeps its backup repository. Configured separately from mediaRoot, on purpose. */
+  resticRepository: string;
   locale: Locale;
   /** Where the corpus service answers. Empty means this deployment has no scripture library. */
   corpusUrl: string;
@@ -31,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   port: 3000,
   dataDir: '/data/holydeck',
   mediaRoot: '/data/holydeck/media',
+  resticRepository: '/data/holydeck/restic',
   locale: 'en',
   corpusUrl: '',
   corpusToken: '',
@@ -46,14 +49,21 @@ export interface LoadedSettings {
   path: string;
 }
 
+/** What kind of refusal a `SettingsError` carries: a value the schema itself rejects, or one the
+ * filesystem does — a syntactically valid path this process still cannot write into. */
+export type SettingsRefusal = 'invalid' | 'unwritable';
+
 /** Carries every problem rather than the first, because a deployment fixes them in one pass. */
 export class SettingsError extends Error {
   readonly problems: readonly string[];
 
-  constructor(problems: readonly string[]) {
+  readonly kind: SettingsRefusal;
+
+  constructor(problems: readonly string[], kind: SettingsRefusal = 'invalid') {
     super(`the settings are not usable:\n${problems.map((problem) => `  ${problem}`).join('\n')}`);
     this.name = 'SettingsError';
     this.problems = problems;
+    this.kind = kind;
   }
 }
 
@@ -61,6 +71,7 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   port: 'HOLYDECK_PORT',
   dataDir: 'HOLYDECK_DATA_DIR',
   mediaRoot: 'HOLYDECK_MEDIA_ROOT',
+  resticRepository: 'HOLYDECK_RESTIC_REPOSITORY',
   locale: 'HOLYDECK_LOCALE',
   corpusUrl: 'HOLYDECK_CORPUS_URL',
   corpusToken: 'HOLYDECK_CORPUS_TOKEN',
@@ -235,6 +246,7 @@ export function loadSettings(input: {
   const port = resolve('port', DEFAULT_SETTINGS.port, parsePort, layers);
   const dataDir = resolve('dataDir', DEFAULT_SETTINGS.dataDir, parseAbsolutePath, layers);
   const mediaRoot = resolve('mediaRoot', DEFAULT_SETTINGS.mediaRoot, parseAbsolutePath, layers);
+  const resticRepository = resolve('resticRepository', DEFAULT_SETTINGS.resticRepository, parseAbsolutePath, layers);
   const locale = resolve('locale', DEFAULT_SETTINGS.locale, parseLocale, layers);
   const corpusProblems = problems.length;
   const corpusUrl = resolve('corpusUrl', DEFAULT_SETTINGS.corpusUrl, parseCorpusUrl, layers);
@@ -255,6 +267,7 @@ export function loadSettings(input: {
       port: port.value,
       dataDir: dataDir.value,
       mediaRoot: mediaRoot.value,
+      resticRepository: resticRepository.value,
       locale: locale.value,
       corpusUrl: corpusUrl.value,
       corpusToken: corpusToken.value,
@@ -265,6 +278,7 @@ export function loadSettings(input: {
       port: port.source,
       dataDir: dataDir.source,
       mediaRoot: mediaRoot.source,
+      resticRepository: resticRepository.source,
       locale: locale.source,
       corpusUrl: corpusUrl.source,
       corpusToken: corpusToken.source,

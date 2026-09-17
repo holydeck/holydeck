@@ -28,6 +28,7 @@ const sources: LoadedSettings['sources'] = {
   port: 'default',
   dataDir: 'default',
   mediaRoot: 'default',
+  resticRepository: 'default',
   locale: 'file',
   corpusUrl: 'default',
   corpusToken: 'default',

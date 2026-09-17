@@ -58,6 +58,92 @@ describe('validating the whole file before writing any of it', () => {
   });
 });
 
+describe('writability validated before anything is written', () => {
+  it('rejects an unwritable media root with a named error, leaving the file untouched', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    io.markUnwritable('/mnt/nas/media');
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    const failure: unknown = await admin.update({ mediaRoot: '/mnt/nas/media' }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SettingsError);
+    expect((failure as SettingsError).kind).toBe('unwritable');
+    expect((failure as SettingsError).problems).toEqual([
+      'mediaRoot: expected a writable path, but this process cannot write to "/mnt/nas/media"',
+    ]);
+    expect(io.writes).toHaveLength(0);
+    expect(io.renames).toHaveLength(0);
+    expect(admin.current().values.mediaRoot).toBe('/data/holydeck/media');
+  });
+
+  it('rejects an unwritable Restic repository the same way', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    io.markUnwritable('/mnt/nas/restic');
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    const failure: unknown = await admin.update({ resticRepository: '/mnt/nas/restic' }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SettingsError);
+    expect((failure as SettingsError).kind).toBe('unwritable');
+    expect(io.writes).toHaveLength(0);
+    expect(io.renames).toHaveLength(0);
+  });
+
+  it('reports both paths at once when a single change makes neither writable', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    io.markUnwritable('/mnt/nas/media');
+    io.markUnwritable('/mnt/nas/restic');
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    const failure: unknown = await admin
+      .update({ mediaRoot: '/mnt/nas/media', resticRepository: '/mnt/nas/restic' })
+      .catch((error: unknown) => error);
+
+    expect((failure as SettingsError).problems).toEqual([
+      'mediaRoot: expected a writable path, but this process cannot write to "/mnt/nas/media"',
+      'resticRepository: expected a writable path, but this process cannot write to "/mnt/nas/restic"',
+    ]);
+    expect(io.writes).toHaveLength(0);
+  });
+
+  it('adopts a writable path for either setting', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    const updated = await admin.update({ mediaRoot: '/mnt/nas/media' });
+
+    expect(updated.values.mediaRoot).toBe('/mnt/nas/media');
+    expect(io.writabilityChecks).toEqual(['/mnt/nas/media']);
+  });
+});
+
+describe('the media root and the Restic repository are probed independently', () => {
+  it('changing the Restic repository alone never probes the media root', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    // Marked unwritable to prove it: if the untouched media root were probed too, this update would fail.
+    io.markUnwritable('/data/holydeck/media');
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    const updated = await admin.update({ resticRepository: '/mnt/nas/restic' });
+
+    expect(updated.values.resticRepository).toBe('/mnt/nas/restic');
+    expect(updated.values.mediaRoot).toBe('/data/holydeck/media');
+    expect(io.writabilityChecks).toEqual(['/mnt/nas/restic']);
+  });
+
+  it('changing the media root alone never probes the Restic repository', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    io.markUnwritable('/data/holydeck/restic');
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    const updated = await admin.update({ mediaRoot: '/mnt/nas/media' });
+
+    expect(updated.values.mediaRoot).toBe('/mnt/nas/media');
+    expect(updated.values.resticRepository).toBe('/data/holydeck/restic');
+    expect(io.writabilityChecks).toEqual(['/mnt/nas/media']);
+  });
+});
+
 describe('the file layer a write did not touch', () => {
   it('keeps an env-sourced field env-sourced, and a file-sourced field unchanged, after a third field is written', async () => {
     const env = { HOLYDECK_PORT: '4200' };

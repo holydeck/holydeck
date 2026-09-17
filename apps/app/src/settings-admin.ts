@@ -22,12 +22,19 @@ import { SettingsError, loadSettings } from './settings.js';
 
 import type { LoadedSettings, Settings } from './settings.js';
 
+/** Every setting `update()` probes for real filesystem write access before adopting a change to it. */
+const WRITABILITY_CHECKED: ReadonlySet<keyof Settings> = new Set<keyof Settings>(['mediaRoot', 'resticRepository']);
+
 /** The filesystem operations this module needs, injected so no test here ever touches a real disk. */
 export interface SettingsAdminIO {
   readFile(path: string): Promise<string>;
   writeFile(path: string, text: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
   watch(dir: string, listener: (eventType: string, filename: string | Buffer | null) => void): { close(): void };
+  /** Whether this process can write into the given path. Probed for a changed media root or Restic
+   * repository before the change is adopted, so a deployment-mounted path that turns out to be
+   * read-only is refused before anything is written, rather than discovered at the first upload. */
+  writable(path: string): Promise<boolean>;
 }
 
 export interface SettingsAdminOptions extends SettingsAdminIO {
@@ -103,6 +110,21 @@ export function settingsAdminOn(seed: LoadedSettings, io: SettingsAdminOptions):
       // Validated as a whole before anything is written: a partial change that fails alongside a valid one
       // must leave both unwritten, and the loader is the one place that already knows what "valid" means.
       const loaded = loadSettings({ fileText: merged, env: io.env, path });
+
+      // Probed only for the paths this change actually touches, and only after the schema itself
+      // accepts them: a syntactically valid path is still worth nothing if this process cannot write
+      // into it, and that must be caught before the file is touched, exactly like a schema rejection.
+      // Every unwritable path is collected rather than just the first, for the same reason the loader
+      // itself reports every problem at once: a deployment fixes them all in one pass.
+      const unwritable: string[] = [];
+      for (const key of Object.keys(partial) as Array<keyof Settings>) {
+        if (!WRITABILITY_CHECKED.has(key)) continue;
+        const target = loaded.values[key] as string;
+        if (!(await io.writable(target))) {
+          unwritable.push(`${key}: expected a writable path, but this process cannot write to ${JSON.stringify(target)}`);
+        }
+      }
+      if (unwritable.length > 0) throw new SettingsError(unwritable, 'unwritable');
 
       const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`);
       await io.writeFile(tmp, merged);
