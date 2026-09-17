@@ -25,6 +25,7 @@ import { mediaLibraryOn } from './media.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
+import { seedContext, seedOn } from './seed.js';
 import { sessionDb, sessionsOn } from './sessions.js';
 import { passkeyDb, passkeysOn } from './passkeys.js';
 import { settingsAdminOn } from './settings-admin.js';
@@ -89,6 +90,9 @@ if (settings.values.mongoUrl !== '') {
   };
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
+  // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
+  // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
+  await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
   // The media library is a durable record too, kept the same way — but no route serves it yet, so unlike
   // its neighbors above, nothing here holds onto what it returns. T54 builds the store, not its HTTP surface.
   mediaLibraryOn(repositoryDb(store.db()), {
