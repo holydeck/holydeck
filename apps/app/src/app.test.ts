@@ -460,6 +460,23 @@ describe('the verses the application reads from the library', () => {
     expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.malformed');
   });
 
+  it('rejects a repeated book parameter as malformed, before asking the library at all', async () => {
+    const { statusCode, body } = await askedVerses(refusing, 'book=GEN&book=EXO&chapter=1&verses=1');
+    expect(statusCode).toBe(422);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.malformed');
+  });
+
+  it('expands a multi-part verse list before asking the library for it', async () => {
+    let versesUrl = '';
+    const fetching: Fetching = (url) => {
+      if (url.startsWith(VERSES_URL)) versesUrl = url;
+      const body = url.startsWith(CANON_URL) ? canon : verses;
+      return Promise.resolve({ status: 200, json: () => Promise.resolve(body) });
+    };
+    await askedVerses(fetching, 'book=GEN&chapter=1&verses=5,1-4,3');
+    expect(new URL(versesUrl).searchParams.get('verses')).toBe('5,1,2,3,4,3');
+  });
+
   it('is part of the versioned API, so a client too old to read it is told to update', async () => {
     const app = buildApp({ settings: withCorpus, logger: false, fetching: refusing });
     const response = await app.inject({ method: 'GET', url: '/api/v1/translations/KJV/verses?book=GEN&chapter=1&verses=1' });

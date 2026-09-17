@@ -176,7 +176,7 @@ export function buildApp({
     const verses = versesIn(query.verses);
     const revision = query.revision === undefined ? undefined : wholeNumberIn(query.revision);
     const malformedRevision = query.revision !== undefined && revision === undefined;
-    if (query.book === undefined || chapter === undefined || verses === undefined || malformedRevision) {
+    if (typeof query.book !== 'string' || chapter === undefined || verses === undefined || malformedRevision) {
       return reply
         .code(REFERENCE_MALFORMED.status)
         .send(errorEnvelope(REFERENCE_MALFORMED.code, REFERENCE_MALFORMED.message, request.id));
