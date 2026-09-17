@@ -19,7 +19,7 @@
 import { autoFitStyle, chooseFit, fitLadder, fitRequests } from './auto-fit.js';
 import { deepFreeze } from './internal/freeze.js';
 import { geometry, roundTo } from './internal/numbers.js';
-import { mediaRectFor } from './media-fit.js';
+import { isScalableSize, mediaRectFor } from './media-fit.js';
 import { MEASUREMENT_PRECISION } from './measure.js';
 import { canvasFor, resolveOutputProfile } from './output-profile.js';
 import { blocker, readinessOf, warning } from './readiness.js';
@@ -37,7 +37,7 @@ import type {
 import type { FindingSite, Readiness, ReadinessFinding } from './readiness.js';
 
 export type { IntrinsicSize, MediaFit } from './media-fit.js';
-export { MEDIA_FITS } from './media-fit.js';
+export { MEDIA_FITS, MediaGeometryError } from './media-fit.js';
 
 export class RenderModelError extends Error {
   constructor(message: string) {
@@ -279,6 +279,16 @@ const refuseUnplayableAudio = (box: MediaBox, what: string): void => {
   }
 };
 
+// A shape with nothing to scale — a picture of no width, a layout ratio of 0:9 — is refused here with the
+// rest of the producer defects rather than left to the geometry helper, which would otherwise be the one
+// thing in this file throwing something other than a `RenderModelError` at a caller sorting bad input from
+// an unexpected crash. `mediaRectFor` keeps its own guard for callers that reach it directly.
+const refuseUnscalableSize = (size: IntrinsicSize, what: string): void => {
+  if (!isScalableSize(size)) {
+    throw new RenderModelError(`${what} is ${size.width}x${size.height}, which is not two positive numbers`);
+  }
+};
+
 /** Which affordance gets a stalled slide going again. Every state has one, including the good one. */
 const RECOVERY: Readonly<Record<MediaPlaybackState, MediaRecovery>> = Object.freeze({
   ok: 'none',
@@ -289,7 +299,9 @@ const RECOVERY: Readonly<Record<MediaPlaybackState, MediaRecovery>> = Object.fre
 /**
  * The volume a surface actually plays at. Out-of-bound is clamped and said out loud rather than thrown:
  * the same shape as text below the readable floor, for the same reason — the slide still shows, and an
- * editor gets to see what was corrected instead of an error page in place of the service.
+ * editor gets to see what was corrected instead of an error page in place of the service. Both ends of the
+ * range say so, because a correction nobody is told about is how a producer comes to believe a defect was
+ * honoured.
  */
 const boundedAudio = (
   audio: MediaAudio | undefined,
@@ -306,6 +318,15 @@ const boundedAudio = (
         site,
         `the item asks to play at ${audio.volume}, above the resolved bound of ${maximumVolume}; the bound ` +
           'was used instead',
+      ),
+    );
+  }
+  if (audio.volume < 0) {
+    findings.push(
+      warning(
+        'media.volumeBelowSilence',
+        site,
+        `the item asks to play at ${audio.volume}, below silence; silence was used instead`,
       ),
     );
   }
@@ -401,11 +422,17 @@ export async function prepareRenderModel({
   const requests: MeasureRequest[] = [];
   for (const slide of model.slides) {
     refuseOwnRatio(slide, `slide ${slide.id}`);
+    if (slide.layoutAspectRatio !== undefined) {
+      refuseUnscalableSize(slide.layoutAspectRatio, `the layout aspect ratio of slide ${slide.id}`);
+    }
     const letterbox = letterboxOf(slide);
     for (const box of slide.boxes) {
       const what = `box ${box.id} on slide ${slide.id}`;
       refuseOwnRatio(box, what);
-      if (box.kind === 'media') refuseUnplayableAudio(box, what);
+      if (box.kind === 'media') {
+        refuseUnscalableSize(box.intrinsicSize, `the intrinsic size of ${what}`);
+        refuseUnplayableAudio(box, what);
+      }
       if (box.kind !== 'text') continue;
       const frame = frameWithin(letterbox, box.frame);
       const { ladder } = fitFor(box, frame, profile, canvas, stepPx);
@@ -436,6 +463,9 @@ export async function prepareRenderModel({
       const frame = frameWithin(letterbox, box.frame);
       const site = { slideId: slide.id, boxId: box.id };
 
+      // The frame is what the safe area grades, deliberately never a media box's `mediaRect`: `cover` and
+      // `original` are meant to reach past their frame, and whether that overflow is hidden is the painting
+      // surface's concern. Grading it here would report a blocker for a box doing exactly what was asked.
       if (!contains(safeAreaPx, frame)) {
         findings.push(
           box.importance === 'required'

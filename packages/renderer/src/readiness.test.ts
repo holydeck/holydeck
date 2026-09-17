@@ -43,6 +43,7 @@ describe('readiness findings', () => {
       'decoration.outsideSafeArea',
       'layout.ratioMismatch',
       'media.volumeAboveBound',
+      'media.volumeBelowSilence',
     ]);
   });
 });

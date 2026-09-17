@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { stubMeasurer } from '../test/helpers/measurer.js';
 import { LYRIC, MEDIA_FRAME_PX, lyricBox, mediaBox, songModel } from '../test/helpers/model.js';
+import { isScalableSize, mediaRectFor } from './media-fit.js';
 import {
   DEFAULT_ASPECT_RATIO,
   DEFAULT_MAXIMUM_AUDIO_VOLUME,
@@ -13,6 +14,7 @@ import {
 } from './output-profile.js';
 import {
   MEDIA_FITS,
+  MediaGeometryError,
   RenderModelError,
   isPreparedMediaBox,
   isPreparedTextBox,
@@ -71,6 +73,17 @@ describe('aspect ratio and safe area are inputs, frozen at preparation', () => {
 
     await expect(
       prepare({ model: { ...model, slides: [slide] }, measurer: stubMeasurer() } as never),
+    ).rejects.toBeInstanceOf(RenderModelError);
+  });
+
+  // Letterboxing is a centred `contain`, so a ratio with a zero side would scale its way into a frame of
+  // `NaN` bars. A slide is allowed to carry a layout ratio, but not one with nothing to scale.
+  it('refuses a layout aspect ratio with nothing to scale', async () => {
+    const model = songModel();
+    const slide = { id: 'slide-1', boxes: [lyricBox()], layoutAspectRatio: { width: 0, height: 9 } };
+
+    await expect(
+      prepare({ model: { ...model, slides: [slide] }, measurer: stubMeasurer() }),
     ).rejects.toBeInstanceOf(RenderModelError);
   });
 
@@ -279,7 +292,7 @@ describe('where a picture lands inside the box that holds it', () => {
 
   // The property each of the two scaled modes exists for, asserted as a relation rather than as numbers,
   // so it holds for sizes nobody wrote a row for.
-  it('keeps contain inside the frame and lets cover reach past it on exactly one axis', async () => {
+  it('keeps contain inside the frame on every edge and cover around it on every edge', async () => {
     for (const intrinsicSize of [WIDER, TALLER]) {
       const inside = mediaBoxOf(
         await prepare({ model: songModel([mediaBox({ fit: 'contain', intrinsicSize })]), measurer: stubMeasurer() }),
@@ -310,10 +323,27 @@ describe('where a picture lands inside the box that holds it', () => {
     expect(mediaBoxOf(prepared).intrinsicSize).not.toBe(intrinsicSize);
   });
 
+  // A bad intrinsic size is a producer defect like any other, so it is refused in the same walk and with
+  // the same class: a caller sorting bad input from an unexpected crash reads one `instanceof`.
   it('refuses a picture with no size to scale', async () => {
     await expect(
       prepare({ model: songModel([mediaBox({ intrinsicSize: { width: 0, height: 400 } })]), measurer: stubMeasurer() }),
-    ).rejects.toThrow(/not two positive numbers/u);
+    ).rejects.toBeInstanceOf(RenderModelError);
+    await expect(
+      prepare({
+        model: songModel([mediaBox({ intrinsicSize: { width: 1600, height: Number.NaN } })]),
+        measurer: stubMeasurer(),
+      }),
+    ).rejects.toThrow(/intrinsic size of box .* is 1600xNaN/u);
+  });
+
+  // The guard inside the geometry helper is what protects a caller that never goes through preparation. It
+  // is unreachable from `prepareRenderModel` now that the size is refused first, which is the point — but
+  // it still has to hold, and its class still has to be nameable from the package's entry point.
+  it('keeps a geometry refusal of its own for a caller that skips preparation', () => {
+    expect(() => mediaRectFor(MEDIA_FRAME_PX, { width: 0, height: 400 }, 'contain')).toThrow(MediaGeometryError);
+    expect(isScalableSize({ width: 1600, height: 400 })).toBe(true);
+    expect(isScalableSize({ width: 1600, height: 0 })).toBe(false);
   });
 });
 
@@ -354,6 +384,24 @@ describe('how loud a slide is allowed to be', () => {
     });
     expect(prepared.findings).toContainEqual(
       expect.objectContaining({ code: 'media.volumeAboveBound', severity: 'warning', boxId: 'clip' }),
+    );
+    expect(prepared.readiness).toBe('warned');
+  });
+
+  // The other end of the same range: a correction nobody is told about is how a producer comes to believe
+  // a defect was honoured, so silence is said out loud exactly the way the bound is.
+  it('raises a volume below silence to silence and says so instead of correcting it quietly', async () => {
+    const prepared = await prepare({ model: songModel([video(-0.2)]), measurer: stubMeasurer() });
+
+    expect(mediaBoxOf(prepared).audio).toEqual({
+      loop: false,
+      muted: false,
+      volume: 0,
+      requestedVolume: -0.2,
+      maximumVolume: DEFAULT_MAXIMUM_AUDIO_VOLUME,
+    });
+    expect(prepared.findings).toContainEqual(
+      expect.objectContaining({ code: 'media.volumeBelowSilence', severity: 'warning', boxId: 'clip' }),
     );
     expect(prepared.readiness).toBe('warned');
   });

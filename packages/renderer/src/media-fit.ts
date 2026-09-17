@@ -28,6 +28,12 @@ export interface IntrinsicSize {
   readonly height: number;
 }
 
+/**
+ * A size with nothing to scale reached `mediaRectFor`. The render model asks `isScalableSize` first and
+ * refuses such a size as a `RenderModelError`, so a producer's bad number never arrives here; this is the
+ * invariant for a caller that comes straight to this module. Re-exported from `render-model.ts` so that
+ * caller can name it.
+ */
 export class MediaGeometryError extends Error {
   constructor(message: string) {
     super(message);
@@ -36,6 +42,13 @@ export class MediaGeometryError extends Error {
 }
 
 const positive = (value: number): boolean => Number.isFinite(value) && value > 0;
+
+/**
+ * Whether a shape is one this module can scale: two finite, positive numbers. One predicate, so the
+ * refusal that happens before a measurement and the guard inside `mediaRectFor` cannot come to disagree
+ * about which sizes are drawable.
+ */
+export const isScalableSize = (size: IntrinsicSize): boolean => positive(size.width) && positive(size.height);
 
 const centredIn = (frame: PixelFrame, width: number, height: number): PixelFrame => ({
   x: geometry(frame.x + (frame.width - width) / 2),
@@ -55,7 +68,7 @@ const scaleFor = (frame: PixelFrame, intrinsic: IntrinsicSize, fit: MediaFit): n
  * pixels every time, on every surface.
  */
 export function mediaRectFor(frame: PixelFrame, intrinsic: IntrinsicSize, fit: MediaFit): PixelFrame {
-  if (!positive(intrinsic.width) || !positive(intrinsic.height)) {
+  if (!isScalableSize(intrinsic)) {
     throw new MediaGeometryError(
       `intrinsic size ${intrinsic.width}x${intrinsic.height} is not two positive numbers`,
     );

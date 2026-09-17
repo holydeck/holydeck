@@ -22,6 +22,8 @@ export const READINESS_CODES = [
   'layout.ratioMismatch',
   /** A media box asks to play louder than the resolved bound; the bound was used instead. */
   'media.volumeAboveBound',
+  /** A media box asks to play quieter than silence; silence was used instead. */
+  'media.volumeBelowSilence',
 ] as const;
 
 export type ReadinessCode = (typeof READINESS_CODES)[number];
