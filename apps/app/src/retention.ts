@@ -39,16 +39,27 @@ export interface RetentionPolicy {
 // protected, and every other class still needs a declared window even where nothing here yet sweeps it.
 // Only a superseded, unreferenced, intermediate autosave revision is ever eligible, and only past its own
 // window; audit entries are the other class ADMN-03 lets retention expire.
-export const RETENTION_POLICIES: readonly RetentionPolicy[] = Object.freeze([
-  { class: 'current-revision', retentionDays: 3650, protected: true },
-  { class: 'latest-autosave', retentionDays: 3650, protected: true },
-  { class: 'conflict', retentionDays: 3650, protected: true },
-  { class: 'manual-checkpoint', retentionDays: 3650, protected: true },
-  { class: 'prepared-snapshot', retentionDays: 3650, protected: true },
-  { class: 'run-event', retentionDays: 3650, protected: true },
-  { class: 'autosave-revision', retentionDays: 30, protected: false },
-  { class: 'audit-entry', retentionDays: 400, protected: false },
-]);
+//
+// Keyed by `RetentionClass` itself, with a type annotation rather than a cast, so a class this table
+// forgets is a compile error here rather than a `no-policy` refusal `policyFor` would otherwise only catch
+// at runtime — adding a ninth member to `RetentionClass` without a matching entry below does not compile.
+const POLICIES: Record<RetentionClass, Omit<RetentionPolicy, 'class'>> = {
+  'current-revision': { retentionDays: 3650, protected: true },
+  'latest-autosave': { retentionDays: 3650, protected: true },
+  conflict: { retentionDays: 3650, protected: true },
+  'manual-checkpoint': { retentionDays: 3650, protected: true },
+  'prepared-snapshot': { retentionDays: 3650, protected: true },
+  'run-event': { retentionDays: 3650, protected: true },
+  'autosave-revision': { retentionDays: 30, protected: false },
+  'audit-entry': { retentionDays: 400, protected: false },
+};
+
+export const RETENTION_POLICIES: readonly RetentionPolicy[] = Object.freeze(
+  Object.entries(POLICIES).map(([retentionClass, policy]) => ({
+    class: retentionClass as RetentionClass,
+    ...policy,
+  })),
+);
 
 const POLICY_BY_CLASS: ReadonlyMap<string, RetentionPolicy> = new Map(
   RETENTION_POLICIES.map((policy) => [policy.class, policy]),
@@ -141,12 +152,17 @@ export interface GradedRevision {
 
 /**
  * Which of ADR 0001's revision classes one content revision belongs to, from its place in that content's
- * own history. `history` is assumed already in ordinal order, which is what `revisions.ts`'s own
- * `history()` returns. This grades nothing about whether a revision is referenced elsewhere (a prepared
- * snapshot's pin, ADR 0006) — that is the caller's to fold into `protectedBy` before calling `sweep`.
+ * own history. The standing revision is whichever `history` holds the highest ordinal for, found by value
+ * rather than by trusting the list's own order — so this does not silently misgrade if a caller ever hands
+ * it `history` in something other than the order `revisions.ts`'s own `history()` returns. This grades
+ * nothing about whether a revision is referenced elsewhere (a prepared snapshot's pin, ADR 0006) — that is
+ * the caller's to fold into `protectedBy` before calling `sweep`.
  */
 export function revisionRetentionClass(history: readonly GradedRevision[], target: GradedRevision): RetentionClass {
-  const current = history[history.length - 1];
+  const current = history.reduce<GradedRevision | undefined>(
+    (highest, entry) => (highest === undefined || entry.revision > highest.revision ? entry : highest),
+    undefined,
+  );
   if (current !== undefined && current.revision === target.revision) return 'current-revision';
   if (target.origin === 'manual-checkpoint') return 'manual-checkpoint';
   const supersededByALaterAutosave = history.some(

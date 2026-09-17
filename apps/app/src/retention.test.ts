@@ -49,7 +49,7 @@ describe('RETENTION_POLICIES', () => {
     }
   });
 
-  it('marks exactly the four permanent revision classes and the two run classes protected', () => {
+  it('marks exactly the four permanent revision classes plus prepared snapshots and run events protected', () => {
     const protectedClasses = RETENTION_POLICIES.filter((policy) => policy.protected).map((policy) => policy.class).toSorted();
     expect(protectedClasses).toEqual(
       ['conflict', 'current-revision', 'latest-autosave', 'manual-checkpoint', 'prepared-snapshot', 'run-event'].toSorted(),
