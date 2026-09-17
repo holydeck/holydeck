@@ -14,8 +14,10 @@ import {
   corpusBoundaryProblems,
   corpusFailureMapping,
   corpusTokenMatches,
+  parseCorpusCanon,
   parseCorpusFailure,
   parseCorpusTranslations,
+  parseCorpusVerses,
   presentedCorpusToken,
 } from './corpus.js';
 import { statusForCode } from './http.js';
@@ -124,6 +126,94 @@ describe('the translations the application reads through the boundary', () => {
     const parsed = parseCorpusTranslations(value);
     expect(parsed.ok === false && parsed.problems).toEqual([
       { path: 'corpusTranslations.translations.0.abbreviation', code: 'field.required', message: 'is required' },
+    ]);
+  });
+});
+
+describe('the canon the application reads through the boundary', () => {
+  const body = () => ({
+    translation: 'KJV',
+    source: 'bundled',
+    books: [
+      { usfm: 'GEN', canon: 'ot', name: 'Genesis', chapters: [{ id: '1', label: '1' }, { id: '2', label: '2' }] },
+    ],
+  });
+
+  it('reads the canon the corpus returns', () => {
+    const parsed = parseCorpusCanon(body());
+    expect(parsed.ok && parsed.value).toEqual(body());
+  });
+
+  it('reads the long name and abbreviation a book carries, when the corpus sends them', () => {
+    const value = body();
+    (value.books[0] as { longName?: string; abbreviation?: string }).longName = 'The First Book of Moses';
+    (value.books[0] as { longName?: string; abbreviation?: string }).abbreviation = 'Gen';
+    const parsed = parseCorpusCanon(value);
+    expect(parsed.ok && parsed.value.books[0]).toEqual({
+      ...body().books[0],
+      longName: 'The First Book of Moses',
+      abbreviation: 'Gen',
+    });
+  });
+
+  it('refuses a source that is neither bundled nor synced', () => {
+    const parsed = parseCorpusCanon({ ...body(), source: 'invented' });
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusCanon.source', code: 'field.not_allowed', message: 'must be one of bundled, synced' },
+    ]);
+  });
+
+  it('refuses a book with no chapters to name it by', () => {
+    const value = body();
+    delete (value.books[0] as { chapters?: unknown }).chapters;
+    const parsed = parseCorpusCanon(value);
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusCanon.books.0.chapters', code: 'field.required', message: 'is required' },
+    ]);
+  });
+});
+
+describe('the verses the application reads through the boundary', () => {
+  const body = () => ({
+    verses: { '1': 'In the beginning God created the heaven and the earth.', '2': 'And the earth was without form...' },
+    citation: 'Genesis 1:1-2 (KJV)',
+    revision: 3,
+    fetchedAt: '2026-09-13T09:30:00Z',
+    source: 'cache',
+  });
+
+  it('reads the verses the corpus returns, revision included', () => {
+    const parsed = parseCorpusVerses(body());
+    expect(parsed.ok && parsed.value).toEqual(body());
+  });
+
+  it('refuses a verse map holding something other than text', () => {
+    const parsed = parseCorpusVerses({ ...body(), verses: { '1': 7 } });
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusVerses.verses.1', code: 'field.not_text', message: 'must be text' },
+    ]);
+  });
+
+  it('refuses a verse map that is not an object', () => {
+    const parsed = parseCorpusVerses({ ...body(), verses: 'not a map' });
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusVerses.verses', code: 'field.not_an_object', message: 'must be an object' },
+    ]);
+  });
+
+  it('refuses a source that is neither cache nor live', () => {
+    const parsed = parseCorpusVerses({ ...body(), source: 'invented' });
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusVerses.source', code: 'field.not_allowed', message: 'must be one of cache, live' },
+    ]);
+  });
+
+  it('refuses a body carrying no revision, since that is the one thing every retrieval must record', () => {
+    const value = body();
+    delete (value as { revision?: number }).revision;
+    const parsed = parseCorpusVerses(value);
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusVerses.revision', code: 'field.required', message: 'is required' },
     ]);
   });
 });

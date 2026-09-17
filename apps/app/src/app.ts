@@ -5,7 +5,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import { serveAccountRoutes } from './accounts-routes.js';
 import { enforceAuthorization } from './authorization.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
-import { corpusClient } from './corpus.js';
+import { REFERENCE_MALFORMED, corpusClient, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
@@ -28,6 +28,30 @@ import type { LoadedSettings } from './settings.js';
 import type { WebAsset } from './static.js';
 
 const PUBLIC: RouteNeed = { kind: 'public' };
+
+/** Counting from one, the same as a chapter or a revision does. A leading zero is not a whole number. */
+const wholeNumberIn = (value: unknown): number | undefined =>
+  typeof value === 'string' && /^[1-9][0-9]*$/u.test(value) ? Number(value) : undefined;
+
+const VERSE_TOKEN = /^(\d{1,3})(?:-(\d{1,3}))?$/u;
+
+/**
+ * Reads the corpus's own comma/range grammar for a verse list, without depending on the corpus package
+ * to do it: `5`, `1-4` and `5,1-4,3` are all one list, and anything else is nothing this can read.
+ */
+function versesIn(value: unknown): readonly number[] | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const verses: number[] = [];
+  for (const token of value.split(',')) {
+    const match = VERSE_TOKEN.exec(token.trim());
+    if (match === null) return undefined;
+    const from = Number(match[1]);
+    const to = match[2] === undefined ? from : Number(match[2]);
+    if (from < 1 || to < from) return undefined;
+    for (let verse = from; verse <= to; verse += 1) verses.push(verse);
+  }
+  return verses;
+}
 
 export interface AppOptions {
   settings: LoadedSettings;
@@ -123,6 +147,47 @@ export function buildApp({
         .send(errorEnvelope(answer.refusal.code, answer.refusal.message, request.id));
     }
     return successEnvelope({ translations: answer.value }, request.id, CLIENT_WINDOW.current);
+  });
+
+  // The canon of one translation: which books it holds and which chapters of each, so an editor's
+  // choices can be checked before anything is read. Mirrors the route above in every way but the path.
+  app.get('/api/v1/translations/:abbr/canon', { config: { need: PUBLIC } }, async (request, reply) => {
+    const { abbr } = request.params as { readonly abbr: string };
+    const answer = await corpus.canon(abbr);
+    if (!answer.ok) {
+      return reply
+        .code(answer.refusal.status)
+        .send(errorEnvelope(answer.refusal.code, answer.refusal.message, request.id));
+    }
+    return successEnvelope({ canon: answer.value }, request.id, CLIENT_WINDOW.current);
+  });
+
+  // One validated reference: the book and chapter are checked against the canon before the library is
+  // asked at all, and the verses it answers with carry the revision they were read at.
+  app.get('/api/v1/translations/:abbr/verses', { config: { need: PUBLIC } }, async (request, reply) => {
+    const { abbr } = request.params as { readonly abbr: string };
+    const query = request.query as {
+      readonly book?: string;
+      readonly chapter?: string;
+      readonly verses?: string;
+      readonly revision?: string;
+    };
+    const chapter = wholeNumberIn(query.chapter);
+    const verses = versesIn(query.verses);
+    const revision = query.revision === undefined ? undefined : wholeNumberIn(query.revision);
+    const malformedRevision = query.revision !== undefined && revision === undefined;
+    if (query.book === undefined || chapter === undefined || verses === undefined || malformedRevision) {
+      return reply
+        .code(REFERENCE_MALFORMED.status)
+        .send(errorEnvelope(REFERENCE_MALFORMED.code, REFERENCE_MALFORMED.message, request.id));
+    }
+    const answer = await selectReference(corpus, { abbr, book: query.book, chapter, verses, revision });
+    if (!answer.ok) {
+      return reply
+        .code(answer.refusal.status)
+        .send(errorEnvelope(answer.refusal.code, answer.refusal.message, request.id));
+    }
+    return successEnvelope({ verses: answer.value }, request.id, CLIENT_WINDOW.current);
   });
 
   // Both are registered below the guard like everything else, and the two changes they serve without a

@@ -6,11 +6,13 @@ import {
   corpusAuthorization,
   corpusBoundary,
   corpusFailureMapping,
+  parseCorpusCanon,
   parseCorpusFailure,
   parseCorpusTranslations,
+  parseCorpusVerses,
 } from '@holydeck/contracts/corpus';
 
-import type { CorpusBoundaryPacket, CorpusTranslation } from '@holydeck/contracts/corpus';
+import type { CorpusBoundaryPacket, CorpusCanon, CorpusTranslation, CorpusVerses } from '@holydeck/contracts/corpus';
 
 /**
  * The only way this application talks to the corpus service.
@@ -68,6 +70,12 @@ export const LIBRARY_NOT_CONFIGURED: CorpusRefusal = {
   message: 'No scripture library is configured for this deployment.',
 };
 
+/** What a reference is refused as when nothing in the canon matches it, without asking the library at all. */
+export const REFERENCE_NOT_FOUND = refusal('corpus.reference.not_found', 404);
+
+/** What a verse list this application cannot even read is refused as, before the library is asked. */
+export const REFERENCE_MALFORMED = refusal('corpus.reference.malformed', 422);
+
 const TRANSLATIONS_PATH = '/api/v1/translations';
 const LOOPBACK = ['127.0.0.1', 'localhost', '::1', '[::1]'];
 
@@ -114,8 +122,24 @@ function translate(body: unknown): CorpusRefusal {
   return refusal(mapping.code as CorpusCode, mapping.http);
 }
 
+const canonPath = (abbr: string): string => `${TRANSLATIONS_PATH}/${encodeURIComponent(abbr)}/canon`;
+
+function versesPath(abbr: string, book: string, chapter: number, verses: readonly number[], revision?: number): string {
+  const query = new URLSearchParams({ book, chapter: String(chapter), verses: verses.join(',') });
+  if (revision !== undefined) query.set('revision', String(revision));
+  return `${TRANSLATIONS_PATH}/${encodeURIComponent(abbr)}/verses?${query.toString()}`;
+}
+
 export function corpusClient(settings: CorpusSettings, fetching: Fetching): {
   translations(): Promise<CorpusResult<readonly CorpusTranslation[]>>;
+  canon(abbr: string): Promise<CorpusResult<CorpusCanon>>;
+  verses(
+    abbr: string,
+    book: string,
+    chapter: number,
+    verses: readonly number[],
+    revision?: number,
+  ): Promise<CorpusResult<CorpusVerses>>;
 } {
   const address = addressOf(settings.url);
 
@@ -146,7 +170,45 @@ export function corpusClient(settings: CorpusSettings, fetching: Fetching): {
       const parsed = parseCorpusTranslations(answer.value);
       return parsed.ok ? { ok: true, value: parsed.value } : { ok: false, refusal: LIBRARY_UNEXPECTED };
     },
+    async canon(abbr) {
+      const answer = await ask(canonPath(abbr));
+      if (!answer.ok) return answer;
+      const parsed = parseCorpusCanon(answer.value);
+      return parsed.ok ? { ok: true, value: parsed.value } : { ok: false, refusal: LIBRARY_UNEXPECTED };
+    },
+    async verses(abbr, book, chapter, verses, revision) {
+      const answer = await ask(versesPath(abbr, book, chapter, verses, revision));
+      if (!answer.ok) return answer;
+      const parsed = parseCorpusVerses(answer.value);
+      return parsed.ok ? { ok: true, value: parsed.value } : { ok: false, refusal: LIBRARY_UNEXPECTED };
+    },
   };
+}
+
+export interface ReferenceSelection {
+  readonly abbr: string;
+  readonly book: string;
+  readonly chapter: number;
+  readonly verses: readonly number[];
+  readonly revision?: number;
+}
+
+/**
+ * Selects one validated reference and records the corpus revision it was read at. The book and chapter
+ * are checked against the canon here, so a reference nothing in it holds never reaches the library at
+ * all; the verse list is not, because the canon this checks against carries no verse count — that is
+ * left to the library's own answer, which is where a revision is recorded in the first place.
+ */
+export async function selectReference(
+  client: ReturnType<typeof corpusClient>,
+  selection: ReferenceSelection,
+): Promise<CorpusResult<CorpusVerses>> {
+  const canon = await client.canon(selection.abbr);
+  if (!canon.ok) return canon;
+  const book = canon.value.books.find((entry) => entry.usfm === selection.book.toUpperCase());
+  const chapter = book?.chapters.some((entry) => entry.id === String(selection.chapter)) ?? false;
+  if (!chapter) return { ok: false, refusal: REFERENCE_NOT_FOUND };
+  return client.verses(selection.abbr, selection.book, selection.chapter, selection.verses, selection.revision);
 }
 
 export interface CorpusProbe {

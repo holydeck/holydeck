@@ -314,3 +314,156 @@ describe('the translations the application reads from the library', () => {
     expect(response.statusCode).toBe(426);
   });
 });
+
+const canon = {
+  translation: 'KJV',
+  source: 'bundled',
+  books: [{ usfm: 'GEN', canon: 'ot', name: 'Genesis', chapters: [{ id: '1', label: '1' }] }],
+};
+
+const verses = {
+  verses: { '1': 'In the beginning God created the heaven and the earth.' },
+  citation: 'Genesis 1:1 (KJV)',
+  revision: 3,
+  fetchedAt: '2026-09-13T09:30:00Z',
+  source: 'cache',
+};
+
+const CANON_URL = 'http://corpus:8080/api/v1/translations/KJV/canon';
+const VERSES_URL = 'http://corpus:8080/api/v1/translations/KJV/verses';
+
+/** Answers by base path, ignoring the query string, so the canon call and the verses call can differ. */
+function routed(byUrl: ReadonlyMap<string, { status: number; body: unknown }>): Fetching {
+  return (url) => {
+    const answer = byUrl.get(url.split('?')[0] ?? url) ?? { status: 500, body: {} };
+    return Promise.resolve({ status: answer.status, json: () => Promise.resolve(answer.body) });
+  };
+}
+
+describe('the canon the application reads from the library', () => {
+  const askedCanon = async (fetching: Fetching): Promise<{ statusCode: number; body: unknown }> => {
+    const app = buildApp({ settings: withCorpus, logger: false, fetching });
+    try {
+      const response = await app.inject({ method: 'GET', url: '/api/v1/translations/KJV/canon', headers: current });
+      return { statusCode: response.statusCode, body: response.json() };
+    } finally {
+      await app.close();
+    }
+  };
+
+  it('answers the canon in the envelope every successful response takes', async () => {
+    const { statusCode, body } = await askedCanon(routed(new Map([[CANON_URL, { status: 200, body: canon }]])));
+    expect(statusCode).toBe(200);
+    expect(body).toEqual({ data: { canon }, meta: { requestId: expect.any(String), version: CLIENT_WINDOW.current } });
+  });
+
+  it('says the translation is unknown, in a named error, when the library holds none by that name', async () => {
+    const { statusCode, body } = await askedCanon(routed(new Map([[CANON_URL, {
+      status: 404,
+      body: { error: { code: 'unknown_translation', message: 'no such translation in the registry' } },
+    }]])));
+    expect(statusCode).toBe(404);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.translation.unknown');
+  });
+
+  it('is part of the versioned API, so a client too old to read it is told to update', async () => {
+    const app = buildApp({ settings: withCorpus, logger: false, fetching: refusing });
+    const response = await app.inject({ method: 'GET', url: '/api/v1/translations/KJV/canon' });
+    await app.close();
+    expect(response.statusCode).toBe(426);
+  });
+});
+
+describe('the verses the application reads from the library', () => {
+  const askedVerses = async (
+    fetching: Fetching,
+    query = 'book=GEN&chapter=1&verses=1',
+  ): Promise<{ statusCode: number; body: unknown }> => {
+    const app = buildApp({ settings: withCorpus, logger: false, fetching });
+    try {
+      const response = await app.inject({ method: 'GET', url: `/api/v1/translations/KJV/verses?${query}`, headers: current });
+      return { statusCode: response.statusCode, body: response.json() };
+    } finally {
+      await app.close();
+    }
+  };
+
+  it('answers the verses in the envelope every successful response takes, the revision recorded with them', async () => {
+    const fetching = routed(new Map([[CANON_URL, { status: 200, body: canon }], [VERSES_URL, { status: 200, body: verses }]]));
+    const { statusCode, body } = await askedVerses(fetching);
+    expect(statusCode).toBe(200);
+    expect(body).toEqual({ data: { verses }, meta: { requestId: expect.any(String), version: CLIENT_WINDOW.current } });
+  });
+
+  it('passes the revision it was asked for on to the library', async () => {
+    let versesUrl = '';
+    const fetching: Fetching = (url) => {
+      if (url.startsWith(VERSES_URL)) versesUrl = url;
+      const body = url.startsWith(CANON_URL) ? canon : verses;
+      return Promise.resolve({ status: 200, json: () => Promise.resolve(body) });
+    };
+    await askedVerses(fetching, 'book=GEN&chapter=1&verses=1&revision=2');
+    expect(versesUrl).toContain('revision=2');
+  });
+
+  it('rejects an out-of-range chapter as a named error, without asking the library for verses at all', async () => {
+    const fetching = routed(new Map([[CANON_URL, { status: 200, body: canon }]]));
+    const { statusCode, body } = await askedVerses(fetching, 'book=GEN&chapter=99&verses=1');
+    expect(statusCode).toBe(404);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.not_found');
+  });
+
+  it('rejects a book the canon does not hold as a named error, without asking the library for verses at all', async () => {
+    const fetching = routed(new Map([[CANON_URL, { status: 200, body: canon }]]));
+    const { statusCode, body } = await askedVerses(fetching, 'book=ZZZ&chapter=1&verses=1');
+    expect(statusCode).toBe(404);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.not_found');
+  });
+
+  it('surfaces the library own refusal for a verse outside the chapter, as a named error', async () => {
+    const fetching = routed(new Map([
+      [CANON_URL, { status: 200, body: canon }],
+      [VERSES_URL, { status: 404, body: { error: { code: 'verse_not_in_store', message: 'GEN 1:99 is not stored' } } }],
+    ]));
+    const { statusCode, body } = await askedVerses(fetching, 'book=GEN&chapter=1&verses=99');
+    expect(statusCode).toBe(404);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.not_found');
+  });
+
+  it('rejects a verse list it cannot read as malformed, before asking the library at all', async () => {
+    const { statusCode, body } = await askedVerses(refusing, 'book=GEN&chapter=1&verses=nope');
+    expect(statusCode).toBe(422);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.malformed');
+  });
+
+  it('rejects a request missing a required field as malformed, before asking the library at all', async () => {
+    const { statusCode, body } = await askedVerses(refusing, 'book=GEN&verses=1');
+    expect(statusCode).toBe(422);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.malformed');
+  });
+
+  it('rejects a request with no verse list at all as malformed', async () => {
+    const { statusCode, body } = await askedVerses(refusing, 'book=GEN&chapter=1');
+    expect(statusCode).toBe(422);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.malformed');
+  });
+
+  it('rejects a backwards range as malformed, before asking the library at all', async () => {
+    const { statusCode, body } = await askedVerses(refusing, 'book=GEN&chapter=1&verses=4-1');
+    expect(statusCode).toBe(422);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.malformed');
+  });
+
+  it('rejects a malformed revision as malformed, before asking the library at all', async () => {
+    const { statusCode, body } = await askedVerses(refusing, 'book=GEN&chapter=1&verses=1&revision=nope');
+    expect(statusCode).toBe(422);
+    expect((body as { error: { code: string } }).error.code).toBe('corpus.reference.malformed');
+  });
+
+  it('is part of the versioned API, so a client too old to read it is told to update', async () => {
+    const app = buildApp({ settings: withCorpus, logger: false, fetching: refusing });
+    const response = await app.inject({ method: 'GET', url: '/api/v1/translations/KJV/verses?book=GEN&chapter=1&verses=1' });
+    await app.close();
+    expect(response.statusCode).toBe(426);
+  });
+});

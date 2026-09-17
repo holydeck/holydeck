@@ -7,11 +7,14 @@ import {
   LIBRARY_NOT_CONFIGURED,
   LIBRARY_UNAVAILABLE,
   LIBRARY_UNEXPECTED,
+  REFERENCE_MALFORMED,
+  REFERENCE_NOT_FOUND,
   corpusBinding,
   corpusBoundaryFor,
   corpusClient,
   corpusProbeProblems,
   probeCorpusIsClosed,
+  selectReference,
 } from './corpus.js';
 
 import type { Fetching } from './corpus.js';
@@ -130,6 +133,107 @@ describe('asking the library for its translations', () => {
   });
 });
 
+const canon = {
+  translation: 'KJV',
+  source: 'bundled' as const,
+  books: [
+    { usfm: 'GEN', canon: 'ot', name: 'Genesis', chapters: [{ id: '1', label: '1' }, { id: '2', label: '2' }] },
+  ],
+};
+
+const verses = {
+  verses: { '1': 'In the beginning God created the heaven and the earth.' },
+  citation: 'Genesis 1:1 (KJV)',
+  revision: 3,
+  fetchedAt: '2026-09-13T09:30:00Z',
+  source: 'cache' as const,
+};
+
+describe('asking the library for a canon', () => {
+  it('asks the released route for the translation asked about', async () => {
+    const { fetching, asked } = answering([{ status: 200, body: canon }]);
+    const result = await corpusClient(INTERNAL, fetching).canon('KJV');
+    expect(asked).toEqual([{ url: 'http://corpus:8080/api/v1/translations/KJV/canon', headers: { authorization: `Bearer ${TOKEN}` } }]);
+    expect(result).toEqual({ ok: true, value: canon });
+  });
+
+  it('refuses a canon it cannot read', async () => {
+    const { fetching } = answering([{ status: 200, body: { translation: 'KJV', source: 'bundled', books: 'nope' } }]);
+    const result = await corpusClient(INTERNAL, fetching).canon('KJV');
+    expect(result).toEqual({
+      ok: false,
+      refusal: { code: 'corpus.unexpected_error', status: 500, message: CORPUS_WORDING['corpus.unexpected_error'] },
+    });
+  });
+});
+
+describe('asking the library for verses', () => {
+  it('asks the released route with the reference and revision it was given', async () => {
+    const { fetching, asked } = answering([{ status: 200, body: verses }]);
+    const result = await corpusClient(INTERNAL, fetching).verses('KJV', 'GEN', 1, [1, 2, 3], 3);
+    expect(asked).toEqual([{
+      url: 'http://corpus:8080/api/v1/translations/KJV/verses?book=GEN&chapter=1&verses=1%2C2%2C3&revision=3',
+      headers: { authorization: `Bearer ${TOKEN}` },
+    }]);
+    expect(result).toEqual({ ok: true, value: verses });
+  });
+
+  it('asks for the latest revision when none is given', async () => {
+    const { fetching, asked } = answering([{ status: 200, body: verses }]);
+    await corpusClient(INTERNAL, fetching).verses('KJV', 'GEN', 1, [1]);
+    expect(asked[0]?.url).toBe('http://corpus:8080/api/v1/translations/KJV/verses?book=GEN&chapter=1&verses=1');
+  });
+
+  it('surfaces the corpus own refusal for a verse outside the chapter, as a named error', async () => {
+    const { fetching } = answering([{
+      status: 404,
+      body: { error: { code: 'verse_not_in_store', message: 'GEN 1:99 is not in the store' } },
+    }]);
+    const result = await corpusClient(INTERNAL, fetching).verses('KJV', 'GEN', 1, [99]);
+    expect(result).toEqual({
+      ok: false,
+      refusal: { code: 'corpus.reference.not_found', status: 404, message: CORPUS_WORDING['corpus.reference.not_found'] },
+    });
+  });
+});
+
+describe('selecting one validated reference', () => {
+  it('reads the canon, confirms the reference is in it, and records the revision the verses came back at', async () => {
+    const { fetching, asked } = answering([{ status: 200, body: canon }, { status: 200, body: verses }]);
+    const client = corpusClient(INTERNAL, fetching);
+    const result = await selectReference(client, { abbr: 'KJV', book: 'GEN', chapter: 1, verses: [1] });
+    expect(asked.map((call) => call.url)).toEqual([
+      'http://corpus:8080/api/v1/translations/KJV/canon',
+      'http://corpus:8080/api/v1/translations/KJV/verses?book=GEN&chapter=1&verses=1',
+    ]);
+    expect(result).toEqual({ ok: true, value: verses });
+    expect(result.ok && result.value.revision).toBe(3);
+  });
+
+  it('rejects a book the canon does not hold, without asking for verses at all', async () => {
+    const { fetching, asked } = answering([{ status: 200, body: canon }]);
+    const client = corpusClient(INTERNAL, fetching);
+    const result = await selectReference(client, { abbr: 'KJV', book: 'ZZZ', chapter: 1, verses: [1] });
+    expect(asked).toHaveLength(1);
+    expect(result).toEqual({ ok: false, refusal: REFERENCE_NOT_FOUND });
+  });
+
+  it('rejects a chapter the book does not hold, without asking for verses at all', async () => {
+    const { fetching, asked } = answering([{ status: 200, body: canon }]);
+    const client = corpusClient(INTERNAL, fetching);
+    const result = await selectReference(client, { abbr: 'KJV', book: 'GEN', chapter: 99, verses: [1] });
+    expect(asked).toHaveLength(1);
+    expect(result).toEqual({ ok: false, refusal: REFERENCE_NOT_FOUND });
+  });
+
+  it('forwards the canon refusal when the library itself cannot be reached', async () => {
+    const result = await selectReference(corpusClient(INTERNAL, unreachable), {
+      abbr: 'KJV', book: 'GEN', chapter: 1, verses: [1],
+    });
+    expect(result).toEqual({ ok: false, refusal: LIBRARY_UNAVAILABLE });
+  });
+});
+
 describe('translating a refusal the library made', () => {
   const failure = (code: string, message: string): { status: number; body: unknown } => ({
     status: 400,
@@ -191,7 +295,7 @@ describe('the words a client is given for a library failure', () => {
   });
 
   it('gives each refusal it makes on its own the status the contract publishes for that code', () => {
-    for (const refusal of [LIBRARY_UNAVAILABLE, LIBRARY_UNEXPECTED, LIBRARY_NOT_CONFIGURED]) {
+    for (const refusal of [LIBRARY_UNAVAILABLE, LIBRARY_UNEXPECTED, LIBRARY_NOT_CONFIGURED, REFERENCE_NOT_FOUND, REFERENCE_MALFORMED]) {
       expect(MESSAGE_CODES.find((entry) => entry.code === refusal.code)?.status, refusal.code).toBe(refusal.status);
     }
   });

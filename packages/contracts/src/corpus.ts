@@ -5,7 +5,7 @@
 // an internal service's wording is how internal wording quietly becomes a public promise — and the
 // mapping below therefore records both what is translated and what deliberately is not.
 
-import { type Parsed, type ParseFn, isRecord, parseObject } from './problems.js';
+import { FIELD_CODES, type Parsed, type ParseFn, type Problem, isRecord, parseObject } from './problems.js';
 
 export const CORPUS_AUTH_HEADER = 'authorization';
 export const CORPUS_AUTH_SCHEME = 'Bearer';
@@ -83,6 +83,82 @@ export function parseCorpusTranslations(
   path = 'corpusTranslations',
 ): Parsed<readonly CorpusTranslation[]> {
   return parseObject(value, path, (reader) => reader.parsedList('translations', parseCorpusTranslation));
+}
+
+export type CorpusCanonChapter = { readonly id: string; readonly label: string };
+
+export type CorpusCanonBook = {
+  readonly usfm: string;
+  readonly canon: string;
+  readonly name: string;
+  readonly longName?: string;
+  readonly abbreviation?: string;
+  readonly chapters: readonly CorpusCanonChapter[];
+};
+
+export type CorpusCanon = {
+  readonly translation: string;
+  readonly source: 'bundled' | 'synced';
+  readonly books: readonly CorpusCanonBook[];
+};
+
+const CORPUS_CANON_SOURCES = ['bundled', 'synced'] as const;
+
+const parseCorpusCanonChapter: ParseFn<CorpusCanonChapter> = (value, path) =>
+  parseObject(value, path, (reader) => ({ id: reader.text('id'), label: reader.text('label') }));
+
+const parseCorpusCanonBook: ParseFn<CorpusCanonBook> = (value, path) =>
+  parseObject(value, path, (reader) => {
+    const longName = reader.optionalText('longName');
+    const abbreviation = reader.optionalText('abbreviation');
+    return {
+      usfm: reader.text('usfm'),
+      canon: reader.text('canon'),
+      name: reader.text('name'),
+      ...(longName === undefined ? {} : { longName }),
+      ...(abbreviation === undefined ? {} : { abbreviation }),
+      chapters: reader.parsedList('chapters', parseCorpusCanonChapter),
+    };
+  });
+
+export function parseCorpusCanon(value: unknown, path = 'corpusCanon'): Parsed<CorpusCanon> {
+  return parseObject(value, path, (reader) => ({
+    translation: reader.text('translation'),
+    source: reader.choice('source', CORPUS_CANON_SOURCES),
+    books: reader.parsedList('books', parseCorpusCanonBook),
+  }));
+}
+
+export type CorpusVerses = {
+  readonly verses: Readonly<Record<string, string>>;
+  readonly citation: string;
+  readonly revision: number;
+  readonly fetchedAt: string;
+  readonly source: 'cache' | 'live';
+};
+
+const CORPUS_VERSE_SOURCES = ['cache', 'live'] as const;
+
+/** No reader helper reads a map keyed by an arbitrary verse number, so this reads it by hand. */
+function parseVerseTexts(raw: unknown, path: string): Parsed<Readonly<Record<string, string>>> {
+  if (!isRecord(raw)) return { ok: false, problems: [{ path, code: FIELD_CODES.notAnObject, message: 'must be an object' }] };
+  const problems: Problem[] = [];
+  const verses: Record<string, string> = {};
+  for (const [verse, text] of Object.entries(raw)) {
+    if (typeof text === 'string') verses[verse] = text;
+    else problems.push({ path: `${path}.${verse}`, code: FIELD_CODES.notText, message: 'must be text' });
+  }
+  return problems.length === 0 ? { ok: true, value: verses } : { ok: false, problems };
+}
+
+export function parseCorpusVerses(value: unknown, path = 'corpusVerses'): Parsed<CorpusVerses> {
+  return parseObject(value, path, (reader) => ({
+    verses: reader.parsed('verses', parseVerseTexts, {}),
+    citation: reader.text('citation'),
+    revision: reader.wholeNumber('revision', 1),
+    fetchedAt: reader.time('fetchedAt'),
+    source: reader.choice('source', CORPUS_VERSE_SOURCES),
+  }));
 }
 
 export type CorpusErrorMapping = { readonly corpus: string; readonly http: number; readonly code: string };
