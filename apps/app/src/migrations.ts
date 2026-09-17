@@ -12,6 +12,7 @@ import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } fr
 import { LIBRARY_INDEXES, LIBRARY_RECORD } from './library.js';
 import { MEDIA_ASSET_RECORD, MEDIA_INDEXES } from './media.js';
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
+import { PRESENCE_INDEXES, createPresenceIndexOn, dropPresenceIndexOn } from './presence.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { SERVICE_INDEXES, SERVICE_RECORD } from './services.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
@@ -25,6 +26,7 @@ import type { AttemptIndex } from './attempts.js';
 import type { CapabilityIndex } from './capabilities.js';
 import type { RequestContext } from './context.js';
 import type { PasskeyIndex } from './passkeys.js';
+import type { PresenceIndex } from './presence.js';
 import type { QueueIndex } from './queue.js';
 import type { RecordName } from './records.js';
 import type { Document, Repository, RepositoryDb } from './repositories.js';
@@ -87,6 +89,9 @@ export interface MigrationApi {
   /** Nor is a capability: a Guest's invitation or an output window's grant, gone the moment it expires. */
   createCapabilityIndex(index: CapabilityIndex): Promise<string>;
   dropCapabilityIndex(name: string): Promise<void>;
+  /** Nor is presence: who is editing something right now, refreshed while they are and gone when they stop. */
+  createPresenceIndex(index: PresenceIndex): Promise<string>;
+  dropPresenceIndex(name: string): Promise<void>;
 }
 
 export interface SchemaMigration {
@@ -273,6 +278,16 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
       for (const index of [...MEDIA_INDEXES].reverse()) await api.dropIndex(MEDIA_ASSET_RECORD, index.name);
     },
   },
+  {
+    version: 14,
+    name: 'the index everyone editing one piece of content is listed by',
+    async up(api) {
+      for (const index of PRESENCE_INDEXES) await api.createPresenceIndex(index);
+    },
+    async down(api) {
+      for (const index of [...PRESENCE_INDEXES].reverse()) await api.dropPresenceIndex(index.name);
+    },
+  },
 ]);
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -373,6 +388,8 @@ export function migrationApi(db: RepositoryDb): MigrationApi {
     dropPasskeyIndex: (name: string) => dropPasskeyIndexOn(db, name),
     createCapabilityIndex: (index: CapabilityIndex) => createCapabilityIndexOn(db, index),
     dropCapabilityIndex: (name: string) => dropCapabilityIndexOn(db, name),
+    createPresenceIndex: (index: PresenceIndex) => createPresenceIndexOn(db, index),
+    dropPresenceIndex: (name: string) => dropPresenceIndexOn(db, name),
   });
 }
 

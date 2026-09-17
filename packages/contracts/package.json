@@ -61,6 +61,10 @@
       "types": "./dist/portable.d.ts",
       "import": "./dist/portable.js"
     },
+    "./presence": {
+      "types": "./dist/presence.d.ts",
+      "import": "./dist/presence.js"
+    },
     "./revisions": {
       "types": "./dist/revisions.d.ts",
       "import": "./dist/revisions.js"

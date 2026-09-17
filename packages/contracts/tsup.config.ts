@@ -15,6 +15,7 @@ export default defineConfig({
     'src/library.ts',
     'src/media.ts',
     'src/portable.ts',
+    'src/presence.ts',
     'src/revisions.ts',
     'src/service-templates.ts',
     'src/sessions.ts',
