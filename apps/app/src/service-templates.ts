@@ -57,6 +57,9 @@ export interface ServiceTemplatePreview extends ServiceTemplateRecord {
   readonly body: ServiceTemplateBody;
 }
 
+// TODO: no edit or archive verb yet — a Service Template is created once and read back exactly as it
+// was, which is a gap for the seeded default this store holds (see seed.ts's "Known limitations").
+// Revisit that note when this store settles its own update/archive semantics.
 export interface ServiceTemplateStore {
   create(context: unknown, draft: ServiceTemplateDraft): Promise<ServiceTemplatePreview>;
   /** The entries a Service Template was created with, or nothing for one that was never created. */

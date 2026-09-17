@@ -18,6 +18,14 @@
 // no store's `create` a second time, and so reads back an Admin's own edit to a seeded record — its
 // name, its shortcut, its boxes — exactly as the Admin left it, never as this file would restart it.
 //
+// Two boots racing this same check-then-create is the same shape `migrations.ts` already guards
+// against for the ledger it claims — a unique identity refuses the loser's write. There, the loser
+// is left refused, because a schema migration cannot half-apply. Here, the loser has lost nothing:
+// the record it wanted to seed is, by the time it is refused, exactly what the winner just wrote. So
+// `ensured` below catches only that one store's own conflict refusal, re-reads to confirm the record
+// now exists, and moves on — a boot that raced another one still serves rather than crashing on a
+// database that is in fact already correctly seeded.
+//
 // Nothing seeded here carries licensed content. A Slide Layout's Text box is bound by field name —
 // `KeyedBinding.contentKind`/`contentKey`/`languageKey` — never by literal words, so no seed layout
 // can carry a Bible verse or a lyric line by construction (see `@holydeck/contracts/layouts`'s own
@@ -37,14 +45,14 @@
 
 import { CONTENT_LANGUAGES } from '@holydeck/contracts/content-languages';
 
-import { CONTENT_LANGUAGE_PERMISSIONS, contentLanguagesOn } from './content-languages.js';
+import { CONTENT_LANGUAGE_PERMISSIONS, ContentLanguageError, contentLanguagesOn } from './content-languages.js';
 import { requestContext } from './context.js';
 import { LIBRARY_PERMISSIONS } from './library.js';
 import { REVISION_PERMISSIONS } from './revisions.js';
-import { SERVICE_TEMPLATE_PERMISSIONS, serviceTemplatesOn } from './service-templates.js';
-import { SLIDE_LABEL_PERMISSIONS, slideLabelsOn } from './slide-labels.js';
-import { LAYOUT_PERMISSIONS, slideLayoutsOn } from './slide-layouts.js';
-import { slideGroupsOn } from './slide-groups.js';
+import { SERVICE_TEMPLATE_PERMISSIONS, ServiceTemplateError, serviceTemplatesOn } from './service-templates.js';
+import { SLIDE_LABEL_PERMISSIONS, SlideLabelError, slideLabelsOn } from './slide-labels.js';
+import { LAYOUT_PERMISSIONS, SlideLayoutError, slideLayoutsOn } from './slide-layouts.js';
+import { SlideGroupError, slideGroupsOn } from './slide-groups.js';
 
 import type { LayoutBox, SlideLayoutBody } from '@holydeck/contracts/layouts';
 import type { ServiceTemplateBody, ServiceTemplateSection } from '@holydeck/contracts/service-templates';
@@ -73,6 +81,8 @@ export function seedContext(correlationId: string): RequestContext {
   });
 }
 
+// 'ta': spec §11.5 seeds Tamil as this instance's first content language, so a seeded box is bound
+// to it by default rather than left to bind against a registry entry nothing has created yet.
 const textBox = (id: string, contentKind: 'song' | 'sermon' | 'reading', contentKey: string): LayoutBox => ({
   id,
   kind: 'text',
@@ -143,8 +153,36 @@ export interface SeedOutcome {
 }
 
 export interface Seed {
-  /** Seeds every record a fresh instance needs and was not already stamped with. Safe to call twice. */
+  /**
+   * Seeds whichever of these records a fresh instance does not already hold, under the well-known
+   * id each is checked for by, and returns every one of those ids regardless of whether this call
+   * is the one that created it — so a second run's outcome names the same records as the first.
+   * Safe to call twice, and safe to call from two boots racing each other (see the header above).
+   */
   run(context: unknown): Promise<SeedOutcome>;
+}
+
+/**
+ * Writes one seed record only if `read` does not already find it, the way every store's own
+ * `create` is checked against before this file ever calls it. If a concurrent boot won the race —
+ * `write` throws the conflict `isLostRace` names for this store — this run has lost nothing: the
+ * record it wanted is, by construction, exactly what the winner just wrote, so a re-read confirming
+ * it now exists is enough to move on rather than fail this boot over a database that is in fact
+ * already correctly seeded. Any other failure, including a conflict the re-read cannot confirm, is
+ * still raised: it is not the race this file knows how to shrug off.
+ */
+async function ensured(
+  read: () => Promise<unknown>,
+  write: () => Promise<unknown>,
+  isLostRace: (error: unknown) => boolean,
+): Promise<void> {
+  if ((await read()) !== undefined) return;
+  try {
+    await write();
+  } catch (error) {
+    if (isLostRace(error) && (await read()) !== undefined) return;
+    throw error;
+  }
 }
 
 export function seedOn(db: RepositoryDb, options: SeedOptions): Seed {
@@ -158,59 +196,74 @@ export function seedOn(db: RepositoryDb, options: SeedOptions): Seed {
     async run(context) {
       const seededLanguages: string[] = [];
       for (const language of CONTENT_LANGUAGES) {
-        if ((await languages.get(context, language.key)) === undefined) {
-          await languages.create(context, language.key, {
-            displayName: language.displayName,
-            script: language.script,
-            fallbackFont: language.fallbackFont,
-          });
-        }
+        await ensured(
+          () => languages.get(context, language.key),
+          () =>
+            languages.create(context, language.key, {
+              displayName: language.displayName,
+              script: language.script,
+              fallbackFont: language.fallbackFont,
+            }),
+          (error) => error instanceof ContentLanguageError && error.kind === 'conflict',
+        );
         seededLanguages.push(language.key);
       }
 
       const seededLabels: string[] = [];
       for (const label of SEED_LABELS) {
-        if ((await labels.get(context, label.id)) === undefined) {
-          await slideLabelsOn(db, { now: options.now, newId: () => label.id }).create(context, {
-            name: label.name,
-            shortcut: label.shortcut,
-          });
-        }
+        await ensured(
+          () => labels.get(context, label.id),
+          () =>
+            slideLabelsOn(db, { now: options.now, newId: () => label.id }).create(context, {
+              name: label.name,
+              shortcut: label.shortcut,
+            }),
+          (error) => error instanceof SlideLabelError && error.kind === 'conflict',
+        );
         seededLabels.push(label.id);
       }
 
       const seededLayouts: string[] = [];
       for (const layout of SEED_LAYOUTS) {
-        if ((await layouts.preview(context, layout.id)) === undefined) {
-          await slideLayoutsOn(db, { now: options.now, newId: () => layout.id }).create(context, {
-            name: layout.name,
-            body: layout.body,
-          });
-        }
+        await ensured(
+          () => layouts.preview(context, layout.id),
+          () =>
+            slideLayoutsOn(db, { now: options.now, newId: () => layout.id }).create(context, {
+              name: layout.name,
+              body: layout.body,
+            }),
+          (error) => error instanceof SlideLayoutError && error.kind === 'conflict',
+        );
         seededLayouts.push(layout.id);
       }
 
       const seededTemplates: string[] = [];
       for (const template of SEED_TEMPLATES) {
-        if ((await templates.preview(context, template.id)) === undefined) {
-          await serviceTemplatesOn(db, { now: options.now, newId: () => template.id }).create(context, {
-            name: template.name,
-            body: template.body,
-          });
-        }
+        await ensured(
+          () => templates.preview(context, template.id),
+          () =>
+            serviceTemplatesOn(db, { now: options.now, newId: () => template.id }).create(context, {
+              name: template.name,
+              body: template.body,
+            }),
+          (error) => error instanceof ServiceTemplateError && error.kind === 'conflict',
+        );
         seededTemplates.push(template.id);
       }
 
       const seededGroups: string[] = [];
       for (const group of SEED_GROUPS) {
-        if ((await groups.current(context, group.id)) === undefined) {
-          await slideGroupsOn(db, { now: options.now, newId: () => group.id }).create(
-            context,
-            'slideGroup',
-            group.title,
-            group.body,
-          );
-        }
+        await ensured(
+          () => groups.current(context, group.id),
+          () =>
+            slideGroupsOn(db, { now: options.now, newId: () => group.id }).create(
+              context,
+              'slideGroup',
+              group.title,
+              group.body,
+            ),
+          (error) => error instanceof SlideGroupError && error.kind === 'conflict',
+        );
         seededGroups.push(group.id);
       }
 

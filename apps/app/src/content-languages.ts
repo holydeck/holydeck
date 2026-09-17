@@ -44,8 +44,10 @@ export interface ContentLanguageIndex {
   readonly options: Readonly<Record<string, unknown>>;
 }
 
-// One index, and it serves the only reads this store makes: the standing stamp of one key, and of
-// every key. Unique, so a stamp history growing by one is the database's rule too.
+// One index, serving the read this store makes most often: the standing stamp of one key, found by
+// sorting that key's own rows. `everything()` still scans every row unfiltered — there are few
+// content languages, so an unindexed sweep to build the catalogue is not worth a second index over.
+// Unique, so a stamp history growing by one is the database's rule too.
 const DECLARED_INDEXES: readonly ContentLanguageIndex[] = [
   { name: 'content_language_stamp', keys: { languageKey: 1, sequence: -1 }, options: { unique: true } },
 ];

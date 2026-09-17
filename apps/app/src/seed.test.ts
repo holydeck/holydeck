@@ -7,6 +7,7 @@ import { contentLanguagesOn } from './content-languages.js';
 import { requestContext } from './context.js';
 import { RECORDS } from './records.js';
 import { SEED_ACTOR, seedContext, seedOn } from './seed.js';
+import { serviceContext, servicesOn } from './services.js';
 import { serviceTemplatesOn } from './service-templates.js';
 import { slideGroupsOn } from './slide-groups.js';
 import { slideLabelsOn } from './slide-labels.js';
@@ -53,10 +54,28 @@ describe('first-run seed data (SEED-01)', () => {
 
     const instantiated = instantiate(preview!.body, []);
     expect(instantiated.ok).toBe(true);
-    if (instantiated.ok) {
-      expect(instantiated.items).toHaveLength(4);
-      expect(instantiated.items.every((item) => item.kind === 'custom-slide' && item.content === undefined)).toBe(true);
-    }
+    if (!instantiated.ok) return;
+    expect(instantiated.items).toHaveLength(4);
+    expect(instantiated.items.every((item) => item.kind === 'custom-slide' && item.content === undefined)).toBe(true);
+
+    // Not just instantiated in the abstract: a real Service, created through the same store and the
+    // same permission-checked context an Editor's own first Service goes through, built entirely from
+    // what seeding left behind — no catalogue an Admin had to author first.
+    const itemsById = new Map(instantiated.items.map((item) => [item.id, item]));
+    const sections = preview!.body.sections.map((section) => ({
+      id: section.id,
+      name: section.name,
+      items: section.entries.map((entry) => itemsById.get(entry.id)!),
+    }));
+    const services = servicesOn(db, { now });
+    const created = await services.create(serviceContext(ADMINISTRATOR, 'req-service0000001'), {
+      title: 'First Sunday',
+      date: '2026-09-20',
+      site: 'Main',
+      sections,
+    });
+    expect(created.sections).toHaveLength(4);
+    expect(created.sections.flatMap((s) => s.items).every((item) => item.content === undefined)).toBe(true);
   });
 
   it('seeds a content-language registry including Tamil and Romanized Tamil', async () => {
@@ -74,9 +93,9 @@ describe('first-run seed data (SEED-01)', () => {
 
     const { labels } = stores(db, now);
     const catalogue = await labels.catalogue(seedContext('req-read000000003'));
-    expect(catalogue.length).toBeGreaterThanOrEqual(1);
+    expect(catalogue).toHaveLength(8);
     const shortcuts = catalogue.map((entry) => entry.shortcut);
-    expect(new Set(shortcuts).size).toBe(shortcuts.length);
+    expect(new Set(shortcuts).size).toBe(8);
   });
 
   it('seeds at least one Slide Layout per content kind', async () => {
@@ -104,7 +123,7 @@ describe('first-run seed data (SEED-01)', () => {
     const { templates } = stores(db, now);
     expect(outcome.serviceTemplates).toHaveLength(1);
     const preview = await templates.preview(seedContext('req-read000000005'), outcome.serviceTemplates[0]!);
-    expect(preview?.body.sections.length).toBeGreaterThanOrEqual(1);
+    expect(preview?.body.sections.map((entry) => entry.name)).toEqual(['Welcome', 'Worship', 'Message', 'Closing']);
   });
 
   it('seeds a default Standby empty screen, modelled as an empty slide group', async () => {
@@ -169,11 +188,11 @@ describe('first-run seed data (SEED-01)', () => {
     expect((await layouts.archive(adminContext('req-admin0000009f'), outcome.slideLayouts[0]!))?.stamp.archivedAt).toBeDefined();
 
     // service template: seeded and versioned, but this store has no edit or archive verb at all —
-    // a Service Template is created once and read back exactly as it was (disclosed friction).
+    // a Service Template is created once and read back exactly as it was (see service-templates.ts's
+    // own TODO on ServiceTemplateStore, and "Known limitations" in the T59 report).
     const template = await templates.preview(read, outcome.serviceTemplates[0]!);
     expect(template?.createdBy).toBe(SEED_ACTOR);
     expect(template?.revision).toBe(1);
-    expect(Object.keys(templates)).toEqual(['create', 'preview']);
 
     // slide group: seeded and editable, but this store has no archive/unarchive — its offer/withdraw
     // verb is enable/disable (disclosed friction), exercised here instead.
@@ -188,22 +207,38 @@ describe('first-run seed data (SEED-01)', () => {
   it('carries no Bible text and no lyrics', async () => {
     const { db, now } = setup();
     const outcome = await seedOn(db, { now }).run(seedContext('req-seed00000010'));
-    const { layouts, templates, groups } = stores(db, now);
+    const { labels, layouts, templates, groups } = stores(db, now);
     const read = seedContext('req-read000000010');
+
+    // Every seeded free-text field, swept in one place: this is a legally-sensitive requirement
+    // (T11's no-bundled-licensed-content decision), so short and structural is checked directly
+    // rather than merely inferred from how boxes are bound.
+    const freeText: string[] = [];
 
     for (const id of outcome.slideLayouts) {
       const preview = await layouts.preview(read, id);
+      freeText.push(preview!.name);
       for (const box of preview!.body.boxes) {
         if (box.kind === 'text') expect(box.binding.mode).toBe('keyed');
         if (box.kind === 'media') expect(box.placeholder).toBeUndefined();
       }
     }
 
+    for (const id of outcome.slideLabels) {
+      const label = await labels.get(read, id);
+      freeText.push(label!.name);
+    }
+
     for (const id of outcome.serviceTemplates) {
       const preview = await templates.preview(read, id);
+      freeText.push(preview!.name);
       for (const section of preview!.body.sections) {
+        freeText.push(section.name);
         for (const entry of section.entries) {
-          if (entry.slot === 'fixed') expect(entry.content).toBeUndefined();
+          if (entry.slot === 'fixed') {
+            freeText.push(entry.title);
+            expect(entry.content).toBeUndefined();
+          }
         }
       }
     }
@@ -211,6 +246,13 @@ describe('first-run seed data (SEED-01)', () => {
     for (const id of outcome.slideGroups) {
       const group = await groups.current(read, id);
       expect(group?.body.slides).toEqual([]);
+      freeText.push(group!.title);
+    }
+
+    expect(freeText.length).toBeGreaterThan(0);
+    for (const text of freeText) {
+      expect(text.length).toBeLessThanOrEqual(40);
+      expect(text).not.toContain('\n');
     }
   });
 });
