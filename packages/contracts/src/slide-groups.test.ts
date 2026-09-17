@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { CONTENT_LANGUAGES } from './content-languages.js';
 import { FIELD_CODES } from './problems.js';
-import { SLIDE_GROUP_MODES, parseSlide, parseSlideGroupBody, resolveSlide } from './slide-groups.js';
+import { SLIDE_GROUP_MODES, parseLanguageBlock, parseSlide, parseSlideGroupBody, resolveSlide } from './slide-groups.js';
 
-import type { Slide, SlideGroupBody } from './slide-groups.js';
+import type { LanguageBlock, Slide, SlideGroupBody } from './slide-groups.js';
 
-const SLIDE = { id: 'slide-1', enabled: true, label: 'Welcome' };
+const SLIDE = { id: 'slide-1', enabled: true, label: 'Welcome', languageBlocks: [] };
 
 describe('reading a Slide', () => {
   it('round-trips id, enabled, and label', () => {
@@ -20,6 +21,7 @@ describe('reading a Slide', () => {
       'slide.id',
       'slide.enabled',
       'slide.label',
+      'slide.languageBlocks',
     ]);
   });
 
@@ -103,6 +105,7 @@ describe('reading a SlideGroupBody', () => {
     expect(!parsed.ok && parsed.problems.map((problem) => problem.path)).toEqual([
       'group.slides.0.enabled',
       'group.slides.0.label',
+      'group.slides.0.languageBlocks',
     ]);
   });
 
@@ -172,5 +175,61 @@ describe("resolving a slide's effective background and Slide Layout (SLID-02)", 
       slideLayoutId: { value: 'layout-a', source: 'inherited' },
       background: { value: undefined, source: 'inherited' },
     });
+  });
+});
+
+describe('reading a LanguageBlock', () => {
+  const BLOCK = { id: 'block-1', languageKey: 'ta', text: 'Andru' };
+
+  it('round-trips id, languageKey, and text', () => {
+    expect(parseLanguageBlock(BLOCK, 'block')).toEqual({ ok: true, value: BLOCK });
+  });
+
+  it('refuses a missing field with its own problem, one per field', () => {
+    const parsed = parseLanguageBlock({}, 'block');
+    expect(parsed.ok).toBe(false);
+    expect(!parsed.ok && parsed.problems.map((problem) => problem.path)).toEqual([
+      'block.id',
+      'block.languageKey',
+      'block.text',
+    ]);
+  });
+
+  it('refuses a languageKey the registry does not carry', () => {
+    const parsed = parseLanguageBlock({ ...BLOCK, languageKey: 'xx' }, 'block');
+    expect(parsed.ok).toBe(false);
+    expect(!parsed.ok && parsed.problems).toEqual([
+      {
+        path: 'block.languageKey',
+        code: FIELD_CODES.notAllowed,
+        message: 'must name a language in the content-language registry',
+      },
+    ]);
+  });
+});
+
+describe('multilingual language blocks on a slide (LANG-01)', () => {
+  const BLOCK_TA: LanguageBlock = { id: 'block-1', languageKey: 'ta', text: 'Andru' };
+  const BLOCK_TA_LATN: LanguageBlock = { id: 'block-2', languageKey: 'ta-Latn', text: 'Andru vandhu' };
+
+  it('round-trips multiple ordered language blocks on one slide', () => {
+    const slide = { ...SLIDE, languageBlocks: [BLOCK_TA, BLOCK_TA_LATN] };
+    expect(parseSlide(slide, 'slide')).toEqual({ ok: true, value: slide });
+  });
+
+  it('preserves the order the blocks were written in, not any sorted order', () => {
+    const reversed = { ...SLIDE, languageBlocks: [BLOCK_TA_LATN, BLOCK_TA] };
+    const parsed = parseSlide(reversed, 'slide');
+    expect(parsed.ok && parsed.value.languageBlocks.map((block) => block.id)).toEqual(['block-2', 'block-1']);
+  });
+
+  it('has Tamil and Romanized Tamil as registry entries, not a hardcoded pair checked here', () => {
+    const keys = CONTENT_LANGUAGES.map((language) => language.key);
+    expect(keys).toEqual(['ta', 'ta-Latn']);
+    // Every registry entry parses as a valid languageKey, driven by the registry itself.
+    for (const language of CONTENT_LANGUAGES) {
+      const slide = { ...SLIDE, languageBlocks: [{ id: 'b', languageKey: language.key, text: 'x' }] };
+      expect(parseSlide(slide, 'slide').ok).toBe(true);
+    }
   });
 });

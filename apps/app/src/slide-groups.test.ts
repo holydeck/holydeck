@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { CONTENT_LANGUAGES } from '@holydeck/contracts/content-languages';
 import { resolveSlide } from '@holydeck/contracts/slide-groups';
 
 import { requestContext } from './context.js';
@@ -10,7 +11,7 @@ import { addressOf } from './revisions.js';
 import { SlideGroupError, slideGroupContext, slideGroupsOn } from './slide-groups.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
-import type { Slide, SlideGroupBody } from '@holydeck/contracts/slide-groups';
+import type { LanguageBlock, Slide, SlideGroupBody } from '@holydeck/contracts/slide-groups';
 
 import type { Document } from './repositories.js';
 import type { SlideGroupStore } from './slide-groups.js';
@@ -28,9 +29,18 @@ const REVISIONS = RECORDS.contentRevisions.collection;
 
 const AUDIT = RECORDS.auditEvents.collection;
 
-const SLIDE_A: Slide = { id: 'slide-1', enabled: true, label: 'Welcome' };
+const SLIDE_A: Slide = { id: 'slide-1', enabled: true, label: 'Welcome', languageBlocks: [] };
 
-const SLIDE_B: Slide = { id: 'slide-2', enabled: true, label: 'Verse' };
+const SLIDE_B: Slide = { id: 'slide-2', enabled: true, label: 'Verse', languageBlocks: [] };
+
+// LANG-01's own minimal registry names Tamil first, Romanized Tamil second — the order spec
+// §11.5 states as a song's default. Reading the fixtures' keys off the registry itself, rather
+// than typing 'ta'/'ta-Latn' here, is this file's own proof of the third plan bullet.
+const [TAMIL, ROMANIZED_TAMIL] = CONTENT_LANGUAGES;
+
+const BLOCK_TA: LanguageBlock = { id: 'block-1', languageKey: TAMIL!.key, text: 'Andru' };
+
+const BLOCK_TA_LATN: LanguageBlock = { id: 'block-2', languageKey: ROMANIZED_TAMIL!.key, text: 'Andru vandhu' };
 
 const CUSTOM: SlideGroupBody = {
   mode: 'custom',
@@ -133,6 +143,8 @@ describe('the lifecycle of a slide group or a reusable slide', () => {
     expect(await groups.overrideSlideBackground(ADMIN, 'nope', SLIDE_A.id, 'navy')).toBeUndefined();
     expect(await groups.clearSlideBackgroundOverride(ADMIN, 'nope', SLIDE_A.id)).toBeUndefined();
     expect(await groups.reorderSlides(ADMIN, 'nope', [])).toBeUndefined();
+    expect(await groups.duplicateLanguageBlock(ADMIN, 'nope', SLIDE_A.id, 'block-1')).toBeUndefined();
+    expect(await groups.reorderLanguageBlocks(ADMIN, 'nope', SLIDE_A.id, [])).toBeUndefined();
     expect(await groups.regenerate(ADMIN, 'nope', GENERATED)).toBeUndefined();
     expect(await groups.history(ADMIN, 'nope')).toEqual([]);
   });
@@ -402,6 +414,92 @@ describe("a slide inherits its group's background and Slide Layout by default (S
   });
 });
 
+describe('multiple language blocks on one song slide (LANG-01)', () => {
+  const withBlocks = (...blocks: readonly LanguageBlock[]): Slide => ({ ...SLIDE_A, languageBlocks: blocks });
+
+  it('stores multiple language blocks and edits one independently, leaving the other byte-identical', async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Song slide', {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      slides: [withBlocks(BLOCK_TA, BLOCK_TA_LATN)],
+    });
+    const id = created.stamp.id;
+    expect((await groups.current(ADMIN, id))?.body.slides[0]?.languageBlocks).toEqual([BLOCK_TA, BLOCK_TA_LATN]);
+
+    const editedBlock = { ...BLOCK_TA, text: 'Andru vandhu paadu' };
+    await groups.edit(ADMIN, id, {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      slides: [withBlocks(editedBlock, BLOCK_TA_LATN)],
+    });
+    const after = await groups.current(ADMIN, id);
+    expect(after?.body.slides[0]?.languageBlocks).toEqual([editedBlock, BLOCK_TA_LATN]);
+  });
+
+  it('duplicates a language block, inserted after the source, leaving every other block and slide untouched', async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Song slide', {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      slides: [withBlocks(BLOCK_TA), SLIDE_B],
+    });
+    const id = created.stamp.id;
+
+    const duplicated = await groups.duplicateLanguageBlock(ADMIN, id, SLIDE_A.id, BLOCK_TA.id);
+    const blocks = duplicated?.body.slides[0]?.languageBlocks;
+    expect(blocks?.map((block) => ({ languageKey: block.languageKey, text: block.text }))).toEqual([
+      { languageKey: BLOCK_TA.languageKey, text: BLOCK_TA.text },
+      { languageKey: BLOCK_TA.languageKey, text: BLOCK_TA.text },
+    ]);
+    expect(blocks?.[1]?.id).not.toBe(BLOCK_TA.id);
+    expect(duplicated?.body.slides[1]).toEqual(SLIDE_B);
+  });
+
+  it('reorders language blocks, and the persisted order is what every later read returns', async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Song slide', {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      slides: [withBlocks(BLOCK_TA, BLOCK_TA_LATN)],
+    });
+    const id = created.stamp.id;
+
+    const reordered = await groups.reorderLanguageBlocks(ADMIN, id, SLIDE_A.id, [BLOCK_TA_LATN.id, BLOCK_TA.id]);
+    expect(reordered?.body.slides[0]?.languageBlocks).toEqual([BLOCK_TA_LATN, BLOCK_TA]);
+    expect((await groups.current(ADMIN, id))?.body.slides[0]?.languageBlocks).toEqual([BLOCK_TA_LATN, BLOCK_TA]);
+  });
+
+  it("refuses a reorder that does not name exactly this slide's current blocks, once each", async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Song slide', {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      slides: [withBlocks(BLOCK_TA, BLOCK_TA_LATN)],
+    });
+    const error = await refused(groups.reorderLanguageBlocks(ADMIN, created.stamp.id, SLIDE_A.id, [BLOCK_TA.id]));
+    expect(error.kind).toBe('schema');
+  });
+
+  it('refuses naming a language block the slide does not hold', async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Song slide', {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      slides: [withBlocks(BLOCK_TA)],
+    });
+    const error = await refused(groups.duplicateLanguageBlock(ADMIN, created.stamp.id, SLIDE_A.id, 'nope'));
+    expect(error.kind).toBe('schema');
+    expect(error.message).toContain('nope');
+  });
+});
+
 describe('the permission boundary between naming an item and holding its body', () => {
   it.each([
     'current',
@@ -417,6 +515,8 @@ describe('the permission boundary between naming an item and holding its body', 
     'overrideSlideBackground',
     'clearSlideBackgroundOverride',
     'reorderSlides',
+    'duplicateLanguageBlock',
+    'reorderLanguageBlocks',
     'regenerate',
     'history',
   ] as const)('refuses %s without contentRevisions permission', async (verb) => {
@@ -445,6 +545,8 @@ describe('the permission boundary between naming an item and holding its body', 
       overrideSlideBackground: () => groups.overrideSlideBackground(reader, id, SLIDE_A.id, 'navy'),
       clearSlideBackgroundOverride: () => groups.clearSlideBackgroundOverride(reader, id, SLIDE_A.id),
       reorderSlides: () => groups.reorderSlides(reader, id, [SLIDE_A.id, SLIDE_B.id]),
+      duplicateLanguageBlock: () => groups.duplicateLanguageBlock(reader, id, SLIDE_A.id, 'block-1'),
+      reorderLanguageBlocks: () => groups.reorderLanguageBlocks(reader, id, SLIDE_A.id, []),
       regenerate: () => groups.regenerate(reader, id, GENERATED),
       history: () => groups.history(reader, id),
     } as const;
@@ -475,6 +577,15 @@ describe('this store never touches the audit trail', () => {
     await groups.overrideSlideBackground(ADMIN, id, SLIDE_A.id, 'crimson');
     await groups.clearSlideLayoutOverride(ADMIN, id, SLIDE_A.id);
     await groups.clearSlideBackgroundOverride(ADMIN, id, SLIDE_A.id);
+    await groups.edit(ADMIN, id, {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      slides: [{ ...SLIDE_A, languageBlocks: [BLOCK_TA] }],
+    });
+    const dupBlock = await groups.duplicateLanguageBlock(ADMIN, id, SLIDE_A.id, BLOCK_TA.id);
+    const blockIds = dupBlock!.body.slides[0]!.languageBlocks.map((block) => block.id).reverse();
+    await groups.reorderLanguageBlocks(ADMIN, id, SLIDE_A.id, blockIds);
     await groups.duplicate(ADMIN, id);
     await groups.history(ADMIN, id);
     expect(rows(db, AUDIT)).toEqual([]);

@@ -42,7 +42,7 @@ import { RevisionError, REVISION_PERMISSIONS, revisionsOn } from './revisions.js
 import type { EntityStamp } from '@holydeck/contracts/entities';
 import type { LibraryKind } from '@holydeck/contracts/library';
 import type { RevisionBody, RevisionRecord } from '@holydeck/contracts/revisions';
-import type { Slide, SlideGroupBody } from '@holydeck/contracts/slide-groups';
+import type { LanguageBlock, Slide, SlideGroupBody } from '@holydeck/contracts/slide-groups';
 
 import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
@@ -121,6 +121,20 @@ export interface SlideGroupStore {
   clearSlideBackgroundOverride(context: unknown, id: string, slideId: string): Promise<SlideGroupRecord | undefined>;
   /** slideIds must name exactly the group's current slides, once each — mirrors services.ts's reorderItems. */
   reorderSlides(context: unknown, id: string, slideIds: readonly string[]): Promise<SlideGroupRecord | undefined>;
+  /** Adds a copy of this language block, inserted right after it, on the same slide (LANG-01). */
+  duplicateLanguageBlock(
+    context: unknown,
+    id: string,
+    slideId: string,
+    blockId: string,
+  ): Promise<SlideGroupRecord | undefined>;
+  /** blockIds must name exactly this slide's current language blocks, once each — mirrors reorderSlides. */
+  reorderLanguageBlocks(
+    context: unknown,
+    id: string,
+    slideId: string,
+    blockIds: readonly string[],
+  ): Promise<SlideGroupRecord | undefined>;
   /** Refuses on a custom group. */
   regenerate(context: unknown, id: string, body: SlideGroupBody): Promise<RegeneratedSlideGroupRecord | undefined>;
   history(context: unknown, id: string): Promise<readonly SlideGroupRecord[]>;
@@ -232,8 +246,40 @@ const withReorderedSlides = (slides: readonly Slide[], slideIds: readonly string
     slideIds.length === slides.length &&
     new Set(slideIds).size === slideIds.length &&
     slideIds.every((id) => byId.has(id));
-  if (!matches) throw new SlideGroupError('schema', 'reorder must name exactly this group’s current slides, once each');
+  if (!matches) throw new SlideGroupError('schema', "reorder must name exactly this group's current slides, once each");
   return slideIds.map((id) => byId.get(id)!);
+};
+
+const locateLanguageBlock = (blocks: readonly LanguageBlock[], blockId: string): number => {
+  const index = blocks.findIndex((block) => block.id === blockId);
+  if (index === -1) throw new SlideGroupError('schema', `${blockId} does not name a language block on this slide`);
+  return index;
+};
+
+const withDuplicatedLanguageBlock = (
+  blocks: readonly LanguageBlock[],
+  blockId: string,
+  freshId: string,
+): readonly LanguageBlock[] => {
+  const index = locateLanguageBlock(blocks, blockId);
+  const next = [...blocks];
+  next.splice(index + 1, 0, { ...next[index]!, id: freshId });
+  return next;
+};
+
+const withReorderedLanguageBlocks = (
+  blocks: readonly LanguageBlock[],
+  blockIds: readonly string[],
+): readonly LanguageBlock[] => {
+  const byId = new Map(blocks.map((block) => [block.id, block] as const));
+  const matches =
+    blockIds.length === blocks.length &&
+    new Set(blockIds).size === blockIds.length &&
+    blockIds.every((id) => byId.has(id));
+  if (!matches) {
+    throw new SlideGroupError('schema', "reorder must name exactly this slide's current language blocks, once each");
+  }
+  return blockIds.map((id) => byId.get(id)!);
 };
 
 export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): SlideGroupStore {
@@ -382,6 +428,28 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
         const row = await standing(context, id);
         if (row === undefined) return undefined;
         const slides = withReorderedSlides(row.body.slides, slideIds);
+        return save(context, row, id, { ...row.body, slides });
+      }),
+
+    duplicateLanguageBlock: (context, id, slideId, blockId) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        const slides = withChangedSlide(row.body.slides, slideId, (slide) => ({
+          ...slide,
+          languageBlocks: withDuplicatedLanguageBlock(slide.languageBlocks, blockId, newId()),
+        }));
+        return save(context, row, id, { ...row.body, slides });
+      }),
+
+    reorderLanguageBlocks: (context, id, slideId, blockIds) =>
+      own(async () => {
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        const slides = withChangedSlide(row.body.slides, slideId, (slide) => ({
+          ...slide,
+          languageBlocks: withReorderedLanguageBlocks(slide.languageBlocks, blockIds),
+        }));
         return save(context, row, id, { ...row.body, slides });
       }),
 

@@ -19,6 +19,7 @@ export default defineConfig({
     'src/sessions.ts',
     'src/snapshots.ts',
     'src/services.ts',
+    'src/content-languages.ts',
     'src/slide-groups.ts',
     'src/totp.ts',
     'src/webauthn.ts',

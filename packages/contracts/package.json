@@ -73,6 +73,10 @@
       "types": "./dist/services.d.ts",
       "import": "./dist/services.js"
     },
+    "./content-languages": {
+      "types": "./dist/content-languages.d.ts",
+      "import": "./dist/content-languages.js"
+    },
     "./slide-groups": {
       "types": "./dist/slide-groups.d.ts",
       "import": "./dist/slide-groups.js"
