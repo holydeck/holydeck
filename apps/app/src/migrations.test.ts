@@ -97,6 +97,7 @@ describe('the shipped migrations', () => {
       'prepared_snapshots',
       'run_events',
       'schema_migrations',
+      'services',
       'sessions',
       'sign_in_attempts',
       'slide_layouts',

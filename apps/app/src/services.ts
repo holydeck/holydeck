@@ -11,7 +11,7 @@ import {
 import { isCalendarDay, parseService, parseServiceDraft } from '@holydeck/contracts/services';
 
 import { auditOn } from './audit.js';
-import { requestContext } from './context.js';
+import { contextProblems, requestContext } from './context.js';
 import { permissionsFor } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 
@@ -112,6 +112,16 @@ const own = async <T>(work: () => Promise<T>): Promise<T> => {
   }
 };
 
+const requireAuditPermission = (context: unknown): void => {
+  const problems = contextProblems(context);
+  if (problems.length > 0) throw new RepositoryError('context', `auditEvents: ${problems.join('; ')}`);
+  const granted = (context as RequestContext).permissions;
+  const permission = permissionsFor('auditEvents').append;
+  if (!granted.includes(permission)) {
+    throw new RepositoryError('permission', `auditEvents: the actor may not append, which needs ${permission}`);
+  }
+};
+
 function readDraft(draft: ServiceDraft): ServiceDraft {
   const parsed = parseServiceDraft(draft);
   if (!parsed.ok) throw new ServiceError('schema', `this is not a Service: ${problems(parsed.problems)}`);
@@ -185,6 +195,7 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
     draft: ServiceDraft,
     action: 'service.create' | 'service.duplicate',
   ): Promise<ServiceRecord> => {
+    requireAuditPermission(context);
     const fields = readDraft(draft);
     const id = newId();
     // The unique key catches two creations minting one identifier in the same instant; this catches
@@ -204,6 +215,7 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
     change: (row: StampRow, at: string, by: string) => EntityStamp,
     detail: string,
   ): Promise<ServiceRecord | undefined> => {
+    requireAuditPermission(context);
     const row = await standing(context, id);
     if (row === undefined) return undefined;
     const at = options.now();
@@ -224,6 +236,7 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
 
     schedule: (context, id, date) =>
       own(async () => {
+        requireAuditPermission(context);
         const row = await standing(context, id);
         if (row === undefined) return undefined;
         if (!isCalendarDay(date)) {
@@ -236,6 +249,7 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
 
     edit: (context, id, sections) =>
       own(async () => {
+        requireAuditPermission(context);
         const row = await standing(context, id);
         if (row === undefined) return undefined;
         const draft = readDraft({ title: row.title, date: row.date, site: row.site, sections });

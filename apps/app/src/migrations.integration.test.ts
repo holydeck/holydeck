@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { requestContext, systemContext } from './context.js';
 import { MIGRATIONS, MigrationError, SCHEMA_VERSION, migrate, rollback, schemaStatus } from './migrations.js';
 import { repositoriesOn, repositoryDb } from './repositories.js';
+import { SERVICE_RECORD } from './services.js';
 import { startTestMongo } from '../test/helpers/mongo.js';
 
 import type { Db } from 'mongodb';
@@ -64,6 +65,9 @@ describe('migrating a real database', () => {
 
     expect(await indexNames('run_events')).toEqual(['_id_', 'run_order']);
     expect(await indexNames('content_revisions')).toEqual(['_id_', 'content_hash', 'content_revision']);
+    expect(await indexNames(SERVICE_RECORD)).toEqual(['_id_', 'service_stamp']);
+    const [serviceStamp] = (await live.collection(SERVICE_RECORD).indexes()).filter((index) => index.name === 'service_stamp');
+    expect(serviceStamp).toMatchObject({ key: { serviceId: 1, sequence: -1 }, unique: true });
     const [unique] = (await live.collection('run_events').indexes()).filter((index) => index.name === 'run_order');
     expect(unique?.unique).toBe(true);
   });
@@ -139,6 +143,7 @@ describe('migrating a real database', () => {
   test('undoes the shipped migrations and leaves the collections it found', async () => {
     await migrate(db, CONTEXT, { now: clock });
     expect(await rollback(db, CONTEXT, { now: clock })).toMatchObject({ recorded: SCHEMA_VERSION - 1 });
+    expect(await indexNames(SERVICE_RECORD)).toEqual(['_id_']);
     for (let step = SCHEMA_VERSION - 1; step > 0; step -= 1) await rollback(db, CONTEXT, { now: clock });
 
     expect(await indexNames('run_events')).toEqual(['_id_']);

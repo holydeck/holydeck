@@ -25,7 +25,7 @@ if (settings.values.mongoUrl === '') {
 }
 
 const undo = process.argv.includes('--rollback');
-const client = new MongoClient(settings.values.mongoUrl);
+const client = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
 await client.connect();
 
 try {

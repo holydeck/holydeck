@@ -72,7 +72,7 @@ let settingsAdmin: SettingsAdmin | undefined;
 let slideLayouts: SlideLayoutStore | undefined;
 let stopWatchingSettings: (() => void) | undefined;
 if (settings.values.mongoUrl !== '') {
-  store = new MongoClient(settings.values.mongoUrl);
+  store = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
   await store.connect();
   checkSchema(await schemaStatus(repositoryDb(store.db()), systemContext(`boot:${process.pid}`)));
   const now = (): string => new Date().toISOString();

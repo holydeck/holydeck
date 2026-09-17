@@ -32,7 +32,7 @@ export async function startRestrictedMongo(privileges: {
   const mongod = await MongoMemoryServer.create({
     auth: { enable: true, customRootName: ROOT.username, customRootPwd: ROOT.password },
   });
-  const root = new MongoClient(mongod.getUri(), { auth: ROOT, authSource: 'admin' });
+  const root = new MongoClient(mongod.getUri(), { auth: ROOT, authSource: 'admin', ignoreUndefined: true });
   await root.connect();
   const database = root.db(DATABASE);
   await database.command({
@@ -47,7 +47,7 @@ export async function startRestrictedMongo(privileges: {
     pwd: APP.password,
     roles: [{ role: 'appendOnly', db: DATABASE }],
   });
-  const client = new MongoClient(mongod.getUri(), { auth: APP, authSource: DATABASE });
+  const client = new MongoClient(mongod.getUri(), { auth: APP, authSource: DATABASE, ignoreUndefined: true });
   await client.connect();
   let stopped = false;
   return {
@@ -65,7 +65,7 @@ export async function startRestrictedMongo(privileges: {
 
 export async function startTestMongo(): Promise<TestMongo> {
   const mongod = await MongoMemoryServer.create();
-  const client = new MongoClient(mongod.getUri());
+  const client = new MongoClient(mongod.getUri(), { ignoreUndefined: true });
   await client.connect();
   let stopped = false;
   return {

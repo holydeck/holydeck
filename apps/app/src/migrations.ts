@@ -11,6 +11,7 @@ import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './att
 import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } from './capabilities.js';
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
+import { SERVICE_INDEXES, SERVICE_RECORD } from './services.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
 import { LAYOUT_INDEXES, LAYOUT_RECORD } from './slide-layouts.js';
 import { TOTP_INDEXES, createTotpIndexOn, dropTotpIndexOn } from './totp.js';
@@ -219,6 +220,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...LAYOUT_INDEXES].reverse()) await api.dropIndex(LAYOUT_RECORD, index.name);
+    },
+  },
+  {
+    version: 10,
+    name: 'the index a Service’s standing stamp is found by',
+    async up(api) {
+      for (const index of SERVICE_INDEXES) {
+        await api.createIndex(SERVICE_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...SERVICE_INDEXES].reverse()) await api.dropIndex(SERVICE_RECORD, index.name);
     },
   },
 ]);

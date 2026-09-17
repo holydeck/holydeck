@@ -119,8 +119,13 @@ describe('creating a Service', () => {
 
   it('passes through repository permission and context refusals', async () => {
     const { db, services } = store();
-    const reader = requestContext({ actor: ADMINISTRATOR, permissions: [SERVICE_PERMISSIONS.read], correlationId: ADMIN.correlationId });
+    const reader = requestContext({ actor: ADMINISTRATOR, permissions: [SERVICE_PERMISSIONS.read, 'auditEvents.append'], correlationId: ADMIN.correlationId });
+    const writer = requestContext({ actor: ADMINISTRATOR, permissions: Object.values(SERVICE_PERMISSIONS), correlationId: ADMIN.correlationId });
     await expect(services.create(reader, DRAFT)).rejects.toBeInstanceOf(RepositoryError);
+    await expect(services.create(writer, DRAFT)).rejects.toMatchObject({
+      name: 'RepositoryError', kind: 'permission',
+      message: 'auditEvents: the actor may not append, which needs auditEvents.append',
+    });
     await expect(services.create(undefined, DRAFT)).rejects.toMatchObject({ kind: 'context' });
     expect(rows(db, STAMPS)).toEqual([]);
     expect(actions(db)).toEqual([]);
@@ -276,6 +281,32 @@ describe('archiving a Service and bringing it back', () => {
 });
 
 describe('reading and refusing Service changes', () => {
+  it.each(['duplicate', 'schedule', 'edit', 'archive', 'unarchive'] as const)(
+    'refuses %s without audit permission before writing a service row', async (change) => {
+      const { db, services } = store();
+      const created = await services.create(ADMIN, DRAFT);
+      const id = created.stamp.id;
+      if (change === 'unarchive') await services.archive(ADMIN, id);
+      const writer = requestContext({ actor: ADMINISTRATOR, permissions: Object.values(SERVICE_PERMISSIONS), correlationId: ADMIN.correlationId });
+      const stamps = [...rows(db, STAMPS)];
+      const audit = [...rows(db, AUDIT)];
+      const changes = {
+        duplicate: () => services.duplicate(writer, id),
+        schedule: () => services.schedule(writer, id, '2026-09-20'),
+        edit: () => services.edit(writer, id, []),
+        archive: () => services.archive(writer, id),
+        unarchive: () => services.unarchive(writer, id),
+      };
+
+      await expect(changes[change]()).rejects.toMatchObject({
+        name: 'RepositoryError', kind: 'permission',
+        message: 'auditEvents: the actor may not append, which needs auditEvents.append',
+      });
+      expect(rows(db, STAMPS)).toEqual(stamps);
+      expect(rows(db, AUDIT)).toEqual(audit);
+    },
+  );
+
   it('returns nothing for every verb on an unknown id without auditing or writing', async () => {
     const { db, services } = store();
     expect(await services.current(ADMIN, 'service-404')).toBeUndefined();
