@@ -68,6 +68,9 @@ describe('migrating a real database', () => {
     expect(await indexNames(SERVICE_RECORD)).toEqual(['_id_', 'service_stamp']);
     const [serviceStamp] = (await live.collection(SERVICE_RECORD).indexes()).filter((index) => index.name === 'service_stamp');
     expect(serviceStamp).toMatchObject({ key: { serviceId: 1, sequence: -1 }, unique: true });
+    expect(await indexNames('media_assets')).toEqual(['_id_', 'media_asset_stamp']);
+    const [mediaStamp] = (await live.collection('media_assets').indexes()).filter((index) => index.name === 'media_asset_stamp');
+    expect(mediaStamp).toMatchObject({ key: { assetId: 1, sequence: -1 }, unique: true });
     const [unique] = (await live.collection('run_events').indexes()).filter((index) => index.name === 'run_order');
     expect(unique?.unique).toBe(true);
   });
@@ -143,7 +146,7 @@ describe('migrating a real database', () => {
   test('undoes the shipped migrations and leaves the collections it found', async () => {
     await migrate(db, CONTEXT, { now: clock });
     expect(await rollback(db, CONTEXT, { now: clock })).toMatchObject({ recorded: SCHEMA_VERSION - 1 });
-    expect(await indexNames('slide_labels')).toEqual(['_id_']);
+    expect(await indexNames('media_assets')).toEqual(['_id_']);
     for (let step = SCHEMA_VERSION - 1; step > 0; step -= 1) await rollback(db, CONTEXT, { now: clock });
 
     expect(await indexNames('run_events')).toEqual(['_id_']);

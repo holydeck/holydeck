@@ -53,6 +53,11 @@ export const RECORDS = {
     kind: 'append-only',
     fields: { ...HISTORY, contentId: 'required', revision: 'required', hash: 'required', origin: 'required', at: 'required', body: 'required' },
   },
+  mediaAssets: {
+    collection: 'media_assets',
+    kind: 'append-only',
+    fields: { ...HISTORY, assetId: 'required', sequence: 'required', at: 'required', manifest: 'required', storageKey: 'required', stamp: 'required' },
+  },
   // Spec PREP-01: the manifest pinning everything a run replays from, including the resolved geometry.
   preparedSnapshots: {
     collection: 'prepared_snapshots',

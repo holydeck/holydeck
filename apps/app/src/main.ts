@@ -1,5 +1,6 @@
 import { constants, readFileSync, watch } from 'node:fs';
-import { access, readFile, rename, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { MongoClient } from 'mongodb';
@@ -20,6 +21,7 @@ import { systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
 import { serveLive } from './live.js';
 import { schemaStatus } from './migrations.js';
+import { mediaLibraryOn } from './media.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
 import { sessionDb, sessionsOn } from './sessions.js';
@@ -86,6 +88,18 @@ if (settings.values.mongoUrl !== '') {
   };
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
+  // The media library is a durable record too, kept the same way — but no route serves it yet, so unlike
+  // its neighbors above, nothing here holds onto what it returns. T54 builds the store, not its HTTP surface.
+  mediaLibraryOn(repositoryDb(store.db()), {
+    now,
+    mediaRoot: settings.values.mediaRoot,
+    write: async (root, key, bytes) => {
+      await mkdir(root, { recursive: true });
+      const path = join(root, key);
+      await writeFile(path, bytes);
+      return path;
+    },
+  });
   settingsAdmin = settingsAdminOn(settings, {
     readFile: (path) => readFile(path, 'utf8'),
     writeFile,

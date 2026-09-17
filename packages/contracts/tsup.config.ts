@@ -13,6 +13,7 @@ export default defineConfig({
     'src/entities.ts',
     'src/layouts.ts',
     'src/library.ts',
+    'src/media.ts',
     'src/portable.ts',
     'src/revisions.ts',
     'src/service-templates.ts',

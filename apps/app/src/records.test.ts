@@ -18,6 +18,7 @@ describe('the durable record classes', () => {
       'auditEvents',
       'contentLibrary',
       'contentRevisions',
+      'mediaAssets',
       'preparedSnapshots',
       'runEvents',
       'schemaMigrations',

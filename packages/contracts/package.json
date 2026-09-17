@@ -53,6 +53,10 @@
       "types": "./dist/library.d.ts",
       "import": "./dist/library.js"
     },
+    "./media": {
+      "types": "./dist/media.d.ts",
+      "import": "./dist/media.js"
+    },
     "./portable": {
       "types": "./dist/portable.d.ts",
       "import": "./dist/portable.js"

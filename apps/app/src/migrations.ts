@@ -10,6 +10,7 @@ import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './acc
 import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
 import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } from './capabilities.js';
 import { LIBRARY_INDEXES, LIBRARY_RECORD } from './library.js';
+import { MEDIA_ASSET_RECORD, MEDIA_INDEXES } from './media.js';
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { SERVICE_INDEXES, SERVICE_RECORD } from './services.js';
@@ -258,6 +259,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...SLIDE_LABEL_INDEXES].reverse()) await api.dropIndex(SLIDE_LABEL_RECORD, index.name);
+    },
+  },
+  {
+    version: 13,
+    name: 'the index a media asset’s standing stamp is found by',
+    async up(api) {
+      for (const index of MEDIA_INDEXES) {
+        await api.createIndex(MEDIA_ASSET_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...MEDIA_INDEXES].reverse()) await api.dropIndex(MEDIA_ASSET_RECORD, index.name);
     },
   },
 ]);
