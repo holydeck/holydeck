@@ -37,6 +37,28 @@ export const RECORDS = {
       durationMs: 'optional',
     },
   },
+  // Spec COLL-01: the losing side of an edit race, kept rather than dropped. Two kinds of row share the
+  // collection and neither is ever rewritten: a `shelved` row is the body a writer lost the ordinal for,
+  // and a `resolved` row is a later note naming the shelved row somebody settled and the revision that
+  // settled it. That is why the five fields below are optional — each kind carries its own pair, and a
+  // row carrying neither pair is a row `collaboration.ts`'s parser refuses. `contentId` is deliberately
+  // the word `contentRevisions` already uses, because a shelf row is about exactly that key space.
+  conflictShelf: {
+    collection: 'conflict_shelf',
+    kind: 'append-only',
+    fields: {
+      ...HISTORY,
+      contentId: 'required',
+      sequence: 'required',
+      kind: 'required',
+      at: 'required',
+      attempted: 'optional',
+      origin: 'optional',
+      body: 'optional',
+      resolves: 'optional',
+      revision: 'optional',
+    },
+  },
   // Spec CONT-01: the discoverability index for reusable content — one row per stamp change, the same
   // append-only shape `slideLayouts` uses. `contentId` is deliberately the same word `contentRevisions`
   // already uses for its own key, not a domain-suffixed name like `layoutId`/`serviceId`: this table's

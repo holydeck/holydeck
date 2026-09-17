@@ -17,6 +17,10 @@
       "types": "./dist/canonical.d.ts",
       "import": "./dist/canonical.js"
     },
+    "./collaboration": {
+      "types": "./dist/collaboration.d.ts",
+      "import": "./dist/collaboration.js"
+    },
     "./problems": {
       "types": "./dist/problems.d.ts",
       "import": "./dist/problems.js"

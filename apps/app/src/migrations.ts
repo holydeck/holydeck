@@ -9,6 +9,7 @@
 import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './accounts.js';
 import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
 import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } from './capabilities.js';
+import { SHELF_INDEXES, SHELF_RECORD } from './conflicts.js';
 import { LIBRARY_INDEXES, LIBRARY_RECORD } from './library.js';
 import { MEDIA_ASSET_RECORD, MEDIA_INDEXES } from './media.js';
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
@@ -286,6 +287,20 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...PRESENCE_INDEXES].reverse()) await api.dropPresenceIndex(index.name);
+    },
+  },
+  // The conflict shelf is a record class, unlike presence above, so its index is built through the same
+  // `createIndex` the durable records use rather than through a helper of its own.
+  {
+    version: 15,
+    name: 'the index a content’s shelved conflicts are read in order by',
+    async up(api) {
+      for (const index of SHELF_INDEXES) {
+        await api.createIndex(SHELF_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...SHELF_INDEXES].reverse()) await api.dropIndex(SHELF_RECORD, index.name);
     },
   },
 ]);

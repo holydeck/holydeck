@@ -4,6 +4,7 @@ export default defineConfig({
   entry: [
     'src/accounts.ts',
     'src/canonical.ts',
+    'src/collaboration.ts',
     'src/problems.ts',
     'src/http.ts',
     'src/clients.ts',

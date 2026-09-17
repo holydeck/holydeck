@@ -90,6 +90,7 @@ describe('the shipped migrations', () => {
       'accounts',
       'audit_events',
       'capabilities',
+      'conflict_shelf',
       'content_library',
       'content_revisions',
       'jobs',
