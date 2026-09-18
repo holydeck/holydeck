@@ -3,10 +3,11 @@ import type { BrowserLauncher } from '@holydeck/core/browser-fetch';
 import type { PlatformInfo } from '@holydeck/core/config';
 import type { HttpGet } from '@holydeck/core/fetcher';
 import { createPuppeteerLauncher } from '@holydeck/core/puppeteer-launcher';
-import { createClipboard } from './clipboard.js';
+import { createClipboard, createClipboardReader } from './clipboard.js';
 import { createEditor } from './editor.js';
 import { openExternalUrl, startLoopbackCallback } from './oidc-node.js';
 import type { OidcCallbackServer } from './oidc.js';
+import { createConfirm, createStdinReader } from './prompt.js';
 import type { HttpPost } from './server-client.js';
 
 export interface CliContext {
@@ -18,6 +19,12 @@ export interface CliContext {
   out: (text: string) => void;
   err: (text: string) => void;
   clipboard: (text: string) => Promise<void>;
+  /** The read side of `clipboard`, for a command handed a message someone pasted. */
+  readClipboard: () => Promise<string>;
+  /** Whatever was piped into this run; undefined when stdin is a terminal and nothing was. */
+  readStdin: () => Promise<string | undefined>;
+  /** Puts a yes/no question to the person at the terminal. Callers check `isTTY` before asking. */
+  confirm: (message: string) => Promise<boolean>;
   editor: (path: string) => Promise<'opened' | 'skipped'>;
   httpGet: HttpGet;
   httpPost: HttpPost;
@@ -68,6 +75,10 @@ export function defaultContext(): CliContext {
       process.stderr.write(text);
     },
     clipboard: createClipboard(process.platform, process.env),
+    readClipboard: createClipboardReader(process.platform, process.env),
+    readStdin: createStdinReader(process.stdin),
+    // The question goes to stderr: stdout is what a command writes for a pipe to read.
+    confirm: createConfirm(process.stdin, process.stderr),
     editor: createEditor(process.env),
     httpGet: fetchHttpGet,
     httpPost: fetchHttpPost,

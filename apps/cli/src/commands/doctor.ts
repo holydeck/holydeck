@@ -95,6 +95,22 @@ async function checkServer(runtime: Runtime | undefined): Promise<DoctorCheck> {
   }
 }
 
+/**
+ * The optional resolver is opt-in, so a missing key is a warning and never a failure — nothing else in
+ * this build needs one. Only where the key came from is reported; the key itself is never printed.
+ */
+function checkResolverKey(runtime: Runtime | undefined): DoctorCheck {
+  if (runtime === undefined) return { name: 'resolver key', status: 'skipped', detail: 'unknown (config failed)' };
+  if (runtime.config.values.anthropicApiKey === undefined) {
+    return {
+      name: 'resolver key',
+      status: 'warn',
+      detail: 'not configured — "holydeck ai" reports book names it cannot place instead of asking',
+    };
+  }
+  return { name: 'resolver key', status: 'ok', detail: `configured (${runtime.config.sources.anthropicApiKey})` };
+}
+
 export async function runDoctor(ctx: CliContext, globals: GlobalOptions): Promise<void> {
   const checks: DoctorCheck[] = [];
   let runtime: Runtime | undefined;
@@ -123,6 +139,7 @@ export async function runDoctor(ctx: CliContext, globals: GlobalOptions): Promis
   }
   checks.push(await checkBibleCom(ctx, runtime));
   checks.push(await checkServer(runtime));
+  checks.push(checkResolverKey(runtime));
   if (globals.json === true) {
     outLine(ctx, JSON.stringify({ checks }, undefined, 2));
   } else {

@@ -44,6 +44,7 @@ holydeck get-verses --last
 | Command | What it does |
 | --- | --- |
 | `new` | Scaffold a dated sermon file and open it in `$EDITOR` |
+| `ai` | Turn a pasted sermon message into a sermon file |
 | `preflight` | Verify every passage of a sermon file is available, fetching what is missing |
 | `get-verses` | Render a sermon file to text output |
 | `get` | Render a single reference ad hoc, e.g. `holydeck get "PSA 118:24"` |
@@ -124,6 +125,34 @@ holydeck get "1. Mose 30:5-7,9"
 holydeck get "2nd Samuel 1:6"     # or "2 Samuel", "II Samuel", "2. Samuel"
 holydeck get "சங்கீதம் 118:24"
 ```
+
+## From a pasted message
+
+`ai` turns the message a pastor sends — a title and a list of passages, written however they
+were written — into a sermon file. It reads whatever is piped in, or the system clipboard when
+nothing is, shows the file it would write, and writes it only once you say so (`--yes` skips
+the question, which is what a script wants):
+
+```sh
+holydeck ai                      # from the clipboard, with a preview and a y/n
+pbpaste | holydeck ai --yes      # from a pipe, no questions asked
+```
+
+Reading the message is deterministic: book names, chapters and verse lists are resolved
+against the same canon every other command uses, and nothing leaves your machine.
+
+A name it cannot place — a typo, or a book named in a language the canon does not carry — is
+reported and left out. Optionally, those leftover names alone can be sent to Anthropic's API
+to be matched against the 66 book codes; the passages themselves are never sent, and every
+answer is re-checked against the canon before it is used. To enable it, set a key:
+
+```sh
+export ANTHROPIC_API_KEY=...     # or the anthropicApiKey field in the config file
+```
+
+Get one at <https://console.anthropic.com/>. Without a key nothing changes except that the
+unplaceable names stay unplaced — `holydeck doctor` says which of the two you are in. Every
+call is reported on stderr with its outcome and token cost, never with what it sent.
 
 ## Passages that are not synced yet
 

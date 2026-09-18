@@ -25,6 +25,12 @@ export interface MakeContextOptions {
   env?: Record<string, string | undefined>;
   /** Canned HTTP responses keyed by URL (GET) or `POST <url>`. */
   responses?: Record<string, CannedResponse>;
+  /** What the system clipboard holds; unset means reading it fails, as an empty one would. */
+  clipboardText?: string;
+  /** What was piped into the run; unset means stdin is a terminal and nothing was piped. */
+  stdinText?: string;
+  /** The answer every y/n prompt gets (default: yes). */
+  confirmAnswer?: boolean;
   overrides?: Partial<CliContext>;
 }
 
@@ -38,6 +44,10 @@ export interface TestSetup {
   edits: string[];
   requests: string[];
   openedUrls: string[];
+  /** Every y/n question the run asked, so a test can prove one was or was not put. */
+  confirmations: string[];
+  /** Counts the clipboard reads, so a test can prove the run never reached for it. */
+  clipboardReads: () => number;
 }
 
 export function makeContext(options: MakeContextOptions = {}): TestSetup {
@@ -49,6 +59,8 @@ export function makeContext(options: MakeContextOptions = {}): TestSetup {
   const edits: string[] = [];
   const requests: string[] = [];
   const openedUrls: string[] = [];
+  const confirmations: string[] = [];
+  let clipboardReads = 0;
   const env: Record<string, string | undefined> = { HOLYDECK_DATA_DIR: dataDir, ...options.env };
   const responses = options.responses ?? {};
   const httpGet: HttpGet = async (url) => {
@@ -80,6 +92,16 @@ export function makeContext(options: MakeContextOptions = {}): TestSetup {
       edits.push(path);
       return 'opened';
     },
+    readClipboard: async () => {
+      clipboardReads += 1;
+      if (options.clipboardText === undefined) throw new Error('nothing on the clipboard in this test');
+      return options.clipboardText;
+    },
+    confirm: async (message) => {
+      confirmations.push(message);
+      return options.confirmAnswer ?? true;
+    },
+    readStdin: async () => options.stdinText,
     httpGet,
     httpPost,
     openUrl: async (url) => {
@@ -105,6 +127,8 @@ export function makeContext(options: MakeContextOptions = {}): TestSetup {
     edits,
     requests,
     openedUrls,
+    confirmations,
+    clipboardReads: () => clipboardReads,
   };
 }
 

@@ -47,6 +47,7 @@ describe('configScaffold', () => {
       'defaultTranslations',
       'syncConcurrency',
       'syncDelayMs',
+      'anthropicApiKey',
     ]) {
       expect(text).toContain(key);
     }
@@ -64,6 +65,7 @@ describe('configScaffold', () => {
       'HOLYDECK_TRANSLATIONS',
       'HOLYDECK_SYNC_CONCURRENCY',
       'HOLYDECK_SYNC_DELAY_MS',
+      'ANTHROPIC_API_KEY',
     ]) {
       expect(text).toContain(env);
     }

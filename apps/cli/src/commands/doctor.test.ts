@@ -153,6 +153,27 @@ describe('doctor', () => {
     const setup = makeContext({ responses: BIBLE_OK });
     await expect(runCli(setup.ctx, ['doctor', '--json'])).resolves.toBe(0);
     const parsed = JSON.parse(setup.stdout()) as { checks: Array<{ name: string; status: string; detail: string }> };
-    expect(parsed.checks.map((check) => check.name)).toEqual(['config', 'data dir', 'datastore', 'bible.com', 'server']);
+    expect(parsed.checks.map((check) => check.name)).toEqual([
+      'config',
+      'data dir',
+      'datastore',
+      'bible.com',
+      'server',
+      'resolver key',
+    ]);
+  });
+
+  it('warns rather than fails when no key for the optional resolver is configured', async () => {
+    const setup = makeContext({ responses: BIBLE_OK });
+    await expect(runCli(setup.ctx, ['doctor'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('warn    resolver key — not configured');
+  });
+
+  it('reports a configured resolver key by where it came from, never by what it is', async () => {
+    const key = 'test-api-key';
+    const setup = makeContext({ responses: BIBLE_OK, env: { ANTHROPIC_API_KEY: key } });
+    await expect(runCli(setup.ctx, ['doctor'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('ok      resolver key — configured (env)');
+    expect(setup.stdout()).not.toContain(key);
   });
 });
