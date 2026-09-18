@@ -9,9 +9,16 @@
 // shape — its paragraphs joined by "\n", its runs concatenated with no separator, exactly as authored —
 // in the shape's document order. No language detection, no repeat-marker parsing, no title or source
 // extraction, no duplicate detection, no classification: that reading is PPTX-04's job, done on top of
-// this deterministic list rather than folded into it. And as with `sermon-ai.ts`, nothing reaches the
-// filesystem — `extractPptx` either returns the full result or throws before building any of it; there
-// is no partial result for a caller to receive.
+// this deterministic list rather than folded into it (script separation and repeat-marker detection live
+// in the sibling `pptx-content.ts`, as pure functions over one raw text block). And as with
+// `sermon-ai.ts`, nothing reaches the filesystem — `extractPptx` either returns the full result or
+// throws before building any of it; there is no partial result for a caller to receive.
+//
+// T69 adds one more list to each slide: its embedded media, discovered the same non-interpretive way as
+// its text — following the `<a:blip r:embed>` references a slide's shapes make, through that slide's own
+// `_rels` part, to the `ppt/media/…` bytes they name and the media type those bytes sniff as. Still just
+// discovery, not judgment: registering that media anywhere durable is `apps/app`'s job (`pptx-import.ts`),
+// since this package stays free of any `@holydeck/*` dependency and of the filesystem and database alike.
 
 import { load } from 'cheerio';
 import { unzipSync } from 'fflate';
@@ -19,14 +26,44 @@ import { posix } from 'node:path';
 import { HolyDeckError } from './messages.js';
 import type { CheerioAPI } from 'cheerio';
 
-/** One slide's text-bearing shapes, in document order, each exactly as its runs and paragraphs read. */
-export interface PptxSlide {
-  textBlocks: string[];
+/** The v1 media/font types embedded slide media can sniff as — the same set `@holydeck/contracts/media`'s
+ *  `MEDIA_TYPES` declares, restated here (not imported) per T69 ruling 2. */
+export type PptxMediaType =
+  | 'image/png'
+  | 'image/jpeg'
+  | 'image/gif'
+  | 'image/webp'
+  | 'video/mp4'
+  | 'font/woff2'
+  | 'font/ttf'
+  | 'font/otf';
+
+/** One embedded media item a slide's `<a:blip r:embed>` resolved to: its raw bytes and sniffed type. */
+export interface PptxSlideMedia {
+  bytes: Uint8Array;
+  type: PptxMediaType;
 }
 
-/** A presentation's slides, in the order the show would present them. */
+/** An embedded media reference `extractPptx` found but could not type — its bytes matched none of the v1
+ *  formats — and so left out of its slide's `media` list rather than failing the whole extraction. */
+export interface PptxSkippedMedia {
+  slideIndex: number;
+  relationshipId: string;
+  target: string;
+}
+
+/** One slide's text-bearing shapes, in document order, each exactly as its runs and paragraphs read, and
+ *  its embedded media, in the order its `<a:blip>` references appear in the slide's XML. */
+export interface PptxSlide {
+  textBlocks: string[];
+  media: PptxSlideMedia[];
+}
+
+/** A presentation's slides, in the order the show would present them, and every embedded media reference
+ *  found across all of them that could not be typed (see `PptxSkippedMedia`). */
 export interface ExtractedPptx {
   slides: PptxSlide[];
+  skippedMedia: PptxSkippedMedia[];
 }
 
 const PRESENTATION_PART = 'ppt/presentation.xml';
@@ -47,8 +84,14 @@ export function extractPptx(bytes: Uint8Array): ExtractedPptx {
   const presentation = requirePresentationPart(entries);
   const slideParts = resolveSlideOrder(presentation, entries);
   if (slideParts.length === 0) throw new HolyDeckError('pptx_empty');
-  const slides = slideParts.map((path) => ({ textBlocks: extractTextBlocks(readXmlPart(entries, path)) }));
-  return { slides };
+  const skippedMedia: PptxSkippedMedia[] = [];
+  const slides = slideParts.map((path, slideIndex) => {
+    const $slide = readXmlPart(entries, path);
+    const { media, skipped } = extractSlideMedia(entries, path, $slide, slideIndex);
+    skippedMedia.push(...skipped);
+    return { textBlocks: extractTextBlocks($slide), media };
+  });
+  return { slides, skippedMedia };
 }
 
 function openArchive(bytes: Uint8Array): Record<string, Uint8Array> {
@@ -110,11 +153,7 @@ function resolveSlideOrder($presentation: CheerioAPI, entries: Record<string, Ui
   });
 }
 
-function readRelationships(entries: Record<string, Uint8Array>): Map<string, string> {
-  const raw = entries[RELATIONSHIPS_PART];
-  if (raw === undefined) {
-    throw new HolyDeckError('pptx_corrupt', { reason: `no ${RELATIONSHIPS_PART} part to resolve slide order` });
-  }
+function parseRelationships(raw: Uint8Array): Map<string, string> {
   const $rels = parseXmlPart(raw);
   const map = new Map<string, string>();
   $rels('Relationship').each((_, el) => {
@@ -123,6 +162,95 @@ function readRelationships(entries: Record<string, Uint8Array>): Map<string, str
     if (id !== undefined && target !== undefined) map.set(id, target);
   });
   return map;
+}
+
+function readRelationships(entries: Record<string, Uint8Array>): Map<string, string> {
+  const raw = entries[RELATIONSHIPS_PART];
+  if (raw === undefined) {
+    throw new HolyDeckError('pptx_corrupt', { reason: `no ${RELATIONSHIPS_PART} part to resolve slide order` });
+  }
+  return parseRelationships(raw);
+}
+
+/**
+ * A slide's own embedded media: every `<a:blip r:embed="…">` in its XML (the standard OOXML picture-fill
+ * reference — `r:link` and non-`<a:blip>` embed mechanisms are out of scope for v1, per T69 ruling 5),
+ * resolved through that slide's `ppt/slides/_rels/slideN.xml.rels` part the same way `resolveSlideOrder`
+ * resolves the presentation's own relationships. A slide with no `_rels` part simply has no embedded
+ * media — not an error, and not worth scanning its shapes for `<a:blip>` first to tell the two cases
+ * apart, since a slide with genuine picture-fills always carries the `_rels` part that names their
+ * targets. A `r:embed` id the `_rels` part does not know, or a target part the archive does not contain,
+ * is `pptx_corrupt` — the same "package claims a reference it cannot deliver" break `resolveSlideOrder`
+ * already treats that way. A target that IS in the archive but whose bytes sniff as no v1 media type is
+ * skipped rather than failing the whole extraction (T69 ruling 5); the caller collects why into
+ * `skippedMedia` instead of dropping it.
+ */
+function extractSlideMedia(
+  entries: Record<string, Uint8Array>,
+  slidePath: string,
+  $slide: CheerioAPI,
+  slideIndex: number,
+): { media: PptxSlideMedia[]; skipped: PptxSkippedMedia[] } {
+  const relsPath = posix.join(posix.dirname(slidePath), '_rels', `${posix.basename(slidePath)}.rels`);
+  const relsRaw = entries[relsPath];
+  if (relsRaw === undefined) return { media: [], skipped: [] };
+  const rels = parseRelationships(relsRaw);
+  const embedIds: string[] = [];
+  $slide('a\\:blip').each((_, el) => {
+    const relId = $slide(el).attr('r:embed');
+    if (relId !== undefined) embedIds.push(relId);
+  });
+  const media: PptxSlideMedia[] = [];
+  const skipped: PptxSkippedMedia[] = [];
+  for (const relId of embedIds) {
+    const target = rels.get(relId);
+    if (target === undefined) {
+      throw new HolyDeckError('pptx_corrupt', {
+        reason: `embedded media relationship "${relId}" is missing from ${relsPath}`,
+      });
+    }
+    const mediaPath = posix.join(posix.dirname(slidePath), target);
+    const raw = entries[mediaPath];
+    if (raw === undefined) {
+      throw new HolyDeckError('pptx_corrupt', { reason: `referenced media part "${mediaPath}" is missing from the archive` });
+    }
+    const type = sniffPptxMediaType(raw);
+    if (type === undefined) {
+      skipped.push({ slideIndex, relationshipId: relId, target: mediaPath });
+      continue;
+    }
+    media.push({ bytes: raw, type });
+  }
+  return { media, skipped };
+}
+
+const matchesSignature = (bytes: Uint8Array, signature: readonly number[], offset = 0): boolean =>
+  signature.every((value, index) => bytes[offset + index] === value);
+
+/**
+ * Duplicates `@holydeck/contracts/media`'s `sniffMediaType` byte-for-byte, deliberately: `packages/core`
+ * stays free of any `@holydeck/*` dependency (T69 ruling 2), so the same magic-byte detection is kept
+ * here rather than imported. `apps/app`'s registration step re-sniffs the same bytes through the real one
+ * when it calls `MediaLibrary.upload`, so the two are never trusted to agree silently — only ever proven
+ * to by both packages' own tests passing against the same signature bytes.
+ */
+function sniffPptxMediaType(bytes: Uint8Array): PptxMediaType | undefined {
+  if (matchesSignature(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png';
+  if (matchesSignature(bytes, [0xff, 0xd8, 0xff])) return 'image/jpeg';
+  if (
+    matchesSignature(bytes, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) ||
+    matchesSignature(bytes, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
+  ) {
+    return 'image/gif';
+  }
+  if (matchesSignature(bytes, [0x52, 0x49, 0x46, 0x46]) && matchesSignature(bytes, [0x57, 0x45, 0x42, 0x50], 8)) {
+    return 'image/webp';
+  }
+  if (matchesSignature(bytes, [0x66, 0x74, 0x79, 0x70], 4)) return 'video/mp4';
+  if (matchesSignature(bytes, [0x77, 0x4f, 0x46, 0x32])) return 'font/woff2';
+  if (matchesSignature(bytes, [0x00, 0x01, 0x00, 0x00])) return 'font/ttf';
+  if (matchesSignature(bytes, [0x4f, 0x54, 0x54, 0x4f])) return 'font/otf';
+  return undefined;
 }
 
 /**

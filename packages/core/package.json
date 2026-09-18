@@ -41,6 +41,10 @@
       "types": "./dist/pptx.d.ts",
       "import": "./dist/pptx.js"
     },
+    "./pptx-content": {
+      "types": "./dist/pptx-content.d.ts",
+      "import": "./dist/pptx-content.js"
+    },
     "./anthropic": {
       "types": "./dist/anthropic.d.ts",
       "import": "./dist/anthropic.js"
