@@ -16,6 +16,7 @@ import {
   corpusTokenMatches,
   parseCorpusCanon,
   parseCorpusFailure,
+  parseCorpusSearch,
   parseCorpusTranslations,
   parseCorpusVerses,
   presentedCorpusToken,
@@ -214,6 +215,72 @@ describe('the verses the application reads through the boundary', () => {
     const parsed = parseCorpusVerses(value);
     expect(parsed.ok === false && parsed.problems).toEqual([
       { path: 'corpusVerses.revision', code: 'field.required', message: 'is required' },
+    ]);
+  });
+});
+
+describe('the search results the application reads through the boundary', () => {
+  const body = () => ({
+    translation: 'KJV',
+    query: 'in the beginning',
+    hits: [
+      {
+        book: 'GEN',
+        bookOrder: 0,
+        chapter: 1,
+        verse: 1,
+        text: 'In the beginning God created the heaven and the earth.',
+        revision: 3,
+        phrase: true,
+        occurrences: 1,
+      },
+    ],
+  });
+
+  it('reads the hits the corpus returns, each naming the reference it was found at', () => {
+    const parsed = parseCorpusSearch(body());
+    expect(parsed.ok && parsed.value).toEqual(body());
+  });
+
+  it('reads an answer that found nothing, which is an answer and not a failure', () => {
+    const parsed = parseCorpusSearch({ ...body(), hits: [] });
+    expect(parsed.ok && parsed.value.hits).toEqual([]);
+  });
+
+  it('refuses a body that does not say what was searched for', () => {
+    const value = body();
+    delete (value as { query?: string }).query;
+    const parsed = parseCorpusSearch(value);
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusSearch.query', code: 'field.required', message: 'is required' },
+    ]);
+  });
+
+  it('refuses a hit naming no book, and one holding no text to show for itself', () => {
+    const value = body();
+    delete (value.hits[0] as { book?: string }).book;
+    delete (value.hits[0] as { text?: string }).text;
+    const parsed = parseCorpusSearch(value);
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusSearch.hits.0.book', code: 'field.required', message: 'is required' },
+      { path: 'corpusSearch.hits.0.text', code: 'field.required', message: 'is required' },
+    ]);
+  });
+
+  it('refuses a hit at a chapter or verse no reference could name', () => {
+    const value = body();
+    value.hits[0] = { ...value.hits[0]!, chapter: 0, verse: 0 };
+    const parsed = parseCorpusSearch(value);
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusSearch.hits.0.chapter', code: 'field.too_small', message: 'must be at least 1' },
+      { path: 'corpusSearch.hits.0.verse', code: 'field.too_small', message: 'must be at least 1' },
+    ]);
+  });
+
+  it('refuses a hits list that is not a list', () => {
+    const parsed = parseCorpusSearch({ ...body(), hits: 'GEN 1:1' });
+    expect(parsed.ok === false && parsed.problems).toEqual([
+      { path: 'corpusSearch.hits', code: 'field.not_a_list', message: 'must be a list' },
     ]);
   });
 });

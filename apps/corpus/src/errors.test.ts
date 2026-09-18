@@ -73,13 +73,14 @@ describe('errorEnvelope', () => {
 });
 
 describe('API_ENDPOINTS', () => {
-  it('lists exactly the eight public endpoints', () => {
+  it('lists exactly the nine public endpoints', () => {
     expect(Object.keys(API_ENDPOINTS).sort()).toEqual(
       [
         'GET /health',
         'GET /api/v1/translations',
         'GET /api/v1/translations/:abbr/canon',
         'GET /api/v1/translations/:abbr/verses',
+        'GET /api/v1/translations/:abbr/search',
         'POST /api/v1/translations/:abbr/sync',
         'GET /api/v1/translations/:abbr/sync',
         'GET /api/v1/stats',

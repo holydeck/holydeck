@@ -5,6 +5,7 @@ export const API_ENDPOINTS: Record<string, string> = {
   'GET /api/v1/translations': 'list known and cached translations',
   'GET /api/v1/translations/:abbr/canon': 'book/chapter structure for a translation',
   'GET /api/v1/translations/:abbr/verses': 'read verses: ?book=GEN&chapter=1&verses=1-3[&refresh][&revision=N]',
+  'GET /api/v1/translations/:abbr/search': 'search the synced text of a translation: ?q=word or phrase',
   'POST /api/v1/translations/:abbr/sync': 'start a background sync job',
   'GET /api/v1/translations/:abbr/sync': 'status of the latest sync job',
   'GET /api/v1/stats': 'datastore statistics',

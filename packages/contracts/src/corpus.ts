@@ -161,6 +161,47 @@ export function parseCorpusVerses(value: unknown, path = 'corpusVerses'): Parsed
   }));
 }
 
+export type CorpusSearchHit = {
+  readonly book: string;
+  /** Where the book falls in the canon, which is how hits from two translations are ordered together. */
+  readonly bookOrder: number;
+  readonly chapter: number;
+  readonly verse: number;
+  readonly text: string;
+  /** The revision the text was searched at, so the passage opens at what the search actually read. */
+  readonly revision: number;
+  /** Whether the query's words were found together, in order, rather than scattered through the verse. */
+  readonly phrase: boolean;
+  readonly occurrences: number;
+};
+
+export type CorpusSearch = {
+  readonly translation: string;
+  readonly query: string;
+  readonly hits: readonly CorpusSearchHit[];
+};
+
+const parseCorpusSearchHit: ParseFn<CorpusSearchHit> = (value, path) =>
+  parseObject(value, path, (reader) => ({
+    book: reader.text('book'),
+    bookOrder: reader.wholeNumber('bookOrder'),
+    // A chapter or verse below one names no reference, so a hit carrying one could never be opened.
+    chapter: reader.wholeNumber('chapter', 1),
+    verse: reader.wholeNumber('verse', 1),
+    text: reader.text('text'),
+    revision: reader.wholeNumber('revision', 1),
+    phrase: reader.flag('phrase'),
+    occurrences: reader.wholeNumber('occurrences', 1),
+  }));
+
+export function parseCorpusSearch(value: unknown, path = 'corpusSearch'): Parsed<CorpusSearch> {
+  return parseObject(value, path, (reader) => ({
+    translation: reader.text('translation'),
+    query: reader.text('query'),
+    hits: reader.parsedList('hits', parseCorpusSearchHit),
+  }));
+}
+
 export type CorpusErrorMapping = { readonly corpus: string; readonly http: number; readonly code: string };
 export type CorpusRefusal = { readonly corpus: string; readonly reason: string };
 export type CorpusPort = {
@@ -195,6 +236,7 @@ export const CORPUS_ROUTES: readonly CorpusRoute[] = [
   { route: 'GET /api/v1/translations', preserved: true, since: '2026-09-13' },
   { route: 'GET /api/v1/translations/:abbr/canon', preserved: true, since: '2026-09-13' },
   { route: 'GET /api/v1/translations/:abbr/verses', preserved: true, since: '2026-09-13' },
+  { route: 'GET /api/v1/translations/:abbr/search', preserved: true, since: '2026-09-16' },
 ];
 
 export const CORPUS_UNEXPECTED = 'corpus.unexpected_error';

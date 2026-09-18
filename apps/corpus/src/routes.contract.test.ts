@@ -11,6 +11,7 @@ const RELEASED_ROUTES = [
   'GET /api/v1/stats',
   'GET /api/v1/translations',
   'GET /api/v1/translations/:abbr/canon',
+  'GET /api/v1/translations/:abbr/search',
   'GET /api/v1/translations/:abbr/sync',
   'GET /api/v1/translations/:abbr/verses',
   'GET /api/v1/verse',

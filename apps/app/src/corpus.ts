@@ -8,11 +8,19 @@ import {
   corpusFailureMapping,
   parseCorpusCanon,
   parseCorpusFailure,
+  parseCorpusSearch,
   parseCorpusTranslations,
   parseCorpusVerses,
 } from '@holydeck/contracts/corpus';
 
-import type { CorpusBoundaryPacket, CorpusCanon, CorpusTranslation, CorpusVerses } from '@holydeck/contracts/corpus';
+import type {
+  CorpusBoundaryPacket,
+  CorpusCanon,
+  CorpusSearch,
+  CorpusSearchHit,
+  CorpusTranslation,
+  CorpusVerses,
+} from '@holydeck/contracts/corpus';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 
 /**
@@ -131,6 +139,10 @@ function versesPath(abbr: string, book: string, chapter: number, verses: readonl
   return `${TRANSLATIONS_PATH}/${encodeURIComponent(abbr)}/verses?${query.toString()}`;
 }
 
+function searchPath(abbr: string, query: string): string {
+  return `${TRANSLATIONS_PATH}/${encodeURIComponent(abbr)}/search?${new URLSearchParams({ q: query }).toString()}`;
+}
+
 export function corpusClient(settings: CorpusSettings, fetching: Fetching): {
   translations(): Promise<CorpusResult<readonly CorpusTranslation[]>>;
   canon(abbr: string): Promise<CorpusResult<CorpusCanon>>;
@@ -141,6 +153,7 @@ export function corpusClient(settings: CorpusSettings, fetching: Fetching): {
     verses: readonly number[],
     revision?: number,
   ): Promise<CorpusResult<CorpusVerses>>;
+  search(abbr: string, query: string): Promise<CorpusResult<CorpusSearch>>;
 } {
   const address = addressOf(settings.url);
 
@@ -181,6 +194,12 @@ export function corpusClient(settings: CorpusSettings, fetching: Fetching): {
       const answer = await ask(versesPath(abbr, book, chapter, verses, revision));
       if (!answer.ok) return answer;
       const parsed = parseCorpusVerses(answer.value);
+      return parsed.ok ? { ok: true, value: parsed.value } : { ok: false, refusal: LIBRARY_UNEXPECTED };
+    },
+    async search(abbr, query) {
+      const answer = await ask(searchPath(abbr, query));
+      if (!answer.ok) return answer;
+      const parsed = parseCorpusSearch(answer.value);
       return parsed.ok ? { ok: true, value: parsed.value } : { ok: false, refusal: LIBRARY_UNEXPECTED };
     },
   };
@@ -240,6 +259,77 @@ export async function stackReferences(
     results.push(await selectReference(client, applyOffset(selection, offset)));
   }
   return Object.freeze(results);
+}
+
+export interface ScriptureMatch {
+  /** The passage the match was found in, as a reference the library can be asked to open. */
+  readonly reference: ReferenceSelection;
+  readonly text: string;
+  readonly phrase: boolean;
+  readonly occurrences: number;
+  readonly bookOrder: number;
+}
+
+/**
+ * The reference a hit names. Opening a search result is this and nothing more: the passage it was found
+ * in, at the revision it was searched at, so what is read back is what was matched rather than whatever
+ * the library holds by then.
+ */
+export function referenceOf(abbr: string, hit: CorpusSearchHit): ReferenceSelection {
+  return { abbr, book: hit.book, chapter: hit.chapter, verses: [hit.verse], revision: hit.revision };
+}
+
+/**
+ * Relevance first — the phrase itself above the same words scattered through a verse, and more of them
+ * above fewer — and then the canon, and then the translation's name. The last three are what make the
+ * order a property of the query and the library rather than of whichever translation answered first.
+ */
+function compareMatches(left: ScriptureMatch, right: ScriptureMatch): number {
+  if (left.phrase !== right.phrase) return left.phrase ? -1 : 1;
+  if (left.occurrences !== right.occurrences) return right.occurrences - left.occurrences;
+  if (left.bookOrder !== right.bookOrder) return left.bookOrder - right.bookOrder;
+  if (left.reference.book !== right.reference.book) return left.reference.book < right.reference.book ? -1 : 1;
+  if (left.reference.chapter !== right.reference.chapter) return left.reference.chapter - right.reference.chapter;
+  const leftVerse = left.reference.verses[0] ?? 0;
+  const rightVerse = right.reference.verses[0] ?? 0;
+  if (leftVerse !== rightVerse) return leftVerse - rightVerse;
+  if (left.reference.abbr === right.reference.abbr) return 0;
+  return left.reference.abbr < right.reference.abbr ? -1 : 1;
+}
+
+/**
+ * Word and phrase search across the translations this deployment already holds (spec BIBL-03). Only a
+ * translation the library reports as cached is searched: an unavailable one is left out of the search
+ * entirely rather than asked for, because asking for it is what would fetch it.
+ *
+ * A translation that cannot be searched refuses the whole search. Dropping it instead would answer with
+ * fewer matches than the library holds and say nothing about it, which is the one failure a person
+ * reading search results cannot see for themselves.
+ */
+export async function searchScripture(
+  client: ReturnType<typeof corpusClient>,
+  query: string,
+): Promise<CorpusResult<readonly ScriptureMatch[]>> {
+  // A query with no words to search for names nothing, so nothing is asked of the library at all.
+  if (query.trim() === '') return { ok: true, value: [] };
+  const held = await client.translations();
+  if (!held.ok) return held;
+  const locally = held.value.filter((translation) => translation.cached).map((entry) => entry.abbreviation).toSorted();
+  const matches: ScriptureMatch[] = [];
+  for (const abbr of locally) {
+    const found = await client.search(abbr, query);
+    if (!found.ok) return found;
+    for (const hit of found.value.hits) {
+      matches.push({
+        reference: referenceOf(abbr, hit),
+        text: hit.text,
+        phrase: hit.phrase,
+        occurrences: hit.occurrences,
+        bookOrder: hit.bookOrder,
+      });
+    }
+  }
+  return { ok: true, value: Object.freeze(matches.sort(compareMatches)) };
 }
 
 export interface CorpusProbe {

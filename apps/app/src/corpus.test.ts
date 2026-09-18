@@ -15,10 +15,12 @@ import {
   corpusClient,
   corpusProbeProblems,
   probeCorpusIsClosed,
+  searchScripture,
   selectReference,
   stackReferences,
 } from './corpus.js';
 
+import type { CorpusSearchHit } from '@holydeck/contracts/corpus';
 import type { Fetching } from './corpus.js';
 
 const TOKEN = 'a'.repeat(24);
@@ -306,6 +308,155 @@ describe('stacking several translations for comparison', () => {
       'http://corpus:8080/api/v1/translations/WEB/canon',
       'http://corpus:8080/api/v1/translations/WEB/verses?book=GEN&chapter=1&verses=1',
     ]);
+  });
+});
+
+const cachedTranslations = [
+  { abbreviation: 'KJV', id: 1, title: 'King James Version', language: 'English', syncedChapters: 1189, canonChapters: 1189, cached: true },
+  { abbreviation: 'WEB', id: 2, title: 'World English Bible', language: 'English', syncedChapters: 1189, canonChapters: 1189, cached: true },
+  { abbreviation: 'NIV', id: 3, title: 'New International Version', language: 'English', syncedChapters: 0, canonChapters: 1189, cached: false },
+];
+
+const hit = (fields: Partial<CorpusSearchHit> = {}): CorpusSearchHit => ({
+  book: 'GEN',
+  bookOrder: 0,
+  chapter: 1,
+  verse: 1,
+  text: 'In the beginning God created the heaven and the earth.',
+  revision: 3,
+  phrase: true,
+  occurrences: 1,
+  ...fields,
+});
+
+const kjvHits = {
+  translation: 'KJV',
+  query: 'in the beginning',
+  hits: [hit(), hit({ book: 'PSA', bookOrder: 18, chapter: 117, verse: 1, text: 'Praise him, all ye people.', phrase: false, occurrences: 2 })],
+};
+
+const webHits = {
+  translation: 'WEB',
+  query: 'in the beginning',
+  hits: [hit({ text: 'In the beginning, God created the heavens and the earth.', revision: 1 })],
+};
+
+/** Counts what the search actually asked the library for, by translation, not merely which URLs it hit. */
+function watching(client: ReturnType<typeof corpusClient>): {
+  calls: string[];
+  client: ReturnType<typeof corpusClient>;
+} {
+  const calls: string[] = [];
+  return {
+    calls,
+    client: {
+      translations: () => {
+        calls.push('translations');
+        return client.translations();
+      },
+      canon: (abbr) => {
+        calls.push(`canon ${abbr}`);
+        return client.canon(abbr);
+      },
+      verses: (abbr, book, chapter, verses, revision) => {
+        calls.push(`verses ${abbr}`);
+        return client.verses(abbr, book, chapter, verses, revision);
+      },
+      search: (abbr, query) => {
+        calls.push(`search ${abbr}`);
+        return client.search(abbr, query);
+      },
+    },
+  };
+}
+
+describe('searching the scripture this deployment holds', () => {
+  it('asks the released route for one translation, with the words it was given', async () => {
+    const { fetching, asked } = answering([{ status: 200, body: kjvHits }]);
+    const result = await corpusClient(INTERNAL, fetching).search('KJV', 'in the beginning');
+    expect(asked).toEqual([{
+      url: 'http://corpus:8080/api/v1/translations/KJV/search?q=in+the+beginning',
+      headers: { authorization: `Bearer ${TOKEN}` },
+    }]);
+    expect(result).toEqual({ ok: true, value: kjvHits });
+  });
+
+  it('refuses search results it cannot read', async () => {
+    const { fetching } = answering([{ status: 200, body: { translation: 'KJV', query: 'x', hits: 'none' } }]);
+    const result = await corpusClient(INTERNAL, fetching).search('KJV', 'x');
+    expect(result).toEqual({ ok: false, refusal: LIBRARY_UNEXPECTED });
+  });
+
+  it('searches every translation held locally, and never asks the library about one that is not', async () => {
+    const { fetching, asked } = answering([
+      { status: 200, body: { translations: cachedTranslations } },
+      { status: 200, body: kjvHits },
+      { status: 200, body: webHits },
+    ]);
+    const watched = watching(corpusClient(INTERNAL, fetching));
+    const result = await searchScripture(watched.client, 'in the beginning');
+    expect(watched.calls).toEqual(['translations', 'search KJV', 'search WEB']);
+    expect(watched.calls.filter((call) => call.includes('NIV'))).toEqual([]);
+    expect(asked.map((call) => call.url).join(' ')).not.toContain('NIV');
+    expect(result.ok && result.value.map((match) => match.reference.abbr)).toEqual(['KJV', 'WEB', 'KJV']);
+  });
+
+  it('asks the library nothing at all for a query that names nothing', async () => {
+    const { fetching, asked } = answering([]);
+    const watched = watching(corpusClient(INTERNAL, fetching));
+    for (const query of ['', '   ']) {
+      const result = await searchScripture(watched.client, query);
+      expect(result).toEqual({ ok: true, value: [] });
+    }
+    expect(watched.calls).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
+  it('opens a matching passage at the reference it was found at', async () => {
+    const { fetching, asked } = answering([
+      { status: 200, body: { translations: cachedTranslations } },
+      { status: 200, body: kjvHits },
+      { status: 200, body: webHits },
+      { status: 200, body: canon },
+      { status: 200, body: verses },
+    ]);
+    const client = corpusClient(INTERNAL, fetching);
+    const found = await searchScripture(client, 'in the beginning');
+    const first = found.ok ? found.value[0] : undefined;
+    expect(first?.reference).toEqual({ abbr: 'KJV', book: 'GEN', chapter: 1, verses: [1], revision: 3 });
+    const opened = await selectReference(client, first?.reference ?? { abbr: '', book: '', chapter: 0, verses: [] });
+    expect(asked.at(-1)?.url).toBe('http://corpus:8080/api/v1/translations/KJV/verses?book=GEN&chapter=1&verses=1&revision=3');
+    expect(opened).toEqual({ ok: true, value: verses });
+  });
+
+  it('ranks identical input identically, whatever order the library answered in', async () => {
+    const order = async (translations: typeof cachedTranslations, hits: readonly CorpusSearchHit[]) => {
+      const { fetching } = answering([
+        { status: 200, body: { translations } },
+        { status: 200, body: { ...kjvHits, hits } },
+        { status: 200, body: webHits },
+      ]);
+      const result = await searchScripture(corpusClient(INTERNAL, fetching), 'in the beginning');
+      return result.ok ? result.value.map((match) => `${match.reference.abbr} ${match.reference.book} ${match.reference.chapter}:${match.reference.verses.join(',')}`) : result;
+    };
+    const ranked = await order(cachedTranslations, kjvHits.hits);
+    expect(ranked).toEqual(['KJV GEN 1:1', 'WEB GEN 1:1', 'KJV PSA 117:1']);
+    expect(await order([...cachedTranslations].reverse(), [...kjvHits.hits].reverse())).toEqual(ranked);
+  });
+
+  it('refuses the whole search when a translation it holds cannot be searched, rather than answering short', async () => {
+    const { fetching } = answering([
+      { status: 200, body: { translations: cachedTranslations } },
+      { status: 200, body: kjvHits },
+      { status: 503, body: { error: { code: 'store_locked', message: 'the store is locked by job 91' } } },
+    ]);
+    const result = await searchScripture(corpusClient(INTERNAL, fetching), 'in the beginning');
+    expect(result).toEqual({ ok: false, refusal: LIBRARY_UNAVAILABLE });
+  });
+
+  it('forwards the refusal when the library cannot say which translations it holds', async () => {
+    const result = await searchScripture(corpusClient(INTERNAL, unreachable), 'in the beginning');
+    expect(result).toEqual({ ok: false, refusal: LIBRARY_UNAVAILABLE });
   });
 });
 
