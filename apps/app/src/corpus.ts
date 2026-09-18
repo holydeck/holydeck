@@ -13,6 +13,7 @@ import {
 } from '@holydeck/contracts/corpus';
 
 import type { CorpusBoundaryPacket, CorpusCanon, CorpusTranslation, CorpusVerses } from '@holydeck/contracts/corpus';
+import type { TranslationOffsetStore } from './translation-offsets.js';
 
 /**
  * The only way this application talks to the corpus service.
@@ -209,6 +210,36 @@ export async function selectReference(
   const chapter = book?.chapters.some((entry) => entry.id === String(selection.chapter)) ?? false;
   if (!chapter) return { ok: false, refusal: REFERENCE_NOT_FOUND };
   return client.verses(selection.abbr, selection.book, selection.chapter, selection.verses, selection.revision);
+}
+
+/**
+ * The same reference, shifted by a translation's configured offset (spec BIBL-02). Pure, so the shift can
+ * be proven without a network: `selectReference` already checks the shifted chapter against the canon
+ * before it ever asks for verses, which is what rejects an offset that walks a reference out of canon —
+ * for free, and before retrieval, without this needing to know what the canon holds.
+ */
+export function applyOffset(selection: ReferenceSelection, offset: number): ReferenceSelection {
+  return offset === 0 ? selection : { ...selection, chapter: selection.chapter + offset };
+}
+
+/**
+ * One validated reference per selection stacked, each shifted by its own translation's configured offset,
+ * in the exact order the selections were given — never resorted, and never short-circuited: a selection
+ * this could not read still leaves its own slot behind a `CorpusResult` that says so, and costs no other
+ * slot in the stack. Sequential rather than concurrent, so that order is never left to how fast one
+ * translation's library answers relative to another's.
+ */
+export async function stackReferences(
+  client: ReturnType<typeof corpusClient>,
+  offsetStore: Pick<TranslationOffsetStore, 'get'>,
+  selections: readonly ReferenceSelection[],
+): Promise<readonly CorpusResult<CorpusVerses>[]> {
+  const results: CorpusResult<CorpusVerses>[] = [];
+  for (const selection of selections) {
+    const offset = await offsetStore.get(selection.abbr);
+    results.push(await selectReference(client, applyOffset(selection, offset)));
+  }
+  return Object.freeze(results);
 }
 
 export interface CorpusProbe {

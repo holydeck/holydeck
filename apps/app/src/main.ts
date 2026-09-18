@@ -31,6 +31,7 @@ import { passkeyDb, passkeysOn } from './passkeys.js';
 import { settingsAdminOn } from './settings-admin.js';
 import { slideLayoutsOn } from './slide-layouts.js';
 import { totpDb, totpsOn } from './totp.js';
+import { translationOffsetDb, translationOffsetsOn } from './translation-offsets.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
@@ -39,6 +40,7 @@ import type { Identity } from './onboarding.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SessionStore } from './sessions.js';
+import type { TranslationOffsetStore } from './translation-offsets.js';
 
 checkReleasedContracts();
 
@@ -74,6 +76,9 @@ let settingsAdmin: SettingsAdmin | undefined;
 // Slide Layouts are durable records too, and administered by the same Admin: a deployment with nowhere to
 // keep one has none to create, version or archive, and its routes answer not-found the same way.
 let slideLayouts: SlideLayoutStore | undefined;
+// A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
+// keep one has none to read or configure, and its routes answer not-found the same way.
+let translationOffsets: TranslationOffsetStore | undefined;
 let stopWatchingSettings: (() => void) | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
@@ -90,6 +95,7 @@ if (settings.values.mongoUrl !== '') {
   };
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
+  translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
   // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
   await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
@@ -143,6 +149,7 @@ const app = buildApp({
   capabilities,
   settingsAdmin,
   slideLayouts,
+  translationOffsets,
 });
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.

@@ -109,6 +109,10 @@
       "types": "./dist/totp.d.ts",
       "import": "./dist/totp.js"
     },
+    "./translation-offsets": {
+      "types": "./dist/translation-offsets.d.ts",
+      "import": "./dist/translation-offsets.js"
+    },
     "./webauthn": {
       "types": "./dist/webauthn.d.ts",
       "import": "./dist/webauthn.js"

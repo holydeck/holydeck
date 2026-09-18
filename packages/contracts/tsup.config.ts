@@ -27,6 +27,7 @@ export default defineConfig({
     'src/slide-labels.ts',
     'src/songs.ts',
     'src/totp.ts',
+    'src/translation-offsets.ts',
     'src/webauthn.ts',
   ],
   format: ['esm'],

@@ -8,6 +8,7 @@ import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { SLIDE_LAYOUTS_PATH } from '@holydeck/contracts/layouts';
 import { SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
 import { TOTP_PATH, TOTP_RECOVERY_PATH, TOTP_VERIFICATION_PATH } from '@holydeck/contracts/totp';
+import { TRANSLATION_OFFSETS_PATH } from '@holydeck/contracts/translation-offsets';
 import { PASSKEY_OPTIONS_PATH, PASSKEY_PATH } from '@holydeck/contracts/webauthn';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -106,6 +107,9 @@ describe('every route that changes something', () => {
       { method: 'PUT', url: LAYOUT_BOXES_PATH },
       { method: 'POST', url: `${LAYOUT_REVISIONS_PATH}/:revision` },
       { method: 'PATCH', url: `${SLIDE_LAYOUTS_PATH}/:id/status` },
+      // Behind the same permission once more: configuring a translation's offset is Admin's alone,
+      // reading every one configured is not, which is why only this one route is on this list at all.
+      { method: 'PUT', url: `${TRANSLATION_OFFSETS_PATH}/:abbr` },
     ]);
   });
 

@@ -9,12 +9,14 @@ import {
   LIBRARY_UNEXPECTED,
   REFERENCE_MALFORMED,
   REFERENCE_NOT_FOUND,
+  applyOffset,
   corpusBinding,
   corpusBoundaryFor,
   corpusClient,
   corpusProbeProblems,
   probeCorpusIsClosed,
   selectReference,
+  stackReferences,
 } from './corpus.js';
 
 import type { Fetching } from './corpus.js';
@@ -231,6 +233,79 @@ describe('selecting one validated reference', () => {
       abbr: 'KJV', book: 'GEN', chapter: 1, verses: [1],
     });
     expect(result).toEqual({ ok: false, refusal: LIBRARY_UNAVAILABLE });
+  });
+});
+
+const secondCanon = {
+  translation: 'WEB',
+  source: 'bundled' as const,
+  books: [
+    { usfm: 'GEN', canon: 'ot', name: 'Genesis', chapters: [{ id: '1', label: '1' }, { id: '2', label: '2' }] },
+  ],
+};
+
+const secondVerses = {
+  verses: { '1': 'In the beginning, God created the heavens and the earth.' },
+  citation: 'Genesis 1:1 (WEB)',
+  revision: 1,
+  fetchedAt: '2026-09-13T09:30:00Z',
+  source: 'cache' as const,
+};
+
+describe('stacking several translations for comparison', () => {
+  const noOffset = { get: async (): Promise<number> => 0 };
+
+  it('shifts the chapter by the offset, or leaves the reference untouched when the offset is zero', () => {
+    const selection = { abbr: 'KJV', book: 'GEN', chapter: 1, verses: [1] };
+    expect(applyOffset(selection, 1)).toEqual({ ...selection, chapter: 2 });
+    expect(applyOffset(selection, -1)).toEqual({ ...selection, chapter: 0 });
+    expect(applyOffset(selection, 0)).toEqual(selection);
+    expect(applyOffset(selection, 0)).toBe(selection);
+  });
+
+  it('answers one result per selection, in the order they were stacked and never resorted', async () => {
+    const { fetching } = answering([
+      { status: 200, body: secondCanon },
+      { status: 200, body: secondVerses },
+      { status: 200, body: canon },
+      { status: 200, body: verses },
+    ]);
+    const client = corpusClient(INTERNAL, fetching);
+    const stack = await stackReferences(client, noOffset, [
+      { abbr: 'WEB', book: 'GEN', chapter: 1, verses: [1] },
+      { abbr: 'KJV', book: 'GEN', chapter: 1, verses: [1] },
+    ]);
+    expect(stack).toEqual([{ ok: true, value: secondVerses }, { ok: true, value: verses }]);
+  });
+
+  it('applies a translation own configured offset to the chapter before asking the library for it', async () => {
+    const shifted = { ...verses, citation: 'Genesis 2:1 (KJV)' };
+    const { fetching, asked } = answering([{ status: 200, body: canon }, { status: 200, body: shifted }]);
+    const client = corpusClient(INTERNAL, fetching);
+    const offsetByOne = { get: async (abbr: string): Promise<number> => (abbr === 'KJV' ? 1 : 0) };
+    const stack = await stackReferences(client, offsetByOne, [{ abbr: 'KJV', book: 'GEN', chapter: 1, verses: [1] }]);
+    expect(asked[1]?.url).toContain('chapter=2');
+    expect(stack).toEqual([{ ok: true, value: shifted }]);
+  });
+
+  it('rejects an offset that walks a reference out of canon before the library is asked, without losing the rest of the stack', async () => {
+    const { fetching, asked } = answering([
+      { status: 200, body: canon },
+      { status: 200, body: secondCanon },
+      { status: 200, body: secondVerses },
+    ]);
+    const client = corpusClient(INTERNAL, fetching);
+    const offsetOutOfCanon = { get: async (abbr: string): Promise<number> => (abbr === 'KJV' ? 5 : 0) };
+    const stack = await stackReferences(client, offsetOutOfCanon, [
+      { abbr: 'KJV', book: 'GEN', chapter: 1, verses: [1] },
+      { abbr: 'WEB', book: 'GEN', chapter: 1, verses: [1] },
+    ]);
+    expect(stack).toEqual([{ ok: false, refusal: REFERENCE_NOT_FOUND }, { ok: true, value: secondVerses }]);
+    expect(asked.map((call) => call.url)).toEqual([
+      'http://corpus:8080/api/v1/translations/KJV/canon',
+      'http://corpus:8080/api/v1/translations/WEB/canon',
+      'http://corpus:8080/api/v1/translations/WEB/verses?book=GEN&chapter=1&verses=1',
+    ]);
   });
 });
 

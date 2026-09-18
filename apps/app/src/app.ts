@@ -15,6 +15,7 @@ import { serveSessionRoutes } from './session-routes.js';
 import { serveSettingsRoutes } from './settings-routes.js';
 import { serveSlideLayoutRoutes } from './slide-layout-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
+import { serveTranslationOffsetRoutes } from './translation-offset-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
 import type { RouteNeed } from './authorization.js';
@@ -25,6 +26,7 @@ import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
+import type { TranslationOffsetStore } from './translation-offsets.js';
 import type { WebAsset } from './static.js';
 
 const PUBLIC: RouteNeed = { kind: 'public' };
@@ -71,6 +73,8 @@ export interface AppOptions {
   settingsAdmin?: SettingsAdmin;
   /** Where Slide Layouts are kept. Without it, there is none to create, version or archive. */
   slideLayouts?: SlideLayoutStore;
+  /** Where a translation's offset is kept. Without it, there is none to read or configure. */
+  translationOffsets?: TranslationOffsetStore;
 }
 
 /**
@@ -90,6 +94,7 @@ export function buildApp({
   capabilities,
   settingsAdmin,
   slideLayouts,
+  translationOffsets,
 }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
@@ -217,6 +222,10 @@ export function buildApp({
   // Behind the same permission again, by a vocabulary of its own: a Slide Layout is Admin's to create,
   // to save forward and to stop offering, and nobody else's to change.
   serveSlideLayoutRoutes(app, { slideLayouts, identity });
+
+  // Reading is public, the same as the corpus routes above: BIBL-02 calls an offset inspectable, and
+  // there is nothing in one worth a session. Setting one is behind the same permission once again.
+  serveTranslationOffsetRoutes(app, { translationOffsets, identity });
 
   if (web !== undefined) serveWebClient(app, web);
 
