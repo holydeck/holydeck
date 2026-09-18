@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
+import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
@@ -110,6 +111,9 @@ describe('every route that changes something', () => {
       // Behind the same permission once more: configuring a translation's offset is Admin's alone,
       // reading every one configured is not, which is why only this one route is on this list at all.
       { method: 'PUT', url: `${TRANSLATION_OFFSETS_PATH}/:abbr` },
+      // The one route on this list that puts something in front of a room: looking a reference up
+      // changes nothing and is absent here, and showing one is a change because it is recorded.
+      { method: 'POST', url: SHOWN_REFERENCES_PATH },
     ]);
   });
 

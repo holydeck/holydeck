@@ -5,12 +5,13 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import { serveAccountRoutes } from './accounts-routes.js';
 import { enforceAuthorization } from './authorization.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
-import { REFERENCE_MALFORMED, corpusClient, selectReference } from './corpus.js';
+import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
 import { serveOnboarding } from './onboarding.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
+import { serveReferenceRoutes } from './reference-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
 import { serveSettingsRoutes } from './settings-routes.js';
 import { serveSlideLayoutRoutes } from './slide-layout-routes.js';
@@ -26,34 +27,11 @@ import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
+import type { ShownReferenceStore } from './shown-references.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 import type { WebAsset } from './static.js';
 
 const PUBLIC: RouteNeed = { kind: 'public' };
-
-/** Counting from one, the same as a chapter or a revision does. A leading zero is not a whole number. */
-const wholeNumberIn = (value: unknown): number | undefined =>
-  typeof value === 'string' && /^[1-9][0-9]*$/u.test(value) ? Number(value) : undefined;
-
-const VERSE_TOKEN = /^(\d{1,3})(?:-(\d{1,3}))?$/u;
-
-/**
- * Reads the corpus's own comma/range grammar for a verse list, without depending on the corpus package
- * to do it: `5`, `1-4` and `5,1-4,3` are all one list, and anything else is nothing this can read.
- */
-function versesIn(value: unknown): readonly number[] | undefined {
-  if (typeof value !== 'string' || value.trim() === '') return undefined;
-  const verses: number[] = [];
-  for (const token of value.split(',')) {
-    const match = VERSE_TOKEN.exec(token.trim());
-    if (match === null) return undefined;
-    const from = Number(match[1]);
-    const to = match[2] === undefined ? from : Number(match[2]);
-    if (from < 1 || to < from) return undefined;
-    for (let verse = from; verse <= to; verse += 1) verses.push(verse);
-  }
-  return verses;
-}
 
 export interface AppOptions {
   settings: LoadedSettings;
@@ -75,6 +53,8 @@ export interface AppOptions {
   slideLayouts?: SlideLayoutStore;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
   translationOffsets?: TranslationOffsetStore;
+  /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
+  shownReferences?: ShownReferenceStore;
 }
 
 /**
@@ -95,6 +75,7 @@ export function buildApp({
   settingsAdmin,
   slideLayouts,
   translationOffsets,
+  shownReferences,
 }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
@@ -171,22 +152,15 @@ export function buildApp({
   // asked at all, and the verses it answers with carry the revision they were read at.
   app.get('/api/v1/translations/:abbr/verses', { config: { need: PUBLIC } }, async (request, reply) => {
     const { abbr } = request.params as { readonly abbr: string };
-    const query = request.query as {
-      readonly book?: string;
-      readonly chapter?: string;
-      readonly verses?: string;
-      readonly revision?: string;
-    };
-    const chapter = wholeNumberIn(query.chapter);
-    const verses = versesIn(query.verses);
-    const revision = query.revision === undefined ? undefined : wholeNumberIn(query.revision);
-    const malformedRevision = query.revision !== undefined && revision === undefined;
-    if (typeof query.book !== 'string' || chapter === undefined || verses === undefined || malformedRevision) {
+    // Read as unknowns rather than as strings: a field sent twice arrives as a list, and the grammar
+    // below is what refuses that, which it can only do if the type does not claim it cannot happen.
+    const reference = referenceFrom(abbr, request.query as Record<string, unknown>);
+    if (reference === undefined) {
       return reply
         .code(REFERENCE_MALFORMED.status)
         .send(errorEnvelope(REFERENCE_MALFORMED.code, REFERENCE_MALFORMED.message, request.id));
     }
-    const answer = await selectReference(corpus, { abbr, book: query.book, chapter, verses, revision });
+    const answer = await selectReference(corpus, reference);
     if (!answer.ok) {
       return reply
         .code(answer.refusal.status)
@@ -226,6 +200,11 @@ export function buildApp({
   // Reading is public, the same as the corpus routes above: BIBL-02 calls an offset inspectable, and
   // there is nothing in one worth a session. Setting one is behind the same permission once again.
   serveTranslationOffsetRoutes(app, { translationOffsets, identity });
+
+  // The operator's own half of the library: looking a reference up mid-service, and showing one, which is
+  // the only read of a passage this server writes down. Behind Control presentation, the same permission
+  // the capability surface above is behind, because running a presentation is what this surface is for.
+  serveReferenceRoutes(app, { corpus, shownReferences });
 
   if (web !== undefined) serveWebClient(app, web);
 

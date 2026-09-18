@@ -15,9 +15,11 @@ import {
   corpusClient,
   corpusProbeProblems,
   probeCorpusIsClosed,
+  referenceFrom,
   searchScripture,
   selectReference,
   stackReferences,
+  versesIn,
 } from './corpus.js';
 
 import type { CorpusSearchHit } from '@holydeck/contracts/corpus';
@@ -235,6 +237,48 @@ describe('selecting one validated reference', () => {
       abbr: 'KJV', book: 'GEN', chapter: 1, verses: [1],
     });
     expect(result).toEqual({ ok: false, refusal: LIBRARY_UNAVAILABLE });
+  });
+});
+
+// Read here rather than in whichever route asks, so that every surface that takes a reference off a
+// request — the public one, and the operator's own — reads the same grammar and refuses the same things.
+describe('reading a reference off what a client sent', () => {
+  it('reads a book, chapter and verse list, with the revision left out', () => {
+    expect(referenceFrom('KJV', { book: 'GEN', chapter: '1', verses: '1' })).toEqual({
+      abbr: 'KJV',
+      book: 'GEN',
+      chapter: 1,
+      verses: [1],
+      revision: undefined,
+    });
+  });
+
+  it('reads the revision when one was asked for', () => {
+    expect(referenceFrom('KJV', { book: 'GEN', chapter: '1', verses: '1', revision: '4' })?.revision).toBe(4);
+  });
+
+  it('expands the comma and range grammar in the order it was written, repeats and all', () => {
+    expect(versesIn('5,1-4,3')).toEqual([5, 1, 2, 3, 4, 3]);
+  });
+
+  it('reads nothing from a verse list it cannot read', () => {
+    expect(versesIn('nope')).toBeUndefined();
+    expect(versesIn('4-1')).toBeUndefined();
+    expect(versesIn('0')).toBeUndefined();
+    expect(versesIn('')).toBeUndefined();
+    expect(versesIn(['1'])).toBeUndefined();
+  });
+
+  it('reads nothing when a part of the reference is missing, doubled or not a whole number', () => {
+    expect(referenceFrom('KJV', { chapter: '1', verses: '1' })).toBeUndefined();
+    expect(referenceFrom('KJV', { book: ['GEN', 'EXO'], chapter: '1', verses: '1' })).toBeUndefined();
+    expect(referenceFrom('KJV', { book: 'GEN', verses: '1' })).toBeUndefined();
+    expect(referenceFrom('KJV', { book: 'GEN', chapter: '01', verses: '1' })).toBeUndefined();
+    expect(referenceFrom('KJV', { book: 'GEN', chapter: '1' })).toBeUndefined();
+  });
+
+  it('reads nothing when a revision was asked for in a shape no revision takes', () => {
+    expect(referenceFrom('KJV', { book: 'GEN', chapter: '1', verses: '1', revision: 'nope' })).toBeUndefined();
   });
 });
 

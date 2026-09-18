@@ -30,6 +30,7 @@ import { sessionDb, sessionsOn } from './sessions.js';
 import { passkeyDb, passkeysOn } from './passkeys.js';
 import { settingsAdminOn } from './settings-admin.js';
 import { slideLayoutsOn } from './slide-layouts.js';
+import { shownReferenceDb, shownReferencesOn } from './shown-references.js';
 import { totpDb, totpsOn } from './totp.js';
 import { translationOffsetDb, translationOffsetsOn } from './translation-offsets.js';
 import { loadSettings, settingsPath } from './settings.js';
@@ -40,6 +41,7 @@ import type { Identity } from './onboarding.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SessionStore } from './sessions.js';
+import type { ShownReferenceStore } from './shown-references.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 
 checkReleasedContracts();
@@ -79,6 +81,10 @@ let slideLayouts: SlideLayoutStore | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
+// What an operator showed is recorded the same way and for the same reason: a deployment with nowhere to
+// write it down may show nothing, because a passage displayed without its revision recorded is the one
+// thing BIBL-04 rules out, and its routes answer not-found the same way.
+let shownReferences: ShownReferenceStore | undefined;
 let stopWatchingSettings: (() => void) | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
@@ -96,6 +102,7 @@ if (settings.values.mongoUrl !== '') {
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
+  shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
   // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
   await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
@@ -150,6 +157,7 @@ const app = buildApp({
   settingsAdmin,
   slideLayouts,
   translationOffsets,
+  shownReferences,
 });
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.

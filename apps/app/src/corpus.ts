@@ -213,6 +213,55 @@ export interface ReferenceSelection {
   readonly revision?: number;
 }
 
+/** Counting from one, the same as a chapter or a revision does. A leading zero is not a whole number. */
+const wholeNumberIn = (value: unknown): number | undefined =>
+  typeof value === 'string' && /^[1-9][0-9]*$/u.test(value) ? Number(value) : undefined;
+
+const VERSE_TOKEN = /^(\d{1,3})(?:-(\d{1,3}))?$/u;
+
+/**
+ * Reads the corpus's own comma/range grammar for a verse list, without depending on the corpus package
+ * to do it: `5`, `1-4` and `5,1-4,3` are all one list, and anything else is nothing this can read.
+ */
+export function versesIn(value: unknown): readonly number[] | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const verses: number[] = [];
+  for (const token of value.split(',')) {
+    const match = VERSE_TOKEN.exec(token.trim());
+    if (match === null) return undefined;
+    const from = Number(match[1]);
+    const to = match[2] === undefined ? from : Number(match[2]);
+    if (from < 1 || to < from) return undefined;
+    for (let verse = from; verse <= to; verse += 1) verses.push(verse);
+  }
+  return verses;
+}
+
+/** The reference fields a request carries, in whatever shape a query string or a body left them in. */
+export interface ReferenceQuery {
+  readonly book?: unknown;
+  readonly chapter?: unknown;
+  readonly verses?: unknown;
+  readonly revision?: unknown;
+}
+
+/**
+ * One reference, read off what a client sent, or nothing at all when any part of it cannot be read —
+ * including a field sent twice, which arrives as a list rather than as the one value it names. Read here
+ * rather than in a route so that every surface taking a reference reads the same grammar: a reference
+ * a client can open publicly is exactly the one an operator can show.
+ */
+export function referenceFrom(abbr: string, query: ReferenceQuery): ReferenceSelection | undefined {
+  const chapter = wholeNumberIn(query.chapter);
+  const verses = versesIn(query.verses);
+  const revision = query.revision === undefined ? undefined : wholeNumberIn(query.revision);
+  if (typeof query.book !== 'string' || chapter === undefined || verses === undefined) return undefined;
+  // A revision that was asked for and could not be read is not the same as one that was left out: the
+  // first would silently open the passage at whatever the library holds now, which is not what was asked.
+  if (query.revision !== undefined && revision === undefined) return undefined;
+  return { abbr, book: query.book, chapter, verses, revision };
+}
+
 /**
  * Selects one validated reference and records the corpus revision it was read at. The book and chapter
  * are checked against the canon here, so a reference nothing in it holds never reaches the library at
