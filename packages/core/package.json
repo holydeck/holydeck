@@ -33,6 +33,10 @@
       "types": "./dist/sermon.d.ts",
       "import": "./dist/sermon.js"
     },
+    "./sermon-ai": {
+      "types": "./dist/sermon-ai.d.ts",
+      "import": "./dist/sermon-ai.js"
+    },
     "./template": {
       "types": "./dist/template.d.ts",
       "import": "./dist/template.js"

@@ -4,6 +4,8 @@ export type MessageCode =
   | 'unknown_translation'
   | 'invalid_translation'
   | 'sermon_invalid'
+  | 'ai_parse_failed'
+  | 'sermon_book_unresolved'
   | 'config_invalid_value'
   | 'config_file_unreadable'
   | 'template_invalid'
@@ -65,6 +67,9 @@ export const messageCatalog: Record<MessageCode, string> = {
   unknown_translation: 'Unknown translation "{abbr}". Known: {known}.',
   invalid_translation: 'Invalid translation identifier "{abbr}"; expected 1-16 letters/digits, e.g. "KJV" or "SCH2000".',
   sermon_invalid: 'Invalid sermon file: {reason}.',
+  ai_parse_failed: 'Could not turn that message into a sermon file: {reason}.',
+  sermon_book_unresolved:
+    'Could not tell which book "{line}" names, so that passage is not in the file; add it by hand.',
   config_invalid_value: 'Invalid value for {key}: "{value}" — {reason}.',
   config_file_unreadable: 'Cannot use config file {path}: {reason}.',
   template_invalid: 'Template error: {reason}.',
