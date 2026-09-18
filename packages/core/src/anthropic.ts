@@ -62,8 +62,8 @@ const defaultHttpPost: HttpPost = async (url, body, headers) => {
   return { status: response.status, body: await response.text() };
 };
 
-function invalid(reason: string): HolyDeckError {
-  return new HolyDeckError('ai_response_invalid', { reason });
+function invalid(reason: string, usage: Record<string, number> = {}): HolyDeckError {
+  return new HolyDeckError('ai_response_invalid', { reason, ...usage });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -123,35 +123,46 @@ function readAnswer(
     throw new HolyDeckError('ai_request_failed', { reason: `HTTP ${response.status}` });
   }
   const payload: unknown = JSON.parse(response.body);
+  // Read before anything below can throw: an audit entry wants the call's cost even when the shape
+  // that came back is one this build has to refuse.
+  const usage = isRecord(payload)
+    ? (payload.usage as { input_tokens?: unknown; output_tokens?: unknown } | undefined)
+    : undefined;
+  const usageParams: Record<string, number> = {};
+  if (typeof usage?.input_tokens === 'number') usageParams['requestTokens'] = usage.input_tokens;
+  if (typeof usage?.output_tokens === 'number') usageParams['responseTokens'] = usage.output_tokens;
+  const fail = (reason: string): HolyDeckError => invalid(reason, usageParams);
+
   const content = isRecord(payload) ? payload.content : undefined;
-  if (!Array.isArray(content)) throw invalid('the answer carried no content');
-  const call = content.find(
+  if (!Array.isArray(content)) throw fail('the answer carried no content');
+  const calls = content.filter(
     (block) => isRecord(block) && block.type === 'tool_use' && block.name === RESOLVE_TOOL_NAME,
-  ) as { input?: { resolutions?: unknown } } | undefined;
-  if (call === undefined) throw invalid(`the answer carried no ${RESOLVE_TOOL_NAME} call`);
-  const resolutions = call.input?.resolutions;
-  if (!Array.isArray(resolutions)) throw invalid('the tool call carried no list of resolutions');
+  ) as { input?: { resolutions?: unknown } }[];
+  if (calls.length === 0) throw fail(`the answer carried no ${RESOLVE_TOOL_NAME} call`);
+  if (calls.length > 1) throw fail(`the answer carried more than one ${RESOLVE_TOOL_NAME} call`);
+  const resolutions = calls[0]!.input?.resolutions;
+  if (!Array.isArray(resolutions)) throw fail('the tool call carried no list of resolutions');
 
   const asked = new Set(tokens);
   const known = new Set(canon.map((book) => book.usfm));
   const codes = new Map<string, string>();
   for (const entry of resolutions) {
-    if (!isRecord(entry)) throw invalid('a resolution was not an object');
+    if (!isRecord(entry)) throw fail('a resolution was not an object');
+    const keys = Object.keys(entry);
+    if (keys.length !== 2 || !keys.includes('token') || !keys.includes('usfm')) {
+      throw fail('a resolution carried properties beyond its book name and its code');
+    }
     const { token, usfm } = entry;
     if (typeof token !== 'string' || typeof usfm !== 'string') {
-      throw invalid('a resolution was missing its book name or its code');
+      throw fail('a resolution was missing its book name or its code');
     }
-    if (!asked.has(token)) throw invalid('a resolution named a book that was never asked about');
-    if (!known.has(usfm)) throw invalid('a resolution answered with a code the canon does not hold');
-    if (codes.has(token)) throw invalid('a book name was answered twice');
+    if (!asked.has(token)) throw fail('a resolution named a book that was never asked about');
+    if (!known.has(usfm)) throw fail('a resolution answered with a code the canon does not hold');
+    if (codes.has(token)) throw fail('a book name was answered twice');
     codes.set(token, usfm);
   }
 
-  const usage = (payload as { usage?: { input_tokens?: unknown; output_tokens?: unknown } }).usage;
-  const result: ResolvedBookCodes = { codes: Object.fromEntries(codes) };
-  if (typeof usage?.input_tokens === 'number') result.requestTokens = usage.input_tokens;
-  if (typeof usage?.output_tokens === 'number') result.responseTokens = usage.output_tokens;
-  return result;
+  return { codes: Object.fromEntries(codes), ...usageParams };
 }
 
 /**
@@ -178,8 +189,11 @@ export async function resolveBookCodes(
       'x-api-key': apiKey,
       'anthropic-version': ANTHROPIC_VERSION,
     });
-  } catch (error) {
-    throw new HolyDeckError('ai_request_failed', { reason: (error as Error).message });
+  } catch {
+    // The caught exception's own message can carry the key or the prompt (a transport that echoes the
+    // request it failed to send, a proxy error quoting the URL) — reported as a fixed, generic reason
+    // instead, never interpolated, so a transport failure can never put either into a notice.
+    throw new HolyDeckError('ai_request_failed', { reason: 'the request could not be sent' });
   }
   try {
     return readAnswer(response, tokens, canon);

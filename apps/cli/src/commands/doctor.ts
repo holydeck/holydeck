@@ -101,7 +101,8 @@ async function checkServer(runtime: Runtime | undefined): Promise<DoctorCheck> {
  */
 function checkResolverKey(runtime: Runtime | undefined): DoctorCheck {
   if (runtime === undefined) return { name: 'resolver key', status: 'skipped', detail: 'unknown (config failed)' };
-  if (runtime.config.values.anthropicApiKey === undefined) {
+  const key = runtime.config.values.anthropicApiKey;
+  if (key === undefined || key.trim() === '') {
     return {
       name: 'resolver key',
       status: 'warn',

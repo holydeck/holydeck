@@ -332,13 +332,15 @@ async function askResolver(
   // entry: an integration that was never contacted is not an integration call.
   if (apiKey === '') return { codes: {}, notice: formatMessage('ai_api_key_missing') };
   const started = Date.now();
+  let call: IntegrationCallInfo;
+  let outcome: { codes: Record<string, string>; notice?: string };
   try {
     const answer = await resolveBookCodes(tokens, canon.books, {
       apiKey,
       model: options.model,
       httpPost: options.httpPost,
     });
-    const call: IntegrationCallInfo = {
+    call = {
       action: 'integration.call',
       subject: RESOLVER_SUBJECT,
       outcome: 'allowed',
@@ -347,20 +349,32 @@ async function askResolver(
     };
     if (answer.requestTokens !== undefined) call.requestTokens = answer.requestTokens;
     if (answer.responseTokens !== undefined) call.responseTokens = answer.responseTokens;
-    await options.onIntegrationCall?.(call);
-    return { codes: answer.codes };
+    outcome = { codes: answer.codes };
   } catch (error) {
     // `resolveBookCodes` reports every failure as a `HolyDeckError`; nothing else leaves it.
     const failure = error as HolyDeckError;
-    await options.onIntegrationCall?.({
+    call = {
       action: 'integration.call',
       subject: RESOLVER_SUBJECT,
       outcome: 'refused',
       detail: failure.code,
       durationMs: Date.now() - started,
-    });
-    return { codes: {}, notice: failure.message };
+    };
+    if (typeof failure.params?.['requestTokens'] === 'number') call.requestTokens = failure.params['requestTokens'];
+    if (typeof failure.params?.['responseTokens'] === 'number') {
+      call.responseTokens = failure.params['responseTokens'];
+    }
+    outcome = { codes: {}, notice: failure.message };
   }
+  // The callback belongs to the caller, not the resolver: whether it throws, rejects, or does
+  // neither must never change which outcome was already decided above, never fire a second call, and
+  // never stop the deterministic result from coming back.
+  try {
+    await options.onIntegrationCall?.(call);
+  } catch {
+    // Best-effort logging; the resolver's own outcome, decided above, still stands.
+  }
+  return outcome;
 }
 
 /**

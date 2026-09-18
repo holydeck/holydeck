@@ -521,6 +521,33 @@ describe('generateSermonFromText with the optional book-name resolver', () => {
     }
   });
 
+  it('carries the token counts into a refused audit entry when the unusable answer still reported them', async () => {
+    const { httpPost } = transport({
+      status: 200,
+      body: JSON.stringify({
+        content: [
+          { type: 'tool_use', name: RESOLVE_TOOL_NAME, input: { resolutions: [{ token: 'Roman', usfm: 'XYZ' }] } },
+        ],
+        usage: { input_tokens: 412, output_tokens: 27 },
+      }),
+    });
+    const calls: IntegrationCallInfo[] = [];
+    await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: (call) => {
+        calls.push(call);
+      },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.outcome).toBe('refused');
+    expect(calls[0]!.requestTokens).toBe(412);
+    expect(calls[0]!.responseTokens).toBe(27);
+  });
+
   it('records the call without token counts when the answer reported none', async () => {
     const { httpPost } = transport({
       status: 200,
@@ -559,5 +586,89 @@ describe('generateSermonFromText with the optional book-name resolver', () => {
     });
 
     expect(seen).toEqual(['recorded']);
+  });
+
+  it('keeps the resolved result when the audit hook throws synchronously on a successful call', async () => {
+    const { httpPost } = transport(resolving([{ token: 'Roman', usfm: 'ROM' }]));
+    let calls = 0;
+    const result = await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: () => {
+        calls += 1;
+        throw new Error('audit sink down');
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(result.notices).toEqual([]);
+    expect(parseSermonFile(result.yaml).entries).toEqual([
+      { book: 'ROM', chapter: 7, verses: [15], offsets: {} },
+      { book: 'HOS', chapter: 4, verses: [6], offsets: {} },
+    ]);
+  });
+
+  it('keeps the deterministic result when the audit hook throws synchronously on a refused call', async () => {
+    const { httpPost } = transport(new Error('getaddrinfo ENOTFOUND'));
+    let calls = 0;
+    const result = await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: () => {
+        calls += 1;
+        throw new Error('audit sink down');
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(result.notices).toHaveLength(2);
+    expect(parseSermonFile(result.yaml).entries).toEqual([{ book: 'HOS', chapter: 4, verses: [6], offsets: {} }]);
+  });
+
+  it('keeps the resolved result when the audit hook rejects asynchronously on a successful call', async () => {
+    const { httpPost } = transport(resolving([{ token: 'Roman', usfm: 'ROM' }]));
+    let calls = 0;
+    const result = await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: async () => {
+        calls += 1;
+        await Promise.resolve();
+        throw new Error('audit sink down');
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(result.notices).toEqual([]);
+    expect(parseSermonFile(result.yaml).entries).toEqual([
+      { book: 'ROM', chapter: 7, verses: [15], offsets: {} },
+      { book: 'HOS', chapter: 4, verses: [6], offsets: {} },
+    ]);
+  });
+
+  it('keeps the deterministic result when the audit hook rejects asynchronously on a refused call', async () => {
+    const { httpPost } = transport(new Error('getaddrinfo ENOTFOUND'));
+    let calls = 0;
+    const result = await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: async () => {
+        calls += 1;
+        await Promise.resolve();
+        throw new Error('audit sink down');
+      },
+    });
+
+    expect(calls).toBe(1);
+    expect(result.notices).toHaveLength(2);
+    expect(parseSermonFile(result.yaml).entries).toEqual([{ book: 'HOS', chapter: 4, verses: [6], offsets: {} }]);
   });
 });

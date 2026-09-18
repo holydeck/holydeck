@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ANTHROPIC_MESSAGES_URL, RESOLVE_TOOL_NAME } from '@holydeck/core/anthropic';
@@ -73,6 +74,38 @@ describe('ai', () => {
     await expect(runCli(setup.ctx, ['ai', '--clipboard', '--yes'])).resolves.toBe(0);
 
     expect(existsSync(join(setup.home, CLEAN_FILE))).toBe(true);
+  });
+
+  it('composes the message in $EDITOR when --editor is passed, and uses what was saved', async () => {
+    const setup = makeContext({
+      stdinText: WITH_UNKNOWN,
+      clipboardText: WITH_UNKNOWN,
+      overrides: {
+        editor: async (path) => {
+          await writeFile(path, CLEAN, 'utf8');
+          return 'opened';
+        },
+      },
+    });
+    await expect(runCli(setup.ctx, ['ai', '--editor', '--yes'])).resolves.toBe(0);
+
+    expect(setup.clipboardReads()).toBe(0);
+    expect(existsSync(join(setup.home, CLEAN_FILE))).toBe(true);
+  });
+
+  it('reads back an empty buffer when nothing was typed and saved in $EDITOR', async () => {
+    const setup = makeContext({});
+    await expect(runCli(setup.ctx, ['ai', '--editor', '--yes'])).resolves.toBe(1);
+
+    expect(setup.edits).toHaveLength(1);
+    expect(setup.stderr()).toContain('no line in it reads as');
+  });
+
+  it('warns when $EDITOR is not set, and still proceeds with whatever the blank buffer holds', async () => {
+    const setup = makeContext({ overrides: { editor: async () => 'skipped' } });
+    await expect(runCli(setup.ctx, ['ai', '--editor', '--yes'])).resolves.toBe(1);
+
+    expect(setup.stderr()).toContain('$EDITOR is not set');
   });
 
   it.each([

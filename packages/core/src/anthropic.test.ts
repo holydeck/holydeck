@@ -146,14 +146,29 @@ describe('resolveBookCodes', () => {
     expect(sent).toEqual([]);
   });
 
-  it('reports a transport that throws as a failed request', async () => {
+  it('reports a transport that throws as a failed request, without repeating what it threw', async () => {
     const httpPost: HttpPost = async () => {
       throw new Error('getaddrinfo ENOTFOUND');
     };
     const failure = await failureOf(() => resolveBookCodes(['Roman'], CANON, { apiKey: API_KEY, httpPost }));
 
     expect(failure.code).toBe('ai_request_failed');
-    expect(failure.message).toContain('getaddrinfo ENOTFOUND');
+    expect(failure.message).not.toContain('getaddrinfo ENOTFOUND');
+  });
+
+  it('never lets a transport exception carry the key or the prompt into its failure', async () => {
+    const httpPost: HttpPost = async () => {
+      // A transport error can quote back what it failed to send — a proxy echoing the request, a
+      // socket error carrying the URL with its header. Fabricated to look exactly like that, so the
+      // fix is proven against a realistic leak and not just an empty message.
+      throw new Error(`connect ECONNREFUSED, request was: x-api-key: ${API_KEY}, body: Book names: Roman`);
+    };
+    const failure = await failureOf(() => resolveBookCodes(['Roman'], CANON, { apiKey: API_KEY, httpPost }));
+
+    expect(failure.code).toBe('ai_request_failed');
+    expect(failure.message).not.toContain(API_KEY);
+    expect(failure.message).not.toContain('Roman');
+    expect(JSON.stringify(failure.params)).not.toContain(API_KEY);
   });
 
   it.each([
@@ -182,9 +197,23 @@ describe('resolveBookCodes', () => {
     ['a resolution is not an object', toolReply({ resolutions: ['ROM'] })],
     ['a resolution carries no token', toolReply({ resolutions: [{ usfm: 'ROM' }] })],
     ['a resolution carries no code', toolReply({ resolutions: [{ token: 'Roman' }] })],
+    ['a resolution carries the right keys but the wrong types', toolReply({ resolutions: [{ token: 412, usfm: 'ROM' }] })],
+    ['a resolution carries a property beyond its book name and its code', toolReply({ resolutions: [{ token: 'Roman', usfm: 'ROM', confidence: 0.9 }] })],
     ['a resolution names a token nobody asked about', toolReply({ resolutions: [{ token: 'Hosea', usfm: 'HOS' }] })],
     ['a resolution answers with a code outside the canon', toolReply({ resolutions: [{ token: 'Roman', usfm: 'XYZ' }] })],
     ['the same token is answered twice', toolReply({ resolutions: [{ token: 'Roman', usfm: 'ROM' }, { token: 'Roman', usfm: 'GEN' }] })],
+    [
+      'more than one tool_use block names the resolver',
+      {
+        status: 200,
+        body: JSON.stringify({
+          content: [
+            { type: 'tool_use', name: RESOLVE_TOOL_NAME, input: { resolutions: [{ token: 'Roman', usfm: 'ROM' }] } },
+            { type: 'tool_use', name: RESOLVE_TOOL_NAME, input: { resolutions: [{ token: 'Roman', usfm: 'GEN' }] } },
+          ],
+        }),
+      },
+    ],
   ])('refuses an answer this build cannot use when %s', async (_case, reply) => {
     const { httpPost } = recorder(reply);
     const failure = await failureOf(() => resolveBookCodes(['Roman'], CANON, { apiKey: API_KEY, httpPost }));
@@ -197,6 +226,15 @@ describe('resolveBookCodes', () => {
     const failure = await failureOf(() => resolveBookCodes(['Roman'], CANON, { apiKey: API_KEY, httpPost }));
 
     expect(failure.code).toBe('ai_response_invalid');
+  });
+
+  it('keeps what the call cost even when the shape it answered with has to be refused', async () => {
+    const { httpPost } = recorder(toolReply({ resolutions: [{ token: 'Roman', usfm: 'XYZ' }] }));
+    const failure = await failureOf(() => resolveBookCodes(['Roman'], CANON, { apiKey: API_KEY, httpPost }));
+
+    expect(failure.code).toBe('ai_response_invalid');
+    expect(failure.params['requestTokens']).toBe(412);
+    expect(failure.params['responseTokens']).toBe(27);
   });
 
   it('keeps the API key out of every failure it reports', async () => {

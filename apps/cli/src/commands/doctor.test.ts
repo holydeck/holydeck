@@ -169,6 +169,12 @@ describe('doctor', () => {
     expect(setup.stdout()).toContain('warn    resolver key — not configured');
   });
 
+  it('warns rather than fails when the configured resolver key is blank', async () => {
+    const setup = makeContext({ responses: BIBLE_OK, env: { ANTHROPIC_API_KEY: '   ' } });
+    await expect(runCli(setup.ctx, ['doctor'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('warn    resolver key — not configured');
+  });
+
   it('reports a configured resolver key by where it came from, never by what it is', async () => {
     const key = 'test-api-key';
     const setup = makeContext({ responses: BIBLE_OK, env: { ANTHROPIC_API_KEY: key } });

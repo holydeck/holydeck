@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { HolyDeckError, formatMessage } from '@holydeck/core/messages';
@@ -17,7 +18,27 @@ const FALLBACK_TRANSLATIONS = ['KJV'];
 export interface AiOptions {
   stdin?: boolean;
   clipboard?: boolean;
+  editor?: boolean;
   yes?: boolean;
+}
+
+/**
+ * A blank buffer in $EDITOR, the same mechanism `new` opens its scaffold with — except here nothing is
+ * written first, and what the pastor saves is read back as the message. The temp file lives in its own
+ * directory so it never collides with a real sermon file, and that directory is gone again before this
+ * returns, saved or not.
+ */
+async function readFromEditor(ctx: CliContext): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'holydeck-ai-'));
+  try {
+    const path = join(dir, 'message.txt');
+    await writeFile(path, '', 'utf8');
+    const result = await ctx.editor(path);
+    if (result === 'skipped') errLine(ctx, formatMessage('editor_not_set'));
+    return await readFile(path, 'utf8');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -27,6 +48,7 @@ export interface AiOptions {
  * `--stdin` on an empty pipe fails on the empty message instead of quietly pasting something else.
  */
 export async function readMessage(ctx: CliContext, options: AiOptions): Promise<string> {
+  if (options.editor === true) return readFromEditor(ctx);
   if (options.clipboard === true) return ctx.readClipboard();
   const piped = await ctx.readStdin();
   if (options.stdin === true) return piped ?? '';
@@ -99,6 +121,7 @@ export function registerAi(program: Command, ctx: CliContext): void {
     .description('Turn a pasted sermon message into a sermon file')
     .option('--clipboard', 'read the message from the system clipboard')
     .option('--stdin', 'read the message from standard input')
+    .option('--editor', 'compose the message in $EDITOR')
     .option('--yes', 'write the file without asking')
     .action(async (options: AiOptions, command: Command) => {
       await runAi(ctx, options, command.optsWithGlobals<GlobalOptions>());
