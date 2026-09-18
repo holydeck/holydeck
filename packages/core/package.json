@@ -37,6 +37,10 @@
       "types": "./dist/sermon-ai.d.ts",
       "import": "./dist/sermon-ai.js"
     },
+    "./pptx": {
+      "types": "./dist/pptx.d.ts",
+      "import": "./dist/pptx.js"
+    },
     "./anthropic": {
       "types": "./dist/anthropic.d.ts",
       "import": "./dist/anthropic.js"
@@ -99,6 +103,7 @@
   },
   "dependencies": {
     "cheerio": "^1.2.0",
+    "fflate": "^0.8.3",
     "liquidjs": "^10.29.0",
     "yaml": "^2.9.0"
   },

@@ -11,6 +11,9 @@ export type MessageCode =
   | 'sermon_book_unresolved'
   | 'sermon_chapter_out_of_range'
   | 'sermon_verses_unreadable'
+  | 'pptx_corrupt'
+  | 'pptx_unsupported'
+  | 'pptx_empty'
   | 'config_invalid_value'
   | 'config_file_unreadable'
   | 'template_invalid'
@@ -92,6 +95,9 @@ export const messageCatalog: Record<MessageCode, string> = {
     '"{line}" is past the end of {book}, which has {count} chapter(s), so that passage is not in the file; check the chapter number.',
   sermon_verses_unreadable:
     'Could not read the verses in "{line}", so that passage is not in the file; add it by hand.',
+  pptx_corrupt: 'Could not read the PowerPoint file: {reason}.',
+  pptx_unsupported: 'This file is not a supported PowerPoint presentation: {reason}.',
+  pptx_empty: 'The PowerPoint file has no slides to extract.',
   config_invalid_value: 'Invalid value for {key}: "{value}" — {reason}.',
   config_file_unreadable: 'Cannot use config file {path}: {reason}.',
   template_invalid: 'Template error: {reason}.',
