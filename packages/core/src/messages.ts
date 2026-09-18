@@ -5,6 +5,9 @@ export type MessageCode =
   | 'invalid_translation'
   | 'sermon_invalid'
   | 'ai_parse_failed'
+  | 'ai_api_key_missing'
+  | 'ai_request_failed'
+  | 'ai_response_invalid'
   | 'sermon_book_unresolved'
   | 'sermon_chapter_out_of_range'
   | 'sermon_verses_unreadable'
@@ -49,7 +52,11 @@ export type MessageCode =
   | 'fetch_summary'
   | 'canon_unavailable'
   | 'clipboard_unavailable'
+  | 'clipboard_read_unavailable'
   | 'copied_to_clipboard'
+  | 'confirmation_required'
+  | 'write_declined'
+  | 'integration_called'
   | 'editor_not_set'
   | 'editor_failed'
   | 'diff_range_invalid'
@@ -70,6 +77,15 @@ export const messageCatalog: Record<MessageCode, string> = {
   invalid_translation: 'Invalid translation identifier "{abbr}"; expected 1-16 letters/digits, e.g. "KJV" or "SCH2000".',
   sermon_invalid: 'Invalid sermon file: {reason}.',
   ai_parse_failed: 'Could not turn that message into a sermon file: {reason}.',
+  ai_api_key_missing:
+    'No key is configured for the book-name resolver, so the book names this build could not place on ' +
+    'its own were left as they are; set ANTHROPIC_API_KEY, or add anthropicApiKey to the config file.',
+  ai_request_failed:
+    'Could not reach the book-name resolver ({reason}), so the book names this build could not place on ' +
+    'its own were left as they are.',
+  ai_response_invalid:
+    'The book-name resolver answered with something this build cannot use ({reason}), so the book names ' +
+    'it could not place on its own were left as they are.',
   sermon_book_unresolved:
     'Could not tell which book "{line}" names, so that passage is not in the file; add it by hand.',
   sermon_chapter_out_of_range:
@@ -127,7 +143,13 @@ export const messageCatalog: Record<MessageCode, string> = {
   fetch_summary: 'Fetched {live} of {total} chapters live; --verbose says where each one came from.',
   canon_unavailable: 'Could not fetch the book names of {abbr} ({reason}); rendering its citations with English names.',
   clipboard_unavailable: 'Could not copy to clipboard: no clipboard tool worked (tried {tried}).',
+  clipboard_read_unavailable: 'Could not read the clipboard: no clipboard tool worked (tried {tried}).',
   copied_to_clipboard: 'Copied to clipboard.',
+  confirmation_required:
+    'Nothing is written without a confirmation, and this session has no terminal to ask at. ' +
+    'Re-run with --yes to write {path} without being asked.',
+  write_declined: 'Nothing was written.',
+  integration_called: '{subject}: {outcome} in {durationMs}ms{tokens}.',
   editor_not_set: '$EDITOR is not set; skipping editor launch.',
   editor_failed: 'Editor "{editor}" exited with status {status}.',
   diff_range_invalid: 'Invalid --diff range "{input}". Use two revision numbers like "1..3".',

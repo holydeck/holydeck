@@ -19,6 +19,8 @@ export interface HolyDeckConfig {
   syncDelayMs: number;
   /** Fetch bible.com through a headless browser, which can pass its bot-protection challenge. */
   browserFetch: boolean;
+  /** Enables the optional book-name resolver. Without it the sermon pipeline stays deterministic. */
+  anthropicApiKey?: string;
 }
 
 export type ConfigSource = 'default' | 'file' | 'env' | 'flag';
@@ -93,6 +95,8 @@ export function parseConfigFile(text: string, path: string): Partial<HolyDeckCon
   if (concurrency !== undefined) out.syncConcurrency = concurrency;
   const delay = intValue(obj, 'syncDelayMs', 0);
   if (delay !== undefined) out.syncDelayMs = delay;
+  const anthropicApiKey = stringValue(obj, 'anthropicApiKey');
+  if (anthropicApiKey !== undefined) out.anthropicApiKey = anthropicApiKey;
   const browserFetchValue = boolValue(obj, 'browserFetch');
   if (browserFetchValue !== undefined) out.browserFetch = browserFetchValue;
   return out;
@@ -170,6 +174,9 @@ function envLayer(env: Record<string, string | undefined>, notices: string[]): P
   if (env.HOLYDECK_OIDC_CALLBACK_PORT !== undefined && env.HOLYDECK_OIDC_CALLBACK_PORT.trim() !== '') {
     layer.oidcCallbackPort = parseIntEnv('HOLYDECK_OIDC_CALLBACK_PORT', env.HOLYDECK_OIDC_CALLBACK_PORT, 1);
   }
+  // Read under its own bare name, not a HOLYDECK_ one: that is what the Anthropic tooling already
+  // exports, so a key a person has set for anything else works here without being copied.
+  if (env.ANTHROPIC_API_KEY !== undefined) layer.anthropicApiKey = env.ANTHROPIC_API_KEY;
   if (env.HOLYDECK_DATA_DIR !== undefined) layer.dataDir = env.HOLYDECK_DATA_DIR;
   if (env.HOLYDECK_TEMPLATE !== undefined) layer.template = env.HOLYDECK_TEMPLATE;
   if (env.HOLYDECK_TRANSLATIONS !== undefined) {
@@ -219,6 +226,7 @@ export function resolveConfig(inputs: {
     syncConcurrency: 'default',
     syncDelayMs: 'default',
     browserFetch: 'default',
+    anthropicApiKey: 'default',
   };
   const apply = (layer: Partial<HolyDeckConfig>, source: ConfigSource): void => {
     for (const key of Object.keys(layer) as Array<keyof HolyDeckConfig>) {

@@ -45,6 +45,10 @@ describe('parseConfigFile', () => {
       .toEqual({ serverToken: 'a-token-that-came-from-the-file' });
   });
 
+  it('reads the key for the optional book-name resolver', () => {
+    expect(parseConfigFile('anthropicApiKey: test-api-key\n', 'x.yaml')).toEqual({ anthropicApiKey: 'test-api-key' });
+  });
+
   it('parses reusable OIDC login settings', () => {
     expect(parseConfigFile([
       'oidcIssuer: https://auth.example.com',
@@ -74,6 +78,7 @@ describe('parseConfigFile', () => {
     ['oidcCallbackPort: 0', 'config_invalid_value'],
     ['serverUrl: 7', 'config_invalid_value'],
     ['serverToken: 7', 'config_invalid_value'],
+    ['anthropicApiKey: 7', 'config_invalid_value'],
     ['template: 7', 'config_invalid_value'],
     [': : :', 'config_file_unreadable'],
   ])('rejects %j with %s', (text, code) => {
@@ -150,6 +155,20 @@ describe('resolveConfig', () => {
     expect(resolved.values.serverToken).toBe('a-token-long-enough-to-type');
     expect(resolved.sources.serverToken).toBe('env');
     expect(resolveConfig({ platform: darwin, env: {} }).values.serverToken).toBeUndefined();
+  });
+
+  it('takes the resolver key from a bare ANTHROPIC_API_KEY, the name that ecosystem already uses', () => {
+    const resolved = resolveConfig({ platform: darwin, env: { ANTHROPIC_API_KEY: 'test-api-key' } });
+    expect(resolved.values.anthropicApiKey).toBe('test-api-key');
+    expect(resolved.sources.anthropicApiKey).toBe('env');
+    const fromFile = resolveConfig({
+      platform: darwin,
+      env: {},
+      file: { anthropicApiKey: 'test-api-key-from-the-file' },
+    });
+    expect(fromFile.values.anthropicApiKey).toBe('test-api-key-from-the-file');
+    expect(fromFile.sources.anthropicApiKey).toBe('file');
+    expect(resolveConfig({ platform: darwin, env: {} }).values.anthropicApiKey).toBeUndefined();
   });
 
   it('honors deprecated aliases only when the new name is unset, with a notice', () => {

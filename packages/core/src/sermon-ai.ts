@@ -5,18 +5,24 @@
 // book name in any language it knows, `parseVerseList`/`formatVerseList` for the verse text, and
 // `parseSermonFile` as the final check that what was generated is a file this build would accept.
 //
-// Two rules shape the whole module. Nothing reaches the network or the filesystem: the returned
-// `GeneratedSermon` is the preview, and writing it is the caller's decision, made after seeing it. And
-// nothing parsed is discarded: a passage this build cannot place — an unknown book name, a book the
-// canon does not hold, a chapter past its end, a verse list nothing can read — is left out of the file
-// and reported in `notices` with the line it came from, so the pastor can add it by hand rather than
-// discovering later that a verse went missing.
+// Three rules shape the whole module. Nothing reaches the filesystem: the returned `GeneratedSermon` is
+// the preview, and writing it is the caller's decision, made after seeing it. Nothing parsed is
+// discarded: a passage this build cannot place — an unknown book name, a book the canon does not hold, a
+// chapter past its end, a verse list nothing can read — is left out of the file and reported in
+// `notices` with the line it came from, so the pastor can add it by hand rather than discovering later
+// that a verse went missing. And the one thing that can reach the network — the optional book-name
+// resolver in `anthropic.ts` — is never on the critical path: it runs only when a book name was left
+// over and a key is configured, it is asked only about those names, and every way it can fail ends as a
+// notice beside the deterministic file rather than instead of it.
 
 import { stringify } from 'yaml';
+import { resolveBookCodes } from './anthropic.js';
 import { bundledCanon, findBook, resolveBook } from './canon.js';
 import { HolyDeckError, formatMessage } from './messages.js';
 import { formatVerseList, parseVerseList } from './references.js';
 import { parseSermonFile } from './sermon.js';
+import type { HttpPost } from './anthropic.js';
+import type { Canon } from './canon.js';
 
 /** One passage line as the message wrote it, before any book name is resolved. */
 export interface ParsedPastorLine {
@@ -41,9 +47,30 @@ export interface BuiltSermon {
   notices: string[];
 }
 
+/**
+ * One outbound call to the book-name resolver, shaped so a server can hand it straight to ADMN-04's
+ * audit log. It says that a call happened, how it ended and what it cost — never what was sent: no
+ * prompt, no book name, no key. Core records nothing itself; a caller that keeps an audit log passes
+ * `onIntegrationCall` and writes the entry where its own entries go.
+ */
+export interface IntegrationCallInfo {
+  action: 'integration.call';
+  subject: string;
+  outcome: 'allowed' | 'refused';
+  detail: string;
+  requestTokens?: number;
+  responseTokens?: number;
+  durationMs: number;
+}
+
 export interface GenerateSermonOptions {
   translations: string[];
   now: Date;
+  /** Without one the resolver is skipped entirely, and the deterministic result still comes back. */
+  apiKey?: string;
+  model?: string;
+  httpPost?: HttpPost;
+  onIntegrationCall?: (call: IntegrationCallInfo) => void | Promise<void>;
 }
 
 export interface GeneratedSermon {
@@ -76,11 +103,13 @@ const LATIN_ACCENTS = /(?<=\p{Script=Latin})\p{M}+/gu;
 const NOT_SLUGGABLE = /[^\p{L}\p{N}]+/gu;
 
 /**
- * A verse list opens with a digit. That is what separates a mistyped passage — "Hosea 4:9-2" — from a
- * title that happens to carry a colon after a number, "Psalm 23: The Lord is my shepherd": the first
- * was meant as verses and has to be reported, the second is prose and is free to become the title.
+ * A verse list is made of digits and separators and nothing else. That is what separates a mistyped
+ * passage — "Hosea 4:9-2" — from a title that happens to carry a colon after a number: "Psalm 23: The
+ * Lord is my shepherd" and "Matthew 5: 8 beatitudes for us" both carry words, so both are prose and are
+ * free to become the title, while the first was meant as verses and has to be reported. Reading the
+ * absence of letters rather than a leading digit is what keeps the second of those a title.
  */
-const VERSE_LIST_START = /^\s*\p{Nd}/u;
+const ANY_LETTER = /\p{L}/u;
 
 /** What `parsePassageLine` answers with when a line means verses that cannot be read as any. */
 const UNREADABLE_VERSES = Symbol('unreadable verse list');
@@ -150,7 +179,7 @@ function parsePassageLine(line: string): ParsedPastorLine | typeof UNREADABLE_VE
   const verseText = cleaned.slice(colon + 1);
   const verseListRaw = normalizeVerseList(verseText);
   if (verseListRaw !== undefined) return { rawBook, chapter, verseListRaw };
-  return VERSE_LIST_START.test(verseText) ? UNREADABLE_VERSES : undefined;
+  return ANY_LETTER.test(verseText) ? undefined : UNREADABLE_VERSES;
 }
 
 /**
@@ -218,14 +247,24 @@ export function resolveSermonFilename(title: string | undefined, now: Date): str
  * parse already reported, so the work of parsing it survives as something the pastor can act on. The
  * result is re-read through `parseSermonFile` before it is returned: a file this build would refuse is
  * never handed back as one to write.
+ *
+ * `resolved` holds book names some other reading placed — today, the optional resolver. It is a
+ * shortcut past `resolveBook` and nothing more: every code it supplies still goes through the same
+ * canon and chapter checks below, so a name placed elsewhere buys no trust here.
  */
-export function buildSermonYaml(message: ParsedPastorMessage, translations: string[]): BuiltSermon {
+export function buildSermonYaml(
+  message: ParsedPastorMessage,
+  translations: string[],
+  resolved: Record<string, string> = {},
+): BuiltSermon {
   const verses: { book: string; chapter: number; verses: string }[] = [];
   const notices: string[] = [...(message.notices ?? [])];
   const canon = bundledCanon();
+  // A map, not the record itself: a book name like "constructor" reads a function off a plain object.
+  const shortcuts = new Map(Object.entries(resolved));
   for (const line of message.lines) {
     const passage = `${line.rawBook} ${line.chapter}:${line.verseListRaw}`;
-    const usfm = resolveBook(line.rawBook);
+    const usfm = shortcuts.get(line.rawBook) ?? resolveBook(line.rawBook);
     // `resolveBook` lets an unknown three-letter code through, as it always has, so what it answers
     // with is a candidate and not yet a book: only the canon can say whether it names one, and how
     // many chapters that one has. A code or a chapter the canon does not know is reported, never
@@ -257,19 +296,93 @@ export function buildSermonYaml(message: ParsedPastorMessage, translations: stri
   return { yaml, notices };
 }
 
+/** The target named in an audit entry. Naming the vendor is the point: an audit says who was called. */
+const RESOLVER_SUBJECT = 'Anthropic book-name resolver';
+
 /**
- * The whole pipeline, and the one function a command or a server calls. It reaches for nothing outside
- * this package: no network, no filesystem. What comes back is the preview — the file that would be
- * written, its name, and anything the reader needs to know before deciding to write it.
+ * Every book name the deterministic reading could not place, once each, in the order it first appeared.
+ * This is the entire question the resolver is ever asked: a message whose names all resolve here never
+ * reaches the network at all.
+ */
+function unresolvedBookTokens(message: ParsedPastorMessage, canon: Canon): string[] {
+  const tokens: string[] = [];
+  const seen = new Set<string>();
+  for (const line of message.lines) {
+    if (seen.has(line.rawBook)) continue;
+    const usfm = resolveBook(line.rawBook);
+    if (usfm !== undefined && findBook(canon, usfm) !== undefined) continue;
+    seen.add(line.rawBook);
+    tokens.push(line.rawBook);
+  }
+  return tokens;
+}
+
+/**
+ * The optional call, and the whole of its failure handling. Nothing thrown by the resolver leaves here:
+ * no key, an unreachable service and an unusable answer all end the same way — an empty map, one notice
+ * saying which of those it was, and a deterministic file still on its way back to the caller.
+ */
+async function askResolver(
+  tokens: string[],
+  canon: Canon,
+  options: GenerateSermonOptions,
+): Promise<{ codes: Record<string, string>; notice?: string }> {
+  const apiKey = options.apiKey?.trim() ?? '';
+  // Checked here rather than caught below, so a run with no key makes no call and records no audit
+  // entry: an integration that was never contacted is not an integration call.
+  if (apiKey === '') return { codes: {}, notice: formatMessage('ai_api_key_missing') };
+  const started = Date.now();
+  try {
+    const answer = await resolveBookCodes(tokens, canon.books, {
+      apiKey,
+      model: options.model,
+      httpPost: options.httpPost,
+    });
+    const call: IntegrationCallInfo = {
+      action: 'integration.call',
+      subject: RESOLVER_SUBJECT,
+      outcome: 'allowed',
+      detail: `${Object.keys(answer.codes).length} of ${tokens.length} book name(s) placed`,
+      durationMs: Date.now() - started,
+    };
+    if (answer.requestTokens !== undefined) call.requestTokens = answer.requestTokens;
+    if (answer.responseTokens !== undefined) call.responseTokens = answer.responseTokens;
+    await options.onIntegrationCall?.(call);
+    return { codes: answer.codes };
+  } catch (error) {
+    // `resolveBookCodes` reports every failure as a `HolyDeckError`; nothing else leaves it.
+    const failure = error as HolyDeckError;
+    await options.onIntegrationCall?.({
+      action: 'integration.call',
+      subject: RESOLVER_SUBJECT,
+      outcome: 'refused',
+      detail: failure.code,
+      durationMs: Date.now() - started,
+    });
+    return { codes: {}, notice: failure.message };
+  }
+}
+
+/**
+ * The whole pipeline, and the one function a command or a server calls. What comes back is the preview —
+ * the file that would be written, its name, and anything the reader needs to know before deciding to
+ * write it. Nothing here writes to the filesystem, and the only call that leaves the machine is the
+ * optional resolver, reached only when a book name was left over and a key was configured.
  */
 export async function generateSermonFromText(
   rawText: string,
   options: GenerateSermonOptions,
 ): Promise<GeneratedSermon> {
   const message = parsePastorMessage(rawText);
-  const built = buildSermonYaml(message, options.translations);
+  const canon = bundledCanon();
+  const unresolved = unresolvedBookTokens(message, canon);
+  const resolver: { codes: Record<string, string>; notice?: string } =
+    unresolved.length === 0 ? { codes: {} } : await askResolver(unresolved, canon, options);
+  const built = buildSermonYaml(message, options.translations, resolver.codes);
+  // The resolver's notice explains the per-line ones that follow it, so it is read first.
+  const notices = resolver.notice === undefined ? built.notices : [resolver.notice, ...built.notices];
   const filename = resolveSermonFilename(message.title, options.now);
   return message.title === undefined
-    ? { filename, yaml: built.yaml, notices: built.notices }
-    : { filename, title: message.title, yaml: built.yaml, notices: built.notices };
+    ? { filename, yaml: built.yaml, notices }
+    : { filename, title: message.title, yaml: built.yaml, notices };
 }

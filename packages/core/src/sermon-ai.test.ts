@@ -1,5 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
+import { RESOLVE_TOOL_NAME } from './anthropic.js';
 import { HolyDeckError } from './messages.js';
 import { parseSermonFile } from './sermon.js';
 import {
@@ -10,6 +11,8 @@ import {
   slugifyTitle,
   upcomingSunday,
 } from './sermon-ai.js';
+import type { HttpPost } from './anthropic.js';
+import type { IntegrationCallInfo } from './sermon-ai.js';
 
 // Every write the pipeline could reach for, replaced by a recorder that also refuses. The contract is
 // that the returned object is the whole preview: a file appears only once something downstream is told
@@ -116,6 +119,7 @@ describe('parsePastorMessage', () => {
     ['no lead-in at all', 'GOD BREAK THE YOKE', 'GOD BREAK THE YOKE'],
     ['a lead-in before a title that ends in a period', "Today's word. Break the yoke.", 'Break the yoke.'],
     ['a chapter number in front of the colon', 'Psalm 23: The Lord is my shepherd', 'The Lord is my shepherd'],
+    ['a count leading the words after the colon', 'Matthew 5: 8 beatitudes for us', '8 beatitudes for us'],
   ])('reads the title out of a first line with %s', (_case, first, title) => {
     expect(parsePastorMessage(`${first}\nHosea 4:6`).title).toBe(title);
   });
@@ -320,8 +324,240 @@ describe('generateSermonFromText', () => {
       translations: ['KJV'],
       now: new Date('2026-09-18T10:00:00Z'),
     });
-    expect(result.notices).toHaveLength(1);
-    expect(result.notices[0]).toContain('Roman 7:15');
+    // Two: the book name was left over, and with no key configured nothing else was going to place it.
+    expect(result.notices).toHaveLength(2);
+    expect(result.notices[1]).toContain('Roman 7:15');
     expect(parseSermonFile(result.yaml).entries).toHaveLength(1);
+  });
+});
+
+describe('generateSermonFromText with the optional book-name resolver', () => {
+  /** Obviously not a key. Nothing in this repo may carry a string that could pass for a real one. */
+  const API_KEY = 'test-api-key';
+  const NOW = new Date('2026-09-18T10:00:00Z');
+
+  function transport(reply: { status: number; body: string } | Error): {
+    sent: string[];
+    httpPost: HttpPost;
+  } {
+    const sent: string[] = [];
+    const httpPost: HttpPost = async (_url, body) => {
+      sent.push(body);
+      if (reply instanceof Error) throw reply;
+      return reply;
+    };
+    return { sent, httpPost };
+  }
+
+  function resolving(resolutions: Array<{ token: string; usfm: string }>): { status: number; body: string } {
+    return {
+      status: 200,
+      body: JSON.stringify({
+        content: [{ type: 'tool_use', id: 'toolu_test', name: RESOLVE_TOOL_NAME, input: { resolutions } }],
+        usage: { input_tokens: 412, output_tokens: 27 },
+      }),
+    };
+  }
+
+  /** Every token the request actually asked about, read back out of the recorded body. */
+  function tokensAsked(body: string): string {
+    return (JSON.parse(body) as { messages: Array<{ content: string }> }).messages[0]!.content;
+  }
+
+  it('makes no request at all when every book name resolved without one', async () => {
+    const { sent, httpPost } = transport(resolving([]));
+    const calls: IntegrationCallInfo[] = [];
+    const result = await generateSermonFromText(MESSAGE, {
+      translations: TRANSLATIONS,
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: (call) => {
+        calls.push(call);
+      },
+    });
+
+    expect(sent).toHaveLength(0);
+    expect(calls).toEqual([]);
+    expect(result.notices).toEqual([]);
+    expect(parseSermonFile(result.yaml).entries).toHaveLength(7);
+  });
+
+  it('asks only about the book names it could not place, once each, and writes what comes back', async () => {
+    const { sent, httpPost } = transport(resolving([{ token: 'Roman', usfm: 'ROM' }]));
+    const result = await generateSermonFromText('Roman 7:15\nRoman 8:1\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+    });
+
+    expect(sent).toHaveLength(1);
+    const asked = tokensAsked(sent[0]!);
+    expect(asked).toContain('Roman');
+    expect(asked).not.toContain('Hosea');
+    expect(asked.match(/Roman/gu)).toHaveLength(1);
+    expect(result.notices).toEqual([]);
+    expect(parseSermonFile(result.yaml).entries).toEqual([
+      { book: 'ROM', chapter: 7, verses: [15], offsets: {} },
+      { book: 'ROM', chapter: 8, verses: [1], offsets: {} },
+      { book: 'HOS', chapter: 4, verses: [6], offsets: {} },
+    ]);
+  });
+
+  it('re-checks what comes back against the canon, so a resolved book with a bad chapter is still reported', async () => {
+    const { httpPost } = transport(resolving([{ token: 'Roman', usfm: 'ROM' }]));
+    const result = await generateSermonFromText('Roman 99:1\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+    });
+
+    expect(result.notices).toEqual([expect.stringContaining('Roman 99:1')]);
+    expect(result.notices[0]).toContain('Romans');
+    expect(parseSermonFile(result.yaml).entries).toEqual([{ book: 'HOS', chapter: 4, verses: [6], offsets: {} }]);
+  });
+
+  it('falls back to the per-line notice for a token the answer left out', async () => {
+    const { httpPost } = transport(resolving([]));
+    const result = await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+    });
+
+    expect(result.notices).toEqual([expect.stringContaining('Roman 7:15')]);
+    expect(parseSermonFile(result.yaml).entries).toHaveLength(1);
+  });
+
+  it('completes deterministically with no key configured, saying once why nothing was resolved', async () => {
+    const { sent, httpPost } = transport(resolving([{ token: 'Roman', usfm: 'ROM' }]));
+    const calls: IntegrationCallInfo[] = [];
+    const result = await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      httpPost,
+      onIntegrationCall: (call) => {
+        calls.push(call);
+      },
+    });
+
+    expect(sent).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(result.notices).toHaveLength(2);
+    expect(result.notices[0]).toContain('ANTHROPIC_API_KEY');
+    expect(result.notices[1]).toContain('Roman 7:15');
+    expect(parseSermonFile(result.yaml).entries).toHaveLength(1);
+  });
+
+  it('stays quiet about the key when every book name resolved without one', async () => {
+    const result = await generateSermonFromText('Hosea 4:6', { translations: ['KJV'], now: NOW });
+    expect(result.notices).toEqual([]);
+  });
+
+  it.each([
+    ['the request never got through', new Error('getaddrinfo ENOTFOUND'), 'ai_request_failed'],
+    ['the service refused', { status: 429, body: '{}' }, 'ai_request_failed'],
+    ['the answer was unusable', { status: 200, body: 'not json' }, 'ai_response_invalid'],
+  ])('keeps the deterministic file when %s, and says so once', async (_case, reply, code) => {
+    const { sent, httpPost } = transport(reply);
+    const calls: IntegrationCallInfo[] = [];
+    const result = await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: (call) => {
+        calls.push(call);
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(result.notices).toHaveLength(2);
+    expect(result.notices[1]).toContain('Roman 7:15');
+    expect(parseSermonFile(result.yaml).entries).toEqual([{ book: 'HOS', chapter: 4, verses: [6], offsets: {} }]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.outcome).toBe('refused');
+    expect(calls[0]!.detail).toBe(code);
+  });
+
+  it('hands the audit hook one ADMN-04-shaped entry per call, carrying nothing it may not carry', async () => {
+    const { httpPost } = transport(resolving([{ token: 'Roman', usfm: 'ROM' }]));
+    const calls: IntegrationCallInfo[] = [];
+    await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: (call) => {
+        calls.push(call);
+      },
+    });
+
+    expect(calls).toHaveLength(1);
+    const call = calls[0]!;
+    expect(call.action).toBe('integration.call');
+    expect(call.subject).toBe('Anthropic book-name resolver');
+    expect(call.outcome).toBe('allowed');
+    expect(call.requestTokens).toBe(412);
+    expect(call.responseTokens).toBe(27);
+    expect(typeof call.durationMs).toBe('number');
+    expect(call.durationMs).toBeGreaterThanOrEqual(0);
+    expect(Object.keys(call).sort()).toEqual([
+      'action',
+      'detail',
+      'durationMs',
+      'outcome',
+      'requestTokens',
+      'responseTokens',
+      'subject',
+    ]);
+
+    const serialized = JSON.stringify(call);
+    for (const secret of [API_KEY, 'Roman', 'ROM', 'Romans', 'USFM', 'actor', 'correlationId']) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it('records the call without token counts when the answer reported none', async () => {
+    const { httpPost } = transport({
+      status: 200,
+      body: JSON.stringify({
+        content: [
+          { type: 'tool_use', name: RESOLVE_TOOL_NAME, input: { resolutions: [{ token: 'Roman', usfm: 'ROM' }] } },
+        ],
+      }),
+    });
+    const calls: IntegrationCallInfo[] = [];
+    await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: (call) => {
+        calls.push(call);
+      },
+    });
+
+    expect(Object.keys(calls[0]!).sort()).toEqual(['action', 'detail', 'durationMs', 'outcome', 'subject']);
+  });
+
+  it('waits for an audit hook that answers with a promise before returning', async () => {
+    const { httpPost } = transport(resolving([{ token: 'Roman', usfm: 'ROM' }]));
+    const seen: string[] = [];
+    await generateSermonFromText('Roman 7:15\nHosea 4:6', {
+      translations: ['KJV'],
+      now: NOW,
+      apiKey: API_KEY,
+      httpPost,
+      onIntegrationCall: async () => {
+        await Promise.resolve();
+        seen.push('recorded');
+      },
+    });
+
+    expect(seen).toEqual(['recorded']);
   });
 });

@@ -37,6 +37,10 @@
       "types": "./dist/sermon-ai.d.ts",
       "import": "./dist/sermon-ai.js"
     },
+    "./anthropic": {
+      "types": "./dist/anthropic.d.ts",
+      "import": "./dist/anthropic.js"
+    },
     "./template": {
       "types": "./dist/template.d.ts",
       "import": "./dist/template.js"
