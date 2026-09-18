@@ -1,4 +1,5 @@
 import { bundledCanon } from './canon.js';
+import { NOT_A_WORD, phraseCount, scatteredCount } from './search-text.js';
 import { latestRevision } from './storage.js';
 import type { TranslationStoreFile } from './storage.js';
 
@@ -33,8 +34,6 @@ const BOOK_ORDER = new Map(bundledCanon().books.map((book, index) => [book.usfm,
 /** A book no bundled canon names sorts after every book one does, and by its own name among its like. */
 const UNNAMED_BOOK_ORDER = BOOK_ORDER.size;
 
-const NOT_A_WORD = /[^\p{L}\p{N}]+/u;
-
 /** The words a line of scripture is searched as: lower case, and with the punctuation between them gone. */
 function wordsOf(text: string): readonly string[] {
   return text.toLowerCase().split(NOT_A_WORD).filter((word) => word !== '');
@@ -43,26 +42,6 @@ function wordsOf(text: string): readonly string[] {
 /** A whole number a reference can name, or nothing for a key that names no chapter or verse at all. */
 function referenceNumber(key: string): number | undefined {
   return /^\d+$/u.test(key) ? Number(key) : undefined;
-}
-
-/** How many times the query's words appear together, in the order they were written. */
-function phraseCount(words: readonly string[], query: readonly string[]): number {
-  let count = 0;
-  for (let start = 0; start + query.length <= words.length; start += 1) {
-    if (query.every((word, index) => words[start + index] === word)) count += 1;
-  }
-  return count;
-}
-
-/** How often the query's words appear anywhere in the verse, or none at all when one of them is missing. */
-function scatteredCount(words: readonly string[], query: readonly string[]): number {
-  let total = 0;
-  for (const word of new Set(query)) {
-    const found = words.filter((candidate) => candidate === word).length;
-    if (found === 0) return 0;
-    total += found;
-  }
-  return total;
 }
 
 function matchOf(text: string, query: readonly string[]): { phrase: boolean; occurrences: number } | undefined {

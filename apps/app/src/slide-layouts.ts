@@ -119,6 +119,9 @@ export interface RestoredVersion extends VersionOutcome {
 
 export interface SlideLayoutStore {
   create(context: unknown, draft: SlideLayoutDraft): Promise<SlideLayoutPreview>;
+  /** Every Slide Layout's standing stamp — the same discoverability `library.ts`'s own `list` gives
+   *  reusable content, restated here because a Slide Layout is administered through this store alone. */
+  list(context: unknown): Promise<readonly SlideLayoutRecord[]>;
   /** The standing boxes, or a named earlier ordinal. Nothing is written either way. */
   preview(context: unknown, id: string, revision?: number): Promise<SlideLayoutPreview | undefined>;
   /** Saves boxes forward. Nothing for an unknown Layout; nothing appended when they did not change. */
@@ -220,10 +223,8 @@ export function slideLayoutsOn(db: RepositoryDb, options: SlideLayoutOptions): S
     return { actor, correlationId };
   };
 
-  /** The standing stamp of one Layout, or nothing at all when no such Layout was ever created. */
-  const standing = async (context: unknown, id: string): Promise<StampRow | undefined> => {
-    const [found] = await records.read(context, { layoutId: id }, { sort: { sequence: -1 }, limit: 1 });
-    if (found === undefined) return undefined;
+  /** What one stamp row holds, once it has been read back as something this build understands. */
+  const rowFrom = (id: string, found: Record<string, unknown>): StampRow => {
     const name = found['name'];
     const sequence = found['sequence'];
     if (typeof name !== 'string' || typeof sequence !== 'number') {
@@ -234,6 +235,12 @@ export function slideLayoutsOn(db: RepositoryDb, options: SlideLayoutOptions): S
       throw new SlideLayoutError('corrupt', `${id} holds a stamp this code cannot read: ${problems(parsed.problems)}`);
     }
     return { stamp: parsed.value, name, sequence };
+  };
+
+  /** The standing stamp of one Layout, or nothing at all when no such Layout was ever created. */
+  const standing = async (context: unknown, id: string): Promise<StampRow | undefined> => {
+    const [found] = await records.read(context, { layoutId: id }, { sort: { sequence: -1 }, limit: 1 });
+    return found === undefined ? undefined : rowFrom(id, found);
   };
 
   const stampOnto = async (
@@ -323,6 +330,22 @@ export function slideLayoutsOn(db: RepositoryDb, options: SlideLayoutOptions): S
         const stamp = createdStamp({ id, kind: 'slideLayout', at, by: author(context).actor });
         await stampOnto(context, stamp, name, 1);
         return { stamp, name, revision: outcome.revision.revision, at: outcome.revision.at, body };
+      }),
+
+    list: (context) =>
+      own(async () => {
+        const rows = await records.read(context, {});
+        const byId = new Map<string, StampRow>();
+        for (const found of rows) {
+          const layoutId = found['layoutId'];
+          if (typeof layoutId !== 'string') {
+            throw new SlideLayoutError('corrupt', 'a Slide Layout row is missing its identifier');
+          }
+          const row = rowFrom(layoutId, found);
+          const current = byId.get(layoutId);
+          if (current === undefined || current.sequence < row.sequence) byId.set(layoutId, row);
+        }
+        return [...byId.values()].map((row) => ({ stamp: row.stamp, name: row.name }));
       }),
 
     preview: (context, id, revision) =>

@@ -61,6 +61,10 @@
       "types": "./dist/media.d.ts",
       "import": "./dist/media.js"
     },
+    "./palette": {
+      "types": "./dist/palette.d.ts",
+      "import": "./dist/palette.js"
+    },
     "./portable": {
       "types": "./dist/portable.d.ts",
       "import": "./dist/portable.js"

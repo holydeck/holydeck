@@ -90,6 +90,9 @@ export type ItemContentDrift = {
 
 export interface ServiceStore {
   create(context: unknown, draft: ServiceDraft): Promise<ServiceRecord>;
+  /** Every Service's standing record. Read-only, so — like `current` below — it needs no audit
+   *  permission: nothing here writes. */
+  list(context: unknown): Promise<readonly ServiceRecord[]>;
   /** A new Service with the same title, date, site, and sections/items — items keep their own
    *  RevisionRef verbatim (same id/revision/hash), never copying the content it points to. Fresh
    *  id, fresh entity stamp, state starts at 'upcoming' regardless of the source's state. */
@@ -279,9 +282,7 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
     return { actor, correlationId };
   };
 
-  const standing = async (context: unknown, id: string): Promise<StampRow | undefined> => {
-    const [found] = await records.read(context, { serviceId: id }, { sort: { sequence: -1 }, limit: 1 });
-    if (found === undefined) return undefined;
+  const rowFrom = (id: string, found: Record<string, unknown>): StampRow => {
     const sequence = found['sequence'];
     if (typeof sequence !== 'number') {
       throw new ServiceError('corrupt', `${id} is stamped with an ordinal this code cannot read`);
@@ -296,6 +297,11 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
     }
     const { title, date, site, state, sections } = service.value;
     return { stamp: parsed.value, title, date, site, state, sections, sequence };
+  };
+
+  const standing = async (context: unknown, id: string): Promise<StampRow | undefined> => {
+    const [found] = await records.read(context, { serviceId: id }, { sort: { sequence: -1 }, limit: 1 });
+    return found === undefined ? undefined : rowFrom(id, found);
   };
 
   const stampOnto = async (
@@ -378,6 +384,29 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
 
   return {
     create: (context, draft) => own(() => create(context, draft, 'service.create')),
+
+    list: (context) =>
+      own(async () => {
+        const rows = await records.read(context, {});
+        const byId = new Map<string, StampRow>();
+        for (const found of rows) {
+          const serviceId = found['serviceId'];
+          if (typeof serviceId !== 'string') {
+            throw new ServiceError('corrupt', 'a Service row is missing its identifier');
+          }
+          const row = rowFrom(serviceId, found);
+          const current = byId.get(serviceId);
+          if (current === undefined || current.sequence < row.sequence) byId.set(serviceId, row);
+        }
+        return [...byId.values()].map(({ stamp, title, date, site, state, sections }) => ({
+          stamp,
+          title,
+          date,
+          site,
+          state,
+          sections,
+        }));
+      }),
 
     duplicate: (context, id) =>
       own(async () => {

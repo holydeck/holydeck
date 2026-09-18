@@ -61,6 +61,10 @@
       "types": "./dist/search.d.ts",
       "import": "./dist/search.js"
     },
+    "./search-text": {
+      "types": "./dist/search-text.d.ts",
+      "import": "./dist/search-text.js"
+    },
     "./file-store": {
       "types": "./dist/file-store.d.ts",
       "import": "./dist/file-store.js"
