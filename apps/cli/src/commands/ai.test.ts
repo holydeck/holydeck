@@ -76,9 +76,22 @@ describe('ai', () => {
     expect(existsSync(join(setup.home, CLEAN_FILE))).toBe(true);
   });
 
-  it('composes the message in $EDITOR when --editor is passed, and uses what was saved', async () => {
+  it('prefers what was piped in over --editor when both are available', async () => {
     const setup = makeContext({
       stdinText: WITH_UNKNOWN,
+      overrides: {
+        editor: async () => {
+          throw new Error('the editor should not open when a pipe already carried the message');
+        },
+      },
+    });
+    await expect(runCli(setup.ctx, ['ai', '--editor', '--yes'])).resolves.toBe(0);
+
+    expect(existsSync(join(setup.home, UNKNOWN_FILE))).toBe(true);
+  });
+
+  it('composes the message in $EDITOR when --editor is passed and nothing was piped in, and uses what was saved', async () => {
+    const setup = makeContext({
       clipboardText: WITH_UNKNOWN,
       overrides: {
         editor: async (path) => {

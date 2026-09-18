@@ -42,17 +42,19 @@ async function readFromEditor(ctx: CliContext): Promise<string> {
 }
 
 /**
- * Where the pasted message comes from. A pipe wins when there is one, because a run with something
- * piped in meant to send that; an empty or blank pipe is not an answer, so it falls through to the
- * clipboard rather than refusing. A flag settles it either way and never consults the other source —
- * `--stdin` on an empty pipe fails on the empty message instead of quietly pasting something else.
+ * Where the pasted message comes from. A pipe wins over `--editor` when there is one, because a run
+ * with something piped in meant to send that, not open an editor on top of it; an empty or blank pipe
+ * is not an answer, so it falls through instead of winning on its own. `--clipboard` is checked ahead
+ * of the pipe, same as before this fix — that ordering is a separate, pre-existing question and untouched
+ * here. `--stdin` on an empty pipe fails on the empty message instead of quietly pasting something else.
  */
 export async function readMessage(ctx: CliContext, options: AiOptions): Promise<string> {
-  if (options.editor === true) return readFromEditor(ctx);
   if (options.clipboard === true) return ctx.readClipboard();
   const piped = await ctx.readStdin();
+  if (piped !== undefined && piped.trim() !== '') return piped;
+  if (options.editor === true) return readFromEditor(ctx);
   if (options.stdin === true) return piped ?? '';
-  return piped === undefined || piped.trim() === '' ? ctx.readClipboard() : piped;
+  return ctx.readClipboard();
 }
 
 /**

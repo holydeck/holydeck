@@ -214,6 +214,18 @@ describe('resolveBookCodes', () => {
         }),
       },
     ],
+    [
+      'a valid resolver call sits alongside a tool_use block for something else',
+      {
+        status: 200,
+        body: JSON.stringify({
+          content: [
+            { type: 'tool_use', name: RESOLVE_TOOL_NAME, input: { resolutions: [{ token: 'Roman', usfm: 'ROM' }] } },
+            { type: 'tool_use', name: 'other', input: { foo: 'bar' } },
+          ],
+        }),
+      },
+    ],
   ])('refuses an answer this build cannot use when %s', async (_case, reply) => {
     const { httpPost } = recorder(reply);
     const failure = await failureOf(() => resolveBookCodes(['Roman'], CANON, { apiKey: API_KEY, httpPost }));

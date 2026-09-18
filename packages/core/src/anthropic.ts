@@ -135,12 +135,16 @@ function readAnswer(
 
   const content = isRecord(payload) ? payload.content : undefined;
   if (!Array.isArray(content)) throw fail('the answer carried no content');
-  const calls = content.filter(
-    (block) => isRecord(block) && block.type === 'tool_use' && block.name === RESOLVE_TOOL_NAME,
-  ) as { input?: { resolutions?: unknown } }[];
-  if (calls.length === 0) throw fail(`the answer carried no ${RESOLVE_TOOL_NAME} call`);
-  if (calls.length > 1) throw fail(`the answer carried more than one ${RESOLVE_TOOL_NAME} call`);
-  const resolutions = calls[0]!.input?.resolutions;
+  // Counted before the name is checked: a tool call for something else sitting alongside the real one
+  // is still more than one block, not zero — the count has to see every block before any is judged.
+  const toolUseBlocks = content.filter(
+    (block) => isRecord(block) && block.type === 'tool_use',
+  ) as { name?: unknown; input?: { resolutions?: unknown } }[];
+  if (toolUseBlocks.length === 0) throw fail(`the answer carried no ${RESOLVE_TOOL_NAME} call`);
+  if (toolUseBlocks.length > 1) throw fail(`the answer carried more than one ${RESOLVE_TOOL_NAME} call`);
+  const call = toolUseBlocks[0]!;
+  if (call.name !== RESOLVE_TOOL_NAME) throw fail(`the answer carried no ${RESOLVE_TOOL_NAME} call`);
+  const resolutions = call.input?.resolutions;
   if (!Array.isArray(resolutions)) throw fail('the tool call carried no list of resolutions');
 
   const asked = new Set(tokens);
