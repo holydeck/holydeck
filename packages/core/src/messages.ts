@@ -6,6 +6,8 @@ export type MessageCode =
   | 'sermon_invalid'
   | 'ai_parse_failed'
   | 'sermon_book_unresolved'
+  | 'sermon_chapter_out_of_range'
+  | 'sermon_verses_unreadable'
   | 'config_invalid_value'
   | 'config_file_unreadable'
   | 'template_invalid'
@@ -70,6 +72,10 @@ export const messageCatalog: Record<MessageCode, string> = {
   ai_parse_failed: 'Could not turn that message into a sermon file: {reason}.',
   sermon_book_unresolved:
     'Could not tell which book "{line}" names, so that passage is not in the file; add it by hand.',
+  sermon_chapter_out_of_range:
+    '"{line}" is past the end of {book}, which has {count} chapter(s), so that passage is not in the file; check the chapter number.',
+  sermon_verses_unreadable:
+    'Could not read the verses in "{line}", so that passage is not in the file; add it by hand.',
   config_invalid_value: 'Invalid value for {key}: "{value}" — {reason}.',
   config_file_unreadable: 'Cannot use config file {path}: {reason}.',
   template_invalid: 'Template error: {reason}.',

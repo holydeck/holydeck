@@ -7,12 +7,13 @@
 //
 // Two rules shape the whole module. Nothing reaches the network or the filesystem: the returned
 // `GeneratedSermon` is the preview, and writing it is the caller's decision, made after seeing it. And
-// nothing parsed is discarded: a passage whose book name this build cannot place is left out of the
-// file and reported in `notices` with the line it came from, so the pastor can add it by hand rather
-// than discovering later that a verse went missing.
+// nothing parsed is discarded: a passage this build cannot place — an unknown book name, a book the
+// canon does not hold, a chapter past its end, a verse list nothing can read — is left out of the file
+// and reported in `notices` with the line it came from, so the pastor can add it by hand rather than
+// discovering later that a verse went missing.
 
 import { stringify } from 'yaml';
-import { resolveBook } from './canon.js';
+import { bundledCanon, findBook, resolveBook } from './canon.js';
 import { HolyDeckError, formatMessage } from './messages.js';
 import { formatVerseList, parseVerseList } from './references.js';
 import { parseSermonFile } from './sermon.js';
@@ -28,6 +29,11 @@ export interface ParsedPastorLine {
 export interface ParsedPastorMessage {
   title?: string;
   lines: ParsedPastorLine[];
+  /**
+   * Lines that read as a passage but whose verse list could not be, already worded for the reader.
+   * Absent when there are none, so a clean message stays `{ title, lines }`.
+   */
+  notices?: string[];
 }
 
 export interface BuiltSermon {
@@ -69,22 +75,39 @@ const LATIN_ACCENTS = /(?<=\p{Script=Latin})\p{M}+/gu;
 /** Anything a filename is better off without, which is everything that is not a letter or a digit. */
 const NOT_SLUGGABLE = /[^\p{L}\p{N}]+/gu;
 
+/**
+ * A verse list opens with a digit. That is what separates a mistyped passage — "Hosea 4:9-2" — from a
+ * title that happens to carry a colon after a number, "Psalm 23: The Lord is my shepherd": the first
+ * was meant as verses and has to be reported, the second is prose and is free to become the title.
+ */
+const VERSE_LIST_START = /^\s*\p{Nd}/u;
+
+/** What `parsePassageLine` answers with when a line means verses that cannot be read as any. */
+const UNREADABLE_VERSES = Symbol('unreadable verse list');
+
 const MILLISECONDS_PER_DAY = 86_400_000;
 
 /**
  * Reads the raw message into a title and its passages, in the order they were written, duplicates and
  * all. A line that does not read as "<book> <chapter>:<verses>" is prose: the first one with a letter
- * in it becomes the title, the rest are ignored. Nothing here resolves a book name — the token is kept
- * exactly as written so an unresolvable one can still be reported with the line it came from.
+ * in it becomes the title, the rest are ignored. A line that does mean verses but writes them in a way
+ * nothing can read is neither — it goes to `notices`, since letting it pass for prose would make the
+ * mistyped passage the sermon's title. Nothing here resolves a book name — the token is kept exactly
+ * as written so an unresolvable one can still be reported with the line it came from.
  */
 export function parsePastorMessage(text: string): ParsedPastorMessage {
   const lines: ParsedPastorLine[] = [];
+  const notices: string[] = [];
   let title: string | undefined;
   for (const raw of text.split('\n')) {
     const trimmed = raw.trim();
     if (trimmed === '') continue;
     const passage = parsePassageLine(trimmed);
-    if (passage !== undefined) {
+    if (passage === UNREADABLE_VERSES) {
+      // Verses were meant here, so the line is not prose: reporting it keeps a mistyped passage out of
+      // the title and the filename, where it would otherwise sit unnoticed.
+      notices.push(formatMessage('sermon_verses_unreadable', { line: trimmed }));
+    } else if (passage !== undefined) {
       lines.push(passage);
     } else if (title === undefined && /\p{L}/u.test(trimmed)) {
       title = titleFrom(trimmed);
@@ -92,13 +115,24 @@ export function parsePastorMessage(text: string): ParsedPastorMessage {
   }
   if (lines.length === 0) {
     throw new HolyDeckError('ai_parse_failed', {
-      reason: 'no line in it reads as "<book> <chapter>:<verses>"',
+      reason: reasonFor('no line in it reads as "<book> <chapter>:<verses>"', notices),
     });
   }
-  return title === undefined ? { lines } : { title, lines };
+  const message: ParsedPastorMessage = { lines };
+  if (title !== undefined) message.title = title;
+  if (notices.length > 0) message.notices = notices;
+  return message;
 }
 
-function parsePassageLine(line: string): ParsedPastorLine | undefined {
+/**
+ * The refusal with what was already learned about the failing lines behind it, when there is any. The
+ * last notice gives up its period: the message this reason is interpolated into ends in one already.
+ */
+function reasonFor(summary: string, notices: string[]): string {
+  return notices.length === 0 ? summary : `${summary} — ${notices.join(' ').replace(/\.$/u, '')}`;
+}
+
+function parsePassageLine(line: string): ParsedPastorLine | typeof UNREADABLE_VERSES | undefined {
   const cleaned = line.replace(LIST_MARKER, '').trim();
   const colon = cleaned.indexOf(':');
   if (colon === -1) return undefined;
@@ -113,8 +147,10 @@ function parsePassageLine(line: string): ParsedPastorLine | undefined {
   if (chapterText === '' || rawBook === '' || digits === rawBook.length) return undefined;
   const chapter = Number(chapterText);
   if (chapter < 1 || chapter > 150) return undefined;
-  const verseListRaw = normalizeVerseList(cleaned.slice(colon + 1));
-  return verseListRaw === undefined ? undefined : { rawBook, chapter, verseListRaw };
+  const verseText = cleaned.slice(colon + 1);
+  const verseListRaw = normalizeVerseList(verseText);
+  if (verseListRaw !== undefined) return { rawBook, chapter, verseListRaw };
+  return VERSE_LIST_START.test(verseText) ? UNREADABLE_VERSES : undefined;
 }
 
 /**
@@ -177,29 +213,43 @@ export function resolveSermonFilename(title: string | undefined, now: Date): str
 
 /**
  * Assembles the sermon file: every passage this build can place, in message order, with its verse text
- * as a compact string rather than an exploded list. A passage whose book name cannot be placed is left
- * out and reported instead, so the work of parsing it survives as something the pastor can act on. The
+ * as a compact string rather than an exploded list. A passage this build cannot place — an unknown
+ * book, or a chapter the book does not have — is left out and reported instead, alongside whatever the
+ * parse already reported, so the work of parsing it survives as something the pastor can act on. The
  * result is re-read through `parseSermonFile` before it is returned: a file this build would refuse is
  * never handed back as one to write.
  */
 export function buildSermonYaml(message: ParsedPastorMessage, translations: string[]): BuiltSermon {
   const verses: { book: string; chapter: number; verses: string }[] = [];
-  const notices: string[] = [];
+  const notices: string[] = [...(message.notices ?? [])];
+  const canon = bundledCanon();
   for (const line of message.lines) {
-    const book = resolveBook(line.rawBook);
-    if (book === undefined) {
+    const passage = `${line.rawBook} ${line.chapter}:${line.verseListRaw}`;
+    const usfm = resolveBook(line.rawBook);
+    // `resolveBook` lets an unknown three-letter code through, as it always has, so what it answers
+    // with is a candidate and not yet a book: only the canon can say whether it names one, and how
+    // many chapters that one has. A code or a chapter the canon does not know is reported, never
+    // written — a file naming a book this build cannot open is worse than a passage added by hand.
+    const book = usfm === undefined ? undefined : findBook(canon, usfm);
+    if (usfm === undefined || book === undefined) {
+      notices.push(formatMessage('sermon_book_unresolved', { line: passage }));
+      continue;
+    }
+    if (line.chapter > book.chapters.length) {
       notices.push(
-        formatMessage('sermon_book_unresolved', {
-          line: `${line.rawBook} ${line.chapter}:${line.verseListRaw}`,
+        formatMessage('sermon_chapter_out_of_range', {
+          line: passage,
+          book: book.name,
+          count: book.chapters.length,
         }),
       );
       continue;
     }
-    verses.push({ book, chapter: line.chapter, verses: line.verseListRaw });
+    verses.push({ book: usfm, chapter: line.chapter, verses: line.verseListRaw });
   }
   if (verses.length === 0) {
     throw new HolyDeckError('ai_parse_failed', {
-      reason: `none of the ${message.lines.length} passage(s) in it names a book this build knows`,
+      reason: reasonFor(`none of the ${message.lines.length} passage(s) in it could be placed`, notices),
     });
   }
   const yaml = stringify({ translations, verses }, { lineWidth: 0 });

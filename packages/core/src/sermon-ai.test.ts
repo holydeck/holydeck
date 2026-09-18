@@ -115,8 +115,16 @@ describe('parsePastorMessage', () => {
     ['a colon lead-in', 'Sermon: The Good Shepherd', 'The Good Shepherd'],
     ['no lead-in at all', 'GOD BREAK THE YOKE', 'GOD BREAK THE YOKE'],
     ['a lead-in before a title that ends in a period', "Today's word. Break the yoke.", 'Break the yoke.'],
+    ['a chapter number in front of the colon', 'Psalm 23: The Lord is my shepherd', 'The Lord is my shepherd'],
   ])('reads the title out of a first line with %s', (_case, first, title) => {
     expect(parsePastorMessage(`${first}\nHosea 4:6`).title).toBe(title);
+  });
+
+  it('reports a passage whose verse list it cannot read instead of reading the line as a title', () => {
+    const message = parsePastorMessage('Hosea 4:9-2\nHosea 4:6');
+    expect(message.title).toBeUndefined();
+    expect(message.lines).toEqual([{ rawBook: 'Hosea', chapter: 4, verseListRaw: '6' }]);
+    expect(message.notices).toEqual([expect.stringContaining('Hosea 4:9-2')]);
   });
 
   it('takes only the first prose line as the title and ignores the rest', () => {
@@ -225,8 +233,35 @@ describe('buildSermonYaml', () => {
     expect(sermon.notices).toEqual([]);
   });
 
+  it('carries a verse list it could not read into the file it builds as a notice', () => {
+    const built = buildSermonYaml(parsePastorMessage('Hosea 4:9-2\nHosea 4:6'), ['KJV']);
+    expect(built.notices).toEqual([expect.stringContaining('Hosea 4:9-2')]);
+    expect(parseSermonFile(built.yaml).entries).toEqual([
+      { book: 'HOS', chapter: 4, verses: [6], offsets: {} },
+    ]);
+  });
+
+  it.each([
+    ['a three-letter token that names no book in the canon', 'Off 3:20'],
+    ['a chapter past the end of the book it names', 'Hosea 99:1'],
+  ])('leaves out %s and reports the line instead of writing it', (_case, passage) => {
+    const built = buildSermonYaml(parsePastorMessage(`${passage}\nHosea 4:6`), ['KJV']);
+    expect(built.notices).toHaveLength(1);
+    expect(built.notices[0]).toContain(passage);
+    const sermon = parseSermonFile(built.yaml);
+    expect(sermon.entries).toEqual([{ book: 'HOS', chapter: 4, verses: [6], offsets: {} }]);
+    expect(sermon.notices).toEqual([]);
+  });
+
   it('refuses to write a file when no book in the message could be placed', () => {
     expect(codeOf(() => buildSermonYaml(parsePastorMessage('Roman 7:15'), ['KJV']))).toBe('ai_parse_failed');
+  });
+
+  it('names the passages it could not place in the refusal, rather than counting them', () => {
+    const refuse = () => buildSermonYaml(parsePastorMessage('Roman 7:15\nOff 3:20'), ['KJV']);
+    expect(refuse).toThrow(/Roman 7:15[\s\S]*Off 3:20/u);
+    // The notices end in a period and so does the message they are folded into: one, not two.
+    expect(refuse).toThrow(/[^.]\.$/u);
   });
 
   it('refuses translations the sermon validator would reject rather than emitting a broken file', () => {
@@ -267,6 +302,17 @@ describe('generateSermonFromText', () => {
     });
     expect(result.filename).toBe('2026-09-13.yml');
     expect(result).not.toHaveProperty('title');
+  });
+
+  it('keeps a passage whose verse list it cannot read out of the title and the filename', async () => {
+    const result = await generateSermonFromText('Hosea 4:9-2\nHosea 4:6', {
+      translations: ['KJV'],
+      now: new Date('2026-09-18T10:00:00Z'),
+    });
+    expect(result).not.toHaveProperty('title');
+    expect(result.filename).toBe('2026-09-20.yml');
+    expect(result.notices).toEqual([expect.stringContaining('Hosea 4:9-2')]);
+    expect(parseSermonFile(result.yaml).entries).toHaveLength(1);
   });
 
   it('carries the notice for an unplaceable book out to the caller', async () => {
