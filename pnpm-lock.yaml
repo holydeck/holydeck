@@ -157,6 +157,9 @@ importers:
       '@holydeck/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@holydeck/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@holydeck/localization':
         specifier: workspace:*
         version: link:../../packages/localization

@@ -41,6 +41,7 @@
   "dependencies": {
     "@fastify/websocket": "^11.3.0",
     "@holydeck/contracts": "workspace:*",
+    "@holydeck/core": "workspace:*",
     "@holydeck/localization": "workspace:*",
     "@holydeck/renderer": "workspace:*",
     "@simplewebauthn/server": "^14.0.1",
