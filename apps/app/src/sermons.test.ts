@@ -6,6 +6,7 @@ import { appendRevision, createEmptyStoreFile } from '@holydeck/core/storage';
 import { libraryOn } from './library.js';
 import { RECORDS } from './records.js';
 import { revisionsOn } from './revisions.js';
+import { sermonFromYaml } from './sermon-yaml.js';
 import { SermonError, sermonContext, sermonsOn } from './sermons.js';
 import { slideGroupsOn } from './slide-groups.js';
 import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
@@ -13,6 +14,8 @@ import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { BoxBinding, SlideLayoutBody, TextLayoutBox } from '@holydeck/contracts/layouts';
 import type { SermonBody, SermonGeneration } from './sermons.js';
+import type { Document } from './repositories.js';
+import type { FakeDb } from '../test/helpers/fake-db.js';
 
 const ADMIN = sermonContext(`account:${'C'.repeat(22)}`, 'req-sermon');
 const LAYOUT_ADMIN = slideLayoutContext(ADMIN.actor, ADMIN.correlationId);
@@ -55,6 +58,20 @@ function stores() {
     layouts: slideLayoutsOn(db, { now, newId: () => `layout-${++serial}` }),
   };
 }
+
+const REVISIONS = RECORDS.contentRevisions.collection;
+
+const rows = (db: FakeDb, collection: string): Document[] => db.rows.get(collection) ?? [];
+
+const refused = async (call: Promise<unknown>): Promise<SermonError> => {
+  try {
+    await call;
+  } catch (error) {
+    if (error instanceof SermonError) return error;
+    throw error;
+  }
+  throw new Error('the call was allowed');
+};
 
 function bible(translation: string) {
   const file = createEmptyStoreFile(translation, now());
@@ -224,5 +241,68 @@ describe('sermon slide generation', () => {
     const other = await sermons.create(ADMIN, 'Other sermon', BODY);
     await expect(sermons.generate(ADMIN, other.stamp.id, { ...input, slideGroupId: generated.stamp.id })).rejects.toMatchObject({ kind: 'state' });
     expect((await groups.current(ADMIN, generated.stamp.id))?.body).toEqual(generated.body);
+  });
+});
+
+describe('the visual surface and the raw surface are one configuration', () => {
+  it('shows the same sermon either way, whichever surface wrote it last', async () => {
+    const { sermons } = stores();
+    const created = await sermons.create(ADMIN, 'Sunday sermon', BODY);
+    const id = created.stamp.id;
+    // Field order is not part of the configuration: compare what the text means, not its exact bytes.
+    expect(sermonFromYaml((await sermons.raw(ADMIN, id))!)).toEqual({ ok: true, value: BODY });
+
+    const changed = { ...BODY, languages: { ...BODY.languages, ta: { ...BODY.languages['ta']!, title: 'Changed' } } };
+    await sermons.edit(ADMIN, id, changed);
+    const parsed = sermonFromYaml((await sermons.raw(ADMIN, id))!);
+    expect(parsed.ok && parsed.value).toEqual(changed);
+  });
+
+  it('loses nothing when a sermon is opened as text and saved straight back', async () => {
+    const { db, sermons } = stores();
+    const created = await sermons.create(ADMIN, 'Sunday sermon', BODY);
+    const id = created.stamp.id;
+    const saved = await sermons.editRaw(ADMIN, id, (await sermons.raw(ADMIN, id))!);
+    expect(saved?.body).toEqual(BODY);
+    // A round trip through the raw editor is not an edit: nothing changed, so nothing was appended.
+    expect(saved?.revision).toBe(1);
+    expect(rows(db, REVISIONS)).toHaveLength(1);
+  });
+
+  it('saves what the raw surface typed, and the visual surface reads it back', async () => {
+    const { sermons } = stores();
+    const created = await sermons.create(ADMIN, 'Sunday sermon', BODY);
+    const id = created.stamp.id;
+    const retyped = (await sermons.raw(ADMIN, id))!.replace('நன்றி', 'நன்றி (திருத்தப்பட்டது)');
+    const saved = await sermons.editRaw(ADMIN, id, retyped);
+    expect(saved?.revision).toBe(2);
+    expect((await sermons.current(ADMIN, id))?.body.languages['ta']?.title).toBe('நன்றி (திருத்தப்பட்டது)');
+    expect(sermonFromYaml((await sermons.raw(ADMIN, id, 1))!)).toEqual({ ok: true, value: BODY });
+  });
+});
+
+describe('switching editing modes mid-edit', () => {
+  it('a refused raw edit explicitly leaves the sermon exactly as it stood, not silently discarded', async () => {
+    const { db, sermons } = stores();
+    const created = await sermons.create(ADMIN, 'Sunday sermon', BODY);
+    const id = created.stamp.id;
+    const broken = (await sermons.raw(ADMIN, id))!.replace('chapter: 117', 'chapter: -1');
+    const error = await refused(sermons.editRaw(ADMIN, id, broken));
+    expect(error.kind).toBe('schema');
+    expect(error.problems.length).toBeGreaterThan(0);
+    // Refused explicitly, so switching back to the visual surface still shows the last saved sermon.
+    expect((await sermons.current(ADMIN, id))?.body).toEqual(BODY);
+    expect(rows(db, REVISIONS)).toHaveLength(1);
+  });
+
+  it('a broken switch to raw text is never partly saved: the whole call fails before any write', async () => {
+    const { db, sermons } = stores();
+    const created = await sermons.create(ADMIN, 'Sunday sermon', BODY);
+    const error = await refused(sermons.editRaw(ADMIN, created.stamp.id, 'titles:\n\ttamil: x\n'));
+    expect(error.kind).toBe('schema');
+    expect(error.problems).toEqual([
+      { path: 'sermon', code: 'yaml.syntax', message: expect.any(String), at: { line: 2, column: 1 } },
+    ]);
+    expect(rows(db, REVISIONS)).toHaveLength(1);
   });
 });
