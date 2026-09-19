@@ -11,6 +11,7 @@ export default defineConfig({
     'src/corpus.ts',
     'src/live.ts',
     'src/live-mode.ts',
+    'src/live-theme.ts',
     'src/jobs.ts',
     'src/entities.ts',
     'src/layouts.ts',
