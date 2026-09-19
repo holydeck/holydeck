@@ -1,6 +1,6 @@
 import { request } from 'node:http';
 
-import { CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, supportedClientVersions } from '@holydeck/contracts/clients';
+import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, supportedClientVersions } from '@holydeck/contracts/clients';
 import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
 import { LIVE_CHANNELS, LIVE_CLOSE, OUTPUT_CHANNELS, parseSnapshotFrame } from '@holydeck/contracts/live';
 import { TICKET_QUERY, sessionCookie } from '@holydeck/contracts/sessions';
@@ -8,7 +8,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app.js';
 import { capabilityContext, capabilitiesOn } from './capabilities.js';
-import { CAPABILITY_QUERY, CLIENT_VERSION_QUERY, LIVE_PATH, SERVICE_QUERY, declaredVersion, isUpgrade, serveLive } from './live.js';
+import {
+  CAPABILITY_QUERY,
+  CLIENT_VERSION_QUERY,
+  LIVE_CONNECTIONS_PATH,
+  LIVE_PATH,
+  SERVICE_QUERY,
+  declaredVersion,
+  isUpgrade,
+  serveLive,
+} from './live.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { serviceContext, servicesOn } from './services.js';
 import { sessionContext, sessionsOn } from './sessions.js';
@@ -124,6 +133,17 @@ const session = (url: string, headers: Record<string, string> = {}) => {
   };
 };
 
+/**
+ * The connection-counts route, read as an operator would: a plain GET, proved by the same cookie a
+ * socket handshake is proved by — never a ticket, because reading a count changes nothing (spec 9.5).
+ */
+const counted = async (base: string, cookie?: string): Promise<{ status: number; body: unknown }> => {
+  const answer = await fetch(`${base.replace(/^ws/u, 'http')}${LIVE_CONNECTIONS_PATH}`, {
+    headers: { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), ...(cookie === undefined ? {} : { cookie }) },
+  });
+  return { status: answer.status, body: await answer.json() };
+};
+
 const connected = async (query: string) => {
   const base = await listening();
   const live = session(`${base}${LIVE_PATH}?${query}`);
@@ -145,6 +165,8 @@ const deployment = async (permissions: readonly string[]) => {
   const base = await listening(real);
   const cookie = sessionCookie(signedIn.token, 60);
   return {
+    base,
+    cookie,
     open: async (channel: string) => {
       const ticket = await real.issueTicket(context, signedIn.token);
       const live = session(`${base}${LIVE_PATH}?channel=${channel}&${CURRENT}&${TICKET_QUERY}=${ticket}`, {
@@ -630,5 +652,83 @@ describe('a Guest joining the Audience view on a shared capability', () => {
     const base = await listening(undefined, { capabilities: broken, services });
     const query = `channel=audience&${SERVICE_QUERY}=service-1&${CAPABILITY_QUERY}=x&${CURRENT}`;
     expect(await handshake(base, query, {})).toBe(500);
+  });
+});
+
+// LIVE-06, spec 9.5: an operator reads how many of each view type are connected, never who — the route
+// below is the only thing that answers that count, and it never answers with anything else.
+describe('operator-visible connection counts by view type', () => {
+  it('refuses to answer a request carrying no session at all', async () => {
+    const run = await deployment([PRESENTATION_CONTROL]);
+    expect((await counted(run.base)).status).toBe(401);
+  });
+
+  it('refuses an operator without Control presentation', async () => {
+    const run = await deployment([]);
+    expect((await counted(run.base, run.cookie)).status).toBe(403);
+  });
+
+  it('starts every view type at zero, and answers with counts only', async () => {
+    const run = await deployment([PRESENTATION_CONTROL]);
+    const { status, body } = await counted(run.base, run.cookie);
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ data: { counts: { control: 0, audience: 0, guest: 0, stage: 0, singer: 0 } } });
+    const counts = Object.keys((body as { data: { counts: object } }).data.counts);
+    expect(counts.toSorted()).toEqual(['audience', 'control', 'guest', 'singer', 'stage']);
+  });
+
+  it('counts a connection the instant it opens, and drops it the instant it disconnects', async () => {
+    const run = await deployment([PRESENTATION_CONTROL]);
+    const control = await run.open('live-control');
+    await control.frame();
+    expect((await counted(run.base, run.cookie)).body).toMatchObject({ data: { counts: { control: 1, audience: 0 } } });
+
+    const audience = await run.open('audience');
+    await audience.frame();
+    expect((await counted(run.base, run.cookie)).body).toMatchObject({ data: { counts: { control: 1, audience: 1 } } });
+
+    audience.socket.close();
+    await audience.closed;
+    expect((await counted(run.base, run.cookie)).body).toMatchObject({ data: { counts: { control: 1, audience: 0 } } });
+
+    const again = await run.open('audience');
+    await again.frame();
+    expect((await counted(run.base, run.cookie)).body).toMatchObject({ data: { counts: { control: 1, audience: 1 } } });
+  });
+
+  it('counts a Guest apart from an ordinary Audience connection, though both watch the same channel', async () => {
+    const services = servicesOn(fakeDb(), { now: () => AT });
+    const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => AT });
+    const guestContext = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
+    const created = await services.create(guestContext, {
+      title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
+    });
+    await services.transition(guestContext, created.stamp.id, 'presenting');
+
+    const real = sessionsOn(memorySessions().db, { now: () => new Date().toISOString() });
+    const opContext = sessionContext('req-0f9c2a41');
+    const signedIn = await real.start(opContext, { actor: 'account:7f3a', permissions: [PRESENTATION_CONTROL] });
+    const cookie = sessionCookie(signedIn.token, 60);
+    const base = await listening(real, { capabilities, services });
+    const origin = base.replace(/^ws/u, 'http');
+
+    const ticket = await real.issueTicket(opContext, signedIn.token);
+    const control = session(`${base}${LIVE_PATH}?channel=live-control&${CURRENT}&${TICKET_QUERY}=${ticket}`, { cookie, origin });
+    await control.opened;
+
+    const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
+      kind: 'guest', service: created.stamp.id, view: 'audience', expiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
+    });
+    const query = `channel=audience&${SERVICE_QUERY}=${created.stamp.id}&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
+    const guest = session(`${base}${LIVE_PATH}?${query}`, { origin });
+    await guest.opened;
+
+    expect((await counted(base, cookie)).body).toMatchObject({
+      data: { counts: { control: 1, audience: 0, guest: 1, stage: 0, singer: 0 } },
+    });
+
+    guest.socket.close();
+    await guest.closed;
+    expect((await counted(base, cookie)).body).toMatchObject({ data: { counts: { guest: 0 } } });
   });
 });

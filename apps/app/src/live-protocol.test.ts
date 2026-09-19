@@ -59,10 +59,13 @@ const peer = (): {
 const hubAt = (options: Partial<Parameters<typeof liveHub>[0]> = {}): LiveHub =>
   liveHub({ clock: () => AT, ...options });
 
-/** A joined connection and the peer it writes to, which is what nearly every assertion below needs. */
-const joined = (hub: LiveHub, channel: LiveChannel, grant: LiveGrant = WATCHER) => {
+/** A joined connection and the peer it writes to, which is what nearly every assertion below needs.
+ *  `guest` mirrors `LiveHub.join`'s own optional 4th argument (T81/T82): true only for a connection
+ *  admitted through a capability, which is what tells a Guest's count apart from an ordinary Audience
+ *  one in `connectionCounts()`. */
+const joined = (hub: LiveHub, channel: LiveChannel, grant: LiveGrant = WATCHER, guest = false) => {
   const far = peer();
-  const connection = hub.join(far.transport, channel, grant);
+  const connection = hub.join(far.transport, channel, grant, guest);
   return { far, connection };
 };
 
@@ -626,5 +629,64 @@ describe('a connection that is no longer there', () => {
     audience.connection?.leave();
     audience.connection?.receive('{ not json');
     expect(audience.far.ended()).toBeUndefined();
+  });
+});
+
+describe('connection counts by view type', () => {
+  it('starts at zero for every view type, with nothing open yet', () => {
+    const hub = hubAt();
+    expect(hub.connectionCounts()).toEqual({ control: 0, audience: 0, guest: 0, stage: 0, singer: 0 });
+  });
+
+  it('counts each channel a session joins under its own view type', () => {
+    const hub = hubAt();
+    joined(hub, 'live-control', OPERATOR);
+    joined(hub, 'audience');
+    joined(hub, 'audience');
+    joined(hub, 'stage');
+    joined(hub, 'singer');
+    expect(hub.connectionCounts()).toEqual({ control: 1, audience: 2, guest: 0, stage: 1, singer: 1 });
+  });
+
+  it('counts a capability-admitted connection as Guest rather than Audience, though both watch the same channel', () => {
+    const hub = hubAt();
+    joined(hub, 'audience');
+    joined(hub, 'audience', VIEW_GRANTS.audience, true);
+    expect(hub.connectionCounts()).toEqual({ control: 0, audience: 1, guest: 1, stage: 0, singer: 0 });
+  });
+
+  it('drops a connection from its count the moment it leaves', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    expect(hub.connectionCounts().audience).toBe(1);
+    audience.connection?.leave();
+    expect(hub.connectionCounts().audience).toBe(0);
+  });
+
+  it('counts a reconnection the same as any other join, once a prior one has left', () => {
+    const hub = hubAt();
+    const first = joined(hub, 'stage');
+    first.connection?.leave();
+    joined(hub, 'stage');
+    expect(hub.connectionCounts().stage).toBe(1);
+  });
+
+  it('stops counting a connection once its heartbeat has lapsed, the same instant it is ended', () => {
+    const hub = hubAt({ heartbeatLapses: 1 });
+    joined(hub, 'audience');
+    expect(hub.connectionCounts().audience).toBe(1);
+    hub.tick();
+    expect(hub.connectionCounts().audience).toBe(1);
+    hub.tick();
+    expect(hub.connectionCounts().audience).toBe(0);
+  });
+
+  it('answers counts only, never a per-connection row a Guest could be picked out of', () => {
+    const hub = hubAt();
+    joined(hub, 'live-control', OPERATOR);
+    joined(hub, 'audience', VIEW_GRANTS.audience, true);
+    const counts = hub.connectionCounts();
+    expect(Object.keys(counts).sort()).toEqual(['audience', 'control', 'guest', 'singer', 'stage']);
+    expect(Object.values(counts).every((value) => typeof value === 'number')).toBe(true);
   });
 });

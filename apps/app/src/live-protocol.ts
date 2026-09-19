@@ -17,6 +17,7 @@ import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
 import {
   LIVE_CHANNELS,
   LIVE_CLOSE,
+  LIVE_CONTROL_CHANNEL,
   MAX_CLOSE_REASON,
   OUTPUT_CHANNELS,
   parseFrame,
@@ -82,6 +83,26 @@ export const VIEW_GRANTS: Readonly<Record<OutputChannel, LiveGrant>> = Object.fr
   singer: grantForView('singer'),
 });
 
+/**
+ * What an operator may know about a connection beyond how many there are of it (spec 9.3/9.5, LIVE-06):
+ * which kind of view it is watching, and never anything that could identify who. `guest` stands apart
+ * from `audience` on purpose — a capability-scoped Guest is exactly the thing spec 9.5 asks an operator
+ * to see the shape of without ever seeing the identity of, collapsed to one count whichever output
+ * channel the capability happened to be scoped to, since nothing about a Guest connection is meant to
+ * be told apart any further than that.
+ */
+export const CONNECTION_VIEW_TYPES = ['control', 'audience', 'guest', 'stage', 'singer'] as const;
+export type ConnectionViewType = (typeof CONNECTION_VIEW_TYPES)[number];
+
+/** How many connections are open right now, by view type and nothing narrower — the whole of what
+ *  `LiveHub.connectionCounts()` answers an operator with. */
+export type ConnectionCounts = Readonly<Record<ConnectionViewType, number>>;
+
+/** A Guest connection is told apart by how it was admitted, never by which channel it happened to land
+ *  on; every other connection is exactly the channel it is watching. */
+const viewTypeOf = (channel: LiveChannel, guest: boolean): ConnectionViewType =>
+  channel === LIVE_CONTROL_CHANNEL ? 'control' : guest ? 'guest' : channel;
+
 export interface LiveHubOptions {
   /** Explicit, so a frame's time is the session's time and a test does not have to read a clock. */
   readonly clock: () => string;
@@ -108,8 +129,17 @@ export interface LiveHub {
   stateRevision(): number;
   /** The last frame number published. What a resume is measured from. */
   sequence(): number;
-  /** Opens a session, or refuses it and answers nothing when the channel is outside what it may watch. */
-  join(transport: LiveTransport, channel: LiveChannel, grant: LiveGrant): LiveConnection | undefined;
+  /**
+   * Opens a session, or refuses it and answers nothing when the channel is outside what it may watch.
+   * `guest` is true only for a connection admitted through a capability rather than a session (T81) —
+   * the one thing that tells a Guest's count apart from an ordinary Audience one, since the grant shape
+   * alone does not.
+   */
+  join(transport: LiveTransport, channel: LiveChannel, grant: LiveGrant, guest?: boolean): LiveConnection | undefined;
+  /** How many sessions are open right now, by view type only — never anything that could identify one
+   *  of them (spec 9.5, LIVE-06). A lapsed or left connection stops counting the same instant it stops
+   *  being a member, because this reads the same set every other operation here does. */
+  connectionCounts(): ConnectionCounts;
   /**
    * Announces a change no client commanded — a domain module's own state moved on its own authority, not
    * a live-control session's. `command()` is the client-facing door onto the same movement; this is the
@@ -147,6 +177,9 @@ interface Member {
   readonly transport: LiveTransport;
   readonly channel: LiveChannel;
   readonly grant: LiveGrant;
+  /** Fixed at join, from the channel and whether this connection was a capability's rather than a
+   *  session's — what `connectionCounts()` groups by. */
+  readonly viewType: ConnectionViewType;
   /** Frames the transport had no room for, in the order they were published. Never reordered. */
   readonly pending: string[];
   /** Heartbeats sent since this session last said anything at all. */
@@ -365,18 +398,38 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     stateRevision: (): number => stateRevision,
     sequence: (): number => sequence,
 
-    join: (transport: LiveTransport, channel: LiveChannel, grant: LiveGrant): LiveConnection | undefined => {
+    join: (transport: LiveTransport, channel: LiveChannel, grant: LiveGrant, guest = false): LiveConnection | undefined => {
       if (!grant.watch.includes(channel)) {
         transport.close(LIVE_CLOSE.refused, `channel: this session may not watch ${channel}`.slice(0, MAX_CLOSE_REASON));
         return undefined;
       }
-      const member: Member = { transport, channel, grant, pending: [], unanswered: 0, open: true };
+      const member: Member = {
+        transport,
+        channel,
+        grant,
+        viewType: viewTypeOf(channel, guest),
+        pending: [],
+        unanswered: 0,
+        open: true,
+      };
       members.add(member);
       write(member, snapshotAt(channel, sequence));
       return Object.freeze({
         receive: (raw: string): void => receive(member, raw),
         leave: (): void => forget(member),
       });
+    },
+
+    connectionCounts: (): ConnectionCounts => {
+      const counts: Record<ConnectionViewType, number> = {
+        control: 0,
+        audience: 0,
+        guest: 0,
+        stage: 0,
+        singer: 0,
+      };
+      for (const member of members) counts[member.viewType] += 1;
+      return Object.freeze({ ...counts });
     },
 
     publish,

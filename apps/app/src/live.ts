@@ -7,7 +7,8 @@
 // The split is on purpose. Everything in the protocol is worth testing without a network in the way, and
 // everything here is only true with one.
 
-import { decideClient } from '@holydeck/contracts/clients';
+import { CLIENT_WINDOW, decideClient } from '@holydeck/contracts/clients';
+import { successEnvelope } from '@holydeck/contracts/http';
 import { LIVE_CHANNELS, LIVE_CLOSE, OUTPUT_CHANNELS, type LiveChannel, type OutputChannel } from '@holydeck/contracts/live';
 import { TICKET_QUERY, isSameOrigin } from '@holydeck/contracts/sessions';
 import websocket from '@fastify/websocket';
@@ -17,6 +18,7 @@ import { unexpectedFailure } from './failures.js';
 import { GuestJoinError, admitGuest } from './guest-join.js';
 import { grantFor, liveHub } from './live-protocol.js';
 import { originOf, refuseAsForbidden, refuseAsStoreSaid, sessionCallFor, sessionFor } from './csrf.js';
+import { PRESENTATION_CONTROL } from './roles.js';
 import { SessionError } from './sessions.js';
 
 import type { CapabilityStore } from './capabilities.js';
@@ -32,7 +34,15 @@ import type { SessionStore } from './sessions.js';
 // Asking a session of it here first would run the wrong check first, and would ask it a second time.
 const PUBLIC: RouteNeed = { kind: 'public' };
 
+// The connection-counts read (below) is Control presentation's, the same permission every other
+// operator-only surface in this deployment is behind.
+const PERMISSION: RouteNeed = { kind: 'permission', need: PRESENTATION_CONTROL };
+
 export const LIVE_PATH = '/api/v1/live';
+
+/** Where an operator reads connection counts by view type — spec 9.5, LIVE-06. Never a per-connection
+ *  row: `live-protocol.ts`'s `connectionCounts()` is the only thing this route answers with. */
+export const LIVE_CONNECTIONS_PATH = `${LIVE_PATH}/connections`;
 
 export const CHANNEL_QUERY = 'channel';
 
@@ -234,6 +244,12 @@ export async function serveLive(
       ? {}
       : { preValidation: proveHandshake(sessions, capabilities, services) };
 
+  // Read-only, and behind Control presentation like every other operator-only surface: never a
+  // per-connection row, only how many of each view type are open right now (spec 9.5, LIVE-06).
+  app.get(LIVE_CONNECTIONS_PATH, { config: { need: PERMISSION } }, (request) =>
+    successEnvelope({ counts: hub.connectionCounts() }, request.id, CLIENT_WINDOW.current),
+  );
+
   app.get(LIVE_PATH, { websocket: true, config: { need: PUBLIC }, ...proving }, (socket, request) => {
     // Graded here rather than by the versioned-surface hook, for two reasons that point the same way: a
     // refused handshake tells a browser client nothing it can read, and an HTTP refusal written onto a
@@ -253,8 +269,11 @@ export async function serveLive(
       return;
     }
 
-    const grant = CAPABILITY_GRANT.get(request) ?? grantFor(PROVEN.get(request)?.record.permissions ?? []);
-    const connection = hub.join(transportOf(socket), channel, grant);
+    // A capability's grant, when this handshake redeemed one, is what tells `connectionCounts()` a
+    // Guest apart from an ordinary Audience session — the grant's own shape does not (spec 9.5).
+    const capabilityGrant = CAPABILITY_GRANT.get(request);
+    const grant = capabilityGrant ?? grantFor(PROVEN.get(request)?.record.permissions ?? []);
+    const connection = hub.join(transportOf(socket), channel, grant, capabilityGrant !== undefined);
     if (connection === undefined) return;
 
     socket.on('message', (data: unknown) => {
