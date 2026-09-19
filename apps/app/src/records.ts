@@ -114,6 +114,24 @@ export const RECORDS = {
       generatedSlides: 'optional',
     },
   },
+  // Spec LIVE-01: a presentation run's own lifecycle — one row per start or end, keyed by `runId` like
+  // `runEvents`, but a table of its own: this is the run starting and ending, not the slides and operator
+  // changes `runEvents` logs while it is on (see `runs.ts`'s header for why the two never share a row).
+  presentationRuns: {
+    collection: 'presentation_runs',
+    kind: 'append-only',
+    fields: {
+      ...HISTORY,
+      runId: 'required',
+      sequence: 'required',
+      at: 'required',
+      serviceId: 'required',
+      snapshotId: 'required',
+      phase: 'required',
+      mode: 'required',
+      position: 'required',
+    },
+  },
   // Spec LIVE-12: every shown slide and operator change, in server order, with the revisions it pinned.
   runEvents: {
     collection: 'run_events',

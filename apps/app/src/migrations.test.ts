@@ -100,6 +100,7 @@ describe('the shipped migrations', () => {
       'passkey_credentials',
       'prepared_snapshots',
       'presence',
+      'presentation_runs',
       'run_events',
       'schema_migrations',
       'services',
