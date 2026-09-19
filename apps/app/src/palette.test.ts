@@ -49,6 +49,11 @@ const MEMBER_SESSION: PaletteSession = { actor: ACTOR, permissions: [PRESENTATIO
 
 const BARE_SESSION: PaletteSession = { actor: ACTOR, permissions: [], correlationId: CORRELATION };
 
+/** An Admin who holds `layouts.manage` but was never separately granted `presentation.control` —
+ *  a real shape `roles.ts` names explicitly: "an admin does not hold Control presentation for
+ *  being admin." Non-admin-role permissions alone are not enough to authorize `insert`. */
+const LAYOUTS_ONLY_SESSION: PaletteSession = { actor: ACTOR, permissions: [LAYOUTS_MANAGE], correlationId: CORRELATION };
+
 /** A song this store already validates elsewhere (songs.test.ts): unrelated content that never
  *  accidentally matches any query this file searches for, so a fixture only needs to override titles. */
 const SONG: SongBody = {
@@ -323,6 +328,18 @@ describe('paletteOn: authorization filtering (ruling 3)', () => {
 
     expect(hits.map((hit) => hit.source).toSorted()).toEqual(['service', 'slide', 'song']);
   });
+
+  it('scoping to a gated source an under-privileged session cannot reach returns zero results, not a refusal', async () => {
+    const corpus = fakeCorpus({ canonBook: { usfm: 'JHN', chapter: '3' }, verseText: { 'JHN:3:16': 'For God so loved the world' } });
+    const { palette, slideLayouts } = scenario(corpus);
+    await slideLayouts.create(slideLayoutContext(ACTOR, CORRELATION), { name: 'Grace Layout', body: LAYOUT_BODY });
+
+    const refHits = await palette.search(BARE_SESSION, 'ref:John 3:16');
+    expect(refHits).toHaveLength(0);
+
+    const layoutHits = await palette.search(MEMBER_SESSION, 'layout:grace');
+    expect(layoutHits).toHaveLength(0);
+  });
 });
 
 describe('paletteOn: Tamil and Romanized-Tamil normalization (ruling 5)', () => {
@@ -573,5 +590,51 @@ describe('paletteOn: direct insertion into a Service (SRCH-02)', () => {
 
     const standing = await services.current(serviceContext(ACTOR, CORRELATION), target.stamp.id);
     expect(standing?.sections[0]?.items).toHaveLength(0);
+  });
+
+  it('refuses a BARE_SESSION with no permissions at all, leaving the Service untouched', async () => {
+    const { palette, songs, services } = scenario();
+    await songs.create(songContext(ACTOR, CORRELATION), 'Amazing Grace', { ...SONG, titles: { tamil: '', romanized: 'Amazing Grace' } });
+    const service = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Grace Service', 'section-1'));
+
+    const hits = await palette.search(ADMIN_SESSION, 'grace');
+    const hit = hits.find((entry) => entry.source === 'song');
+    if (hit === undefined) throw new Error('expected a song hit');
+
+    const error = await refused(palette.insert(BARE_SESSION, hit, service.stamp.id, 'section-1'));
+    expect(error.source).toBe('song');
+
+    const standing = await services.current(serviceContext(ACTOR, CORRELATION), service.stamp.id);
+    expect(standing?.sections[0]?.items).toHaveLength(0);
+  });
+
+  it('refuses a non-admin session that holds a permission but not presentation.control', async () => {
+    const { palette, slideGroups, services } = scenario();
+    await slideGroups.create(slideGroupContext(ACTOR, CORRELATION), 'reusableSlide', 'Grace Slide', slideGroupBody());
+    const service = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Grace Service', 'section-1'));
+
+    const hits = await palette.search(ADMIN_SESSION, 'grace');
+    const hit = hits.find((entry) => entry.source === 'slide');
+    if (hit === undefined) throw new Error('expected a slide hit');
+
+    const error = await refused(palette.insert(LAYOUTS_ONLY_SESSION, hit, service.stamp.id, 'section-1'));
+    expect(error.source).toBe('slide');
+
+    const standing = await services.current(serviceContext(ACTOR, CORRELATION), service.stamp.id);
+    expect(standing?.sections[0]?.items).toHaveLength(0);
+  });
+
+  it('allows a non-admin session that holds presentation.control, exactly as search already does', async () => {
+    const { palette, songs, services } = scenario();
+    await songs.create(songContext(ACTOR, CORRELATION), 'Amazing Grace', { ...SONG, titles: { tamil: '', romanized: 'Amazing Grace' } });
+    const service = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Grace Service', 'section-1'));
+
+    const hits = await palette.search(MEMBER_SESSION, 'grace');
+    const hit = hits.find((entry) => entry.source === 'song');
+    if (hit === undefined) throw new Error('expected a song hit');
+
+    const updated = await palette.insert(MEMBER_SESSION, hit, service.stamp.id, 'section-1');
+
+    expect(updated?.sections[0]?.items).toHaveLength(1);
   });
 });

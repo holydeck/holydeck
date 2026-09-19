@@ -87,7 +87,10 @@ export interface PaletteStore {
   /** Converts a `song` or `slide` hit into a `ServiceItem`, pinned to its content's latest revision,
    *  and appends it to a named section of a Service (SRCH-02's direct insertion). Every other
    *  source — `reference`, `scripture`, `slideLayout`, `service` — is refused with a `PaletteError`
-   *  naming that source, since none of them is `RevisionRef`-backed library content. */
+   *  naming that source, since none of them is `RevisionRef`-backed library content. Requires
+   *  `PRESENTATION_CONTROL`, the same permission `search` already gates `reference`/`scripture`
+   *  behind: a session missing it is refused with a `PaletteError` naming the hit's source, before
+   *  anything is written — a write path is never left open wider than the read path beside it. */
   insert(
     session: PaletteSession,
     hit: PaletteHit,
@@ -494,7 +497,11 @@ export function paletteOn(db: RepositoryDb, options: PaletteOptions): PaletteSto
       return Object.freeze(results.flat().sort(compareHits));
     },
 
-    insert: (session, hit, serviceId, sectionId) =>
-      insertHit(services, revisions, newId, serviceContext(session.actor, session.correlationId), hit, serviceId, sectionId),
+    insert: async (session, hit, serviceId, sectionId) => {
+      if (!session.permissions.includes(PRESENTATION_CONTROL)) {
+        throw new PaletteError(hit.source, `inserting a ${hit.source} hit into a Service needs ${PRESENTATION_CONTROL}`);
+      }
+      return insertHit(services, revisions, newId, serviceContext(session.actor, session.correlationId), hit, serviceId, sectionId);
+    },
   };
 }
