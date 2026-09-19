@@ -41,6 +41,10 @@
       "types": "./dist/live.d.ts",
       "import": "./dist/live.js"
     },
+    "./live-mode": {
+      "types": "./dist/live-mode.d.ts",
+      "import": "./dist/live-mode.js"
+    },
     "./jobs": {
       "types": "./dist/jobs.d.ts",
       "import": "./dist/jobs.js"
