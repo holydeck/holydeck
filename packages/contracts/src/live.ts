@@ -93,12 +93,15 @@ export type ResumeFrame = {
 /**
  * The answer to exactly one command, matched to it by `id`. The revision is the server's own, whatever
  * the outcome, so a client refused as stale is told in the same frame what to re-issue against.
+ * `conflictCode` names why, in the stable vocabulary `./http.js` publishes — carried only when the
+ * outcome is `stale`, because that is the only outcome a client needs a code to act on.
  */
 export type AckFrame = {
   readonly kind: 'ack';
   readonly channel: LiveChannel;
   readonly id: string;
   readonly outcome: AckOutcome;
+  readonly conflictCode?: string;
   readonly stateRevision: number;
   readonly sequence: number;
   readonly at: string;
@@ -174,15 +177,34 @@ export function parseResumeFrame(value: unknown): Parsed<ResumeFrame> {
 }
 
 export function parseAckFrame(value: unknown): Parsed<AckFrame> {
-  return parseObject(value, 'ack', (reader) => ({
-    kind: reader.choice('kind', ['ack'] as const),
-    channel: readChannel(reader),
-    id: reader.text('id'),
-    outcome: reader.choice('outcome', ACK_OUTCOMES),
-    stateRevision: reader.wholeNumber('stateRevision'),
-    sequence: reader.wholeNumber('sequence'),
-    at: reader.time('at'),
-  }));
+  return parseObject(value, 'ack', (reader) => {
+    const kind = reader.choice('kind', ['ack'] as const);
+    const channel = readChannel(reader);
+    const id = reader.text('id');
+    const outcome = reader.choice('outcome', ACK_OUTCOMES);
+    if (outcome !== 'stale') {
+      reader.absent('conflictCode', FIELD_CODES.notAllowed, 'is carried only when the outcome is stale');
+      return {
+        kind,
+        channel,
+        id,
+        outcome,
+        stateRevision: reader.wholeNumber('stateRevision'),
+        sequence: reader.wholeNumber('sequence'),
+        at: reader.time('at'),
+      };
+    }
+    return {
+      kind,
+      channel,
+      id,
+      outcome,
+      conflictCode: reader.text('conflictCode'),
+      stateRevision: reader.wholeNumber('stateRevision'),
+      sequence: reader.wholeNumber('sequence'),
+      at: reader.time('at'),
+    };
+  });
 }
 
 export function parseHeartbeatFrame(value: unknown): Parsed<HeartbeatFrame> {

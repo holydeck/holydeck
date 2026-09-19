@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { STALE_STATE_REVISION } from './http.js';
 import {
   ACK_OUTCOMES,
   LIVE_CHANNELS,
@@ -111,8 +112,20 @@ describe('frames the server sends', () => {
 
   it('parses the acknowledgement a command is answered with, whatever became of it', () => {
     for (const outcome of ACK_OUTCOMES) {
-      expect(parseAckFrame({ ...ack(), outcome })).toEqual({ ok: true, value: { ...ack(), outcome } });
+      // A stale outcome carries the stable code naming why; every other outcome carries none.
+      const frame = outcome === 'stale' ? { ...ack(), outcome, conflictCode: STALE_STATE_REVISION } : { ...ack(), outcome };
+      expect(parseAckFrame(frame)).toEqual({ ok: true, value: frame });
     }
+  });
+
+  it('requires the conflict code on a stale acknowledgement, because that is what a client re-issues against', () => {
+    expect(codes({ ...ack(), outcome: 'stale' }, parseAckFrame)).toEqual([`ack.conflictCode=${FIELD_CODES.required}`]);
+  });
+
+  it('refuses a conflict code on an acknowledgement that is not stale', () => {
+    expect(codes({ ...ack(), conflictCode: STALE_STATE_REVISION }, parseAckFrame)).toEqual([
+      `ack.conflictCode=${FIELD_CODES.notAllowed}`,
+    ]);
   });
 
   it('names the four things that can become of a command and no others', () => {

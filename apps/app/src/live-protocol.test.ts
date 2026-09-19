@@ -1,3 +1,4 @@
+import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
 import { LIVE_CHANNELS, LIVE_CLOSE, MAX_CLOSE_REASON, OUTPUT_CHANNELS } from '@holydeck/contracts/live';
 import { describe, expect, it } from 'vitest';
 
@@ -182,7 +183,13 @@ describe('a command', () => {
     const control = moved(hub, 1);
     control.connection?.receive(command({ id: 'command-late', idempotencyKey: 'key-late', clientStateRevision: 0 }));
     expect(hub.stateRevision()).toBe(1);
-    expect(control.far.frames().at(-1)).toMatchObject({ kind: 'ack', id: 'command-late', outcome: 'stale', stateRevision: 1 });
+    expect(control.far.frames().at(-1)).toMatchObject({
+      kind: 'ack',
+      id: 'command-late',
+      outcome: 'stale',
+      conflictCode: STALE_STATE_REVISION,
+      stateRevision: 1,
+    });
     // Nothing was published for it: the last event is still the one the first command produced.
     expect(control.far.frames().filter((frame) => frame['kind'] === 'event')).toHaveLength(1);
   });
@@ -192,7 +199,11 @@ describe('a command', () => {
     const control = joined(hub, 'live-control', OPERATOR);
     control.connection?.receive(command({ clientStateRevision: 9 }));
     expect(hub.stateRevision()).toBe(0);
-    expect(control.far.frames().at(-1)).toMatchObject({ outcome: 'stale', stateRevision: 0 });
+    expect(control.far.frames().at(-1)).toMatchObject({
+      outcome: 'stale',
+      conflictCode: STALE_STATE_REVISION,
+      stateRevision: 0,
+    });
   });
 
   it('is refused as unauthorized when the session may watch but not command, and the session stays open', () => {
@@ -256,7 +267,10 @@ describe('resuming from the sequence a client last saw', () => {
     audience.connection?.receive(resume(1));
 
     const answered = audience.far.frames().slice(1);
-    expect(answered[0]).toEqual({ kind: 'snapshot', channel: 'audience', stateRevision: 3, sequence: 1, at: AT });
+    // The revision the snapshot carries is the one that was current at sequence 1, not the server's
+    // present revision of 3 — the wire must never hand a resuming client a revision that then goes
+    // backwards through the events replayed after it.
+    expect(answered[0]).toEqual({ kind: 'snapshot', channel: 'audience', stateRevision: 1, sequence: 1, at: AT });
     expect(answered.slice(1)).toMatchObject([
       { kind: 'event', channel: 'audience', sequence: 2, stateRevision: 2 },
       { kind: 'event', channel: 'audience', sequence: 3, stateRevision: 3 },
@@ -319,7 +333,7 @@ describe('resuming from the sequence a client last saw', () => {
     const again = joined(hub, 'stage');
     again.connection?.receive(resume(1, 'stage'));
     expect(again.far.frames().slice(1)).toMatchObject([
-      { kind: 'snapshot', sequence: 1, stateRevision: 3 },
+      { kind: 'snapshot', sequence: 1, stateRevision: 1 },
       { kind: 'event', sequence: 2 },
       { kind: 'event', sequence: 3 },
     ]);

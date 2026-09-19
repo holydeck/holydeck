@@ -38,7 +38,7 @@ export const CHANNEL_QUERY = 'channel';
 export const CLIENT_VERSION_QUERY = 'clientVersion';
 
 /** How often a session is asked whether it is still there, and whatever it fell behind on is drained. */
-export const HEARTBEAT_MS = 15_000;
+export const HEARTBEAT_MS = 5_000;
 
 // Only the query string is read from it, and a relative URL needs some origin to be read against.
 const INTERNAL = 'http://application.invalid';

@@ -1,6 +1,7 @@
 import { request } from 'node:http';
 
 import { CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, supportedClientVersions } from '@holydeck/contracts/clients';
+import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
 import { LIVE_CHANNELS, LIVE_CLOSE, OUTPUT_CHANNELS, parseSnapshotFrame } from '@holydeck/contracts/live';
 import { TICKET_QUERY, sessionCookie } from '@holydeck/contracts/sessions';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -398,7 +399,13 @@ describe('a session carrying Control presentation', () => {
     await control.frame();
     await control.frame();
     control.send(command('command-2', 'key-2'));
-    expect(await control.frame()).toMatchObject({ kind: 'ack', id: 'command-2', outcome: 'stale', stateRevision: 1 });
+    expect(await control.frame()).toMatchObject({
+      kind: 'ack',
+      id: 'command-2',
+      outcome: 'stale',
+      conflictCode: STALE_STATE_REVISION,
+      stateRevision: 1,
+    });
   });
 
   // Failure injection, spec 14.3: the network goes during a live run. The surface loses its connection
@@ -435,7 +442,7 @@ describe('a session carrying Control presentation', () => {
     const again = await run.open('audience');
     await again.frame();
     again.send({ kind: 'resume', channel: 'audience', fromSequence: 1 });
-    expect(await again.frame()).toMatchObject({ kind: 'snapshot', sequence: 1, stateRevision: 3 });
+    expect(await again.frame()).toMatchObject({ kind: 'snapshot', sequence: 1, stateRevision: 1 });
     expect(await again.frame()).toMatchObject({ kind: 'event', sequence: 2 });
     expect(await again.frame()).toMatchObject({ kind: 'event', sequence: 3 });
   });

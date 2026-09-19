@@ -13,6 +13,7 @@
 //
 // (Neither is `conflicts.ts`'s `sequence`, which orders what sits on a shelf and never leaves the server.)
 
+import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
 import {
   LIVE_CHANNELS,
   LIVE_CLOSE,
@@ -98,7 +99,7 @@ const DEFAULTS = {
   backlogFrames: 256,
   pendingFrames: 32,
   highWaterBytes: 64 * 1024,
-  heartbeatLapses: 2,
+  heartbeatLapses: 3,
   rememberedCommands: 256,
 } as const;
 
@@ -186,10 +187,18 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     flush(member);
   };
 
+  /**
+   * The revision that was actually current at a given sequence, recovered from the backlog Change that
+   * carries it rather than read off the hub's own present standing — which is a different number as soon
+   * as anything has published since, and would hand a resumed client a wire that jumps the revision
+   * forward at the snapshot and then backward through the events replayed after it.
+   */
+  const revisionAt = (at: number): number => backlog.find((change) => change.sequence === at)?.stateRevision ?? stateRevision;
+
   const snapshotAt = (channel: LiveChannel, at: number): SnapshotFrame => ({
     kind: 'snapshot',
     channel,
-    stateRevision,
+    stateRevision: revisionAt(at),
     sequence: at,
     at: clock(),
   });
@@ -204,15 +213,18 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     at: change.at,
   });
 
-  const ackOf = (member: Member, id: string, outcome: AckOutcome, at: Landed): AckFrame => ({
-    kind: 'ack',
-    channel: member.channel,
-    id,
-    outcome,
-    stateRevision: at.stateRevision,
-    sequence: at.sequence,
-    at: clock(),
-  });
+  const ackOf = (member: Member, id: string, outcome: AckOutcome, at: Landed): AckFrame => {
+    const base = {
+      kind: 'ack' as const,
+      channel: member.channel,
+      id,
+      outcome,
+      stateRevision: at.stateRevision,
+      sequence: at.sequence,
+      at: clock(),
+    };
+    return outcome === 'stale' ? { ...base, conflictCode: STALE_STATE_REVISION } : base;
+  };
 
   const beatOn = (channel: LiveChannel): HeartbeatFrame => ({ kind: 'heartbeat', channel, at: clock() });
 
