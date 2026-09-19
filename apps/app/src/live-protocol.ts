@@ -192,8 +192,13 @@ export function liveHub(options: LiveHubOptions): LiveHub {
    * carries it rather than read off the hub's own present standing — which is a different number as soon
    * as anything has published since, and would hand a resumed client a wire that jumps the revision
    * forward at the snapshot and then backward through the events replayed after it.
+   *
+   * A sequence that never reached the backlog — nothing published yet, or the one entry that named it has
+   * since fallen off the window — is answered with the sequence number itself: revision and sequence move
+   * together, one for one, on every publish this milestone knows of, so a sequence not yet reached is a
+   * revision not yet reached either.
    */
-  const revisionAt = (at: number): number => backlog.find((change) => change.sequence === at)?.stateRevision ?? stateRevision;
+  const revisionAt = (at: number): number => backlog.find((change) => change.sequence === at)?.stateRevision ?? at;
 
   const snapshotAt = (channel: LiveChannel, at: number): SnapshotFrame => ({
     kind: 'snapshot',

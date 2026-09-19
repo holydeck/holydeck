@@ -277,6 +277,26 @@ describe('resuming from the sequence a client last saw', () => {
     ]);
   });
 
+  it('never hands a resuming client a revision that then goes backwards, resuming from before anything was published', () => {
+    const hub = hubAt();
+    // Joined before the first command runs, so this session's own first snapshot names sequence 0 — a
+    // value every session legitimately resumes from later.
+    const audience = joined(hub, 'audience');
+    moved(hub, 3);
+    const before = audience.far.frames().length;
+    audience.connection?.receive(resume(0));
+
+    const answered = audience.far.frames().slice(before);
+    // The revision the snapshot carries must still be the one that was current at sequence 0 — 0 — and
+    // not the server's present revision of 3.
+    expect(answered[0]).toEqual({ kind: 'snapshot', channel: 'audience', stateRevision: 0, sequence: 0, at: AT });
+    expect(answered.slice(1)).toMatchObject([
+      { kind: 'event', channel: 'audience', sequence: 1, stateRevision: 1 },
+      { kind: 'event', channel: 'audience', sequence: 2, stateRevision: 2 },
+      { kind: 'event', channel: 'audience', sequence: 3, stateRevision: 3 },
+    ]);
+  });
+
   it('replays nothing at all for a client that missed nothing', () => {
     const hub = hubAt();
     moved(hub, 2);
@@ -284,6 +304,20 @@ describe('resuming from the sequence a client last saw', () => {
     audience.connection?.receive(resume(2));
     expect(audience.far.frames().slice(1)).toEqual([
       { kind: 'snapshot', channel: 'audience', stateRevision: 2, sequence: 2, at: AT },
+    ]);
+  });
+
+  it('recovers the revision at a sequence the backlog window has already trimmed away, without it going backwards', () => {
+    const hub = hubAt({ backlogFrames: 2 });
+    moved(hub, 4);
+    const audience = joined(hub, 'audience');
+    // The oldest sequence still held is 3, one past fromSequence — reachable, but the backlog no longer
+    // carries the entry named by fromSequence itself for revisionAt to read a stateRevision off of.
+    audience.connection?.receive(resume(2));
+    expect(audience.far.frames().slice(1)).toMatchObject([
+      { kind: 'snapshot', channel: 'audience', stateRevision: 2, sequence: 2 },
+      { kind: 'event', channel: 'audience', sequence: 3, stateRevision: 3 },
+      { kind: 'event', channel: 'audience', sequence: 4, stateRevision: 4 },
     ]);
   });
 
