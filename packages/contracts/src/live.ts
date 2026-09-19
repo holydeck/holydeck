@@ -4,8 +4,36 @@
 
 import { FIELD_CODES, type FieldReader, type Parsed, isRecord, parseObject } from './problems.js';
 
-export const LIVE_CHANNELS = ['live-control', 'audience', 'stage'] as const;
+/**
+ * The one channel a service is run from. It is never a channel a capability presents, because it is the
+ * only one carrying what an operator does privately — a search, a passage being checked, an edit to
+ * something not shown yet. Reaching it is a permission, and reaching the rest is not.
+ */
+export const LIVE_CONTROL_CHANNEL = 'live-control';
+
+/** The surfaces a service is shown on. Each of them is watched; none of them is ever commanded. */
+export const OUTPUT_CHANNELS = ['audience', 'stage', 'singer'] as const;
+export type OutputChannel = (typeof OUTPUT_CHANNELS)[number];
+
+export const LIVE_CHANNELS = [LIVE_CONTROL_CHANNEL, ...OUTPUT_CHANNELS] as const;
 export type LiveChannel = (typeof LIVE_CHANNELS)[number];
+
+/**
+ * How a live session ends when it was not the client that ended it. 1003 is unsupported data and 1008 a
+ * policy refusal, which is the difference those two carry. The other two are in the 4000s, the range
+ * reserved for an application's own codes, because nothing standard tells "you stopped answering" apart
+ * from "you fell too far behind to be caught up" — and those two ask different things of the client that
+ * reads them: one reconnects, the other reconnects having stopped doing whatever put it behind.
+ */
+export const LIVE_CLOSE = {
+  unreadable: 1003,
+  refused: 1008,
+  lapsed: 4000,
+  overloaded: 4001,
+} as const;
+
+/** A close frame carries at most 123 bytes of reason, so a reason longer than that is cut, not dropped. */
+export const MAX_CLOSE_REASON = 120;
 
 export const LIVE_SESSION_STATES = [
   'connecting',
@@ -17,8 +45,17 @@ export const LIVE_SESSION_STATES = [
 ] as const;
 export type LiveSessionState = (typeof LIVE_SESSION_STATES)[number];
 
-export const FRAME_KINDS = ['snapshot', 'event', 'command', 'resume'] as const;
+export const FRAME_KINDS = ['snapshot', 'event', 'command', 'resume', 'ack', 'heartbeat'] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
+
+/**
+ * What became of a command. Four outcomes, each of which tells the client its next move without any
+ * prose to read: `applied` moved the state, `duplicate` says this command had already moved it and was
+ * not applied again, `stale` says the revision it was issued against is no longer the server's, and
+ * `unauthorized` says this session may watch but not command.
+ */
+export const ACK_OUTCOMES = ['applied', 'duplicate', 'stale', 'unauthorized'] as const;
+export type AckOutcome = (typeof ACK_OUTCOMES)[number];
 
 export type SnapshotFrame = {
   readonly kind: 'snapshot';
@@ -53,7 +90,32 @@ export type ResumeFrame = {
   readonly fromSequence: number;
 };
 
-export type LiveFrame = SnapshotFrame | EventFrame | CommandFrame | ResumeFrame;
+/**
+ * The answer to exactly one command, matched to it by `id`. The revision is the server's own, whatever
+ * the outcome, so a client refused as stale is told in the same frame what to re-issue against.
+ */
+export type AckFrame = {
+  readonly kind: 'ack';
+  readonly channel: LiveChannel;
+  readonly id: string;
+  readonly outcome: AckOutcome;
+  readonly stateRevision: number;
+  readonly sequence: number;
+  readonly at: string;
+};
+
+/**
+ * Proof that a session is still there. It takes no sequence and moves no state: a resume replays what
+ * happened, and nothing happened here. Either end may send one, and either end reads one as the other
+ * end still being on the far side of the connection.
+ */
+export type HeartbeatFrame = {
+  readonly kind: 'heartbeat';
+  readonly channel: LiveChannel;
+  readonly at: string;
+};
+
+export type LiveFrame = SnapshotFrame | EventFrame | CommandFrame | ResumeFrame | AckFrame | HeartbeatFrame;
 
 // Event and command types name themselves in the log an operator reads afterwards, so they are held to
 // a shape a log line can be grouped and searched by rather than to a closed list this milestone would
@@ -111,6 +173,26 @@ export function parseResumeFrame(value: unknown): Parsed<ResumeFrame> {
   }));
 }
 
+export function parseAckFrame(value: unknown): Parsed<AckFrame> {
+  return parseObject(value, 'ack', (reader) => ({
+    kind: reader.choice('kind', ['ack'] as const),
+    channel: readChannel(reader),
+    id: reader.text('id'),
+    outcome: reader.choice('outcome', ACK_OUTCOMES),
+    stateRevision: reader.wholeNumber('stateRevision'),
+    sequence: reader.wholeNumber('sequence'),
+    at: reader.time('at'),
+  }));
+}
+
+export function parseHeartbeatFrame(value: unknown): Parsed<HeartbeatFrame> {
+  return parseObject(value, 'heartbeat', (reader) => ({
+    kind: reader.choice('kind', ['heartbeat'] as const),
+    channel: readChannel(reader),
+    at: reader.time('at'),
+  }));
+}
+
 // Keyed by the value read off the wire rather than by a declared key, so a frame claiming `constructor`
 // or `__proto__` as its kind finds nothing instead of finding an inherited member.
 const FRAME_PARSERS = new Map<unknown, (value: unknown) => Parsed<LiveFrame>>([
@@ -118,6 +200,8 @@ const FRAME_PARSERS = new Map<unknown, (value: unknown) => Parsed<LiveFrame>>([
   ['event', parseEventFrame],
   ['command', parseCommandFrame],
   ['resume', parseResumeFrame],
+  ['ack', parseAckFrame],
+  ['heartbeat', parseHeartbeatFrame],
 ]);
 
 /** Reads a frame whose kind is only known once the frame is read, and refuses one this build cannot. */

@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ACK_OUTCOMES,
   LIVE_CHANNELS,
+  LIVE_CLOSE,
   LIVE_SESSION_STATES,
+  OUTPUT_CHANNELS,
+  parseAckFrame,
   parseCommandFrame,
   parseEventFrame,
   parseFrame,
+  parseHeartbeatFrame,
   parseResumeFrame,
   parseSnapshotFrame,
 } from './live.js';
@@ -17,6 +22,8 @@ const snapshot = () => ({ kind: 'snapshot', channel: 'live-control', stateRevisi
 const event = () => ({ kind: 'event', channel: 'live-control', sequence: 102, stateRevision: 42, type: 'slide-shown', mutatesState: true, at: '2026-09-13T09:30:05Z' });
 const command = () => ({ kind: 'command', channel: 'live-control', id: 'cmd-3', idempotencyKey: 'idem-7a3', type: 'show-slide', clientStateRevision: 41 });
 const resume = () => ({ kind: 'resume', channel: 'audience', fromSequence: 101 });
+const ack = () => ({ kind: 'ack', channel: 'live-control', id: 'cmd-3', outcome: 'applied', stateRevision: 42, sequence: 102, at: '2026-09-13T09:30:05Z' });
+const heartbeat = () => ({ kind: 'heartbeat', channel: 'singer', at: '2026-09-13T09:30:10Z' });
 
 const codes = (value: unknown, parse: (input: unknown) => { ok: boolean; problems?: readonly { path: string; code: string }[] }) => {
   const parsed = parse(value);
@@ -32,8 +39,24 @@ const without = (value: Record<string, unknown>, ...fields: readonly string[]): 
 
 describe('the vocabulary a live session is limited to', () => {
   it('names the channels and the session states the protocol declares', () => {
-    expect(LIVE_CHANNELS).toEqual(['live-control', 'audience', 'stage']);
+    expect(LIVE_CHANNELS).toEqual(['live-control', 'audience', 'stage', 'singer']);
     expect(LIVE_SESSION_STATES).toEqual(['connecting', 'authorizing', 'synchronised', 'resuming', 'degraded', 'closed']);
+  });
+
+  it('separates the surfaces a service is shown on from the one channel it is run from', () => {
+    expect(OUTPUT_CHANNELS).toEqual(['audience', 'stage', 'singer']);
+    expect(OUTPUT_CHANNELS).not.toContain('live-control');
+    expect(LIVE_CHANNELS).toEqual(['live-control', ...OUTPUT_CHANNELS]);
+  });
+
+  it('tells a client that stopped answering apart from one that fell behind', () => {
+    expect(new Set(Object.values(LIVE_CLOSE)).size).toBe(Object.keys(LIVE_CLOSE).length);
+    expect(LIVE_CLOSE.lapsed).not.toBe(LIVE_CLOSE.overloaded);
+    // The 4000s are reserved for an application's own codes, which is what these two are.
+    for (const code of [LIVE_CLOSE.lapsed, LIVE_CLOSE.overloaded]) {
+      expect(code).toBeGreaterThanOrEqual(4000);
+      expect(code).toBeLessThan(5000);
+    }
   });
 });
 
@@ -85,6 +108,35 @@ describe('frames the server sends', () => {
       `event.mutatesState=${FIELD_CODES.required}`,
     ]);
   });
+
+  it('parses the acknowledgement a command is answered with, whatever became of it', () => {
+    for (const outcome of ACK_OUTCOMES) {
+      expect(parseAckFrame({ ...ack(), outcome })).toEqual({ ok: true, value: { ...ack(), outcome } });
+    }
+  });
+
+  it('names the four things that can become of a command and no others', () => {
+    expect(ACK_OUTCOMES).toEqual(['applied', 'duplicate', 'stale', 'unauthorized']);
+    expect(codes({ ...ack(), outcome: 'maybe' }, parseAckFrame)).toEqual([`ack.outcome=${FIELD_CODES.notAllowed}`]);
+  });
+
+  it('refuses an acknowledgement that names no command, because a client matches it by that', () => {
+    expect(codes(without(ack(), 'id'), parseAckFrame)).toEqual([`ack.id=${FIELD_CODES.required}`]);
+  });
+
+  it('refuses an acknowledgement carrying no revision, because a stale client is told the revision by it', () => {
+    expect(codes(without(ack(), 'stateRevision'), parseAckFrame)).toEqual([
+      `ack.stateRevision=${FIELD_CODES.required}`,
+    ]);
+  });
+
+  it('parses a heartbeat, which carries the channel and the instant and nothing else', () => {
+    expect(parseHeartbeatFrame(heartbeat())).toEqual({ ok: true, value: heartbeat() });
+  });
+
+  it('refuses a heartbeat with no instant, because a lapse is measured from one', () => {
+    expect(codes(without(heartbeat(), 'at'), parseHeartbeatFrame)).toEqual([`heartbeat.at=${FIELD_CODES.required}`]);
+  });
 });
 
 describe('frames a client sends', () => {
@@ -126,8 +178,16 @@ describe('frames a client sends', () => {
 
 describe('reading a frame whose kind is only known once it is read', () => {
   it('routes each kind the protocol declares to the parser that owns it', () => {
-    for (const frame of [snapshot(), event(), command(), resume()]) {
+    for (const frame of [snapshot(), event(), command(), resume(), ack(), heartbeat()]) {
       expect(parseFrame(frame)).toEqual({ ok: true, value: frame });
+    }
+  });
+
+  // The parser table is keyed by the value read off the wire, so a frame naming an inherited member as
+  // its kind has to find nothing at all rather than find `Object.prototype`'s.
+  it('refuses a frame claiming a member every object inherits as its kind', () => {
+    for (const kind of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+      expect(codes({ kind, channel: 'audience' }, parseFrame)).toEqual([`frame.kind=${FIELD_CODES.notAllowed}`]);
     }
   });
 
