@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { LOCALES } from '@holydeck/localization/locales';
+import { translate } from '@holydeck/localization/messages';
+
 import { detectScreens, launchOutputSurface, presentSurfaceLaunch } from './output-launch.js';
 
 import type { DetectedScreen, SurfaceLaunchControls } from './output-launch.js';
@@ -106,7 +109,7 @@ describe('the manual fallback when the placement API is unavailable', () => {
 
     const status = { textContent: null as string | null };
     const retry = { hidden: true, onclick: null as (() => void) | null };
-    presentSurfaceLaunch({ status, retry }, launch, () => undefined);
+    presentSurfaceLaunch({ status, retry }, launch, () => undefined, 'en');
 
     expect(status.textContent).toContain('Drag this window onto its screen');
     expect(retry.hidden).toBe(true);
@@ -114,12 +117,14 @@ describe('the manual fallback when the placement API is unavailable', () => {
 });
 
 describe('presenting a successful placement on a detected screen', () => {
-  it('says the surface opened on its assigned screen and keeps the retry affordance hidden', () => {
+  it.each(LOCALES)('says, in %s, the surface opened on its assigned screen and hides the retry affordance', (locale) => {
     const controls: SurfaceLaunchControls = { status: { textContent: null }, retry: { hidden: false, onclick: null } };
 
-    presentSurfaceLaunch(controls, { kind: 'launched', view: 'singer', placement: 'screen' }, () => undefined);
+    presentSurfaceLaunch(controls, { kind: 'launched', view: 'singer', placement: 'screen' }, () => undefined, locale);
 
-    expect(controls.status.textContent).toBe('Singer opened on its assigned screen.');
+    expect(controls.status.textContent).toBe(
+      translate(locale, 'output.launch.screen', { view: translate(locale, 'output.channel.singer') }),
+    );
     expect(controls.retry.hidden).toBe(true);
   });
 });
@@ -130,13 +135,15 @@ describe('presenting a blocked launch as a recoverable, operator-actioned state'
     retry: { hidden: true, onclick: null },
   });
 
-  it('shows the block visibly and offers a click that retries the launch', () => {
+  it.each(LOCALES)('shows the block visibly in %s and offers a click that retries the launch', (locale) => {
     const controls = controlsOf();
     const retry = vi.fn();
 
-    presentSurfaceLaunch(controls, { kind: 'blocked', view: 'audience' }, retry);
+    presentSurfaceLaunch(controls, { kind: 'blocked', view: 'audience' }, retry, locale);
 
-    expect(controls.status.textContent).toContain('blocked');
+    expect(controls.status.textContent).toBe(
+      translate(locale, 'output.launch.blocked', { view: translate(locale, 'output.channel.audience') }),
+    );
     expect(controls.retry.hidden).toBe(false);
     expect(retry).not.toHaveBeenCalled();
 
@@ -146,10 +153,10 @@ describe('presenting a blocked launch as a recoverable, operator-actioned state'
 
   it('recovers: a launch after the retry hides the affordance again', () => {
     const controls = controlsOf();
-    presentSurfaceLaunch(controls, { kind: 'blocked', view: 'audience' }, () => undefined);
+    presentSurfaceLaunch(controls, { kind: 'blocked', view: 'audience' }, () => undefined, 'en');
     expect(controls.retry.hidden).toBe(false);
 
-    presentSurfaceLaunch(controls, { kind: 'launched', view: 'audience', placement: 'manual' }, () => undefined);
+    presentSurfaceLaunch(controls, { kind: 'launched', view: 'audience', placement: 'manual' }, () => undefined, 'en');
 
     expect(controls.retry.hidden).toBe(true);
     expect(controls.retry.onclick).toBeNull();
@@ -161,11 +168,24 @@ describe('presenting a blocked launch as a recoverable, operator-actioned state'
     const firstRetry = vi.fn();
     const secondRetry = vi.fn();
 
-    presentSurfaceLaunch(controls, { kind: 'blocked', view: 'singer' }, firstRetry);
-    presentSurfaceLaunch(controls, { kind: 'blocked', view: 'singer' }, secondRetry);
+    presentSurfaceLaunch(controls, { kind: 'blocked', view: 'singer' }, firstRetry, 'en');
+    presentSurfaceLaunch(controls, { kind: 'blocked', view: 'singer' }, secondRetry, 'en');
 
     controls.retry.onclick?.();
     expect(firstRetry).not.toHaveBeenCalled();
     expect(secondRetry).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('presenting the manual-placement fallback across locales', () => {
+  it.each(LOCALES)('gives the drag instruction in %s for a surface opened without a screen', (locale) => {
+    const controls = { status: { textContent: null as string | null }, retry: { hidden: false, onclick: null } };
+
+    presentSurfaceLaunch(controls, { kind: 'launched', view: 'stage', placement: 'manual' }, () => undefined, locale);
+
+    expect(controls.status.textContent).toBe(
+      translate(locale, 'output.launch.manual', { view: translate(locale, 'output.channel.stage') }),
+    );
+    expect(controls.retry.hidden).toBe(true);
   });
 });

@@ -13,6 +13,13 @@ const en = {
   'shell.preparing': 'Preparing the service view.',
   'service.slideCount.one': '{count} slide',
   'service.slideCount.other': '{count} slides',
+  'output.channel.audience': 'Audience',
+  'output.channel.stage': 'Stage',
+  'output.channel.singer': 'Singer',
+  'output.launch.screen': '{view} opened on its assigned screen.',
+  'output.launch.manual':
+    "{view} opened. Drag this window onto its screen, then use the display's own fullscreen control.",
+  'output.launch.blocked': "{view} was blocked by the browser's popup policy. Click to open it.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -23,12 +30,26 @@ const de: Catalog = {
   'shell.preparing': 'Die Gottesdienstansicht wird vorbereitet.',
   'service.slideCount.one': '{count} Folie',
   'service.slideCount.other': '{count} Folien',
+  'output.channel.audience': 'Publikum',
+  'output.channel.stage': 'Bühne',
+  'output.channel.singer': 'Sänger',
+  'output.launch.screen': '{view} wurde auf dem zugewiesenen Bildschirm geöffnet.',
+  'output.launch.manual':
+    '{view} wurde geöffnet. Ziehen Sie dieses Fenster auf seinen Bildschirm und nutzen Sie dann die Vollbildfunktion des Displays.',
+  'output.launch.blocked': '{view} wurde von der Popup-Blockierung des Browsers verhindert. Zum Öffnen klicken.',
 };
 
 const ta: Catalog = {
   'shell.preparing': 'வழிபாட்டுக் காட்சி தயாராகிறது.',
   'service.slideCount.one': '{count} ஸ்லைடு',
   'service.slideCount.other': '{count} ஸ்லைடுகள்',
+  'output.channel.audience': 'பார்வையாளர்',
+  'output.channel.stage': 'மேடை',
+  'output.channel.singer': 'பாடகர்',
+  'output.launch.screen': '{view} அதற்கான திரையில் திறக்கப்பட்டது.',
+  'output.launch.manual':
+    '{view} திறக்கப்பட்டது. இந்த சாளரத்தை அதற்கான திரைக்கு இழுத்துச் சென்று, பின்னர் காட்சியின் முழுத்திரைக் கட்டுப்பாட்டைப் பயன்படுத்தவும்.',
+  'output.launch.blocked': '{view} உலாவியின் பாப்-அப் கொள்கையால் தடுக்கப்பட்டது. திறக்க கிளிக் செய்யவும்.',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */

@@ -76,6 +76,26 @@ describe('translating', () => {
     expect(translate('ta', 'shell.preparing')).toBe('வழிபாட்டுக் காட்சி தயாராகிறது.');
   });
 
+  it('names each output channel and its launch outcomes in every shipped locale', () => {
+    expect(translate('en', 'output.channel.audience')).toBe('Audience');
+    expect(translate('de', 'output.channel.audience')).toBe('Publikum');
+    expect(translate('ta', 'output.channel.audience')).toBe('பார்வையாளர்');
+
+    expect(translate('en', 'output.launch.screen', { view: 'Stage' })).toBe(
+      'Stage opened on its assigned screen.',
+    );
+    expect(translate('de', 'output.launch.screen', { view: 'Bühne' })).toBe(
+      'Bühne wurde auf dem zugewiesenen Bildschirm geöffnet.',
+    );
+    expect(translate('ta', 'output.launch.screen', { view: 'மேடை' })).toBe(
+      'மேடை அதற்கான திரையில் திறக்கப்பட்டது.',
+    );
+
+    expect(translate('en', 'output.launch.blocked', { view: 'Singer' })).toContain('blocked');
+    expect(translate('de', 'output.launch.blocked', { view: 'Sänger' })).toContain('Popup-Blockierung');
+    expect(translate('ta', 'output.launch.blocked', { view: 'பாடகர்' })).toContain('பாப்-அப்');
+  });
+
   it('formats a number it is given in the locale it is rendering', () => {
     expect(translate('en', 'service.slideCount.other', { count: 1234 })).toBe('1,234 slides');
     expect(translate('de', 'service.slideCount.other', { count: 1234 })).toBe('1.234 Folien');

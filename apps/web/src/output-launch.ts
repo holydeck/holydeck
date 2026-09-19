@@ -17,6 +17,8 @@
 // has taken.
 
 import type { OutputChannel } from '@holydeck/contracts/live';
+import type { Locale } from '@holydeck/localization/locales';
+import { translate, type MessageKey } from '@holydeck/localization/messages';
 
 /** One screen the Window Management API reported, reduced to the four numbers placement needs. */
 export interface DetectedScreen {
@@ -119,15 +121,24 @@ export function launchOutputSurface(
   return { kind: 'launched', view, placement: screen === undefined ? 'manual' : 'screen' };
 }
 
-const LABELS: Readonly<Record<OutputChannel, string>> = { audience: 'Audience', stage: 'Stage', singer: 'Singer' };
+// Audience, Stage and Singer are role words an operator reads, not proper nouns — each locale names
+// them the way it names the rest of the shell's copy, through the same catalog everything else here does.
+const CHANNEL_MESSAGE_KEY: Readonly<Record<OutputChannel, MessageKey>> = {
+  audience: 'output.channel.audience',
+  stage: 'output.channel.stage',
+  singer: 'output.channel.singer',
+};
 
-const launchedText = (view: OutputChannel, placement: 'screen' | 'manual'): string =>
-  placement === 'screen'
-    ? `${LABELS[view]} opened on its assigned screen.`
-    : `${LABELS[view]} opened. Drag this window onto its screen, then use the display's own fullscreen control.`;
+const channelLabel = (locale: Locale, view: OutputChannel): string =>
+  translate(locale, CHANNEL_MESSAGE_KEY[view]);
 
-const blockedText = (view: OutputChannel): string =>
-  `${LABELS[view]} was blocked by the browser's popup policy. Click to open it.`;
+const launchedText = (locale: Locale, view: OutputChannel, placement: 'screen' | 'manual'): string =>
+  translate(locale, placement === 'screen' ? 'output.launch.screen' : 'output.launch.manual', {
+    view: channelLabel(locale, view),
+  });
+
+const blockedText = (locale: Locale, view: OutputChannel): string =>
+  translate(locale, 'output.launch.blocked', { view: channelLabel(locale, view) });
 
 /** The two elements one surface's launch state is shown through, kept as narrow as `presentSurfaceLaunch` needs. */
 export interface SurfaceStatusLike {
@@ -150,16 +161,23 @@ export interface SurfaceLaunchControls {
  * wants tried again, typically `launchOutputSurface` re-run from the click's own gesture, which is the
  * only kind of gesture a browser will honour a second `window.open` from. `onclick` is assigned rather
  * than added as a listener, so presenting the same controls again replaces the previous retry instead
- * of stacking another one behind it.
+ * of stacking another one behind it. `locale` is supplied by the caller exactly as `renderShell` supplies
+ * it to the shell's own copy (`shell.ts`), so the status line renders in whatever language the device
+ * already resolved rather than a hardcoded one.
  */
-export function presentSurfaceLaunch(controls: SurfaceLaunchControls, launch: SurfaceLaunch, retry: () => void): void {
+export function presentSurfaceLaunch(
+  controls: SurfaceLaunchControls,
+  launch: SurfaceLaunch,
+  retry: () => void,
+  locale: Locale,
+): void {
   if (launch.kind === 'blocked') {
-    controls.status.textContent = blockedText(launch.view);
+    controls.status.textContent = blockedText(locale, launch.view);
     controls.retry.hidden = false;
     controls.retry.onclick = retry;
     return;
   }
-  controls.status.textContent = launchedText(launch.view, launch.placement);
+  controls.status.textContent = launchedText(locale, launch.view, launch.placement);
   controls.retry.hidden = true;
   controls.retry.onclick = null;
 }
