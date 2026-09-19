@@ -1,17 +1,23 @@
-// The live socket, at the smallest size a client can actually reach. The protocol itself — resume
-// semantics, backpressure, per-channel authorization, command execution — is settled by the WebSocket
-// contract and implemented by the task that owns it. What exists here is the endpoint an integration
-// and end-to-end harness can connect to, the channel it is connected to, and refusals that name what
-// this build will not do, so nothing later has to guess whether a frame was served or swallowed.
+// The live socket: the endpoint a client reaches, and everything that is true of a connection rather
+// than of the protocol it carries. The handshake a browser can actually prove, the version it declared
+// in the only place a browser socket can declare one, the channel it asked for — and then the socket is
+// handed to `live-protocol.ts`, which owns the session itself: what it may watch, what it may command,
+// what it is caught up with after a drop, and when it has stopped being a connection worth writing to.
+//
+// The split is on purpose. Everything in the protocol is worth testing without a network in the way, and
+// everything here is only true with one.
 
 import { decideClient } from '@holydeck/contracts/clients';
-import { LIVE_CHANNELS, type LiveChannel, type SnapshotFrame, parseFrame } from '@holydeck/contracts/live';
+import { LIVE_CHANNELS, LIVE_CLOSE, type LiveChannel } from '@holydeck/contracts/live';
 import { TICKET_QUERY, isSameOrigin } from '@holydeck/contracts/sessions';
 import websocket from '@fastify/websocket';
 
+import { grantFor, liveHub } from './live-protocol.js';
 import { originOf, refuseAsForbidden, refuseAsStoreSaid, sessionCallFor, sessionFor } from './csrf.js';
 import { SessionError } from './sessions.js';
 
+import type { Guarded } from './csrf.js';
+import type { LiveHubOptions, LiveTransport } from './live-protocol.js';
 import type { RouteNeed } from './authorization.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { SessionStore } from './sessions.js';
@@ -31,16 +37,8 @@ export const CHANNEL_QUERY = 'channel';
  */
 export const CLIENT_VERSION_QUERY = 'clientVersion';
 
-/** 1003 is unsupported data and 1008 a policy refusal, which is the difference these two names carry. */
-export const LIVE_CLOSE = { unreadable: 1003, refused: 1008 } as const;
-
-export const NOT_IN_THIS_BUILD = 'this build serves snapshots and resumes only';
-
-/** A close frame carries at most 123 bytes of reason, so a reason longer than that is cut, not dropped. */
-export const MAX_CLOSE_REASON = 120;
-
-/** Nothing here advances state, so every frame this build sends carries the revision a session opens at. */
-export const OPENING_STATE_REVISION = 0;
+/** How often a session is asked whether it is still there, and whatever it fell behind on is drained. */
+export const HEARTBEAT_MS = 15_000;
 
 // Only the query string is read from it, and a relative URL needs some origin to be read against.
 const INTERNAL = 'http://application.invalid';
@@ -61,11 +59,20 @@ export function declaredVersion(url: string): unknown {
 const isChannel = (value: string | undefined): value is LiveChannel =>
   LIVE_CHANNELS.includes(value as LiveChannel);
 
-export interface LiveOptions {
+/**
+ * What the handshake proved, read back by the route handler that runs after it. Held here rather than on
+ * the request, because the request-wide store is the session guard's and is written by nothing else: a
+ * route that could put a session there could put any session there.
+ */
+const PROVEN = new WeakMap<FastifyRequest, Guarded>();
+
+export interface LiveOptions extends Omit<LiveHubOptions, 'clock'> {
   /** Explicit, so a frame's time is the session's time and a test does not have to read a clock. */
   readonly clock?: () => string;
   /** Absent where a deployment keeps no sessions, and there is no ticket for a socket to be carrying. */
   readonly sessions?: SessionStore;
+  /** Explicit, so a test can beat the protocol by hand instead of waiting out a real interval. */
+  readonly heartbeatMs?: number;
 }
 
 /**
@@ -93,7 +100,10 @@ const proveHandshake =
     const proven = await sessionFor(sessions, request, reply);
     if (proven === undefined) return;
     try {
-      await proven.sessions.redeemTicket(sessionCallFor(request), proven.token, ticket);
+      // The record the ticket was redeemed against, not the one the cookie was loaded with: a ticket names
+      // the slot it was minted for, and this session runs as that slot for as long as it is open.
+      const record = await proven.sessions.redeemTicket(sessionCallFor(request), proven.token, ticket);
+      PROVEN.set(request, { token: proven.token, record, sessions: proven.sessions });
     } catch (error: unknown) {
       if (error instanceof SessionError && error.kind === 'ticket') {
         await refuseAsForbidden(request, reply, TICKET_QUERY, 'a ticket opens one socket, within the seconds it is good for');
@@ -103,14 +113,39 @@ const proveHandshake =
     }
   };
 
+/**
+ * A `ws` socket as the protocol sees it. `bufferedAmount` is the whole reason the protocol asks anything
+ * of a transport at all: it is how a consumer that has stopped reading is told apart from a quiet one.
+ */
+const transportOf = (socket: {
+  send: (text: string) => void;
+  close: (code: number, reason: string) => void;
+  bufferedAmount?: number;
+}): LiveTransport => ({
+  send: (text) => socket.send(text),
+  close: (code, reason) => socket.close(code, reason),
+  buffered: () => socket.bufferedAmount ?? 0,
+});
+
 export async function serveLive(
   app: FastifyInstance,
-  { clock = () => new Date().toISOString(), sessions }: LiveOptions = {},
+  { clock = () => new Date().toISOString(), sessions, heartbeatMs = HEARTBEAT_MS, ...limits }: LiveOptions = {},
 ): Promise<void> {
   await app.register(websocket);
 
+  const hub = liveHub({ clock, ...limits });
+
+  // Unreferenced on purpose: a heartbeat is something a running service does, never a reason for a
+  // process with nothing else to do to keep running.
+  const beat = setInterval(() => hub.tick(), heartbeatMs);
+  beat.unref();
+  app.addHook('onClose', () => {
+    clearInterval(beat);
+  });
+
   // A deployment with no sessions has nothing to prove a handshake against, and serves the socket the
-  // way it serves everything else: to whoever asked.
+  // way it serves everything else: to whoever asked. Whoever asked carries no permissions, so what they
+  // reach is what a permission is not needed for — the surfaces a service is shown on, watched only.
   const proving = sessions === undefined ? {} : { preValidation: proveHandshake(sessions) };
 
   app.get(LIVE_PATH, { websocket: true, config: { need: PUBLIC }, ...proving }, (socket, request) => {
@@ -132,44 +167,16 @@ export async function serveLive(
       return;
     }
 
-    const snapshot = (sequence: number): SnapshotFrame => ({
-      kind: 'snapshot',
-      channel,
-      stateRevision: OPENING_STATE_REVISION,
-      sequence,
-      at: clock(),
-    });
-
-    socket.send(JSON.stringify(snapshot(0)));
+    const connection = hub.join(transportOf(socket), channel, grantFor(PROVEN.get(request)?.record.permissions ?? []));
+    if (connection === undefined) return;
 
     socket.on('message', (data: unknown) => {
-      let sent: unknown;
-      try {
-        sent = JSON.parse(String(data));
-      } catch {
-        socket.close(LIVE_CLOSE.unreadable, 'frame: must be JSON');
-        return;
-      }
-      const parsed = parseFrame(sent);
-      if (!parsed.ok) {
-        // Every problem the parser found, in the order it found them, because a client fixing a frame
-        // wants the whole list and not the first item of it.
-        const reason = parsed.problems.map(({ path, message }) => `${path}: ${message}`).join('; ');
-        socket.close(LIVE_CLOSE.unreadable, reason.slice(0, MAX_CLOSE_REASON));
-        return;
-      }
-      const frame = parsed.value;
-      // Said out loud rather than ignored: a client that sends a command to this build learns that
-      // nothing ran it, instead of waiting for an effect that is never coming.
-      if (frame.kind !== 'resume') {
-        socket.close(LIVE_CLOSE.refused, `${frame.kind}: ${NOT_IN_THIS_BUILD}`);
-        return;
-      }
-      if (frame.channel !== channel) {
-        socket.close(LIVE_CLOSE.refused, `resume.channel: this session is connected to ${channel}`);
-        return;
-      }
-      socket.send(JSON.stringify(snapshot(frame.fromSequence)));
+      connection.receive(String(data));
+    });
+    // Whatever ended it — a client that closed, a proxy that timed out, a network that stopped being
+    // one — the session is over, and the hub stops holding a place for it.
+    socket.on('close', () => {
+      connection.leave();
     });
   });
 }

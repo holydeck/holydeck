@@ -7,7 +7,7 @@
 import { MongoClient } from 'mongodb';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, UPDATE_REQUIRED_STATUS } from '@holydeck/contracts/clients';
 import { UPDATE_REQUIRED } from '@holydeck/contracts/http';
-import { parseSnapshotFrame } from '@holydeck/contracts/live';
+import { LIVE_CLOSE, parseSnapshotFrame } from '@holydeck/contracts/live';
 import { SESSION_PATH, TICKET_QUERY } from '@holydeck/contracts/sessions';
 import { readJob } from '@holydeck/worker/jobs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -180,20 +180,29 @@ describe('MongoDB', () => {
 
 describe('a live WebSocket client', () => {
   it('is answered with a snapshot of the channel it asked for', async () => {
-    const socket = await live(`channel=live-control&clientVersion=${CLIENT_WINDOW.current}`);
+    const socket = await live(`channel=audience&clientVersion=${CLIENT_WINDOW.current}`);
     const parsed = parseSnapshotFrame(await socket.next());
     expect(parsed.ok).toBe(true);
-    expect(parsed.ok && parsed.value).toMatchObject({ kind: 'snapshot', channel: 'live-control', sequence: 0 });
+    expect(parsed.ok && parsed.value).toMatchObject({ kind: 'snapshot', channel: 'audience', sequence: 0 });
     socket.close();
     await socket.closed;
-    ledger.reached('websocket', 'a ticket from a signed-in session opened live-control with a snapshot');
+    ledger.reached('websocket', 'a ticket from a signed-in session opened a surface with a snapshot');
+  });
+
+  // Proven from outside, against a real sign-in: the operator this harness claimed the instance as is an
+  // administrator and still does not hold Control presentation, because that is granted and never implied.
+  it('refuses the channel a service is run from to a session that was not granted it', async () => {
+    const socket = await live(`channel=live-control&clientVersion=${CLIENT_WINDOW.current}`);
+    expect(await socket.closed).toMatchObject({ code: LIVE_CLOSE.refused });
+    expect((await socket.closed).reason).toContain('may not watch live-control');
+    ledger.reached('websocket', 'live-control was refused to a session without Control presentation');
   });
 
   it('answers a resume from the sequence the client last saw', async () => {
     const socket = await live(`channel=stage&clientVersion=${CLIENT_WINDOW.current}`);
     await socket.next();
-    socket.send({ kind: 'resume', channel: 'stage', fromSequence: 7 });
-    expect(await socket.next()).toMatchObject({ kind: 'snapshot', channel: 'stage', sequence: 7 });
+    socket.send({ kind: 'resume', channel: 'stage', fromSequence: 0 });
+    expect(await socket.next()).toMatchObject({ kind: 'snapshot', channel: 'stage', sequence: 0 });
     socket.close();
     await socket.closed;
     ledger.reached('websocket', 'a resume was answered from the sequence the client named');

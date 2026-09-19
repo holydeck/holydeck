@@ -1,20 +1,13 @@
 import { request } from 'node:http';
 
 import { CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, supportedClientVersions } from '@holydeck/contracts/clients';
-import { LIVE_CHANNELS, parseSnapshotFrame } from '@holydeck/contracts/live';
+import { LIVE_CHANNELS, LIVE_CLOSE, OUTPUT_CHANNELS, parseSnapshotFrame } from '@holydeck/contracts/live';
 import { TICKET_QUERY, sessionCookie } from '@holydeck/contracts/sessions';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app.js';
-import {
-  CLIENT_VERSION_QUERY,
-  LIVE_CLOSE,
-  LIVE_PATH,
-  NOT_IN_THIS_BUILD,
-  declaredVersion,
-  isUpgrade,
-  serveLive,
-} from './live.js';
+import { CLIENT_VERSION_QUERY, LIVE_PATH, declaredVersion, isUpgrade, serveLive } from './live.js';
+import { PRESENTATION_CONTROL } from './roles.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { DEFAULT_SETTINGS, type LoadedSettings } from './settings.js';
 import { memorySessions } from '../test/helpers/sessions.js';
@@ -90,8 +83,10 @@ const handshake = async (base: string, query: string, headers: Record<string, st
 };
 
 /** A session that records what arrived, so a test can wait for the next frame or for the close. */
-const session = (url: string) => {
-  const socket = new WebSocket(url);
+const session = (url: string, headers: Record<string, string> = {}) => {
+  // A browser sets neither of these itself, which is exactly why the handshake reads them: this is the
+  // only place in a test where a socket has to be opened the way a page would have opened it.
+  const socket = new WebSocket(url, { headers } as never);
   const arrived: unknown[] = [];
   const waiting: ((frame: unknown) => void)[] = [];
   socket.addEventListener('message', (event) => {
@@ -127,6 +122,30 @@ const connected = async (query: string) => {
 };
 
 const CURRENT = `${CLIENT_VERSION_QUERY}=${CLIENT_WINDOW.current}`;
+
+/**
+ * One deployment that keeps sessions, and one signed-in session on it carrying exactly the permissions a
+ * test names. Every socket it opens spends a ticket of its own, because a ticket opens one socket — which
+ * is what lets a test hold an operator and a surface open on the same run at the same time.
+ */
+const deployment = async (permissions: readonly string[]) => {
+  const real = sessionsOn(memorySessions().db, { now: () => new Date().toISOString() });
+  const context = sessionContext('req-0f9c2a41');
+  const signedIn = await real.start(context, { actor: 'account:7f3a', permissions });
+  const base = await listening(real);
+  const cookie = sessionCookie(signedIn.token, 60);
+  return {
+    open: async (channel: string) => {
+      const ticket = await real.issueTicket(context, signedIn.token);
+      const live = session(`${base}${LIVE_PATH}?channel=${channel}&${CURRENT}&${TICKET_QUERY}=${ticket}`, {
+        cookie,
+        origin: base.replace(/^ws/u, 'http'),
+      });
+      await live.opened;
+      return live;
+    },
+  };
+};
 
 afterEach(async () => {
   await running?.close();
@@ -174,13 +193,21 @@ describe('the live session', () => {
     });
   });
 
-  it('serves every channel the contract declares', async () => {
-    for (const channel of LIVE_CHANNELS) {
+  it('serves every surface a service is shown on, none of which is behind a permission', async () => {
+    for (const channel of OUTPUT_CHANNELS) {
       const live = await connected(`channel=${channel}&${CURRENT}`);
       expect(await live.frame()).toMatchObject({ kind: 'snapshot', channel });
       await running?.close();
       running = undefined;
     }
+  });
+
+  it('closes a session reaching for the channel a service is run from without Control presentation', async () => {
+    const live = await connected(`channel=live-control&${CURRENT}`);
+    expect(await live.closed).toEqual({
+      code: LIVE_CLOSE.refused,
+      reason: 'channel: this session may not watch live-control',
+    });
   });
 
   it('closes a session that asks for a channel the contract does not declare', async () => {
@@ -202,14 +229,21 @@ describe('the live session', () => {
   it('answers a resume with a snapshot from the sequence the client asked to resume from', async () => {
     const live = await connected(`channel=stage&${CURRENT}`);
     await live.frame();
-    live.send({ kind: 'resume', channel: 'stage', fromSequence: 12 });
+    live.send({ kind: 'resume', channel: 'stage', fromSequence: 0 });
     expect(await live.frame()).toEqual({
       kind: 'snapshot',
       channel: 'stage',
       stateRevision: 0,
-      sequence: 12,
+      sequence: 0,
       at: AT,
     });
+  });
+
+  it('moves a client resuming from a sequence this server never issued to where the server stands', async () => {
+    const live = await connected(`channel=stage&${CURRENT}`);
+    await live.frame();
+    live.send({ kind: 'resume', channel: 'stage', fromSequence: 12 });
+    expect(await live.frame()).toMatchObject({ kind: 'snapshot', channel: 'stage', sequence: 0 });
   });
 
   it('closes a session that resumes a channel it is not connected to', async () => {
@@ -246,29 +280,40 @@ describe('the live session', () => {
     expect((await live.closed).code).toBe(LIVE_CLOSE.unreadable);
   });
 
-  it.each(['command', 'event', 'snapshot'] as const)(
-    'refuses a %s frame rather than pretending to serve behaviour this build does not have',
-    async (kind) => {
-      const live = await connected(`channel=live-control&${CURRENT}`);
-      await live.frame();
-      live.send({
-        kind,
-        channel: 'live-control',
-        id: 'command-1',
-        idempotencyKey: 'key-1',
-        type: 'show-slide',
-        clientStateRevision: 0,
-        sequence: 1,
-        stateRevision: 0,
-        mutatesState: true,
-        at: AT,
-      });
-      expect(await live.closed).toEqual({
-        code: LIVE_CLOSE.refused,
-        reason: `${kind}: ${NOT_IN_THIS_BUILD}`,
-      });
-    },
-  );
+  it.each(['snapshot', 'event', 'ack'] as const)('closes a session that sent a %s, which is the server’s to send', async (kind) => {
+    const live = await connected(`channel=audience&${CURRENT}`);
+    await live.frame();
+    live.send({
+      kind,
+      channel: 'audience',
+      id: 'command-1',
+      outcome: 'applied',
+      type: 'show-slide',
+      sequence: 1,
+      stateRevision: 0,
+      mutatesState: true,
+      at: AT,
+    });
+    expect(await live.closed).toEqual({
+      code: LIVE_CLOSE.refused,
+      reason: `${kind}: a client does not send this frame`,
+    });
+  });
+
+  it('tells a surface that tried to command that it may watch, and leaves it watching', async () => {
+    const live = await connected(`channel=audience&${CURRENT}`);
+    await live.frame();
+    live.send({
+      kind: 'command',
+      channel: 'audience',
+      id: 'command-1',
+      idempotencyKey: 'key-1',
+      type: 'show-slide',
+      clientStateRevision: 0,
+    });
+    expect(await live.frame()).toMatchObject({ kind: 'ack', id: 'command-1', outcome: 'unauthorized' });
+    expect(live.socket.readyState).toBe(WebSocket.OPEN);
+  });
 
   it('leaves the ordinary HTTP surface answering while a session is open', async () => {
     const live = await connected(`channel=audience&${CURRENT}`);
@@ -294,6 +339,129 @@ describe('the live session', () => {
     const response = await running?.inject({ method: 'GET', url: `${LIVE_PATH}?channel=audience` });
     expect(response?.statusCode).toBe(426);
     expect(response?.json()).toMatchObject({ error: { message: UPDATE_REQUIRED_MESSAGE } });
+  });
+});
+
+describe('a session carrying Control presentation', () => {
+  it('opens the channel a service is run from, which nothing else may watch', async () => {
+    const run = await deployment([PRESENTATION_CONTROL]);
+    const control = await run.open('live-control');
+    expect(await control.frame()).toMatchObject({ kind: 'snapshot', channel: 'live-control', stateRevision: 0 });
+  });
+
+  it('runs a command, and is told what became of it after the change it made', async () => {
+    const run = await deployment([PRESENTATION_CONTROL]);
+    const control = await run.open('live-control');
+    await control.frame();
+    control.send({
+      kind: 'command',
+      channel: 'live-control',
+      id: 'command-1',
+      idempotencyKey: 'key-1',
+      type: 'show-slide',
+      clientStateRevision: 0,
+    });
+    expect(await control.frame()).toMatchObject({ kind: 'event', sequence: 1, stateRevision: 1, type: 'show-slide' });
+    expect(await control.frame()).toMatchObject({ kind: 'ack', id: 'command-1', outcome: 'applied', stateRevision: 1 });
+  });
+
+  it('reaches a surface watching the same run, without that surface asking for anything', async () => {
+    const run = await deployment([PRESENTATION_CONTROL]);
+    const audience = await run.open('audience');
+    const control = await run.open('live-control');
+    await audience.frame();
+    await control.frame();
+    control.send({
+      kind: 'command',
+      channel: 'live-control',
+      id: 'command-1',
+      idempotencyKey: 'key-1',
+      type: 'show-slide',
+      clientStateRevision: 0,
+    });
+    expect(await audience.frame()).toMatchObject({ kind: 'event', channel: 'audience', sequence: 1 });
+  });
+
+  it('refuses a command issued against a revision the run has moved past, and says what to re-issue against', async () => {
+    const run = await deployment([PRESENTATION_CONTROL]);
+    const control = await run.open('live-control');
+    await control.frame();
+    const command = (id: string, key: string) => ({
+      kind: 'command',
+      channel: 'live-control',
+      id,
+      idempotencyKey: key,
+      type: 'show-slide',
+      clientStateRevision: 0,
+    });
+    control.send(command('command-1', 'key-1'));
+    await control.frame();
+    await control.frame();
+    control.send(command('command-2', 'key-2'));
+    expect(await control.frame()).toMatchObject({ kind: 'ack', id: 'command-2', outcome: 'stale', stateRevision: 1 });
+  });
+
+  // Failure injection, spec 14.3: the network goes during a live run. The surface loses its connection
+  // without a word while the operator carries on, and comes back to exactly what it missed.
+  it('catches a surface up on a run it was disconnected in the middle of, with no gap and no duplicate', async () => {
+    const run = await deployment([PRESENTATION_CONTROL]);
+    const audience = await run.open('audience');
+    const control = await run.open('live-control');
+    await audience.frame();
+    await control.frame();
+
+    const command = (at: number) => ({
+      kind: 'command',
+      channel: 'live-control',
+      id: `command-${at}`,
+      idempotencyKey: `key-${at}`,
+      type: 'show-slide',
+      clientStateRevision: at,
+    });
+
+    control.send(command(0));
+    expect(await audience.frame()).toMatchObject({ kind: 'event', sequence: 1 });
+    await control.frame();
+    await control.frame();
+
+    audience.socket.close();
+    await audience.closed;
+    for (const at of [1, 2]) {
+      control.send(command(at));
+      await control.frame();
+      await control.frame();
+    }
+
+    const again = await run.open('audience');
+    await again.frame();
+    again.send({ kind: 'resume', channel: 'audience', fromSequence: 1 });
+    expect(await again.frame()).toMatchObject({ kind: 'snapshot', sequence: 1, stateRevision: 3 });
+    expect(await again.frame()).toMatchObject({ kind: 'event', sequence: 2 });
+    expect(await again.frame()).toMatchObject({ kind: 'event', sequence: 3 });
+  });
+
+  it('runs a command retried after the connection dropped exactly once, however often it is sent', async () => {
+    const run = await deployment([PRESENTATION_CONTROL]);
+    const first = await run.open('live-control');
+    await first.frame();
+    const command = {
+      kind: 'command',
+      channel: 'live-control',
+      id: 'command-1',
+      idempotencyKey: 'key-1',
+      type: 'show-slide',
+      clientStateRevision: 0,
+    };
+    first.send(command);
+    await first.frame();
+    await first.frame();
+    first.socket.close();
+    await first.closed;
+
+    const again = await run.open('live-control');
+    expect(await again.frame()).toMatchObject({ kind: 'snapshot', stateRevision: 1, sequence: 1 });
+    again.send(command);
+    expect(await again.frame()).toMatchObject({ kind: 'ack', outcome: 'duplicate', stateRevision: 1, sequence: 1 });
   });
 });
 

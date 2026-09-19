@@ -1,0 +1,504 @@
+import { LIVE_CHANNELS, LIVE_CLOSE, MAX_CLOSE_REASON, OUTPUT_CHANNELS } from '@holydeck/contracts/live';
+import { describe, expect, it } from 'vitest';
+
+import { grantFor, liveHub } from './live-protocol.js';
+import { PRESENTATION_CONTROL } from './roles.js';
+
+import type { LiveGrant, LiveHub, LiveTransport } from './live-protocol.js';
+import type { LiveChannel } from '@holydeck/contracts/live';
+
+const AT = '2026-09-13T10:00:00.000Z';
+
+const OPERATOR: LiveGrant = grantFor([PRESENTATION_CONTROL]);
+const WATCHER: LiveGrant = grantFor([]);
+
+type Frame = Record<string, unknown>;
+
+/**
+ * The far side of a connection, with the two things a real one has that a test has to be able to move:
+ * how much the transport is still holding for its peer, and whether a write to it fails because the
+ * peer is no longer there.
+ */
+const peer = (): {
+  transport: LiveTransport;
+  frames(): readonly Frame[];
+  kinds(): readonly string[];
+  hold(bytes: number): void;
+  vanish(): void;
+  ended(): { readonly code: number; readonly reason: string } | undefined;
+} => {
+  const written: string[] = [];
+  let buffered = 0;
+  let gone = false;
+  let ended: { readonly code: number; readonly reason: string } | undefined;
+  return {
+    transport: {
+      send: (text: string): void => {
+        if (gone) throw new Error('the connection is gone');
+        written.push(text);
+      },
+      // First close wins, the same way a socket's does: a second one changes nothing a client sees.
+      close: (code: number, reason: string): void => {
+        ended ??= { code, reason };
+      },
+      buffered: (): number => buffered,
+    },
+    frames: (): readonly Frame[] => written.map((text) => JSON.parse(text) as Frame),
+    kinds: (): readonly string[] => written.map((text) => String((JSON.parse(text) as Frame)['kind'])),
+    hold: (bytes: number): void => {
+      buffered = bytes;
+    },
+    vanish: (): void => {
+      gone = true;
+    },
+    ended: () => ended,
+  };
+};
+
+const hubAt = (options: Partial<Parameters<typeof liveHub>[0]> = {}): LiveHub =>
+  liveHub({ clock: () => AT, ...options });
+
+/** A joined connection and the peer it writes to, which is what nearly every assertion below needs. */
+const joined = (hub: LiveHub, channel: LiveChannel, grant: LiveGrant = WATCHER) => {
+  const far = peer();
+  const connection = hub.join(far.transport, channel, grant);
+  return { far, connection };
+};
+
+const command = (fields: Partial<Frame> = {}): string =>
+  JSON.stringify({
+    kind: 'command',
+    channel: 'live-control',
+    id: 'command-1',
+    idempotencyKey: 'key-1',
+    type: 'show-slide',
+    clientStateRevision: 0,
+    ...fields,
+  });
+
+/** Runs one command from a connection that may issue one, which is how the state moves in these tests. */
+const moved = (hub: LiveHub, count: number): ReturnType<typeof joined> => {
+  const control = joined(hub, 'live-control', OPERATOR);
+  for (let issued = 0; issued < count; issued += 1) {
+    control.connection?.receive(
+      command({ id: `command-${issued}`, idempotencyKey: `key-${issued}`, clientStateRevision: issued }),
+    );
+  }
+  return control;
+};
+
+describe('what a session is allowed to reach', () => {
+  it('gives Control presentation the channel a service is run from, and the authority to command it', () => {
+    expect(OPERATOR).toEqual({ watch: LIVE_CHANNELS, command: true });
+  });
+
+  it('gives every other session the surfaces a service is shown on, and no authority at all', () => {
+    expect(WATCHER).toEqual({ watch: OUTPUT_CHANNELS, command: false });
+    expect(WATCHER.watch).not.toContain('live-control');
+  });
+});
+
+describe('joining a live session', () => {
+  it('opens with a snapshot of the channel joined, at the revision and sequence the hub stands at', () => {
+    const hub = hubAt();
+    const { far, connection } = joined(hub, 'audience');
+    expect(connection).toBeDefined();
+    expect(far.frames()).toEqual([
+      { kind: 'snapshot', channel: 'audience', stateRevision: 0, sequence: 0, at: AT },
+    ]);
+  });
+
+  it('refuses a channel outside what the session may watch, and sends it nothing at all', () => {
+    const hub = hubAt();
+    const { far, connection } = joined(hub, 'live-control');
+    expect(connection).toBeUndefined();
+    expect(far.frames()).toEqual([]);
+    expect(far.ended()).toEqual({
+      code: LIVE_CLOSE.refused,
+      reason: 'channel: this session may not watch live-control',
+    });
+  });
+
+  it('opens every output surface for a session that carries no permission whatsoever', () => {
+    const hub = hubAt();
+    for (const channel of OUTPUT_CHANNELS) {
+      const { far, connection } = joined(hub, channel);
+      expect(connection).toBeDefined();
+      expect(far.frames()).toMatchObject([{ kind: 'snapshot', channel }]);
+    }
+  });
+});
+
+describe('a command', () => {
+  it('advances the state revision and reaches every surface as one event under one sequence', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    const singer = joined(hub, 'singer');
+    const control = joined(hub, 'live-control', OPERATOR);
+
+    control.connection?.receive(command());
+
+    expect(hub.stateRevision()).toBe(1);
+    expect(audience.far.frames()[1]).toEqual({
+      kind: 'event',
+      channel: 'audience',
+      sequence: 1,
+      stateRevision: 1,
+      type: 'show-slide',
+      mutatesState: true,
+      at: AT,
+    });
+    expect(singer.far.frames()[1]).toMatchObject({ kind: 'event', channel: 'singer', sequence: 1, stateRevision: 1 });
+    expect(control.far.frames()[1]).toMatchObject({ kind: 'event', channel: 'live-control', sequence: 1 });
+  });
+
+  it('is acknowledged to the session that issued it, after the event it produced', () => {
+    const hub = hubAt();
+    const control = joined(hub, 'live-control', OPERATOR);
+    control.connection?.receive(command());
+    expect(control.far.kinds()).toEqual(['snapshot', 'event', 'ack']);
+    expect(control.far.frames()[2]).toEqual({
+      kind: 'ack',
+      channel: 'live-control',
+      id: 'command-1',
+      outcome: 'applied',
+      stateRevision: 1,
+      sequence: 1,
+      at: AT,
+    });
+  });
+
+  it('moves the revision and the sequence one step at a time, never backwards', () => {
+    const hub = hubAt();
+    const control = moved(hub, 4);
+    expect(hub.stateRevision()).toBe(4);
+    expect(hub.sequence()).toBe(4);
+    const revisions = control.far.frames().filter((frame) => frame['kind'] === 'event').map((frame) => frame['stateRevision']);
+    expect(revisions).toEqual([1, 2, 3, 4]);
+  });
+
+  it('is refused as stale when the revision it was issued against is no longer the server’s', () => {
+    const hub = hubAt();
+    const control = moved(hub, 1);
+    control.connection?.receive(command({ id: 'command-late', idempotencyKey: 'key-late', clientStateRevision: 0 }));
+    expect(hub.stateRevision()).toBe(1);
+    expect(control.far.frames().at(-1)).toMatchObject({ kind: 'ack', id: 'command-late', outcome: 'stale', stateRevision: 1 });
+    // Nothing was published for it: the last event is still the one the first command produced.
+    expect(control.far.frames().filter((frame) => frame['kind'] === 'event')).toHaveLength(1);
+  });
+
+  it('is refused the same way when the client claims a revision this server never reached', () => {
+    const hub = hubAt();
+    const control = joined(hub, 'live-control', OPERATOR);
+    control.connection?.receive(command({ clientStateRevision: 9 }));
+    expect(hub.stateRevision()).toBe(0);
+    expect(control.far.frames().at(-1)).toMatchObject({ outcome: 'stale', stateRevision: 0 });
+  });
+
+  it('is refused as unauthorized when the session may watch but not command, and the session stays open', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive(command({ channel: 'audience' }));
+    expect(hub.stateRevision()).toBe(0);
+    expect(audience.far.ended()).toBeUndefined();
+    expect(audience.far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'unauthorized', channel: 'audience' });
+  });
+});
+
+describe('a command sent twice under one idempotency key', () => {
+  it('moves the state once and answers the replay with what the first one did', () => {
+    const hub = hubAt();
+    const control = moved(hub, 1);
+    const applied = control.far.frames().at(-1);
+
+    // The replay carries the revision it was first issued against, which by now is behind: a client that
+    // never saw the acknowledgement retries exactly the frame it sent, not a freshly numbered one.
+    control.connection?.receive(command({ id: 'command-0', idempotencyKey: 'key-0', clientStateRevision: 0 }));
+
+    expect(hub.stateRevision()).toBe(1);
+    expect(hub.sequence()).toBe(1);
+    expect(control.far.frames().filter((frame) => frame['kind'] === 'event')).toHaveLength(1);
+    expect(control.far.frames().at(-1)).toMatchObject({
+      kind: 'ack',
+      outcome: 'duplicate',
+      stateRevision: applied?.['stateRevision'],
+      sequence: applied?.['sequence'],
+    });
+  });
+
+  it('answers a replay that reaches the server on a second connection, not only the one that issued it', () => {
+    const hub = hubAt();
+    moved(hub, 1);
+    const second = joined(hub, 'live-control', OPERATOR);
+    second.connection?.receive(command({ id: 'command-0', idempotencyKey: 'key-0', clientStateRevision: 0 }));
+    expect(hub.stateRevision()).toBe(1);
+    expect(second.far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'duplicate', sequence: 1 });
+  });
+
+  it('forgets the oldest key once more commands have run than it remembers', () => {
+    const hub = hubAt({ rememberedCommands: 2 });
+    const control = moved(hub, 3);
+    control.connection?.receive(command({ id: 'command-0', idempotencyKey: 'key-0', clientStateRevision: 3 }));
+    // Forgotten rather than remembered, so it is judged as a command in its own right and applied again.
+    expect(hub.stateRevision()).toBe(4);
+    expect(control.far.frames().at(-1)).toMatchObject({ outcome: 'applied' });
+  });
+});
+
+describe('resuming from the sequence a client last saw', () => {
+  const resume = (fromSequence: number, channel: LiveChannel = 'audience'): string =>
+    JSON.stringify({ kind: 'resume', channel, fromSequence });
+
+  it('replays exactly what was missed, once each and in order, and nothing else', () => {
+    const hub = hubAt();
+    moved(hub, 3);
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive(resume(1));
+
+    const answered = audience.far.frames().slice(1);
+    expect(answered[0]).toEqual({ kind: 'snapshot', channel: 'audience', stateRevision: 3, sequence: 1, at: AT });
+    expect(answered.slice(1)).toMatchObject([
+      { kind: 'event', channel: 'audience', sequence: 2, stateRevision: 2 },
+      { kind: 'event', channel: 'audience', sequence: 3, stateRevision: 3 },
+    ]);
+  });
+
+  it('replays nothing at all for a client that missed nothing', () => {
+    const hub = hubAt();
+    moved(hub, 2);
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive(resume(2));
+    expect(audience.far.frames().slice(1)).toEqual([
+      { kind: 'snapshot', channel: 'audience', stateRevision: 2, sequence: 2, at: AT },
+    ]);
+  });
+
+  it('resynchronises a client whose missed window is no longer held, rather than skipping events silently', () => {
+    const hub = hubAt({ backlogFrames: 2 });
+    moved(hub, 4);
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive(resume(1));
+    // The snapshot lands at the server's own sequence, which is how the client sees its position jump
+    // instead of being handed a stream with a hole in it.
+    expect(audience.far.frames().slice(1)).toEqual([
+      { kind: 'snapshot', channel: 'audience', stateRevision: 4, sequence: 4, at: AT },
+    ]);
+  });
+
+  it('resynchronises a client claiming a sequence this server never issued', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive(resume(7));
+    expect(audience.far.frames().slice(1)).toEqual([
+      { kind: 'snapshot', channel: 'audience', stateRevision: 0, sequence: 0, at: AT },
+    ]);
+  });
+
+  it('closes a session resuming a channel it is not connected to', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive(resume(0, 'stage'));
+    expect(audience.far.ended()).toEqual({
+      code: LIVE_CLOSE.refused,
+      reason: 'resume.channel: this session is connected to audience',
+    });
+  });
+
+  it('recovers a run a client was disconnected in the middle of, with no gap and no duplicate', () => {
+    const hub = hubAt();
+    const first = joined(hub, 'stage');
+    const control = moved(hub, 1);
+    expect(first.far.frames().at(-1)).toMatchObject({ kind: 'event', sequence: 1 });
+
+    // The connection goes, the way a network does: without a word, while the run carries on.
+    first.far.vanish();
+    first.connection?.leave();
+    control.connection?.receive(command({ id: 'command-x', idempotencyKey: 'key-x', clientStateRevision: 1 }));
+    control.connection?.receive(command({ id: 'command-y', idempotencyKey: 'key-y', clientStateRevision: 2 }));
+
+    const again = joined(hub, 'stage');
+    again.connection?.receive(resume(1, 'stage'));
+    expect(again.far.frames().slice(1)).toMatchObject([
+      { kind: 'snapshot', sequence: 1, stateRevision: 3 },
+      { kind: 'event', sequence: 2 },
+      { kind: 'event', sequence: 3 },
+    ]);
+  });
+});
+
+describe('a frame this protocol will not read', () => {
+  it('closes a session that sent something that is not JSON at all', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive('{ not json');
+    expect(audience.far.ended()).toEqual({ code: LIVE_CLOSE.unreadable, reason: 'frame: must be JSON' });
+  });
+
+  it('closes a session naming every defect it found, cut to what a close frame carries', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive(JSON.stringify({ kind: 'resume', channel: 'audience', fromSequence: -1 }));
+    expect(audience.far.ended()).toEqual({
+      code: LIVE_CLOSE.unreadable,
+      reason: 'resume.fromSequence: must be at least 0',
+    });
+  });
+
+  it('cuts a reason longer than a close frame carries rather than dropping it', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive(JSON.stringify({ kind: 'command', channel: 'audience' }));
+    expect(audience.far.ended()?.reason.length).toBeLessThanOrEqual(MAX_CLOSE_REASON);
+    expect(audience.far.ended()?.code).toBe(LIVE_CLOSE.unreadable);
+  });
+
+  it.each(['snapshot', 'event', 'ack'] as const)('closes a session that sent a %s, which is the server’s to send', (kind) => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    audience.connection?.receive(
+      JSON.stringify({
+        kind,
+        channel: 'audience',
+        id: 'command-1',
+        outcome: 'applied',
+        sequence: 1,
+        stateRevision: 1,
+        type: 'show-slide',
+        mutatesState: true,
+        at: AT,
+      }),
+    );
+    expect(audience.far.ended()).toEqual({
+      code: LIVE_CLOSE.refused,
+      reason: `${kind}: a client does not send this frame`,
+    });
+  });
+});
+
+describe('the heartbeat a session is held open by', () => {
+  it('reaches every connection on every tick', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    hub.tick();
+    expect(audience.far.frames().at(-1)).toEqual({ kind: 'heartbeat', channel: 'audience', at: AT });
+  });
+
+  it('holds a session open for as long as it keeps answering', () => {
+    const hub = hubAt({ heartbeatLapses: 1 });
+    const audience = joined(hub, 'audience');
+    for (let tick = 0; tick < 6; tick += 1) {
+      hub.tick();
+      audience.connection?.receive(JSON.stringify({ kind: 'heartbeat', channel: 'audience', at: AT }));
+    }
+    expect(audience.far.ended()).toBeUndefined();
+  });
+
+  it('holds it open for a session that is busy sending something else instead', () => {
+    const hub = hubAt({ heartbeatLapses: 1 });
+    const control = joined(hub, 'live-control', OPERATOR);
+    for (let tick = 0; tick < 4; tick += 1) {
+      hub.tick();
+      control.connection?.receive(command({ id: `command-${tick}`, idempotencyKey: `key-${tick}`, clientStateRevision: tick }));
+    }
+    expect(control.far.ended()).toBeUndefined();
+  });
+
+  it('closes a session that left more heartbeats unanswered than it is allowed to', () => {
+    const hub = hubAt({ heartbeatLapses: 2 });
+    const audience = joined(hub, 'audience');
+    hub.tick();
+    hub.tick();
+    expect(audience.far.ended()).toBeUndefined();
+    hub.tick();
+    expect(audience.far.ended()).toEqual({
+      code: LIVE_CLOSE.lapsed,
+      reason: 'heartbeat: this session left 2 of them unanswered',
+    });
+  });
+
+  it('stops writing to a session it closed for lapsing', () => {
+    const hub = hubAt({ heartbeatLapses: 0 });
+    const audience = joined(hub, 'audience');
+    hub.tick();
+    const written = audience.far.frames().length;
+    moved(hub, 1);
+    hub.tick();
+    expect(audience.far.frames()).toHaveLength(written);
+  });
+});
+
+describe('a consumer that cannot keep up', () => {
+  it('queues for a transport that is already full rather than writing into it', () => {
+    const hub = hubAt({ highWaterBytes: 10 });
+    const audience = joined(hub, 'audience');
+    audience.far.hold(64);
+    moved(hub, 2);
+    expect(audience.far.frames()).toHaveLength(1);
+    expect(audience.far.ended()).toBeUndefined();
+  });
+
+  it('delivers what it queued, in order and in full, as soon as the transport drains', () => {
+    const hub = hubAt({ highWaterBytes: 10 });
+    const audience = joined(hub, 'audience');
+    audience.far.hold(64);
+    moved(hub, 2);
+    audience.far.hold(0);
+    hub.tick();
+    expect(audience.far.frames().slice(1)).toMatchObject([
+      { kind: 'event', sequence: 1 },
+      { kind: 'event', sequence: 2 },
+      { kind: 'heartbeat' },
+    ]);
+  });
+
+  it('closes a session that falls further behind than the queue held for it', () => {
+    const hub = hubAt({ highWaterBytes: 10, pendingFrames: 2 });
+    const audience = joined(hub, 'audience');
+    audience.far.hold(64);
+    moved(hub, 3);
+    expect(audience.far.ended()).toEqual({
+      code: LIVE_CLOSE.overloaded,
+      reason: 'backpressure: this session fell further behind than 2 frames',
+    });
+  });
+
+  it('carries on serving everybody else while one consumer is behind', () => {
+    const hub = hubAt({ highWaterBytes: 10, pendingFrames: 1 });
+    const slow = joined(hub, 'audience');
+    const quick = joined(hub, 'stage');
+    slow.far.hold(64);
+    moved(hub, 3);
+    expect(slow.far.ended()?.code).toBe(LIVE_CLOSE.overloaded);
+    expect(quick.far.frames().filter((frame) => frame['kind'] === 'event')).toHaveLength(3);
+  });
+});
+
+describe('a connection that is no longer there', () => {
+  it('is dropped when a write to it fails, and the run carries on for everyone else', () => {
+    const hub = hubAt();
+    const lost = joined(hub, 'audience');
+    const kept = joined(hub, 'stage');
+    lost.far.vanish();
+    moved(hub, 2);
+    expect(lost.far.frames()).toHaveLength(1);
+    expect(kept.far.frames().filter((frame) => frame['kind'] === 'event')).toHaveLength(2);
+    expect(hub.stateRevision()).toBe(2);
+  });
+
+  it('is written to no more once it has left', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    audience.connection?.leave();
+    moved(hub, 1);
+    hub.tick();
+    expect(audience.far.kinds()).toEqual(['snapshot']);
+  });
+
+  it('reads nothing more from a session that already left, rather than answering it', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    audience.connection?.leave();
+    audience.connection?.receive('{ not json');
+    expect(audience.far.ended()).toBeUndefined();
+  });
+});
