@@ -7,13 +7,19 @@ import { TICKET_QUERY, sessionCookie } from '@holydeck/contracts/sessions';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from './app.js';
-import { CLIENT_VERSION_QUERY, LIVE_PATH, declaredVersion, isUpgrade, serveLive } from './live.js';
+import { capabilityContext, capabilitiesOn } from './capabilities.js';
+import { CAPABILITY_QUERY, CLIENT_VERSION_QUERY, LIVE_PATH, SERVICE_QUERY, declaredVersion, isUpgrade, serveLive } from './live.js';
 import { PRESENTATION_CONTROL } from './roles.js';
+import { serviceContext, servicesOn } from './services.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { DEFAULT_SETTINGS, type LoadedSettings } from './settings.js';
+import { memoryCapabilities } from '../test/helpers/capabilities.js';
+import { fakeDb } from '../test/helpers/fake-db.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 
+import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
+import type { ServiceStore } from './services.js';
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import type { SessionStore } from './sessions.js';
@@ -40,9 +46,12 @@ const AT = '2026-09-13T10:00:00.000Z';
 
 let running: FastifyInstance | undefined;
 
-const listening = async (sessions?: SessionStore): Promise<string> => {
+const listening = async (
+  sessions?: SessionStore,
+  guests?: { readonly capabilities: CapabilityStore; readonly services: ServiceStore },
+): Promise<string> => {
   const app = buildApp({ settings, logger: false, fetching: refusing, sessions });
-  await serveLive(app, { clock: () => AT, sessions });
+  await serveLive(app, { clock: () => AT, sessions, ...guests });
   await app.listen({ host: '127.0.0.1', port: 0 });
   running = app;
   const { port } = app.server.address() as AddressInfo;
@@ -146,6 +155,37 @@ const deployment = async (permissions: readonly string[]) => {
       return live;
     },
   };
+};
+
+const GUEST_ADMINISTRATOR = `account:${'E'.repeat(22)}`;
+const GUEST_CORRELATION = 'req-guest-0001';
+
+/**
+ * One deployment that keeps capabilities and Services but no sessions at all — a Guest signs in to
+ * nothing, so nothing here has anything for a Guest to sign in to (spec 9.5).
+ */
+const guestDeployment = async (): Promise<{
+  readonly base: string;
+  readonly service: string;
+  readonly capabilities: CapabilityStore;
+  readonly services: ServiceStore;
+  readonly tokenFor: (service: string) => Promise<string>;
+}> => {
+  const services = servicesOn(fakeDb(), { now: () => AT });
+  const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => AT });
+  const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
+  const created = await services.create(context, {
+    title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
+  });
+  await services.transition(context, created.stamp.id, 'presenting');
+  const tokenFor = async (service: string): Promise<string> => {
+    const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
+      kind: 'guest', service, view: 'audience', expiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
+    });
+    return token;
+  };
+  const base = await listening(undefined, { capabilities, services });
+  return { base, service: created.stamp.id, capabilities, services, tokenFor };
 };
 
 afterEach(async () => {
@@ -533,5 +573,62 @@ describe('a deployment that keeps no sessions', () => {
   it('opens the socket without a ticket, because there is no session for one to come from', async () => {
     const base = await listening();
     expect(await handshake(base, `channel=audience&${CURRENT}`, {})).toBe(101);
+  });
+});
+
+// LIVE-03: a Guest joins the Audience view with no name, email or account — a capability opens the
+// socket in place of a ticket, and nothing here ever asks a Guest to sign in to anything (spec 9.5).
+describe('a Guest joining the Audience view on a shared capability', () => {
+  it('opens the socket with no cookie at all, and shows exactly what any Audience surface is shown', async () => {
+    const { base, service, tokenFor } = await guestDeployment();
+    const token = await tokenFor(service);
+    const query = `channel=audience&${SERVICE_QUERY}=${service}&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
+    const live = session(`${base}${LIVE_PATH}?${query}`, { origin: base.replace(/^ws/u, 'http') });
+    await live.opened;
+    expect(await live.frame()).toMatchObject({ kind: 'snapshot', channel: 'audience' });
+  });
+
+  it('refuses a capability presented against a different Service (service-scoped)', async () => {
+    const { base, service, tokenFor } = await guestDeployment();
+    const token = await tokenFor(service);
+    const query = `channel=audience&${SERVICE_QUERY}=a-different-service&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
+    expect(await handshake(base, query, {})).toBe(403);
+  });
+
+  it('refuses a join while the Service is not Presenting, whatever the capability proves', async () => {
+    const { base, services, capabilities } = await guestDeployment();
+    const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
+    const upcoming = await services.create(context, {
+      title: 'Next Sunday', date: '2026-09-20', site: 'Main Hall', sections: [],
+    });
+    const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
+      kind: 'guest', service: upcoming.stamp.id, view: 'audience', expiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
+    });
+    const query = `channel=audience&${SERVICE_QUERY}=${upcoming.stamp.id}&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
+    expect(await handshake(base, query, {})).toBe(403);
+  });
+
+  it('refuses a handshake naming no Service at all', async () => {
+    const { base, service, tokenFor } = await guestDeployment();
+    const token = await tokenFor(service);
+    expect(await handshake(base, `channel=audience&${CAPABILITY_QUERY}=${token}&${CURRENT}`, {})).toBe(403);
+  });
+
+  it('refuses a handshake carrying neither a capability nor a ticket, on a deployment with no sessions', async () => {
+    const { base, service } = await guestDeployment();
+    expect(await handshake(base, `channel=audience&${SERVICE_QUERY}=${service}&${CURRENT}`, {})).toBe(403);
+  });
+
+  it('answers a capability store that failed for any other reason as a fault of this server’s', async () => {
+    const services = servicesOn(fakeDb(), { now: () => AT });
+    const defect = new TypeError('mongodb://holydeck:hunter2@records.invalid:27017 is not a function');
+    const broken: CapabilityStore = {
+      issue: () => Promise.reject(defect),
+      redeem: () => Promise.reject(defect),
+      revoke: () => Promise.reject(defect),
+    };
+    const base = await listening(undefined, { capabilities: broken, services });
+    const query = `channel=audience&${SERVICE_QUERY}=service-1&${CAPABILITY_QUERY}=x&${CURRENT}`;
+    expect(await handshake(base, query, {})).toBe(500);
   });
 });

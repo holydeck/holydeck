@@ -8,17 +8,22 @@
 // everything here is only true with one.
 
 import { decideClient } from '@holydeck/contracts/clients';
-import { LIVE_CHANNELS, LIVE_CLOSE, type LiveChannel } from '@holydeck/contracts/live';
+import { LIVE_CHANNELS, LIVE_CLOSE, OUTPUT_CHANNELS, type LiveChannel, type OutputChannel } from '@holydeck/contracts/live';
 import { TICKET_QUERY, isSameOrigin } from '@holydeck/contracts/sessions';
 import websocket from '@fastify/websocket';
 
+import { correlationFor } from './context.js';
+import { unexpectedFailure } from './failures.js';
+import { GuestJoinError, admitGuest } from './guest-join.js';
 import { grantFor, liveHub } from './live-protocol.js';
 import { originOf, refuseAsForbidden, refuseAsStoreSaid, sessionCallFor, sessionFor } from './csrf.js';
 import { SessionError } from './sessions.js';
 
+import type { CapabilityStore } from './capabilities.js';
 import type { Guarded } from './csrf.js';
-import type { LiveHubOptions, LiveTransport } from './live-protocol.js';
+import type { LiveGrant, LiveHubOptions, LiveTransport } from './live-protocol.js';
 import type { RouteNeed } from './authorization.js';
+import type { ServiceStore } from './services.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { SessionStore } from './sessions.js';
 
@@ -30,6 +35,10 @@ const PUBLIC: RouteNeed = { kind: 'public' };
 export const LIVE_PATH = '/api/v1/live';
 
 export const CHANNEL_QUERY = 'channel';
+
+/** The Guest capability a shared join link carries, and the Service it names — spec 9.3/9.5, T81. */
+export const CAPABILITY_QUERY = 'capability';
+export const SERVICE_QUERY = 'service';
 
 /**
  * A browser WebSocket cannot set a request header, so the version a client declares on an upgrade has
@@ -59,6 +68,10 @@ export function declaredVersion(url: string): unknown {
 const isChannel = (value: string | undefined): value is LiveChannel =>
   LIVE_CHANNELS.includes(value as LiveChannel);
 
+// Never `live-control`: a Guest capability opens a surface to watch, not the one an operator runs on.
+const isOutputChannel = (value: string | undefined): value is OutputChannel =>
+  OUTPUT_CHANNELS.includes(value as OutputChannel);
+
 /**
  * What the handshake proved, read back by the route handler that runs after it. Held here rather than on
  * the request, because the request-wide store is the session guard's and is written by nothing else: a
@@ -66,32 +79,94 @@ const isChannel = (value: string | undefined): value is LiveChannel =>
  */
 const PROVEN = new WeakMap<FastifyRequest, Guarded>();
 
+/** What a redeemed Guest capability proved for this request, read back by the route handler below —
+ *  the capability-token counterpart to `PROVEN`, held apart because a Guest never has a `Guarded`. */
+const CAPABILITY_GRANT = new WeakMap<FastifyRequest, LiveGrant>();
+
 export interface LiveOptions extends Omit<LiveHubOptions, 'clock'> {
   /** Explicit, so a frame's time is the session's time and a test does not have to read a clock. */
   readonly clock?: () => string;
   /** Absent where a deployment keeps no sessions, and there is no ticket for a socket to be carrying. */
   readonly sessions?: SessionStore;
+  /** Absent the same way, and for the same reason: with nowhere a capability is kept, a shared join
+   *  link opens nothing (T81). Required together with `services`, which the Presenting gate reads. */
+  readonly capabilities?: CapabilityStore;
+  readonly services?: ServiceStore;
   /** Explicit, so a test can beat the protocol by hand instead of waiting out a real interval. */
   readonly heartbeatMs?: number;
 }
 
 /**
+ * A Guest's join link carries a capability token and the Service it opens, in the query string —
+ * the only place a browser socket can carry anything at all. Success is silent: nothing is written to
+ * `reply`, and the grant `admitGuest` returns waits in `CAPABILITY_GRANT` for the route handler.
+ * `undefined` means this request is not a Guest join at all, and the ticket flow below gets to try it.
+ */
+const proveGuestJoin = async (
+  capabilities: CapabilityStore,
+  services: ServiceStore,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<boolean | undefined> => {
+  const token = queryOf(request.url, CAPABILITY_QUERY);
+  if (token === undefined) return undefined;
+  const service = queryOf(request.url, SERVICE_QUERY);
+  const view = queryOf(request.url, CHANNEL_QUERY);
+  if (service === undefined || !isOutputChannel(view)) {
+    await refuseAsForbidden(
+      request,
+      reply,
+      CAPABILITY_QUERY,
+      `${SERVICE_QUERY} and ${CHANNEL_QUERY} say what a Guest capability opens`,
+    );
+    return false;
+  }
+  try {
+    const grant = await admitGuest(capabilities, services, correlationFor('guest:', request.id), {
+      token, service, view,
+    });
+    CAPABILITY_GRANT.set(request, grant);
+    return true;
+  } catch (error: unknown) {
+    if (error instanceof GuestJoinError) {
+      await refuseAsForbidden(request, reply, CAPABILITY_QUERY, error.message);
+      return false;
+    }
+    request.log.error(error);
+    await reply.code(500).send(unexpectedFailure(request.id));
+    return false;
+  }
+};
+
+/**
  * What a socket proves before it is one. A browser sets no header on a WebSocket, so the two
  * things a mutation proves in a header and a cookie are proven here in the cookie and the query string:
- * the origin the page asking was served from, and a ticket this session was issued, good once and for
- * seconds. The ticket is what appears in the URL — never the session identifier, which stays in the
- * cookie where a proxy log, a referrer and a browser history never reach it.
+ * the origin the page asking was served from, and either a Guest capability (T81) or a ticket this
+ * session was issued, good once and for seconds. The ticket is what appears in the URL — never the
+ * session identifier, which stays in the cookie where a proxy log, a referrer and a browser history
+ * never reach it.
  *
  * Refused before the upgrade finishes rather than closed after it: a status is something a client and an
  * operator can both read, and a close code on a socket that already opened is neither.
  */
 const proveHandshake =
-  (sessions: SessionStore) =>
+  (sessions: SessionStore | undefined, capabilities: CapabilityStore | undefined, services: ServiceStore | undefined) =>
   async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!isSameOrigin(request.headers.origin, originOf(request))) {
       await refuseAsForbidden(request, reply, 'origin', 'a socket is opened only from this deployment’s own pages');
       return;
     }
+
+    if (capabilities !== undefined && services !== undefined) {
+      const guest = await proveGuestJoin(capabilities, services, request, reply);
+      if (guest !== undefined) return;
+    }
+
+    if (sessions === undefined) {
+      await refuseAsForbidden(request, reply, CAPABILITY_QUERY, 'ask an operator for a guest link to open this socket');
+      return;
+    }
+
     const ticket = queryOf(request.url, TICKET_QUERY);
     if (ticket === undefined) {
       await refuseAsForbidden(request, reply, TICKET_QUERY, 'ask this session for a ticket, and spend it here');
@@ -129,7 +204,14 @@ const transportOf = (socket: {
 
 export async function serveLive(
   app: FastifyInstance,
-  { clock = () => new Date().toISOString(), sessions, heartbeatMs = HEARTBEAT_MS, ...limits }: LiveOptions = {},
+  {
+    clock = () => new Date().toISOString(),
+    sessions,
+    capabilities,
+    services,
+    heartbeatMs = HEARTBEAT_MS,
+    ...limits
+  }: LiveOptions = {},
 ): Promise<void> {
   await app.register(websocket);
 
@@ -143,10 +225,14 @@ export async function serveLive(
     clearInterval(beat);
   });
 
-  // A deployment with no sessions has nothing to prove a handshake against, and serves the socket the
-  // way it serves everything else: to whoever asked. Whoever asked carries no permissions, so what they
-  // reach is what a permission is not needed for — the surfaces a service is shown on, watched only.
-  const proving = sessions === undefined ? {} : { preValidation: proveHandshake(sessions) };
+  // A deployment with neither sessions nor capabilities has nothing to prove a handshake against, and
+  // serves the socket the way it serves everything else: to whoever asked. Whoever asked carries no
+  // permissions, so what they reach is what a permission is not needed for — the surfaces a service is
+  // shown on, watched only. Either one configured is a handshake worth proving.
+  const proving =
+    sessions === undefined && capabilities === undefined
+      ? {}
+      : { preValidation: proveHandshake(sessions, capabilities, services) };
 
   app.get(LIVE_PATH, { websocket: true, config: { need: PUBLIC }, ...proving }, (socket, request) => {
     // Graded here rather than by the versioned-surface hook, for two reasons that point the same way: a
@@ -167,7 +253,8 @@ export async function serveLive(
       return;
     }
 
-    const connection = hub.join(transportOf(socket), channel, grantFor(PROVEN.get(request)?.record.permissions ?? []));
+    const grant = CAPABILITY_GRANT.get(request) ?? grantFor(PROVEN.get(request)?.record.permissions ?? []);
+    const connection = hub.join(transportOf(socket), channel, grant);
     if (connection === undefined) return;
 
     socket.on('message', (data: unknown) => {

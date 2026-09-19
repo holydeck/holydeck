@@ -26,6 +26,7 @@ import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
 import { seedContext, seedOn } from './seed.js';
+import { servicesOn } from './services.js';
 import { sessionDb, sessionsOn } from './sessions.js';
 import { passkeyDb, passkeysOn } from './passkeys.js';
 import { settingsAdminOn } from './settings-admin.js';
@@ -38,6 +39,7 @@ import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
 import type { Identity } from './onboarding.js';
+import type { ServiceStore } from './services.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SessionStore } from './sessions.js';
@@ -71,6 +73,9 @@ let identity: Identity | undefined;
 // Capabilities are kept the same way and for the same reason: a deployment with nowhere to put one has
 // no guest invitation and no output capability to issue, and its route answers not-found instead.
 let capabilities: CapabilityStore | undefined;
+// Services are kept the same way, and the live socket reads this one to gate a Guest's join on the
+// Presenting state (spec 9.3, T81): a deployment with nowhere to keep a Service has no state to gate on.
+let services: ServiceStore | undefined;
 // The settings admin is kept apart from the durable store, but wired up alongside it: a deployment with
 // nowhere to keep accounts has nobody who could administer settings either, and its route answers
 // not-found the same way the others do.
@@ -100,6 +105,7 @@ if (settings.values.mongoUrl !== '') {
     passkeys: passkeysOn(passkeyDb(store.db()), { now }),
   };
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
+  services = servicesOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
@@ -162,11 +168,13 @@ const app = buildApp({
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.
 //
-// Guarded by a handshake ticket wherever a session can be held: a ticket is spent from a session, and a
-// session is opened by signing in. A deployment that keeps no durable records has no sessions to hand the
-// guard, so it has no tickets either, and its socket refuses every client there is — which is the same
-// answer as before, reached now because there is nothing to sign in to rather than no way to sign in.
-await serveLive(app, { sessions });
+// Guarded by a handshake ticket wherever a session can be held, or a Guest capability wherever one can
+// be issued (spec 9.3, T81) — a ticket is spent from a session and a session is opened by signing in; a
+// capability is redeemed against a Service left Presenting, and a Guest signs in to nothing at all. A
+// deployment that keeps no durable records has neither to hand the guard, and its socket refuses every
+// client there is — which is the same answer as before, reached now because there is nothing to sign in
+// to or be invited into, rather than no way to sign in.
+await serveLive(app, { sessions, capabilities, services });
 
 for (const [key, source] of Object.entries(settings.sources)) {
   app.log.info(`${key} came from the ${source}`);
