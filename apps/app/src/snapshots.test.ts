@@ -1,0 +1,579 @@
+import { SNAPSHOT_PINS, parsePreparedSnapshot } from '@holydeck/contracts/snapshots';
+import { isRevisionAddress } from '@holydeck/contracts/revisions';
+import { describe, expect, it } from 'vitest';
+
+import { CATEGORY_OF } from './audit.js';
+import { RECORDS, RECORD_ACTIONS } from './records.js';
+import { repositoriesOn } from './repositories.js';
+import { ACCOUNTS_MANAGE, OPERATOR_OVERRIDE, PRESENTATION_CONTROL, permissionsFor } from './roles.js';
+import { serviceContext, servicesOn } from './services.js';
+import {
+  CHECK_SEVERITIES,
+  LIVE_LABEL,
+  LIVE_OVERRIDDEN_LABEL,
+  OVERRIDE_ACTION,
+  PreparationError,
+  READINESS_GROUPS,
+  READINESS_STATES,
+  READINESS_TARGETS,
+  RUN_EVENT_RECORD,
+  SNAPSHOT_RECORD,
+  overrideProblem,
+  preparationContext,
+  preparationOn,
+  transitionProblem,
+} from './snapshots.js';
+import { fakeDb } from '../test/helpers/fake-db.js';
+
+import type { AccountRecord } from '@holydeck/contracts/accounts';
+import type { ServiceDraft, ServiceSection } from '@holydeck/contracts/services';
+
+import type { Document } from './repositories.js';
+import type {
+  OperatorSession,
+  PreparationInputs,
+  PreparationStore,
+  ReadinessCheck,
+  ReadinessChecklist,
+  ReadinessOverride,
+} from './snapshots.js';
+import type { ServiceStore } from './services.js';
+import type { FakeDb } from '../test/helpers/fake-db.js';
+
+const START = Date.parse('2026-09-13T09:30:00.000Z');
+const OPERATOR = `account:${'D'.repeat(22)}`;
+const CORRELATION = 'req-7b21c0ae';
+const CONTEXT = preparationContext(OPERATOR, CORRELATION);
+const EDITOR = serviceContext(OPERATOR, CORRELATION);
+const SNAPSHOTS = RECORDS.preparedSnapshots.collection;
+const RUN_EVENTS = RECORDS.runEvents.collection;
+const AUDIT = RECORDS.auditEvents.collection;
+
+const SECTIONS: readonly ServiceSection[] = [
+  {
+    id: 'section-1', name: 'Worship', items: [
+      { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song-4', revision: 'rev-5', hash: 'fnv1a-6fe1d1e9' } },
+      { id: 'item-2', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined },
+    ],
+  },
+  {
+    id: 'section-2', name: 'Word', items: [
+      { id: 'item-3', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 'rev-9', hash: undefined } },
+    ],
+  },
+];
+const DRAFT: ServiceDraft = { title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: SECTIONS };
+
+const INPUTS: PreparationInputs = {
+  slideLayout: { id: 'layout-1', revision: 3 },
+  serviceTemplate: 'template-1@2',
+  settings: 'settings@41',
+  media: 'media@2026-09-12',
+  corpus: 'corpus@2026-08-01',
+  aspectRatio: '16:9',
+};
+
+// The six groups ADR 0003 names, one check apiece, so a checklist built from them spans the whole shape.
+const MEDIA_MISSING: ReadinessCheck = {
+  name: 'Media: one file missing',
+  group: 'Media',
+  severity: 'blocker',
+  cause: 'welcome.mp4 is not in the media store',
+};
+const NO_OUTPUT: ReadinessCheck = {
+  name: 'Outputs: no output window',
+  group: 'Outputs',
+  severity: 'blocker',
+  cause: 'no output window has opened for this service',
+};
+const ONE_TRANSLATION: ReadinessCheck = {
+  name: 'Bible: one reading has a single translation',
+  group: 'Bible',
+  severity: 'warning',
+  cause: 'John 1 is pinned in one translation only',
+};
+const REHEARSED: ReadinessCheck = {
+  name: 'Rehearsal: the service has been rehearsed',
+  group: 'Rehearsal',
+  severity: 'complete',
+  cause: 'a rehearsal ran on 2026-09-12',
+};
+const CACHED: ReadinessCheck = {
+  name: 'Offline: every asset is cached',
+  group: 'Offline',
+  severity: 'complete',
+  cause: 'the offline cache holds every asset this service replays',
+};
+
+const accountOf = (role: AccountRecord['role'], granted: Partial<AccountRecord> = {}): AccountRecord => ({
+  id: 'A'.repeat(22),
+  name: 'lucia',
+  displayName: 'Lucia Brandt',
+  role,
+  createdAt: '2026-09-13T09:30:00.000Z',
+  controlPresentation: false,
+  operatorOverride: false,
+  disabled: false,
+  ...granted,
+});
+
+const sessionOf = (account: AccountRecord): OperatorSession => ({
+  actor: OPERATOR,
+  permissions: permissionsFor(account),
+  correlationId: CORRELATION,
+});
+
+const OPERATOR_SESSION = sessionOf(accountOf('member', { operatorOverride: true }));
+
+interface Harness {
+  readonly db: FakeDb;
+  readonly services: ServiceStore;
+  readonly preparation: PreparationStore;
+}
+
+const harness = (now?: () => string): Harness => {
+  const db = fakeDb();
+  let tick = 0;
+  let serial = 0;
+  const clock = now ?? ((): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString());
+  return {
+    db,
+    services: servicesOn(db, { now: clock, newId: () => `service-${(serial += 1)}` }),
+    preparation: preparationOn(db, { now: clock, newId: () => `audit-${(serial += 1)}` }),
+  };
+};
+
+const prepared = async (): Promise<Harness & { readonly serviceId: string }> => {
+  const built = harness();
+  const service = await built.services.create(EDITOR, DRAFT);
+  await built.preparation.prepare(CONTEXT, service.stamp.id, INPUTS);
+  return { ...built, serviceId: service.stamp.id };
+};
+
+const rows = (db: FakeDb, collection: string): Document[] => db.rows.get(collection) ?? [];
+
+const refused = async (call: Promise<unknown>): Promise<PreparationError> => {
+  try {
+    await call;
+  } catch (error) {
+    if (error instanceof PreparationError) return error;
+    throw error;
+  }
+  throw new Error('expected a refusal');
+};
+
+const checklistOf = (
+  blockers: readonly ReadinessCheck[],
+  warnings: readonly ReadinessCheck[] = [],
+  completed: readonly ReadinessCheck[] = [],
+  state: ReadinessChecklist['state'] = 'blocked',
+): ReadinessChecklist => ({ state, blockers, warnings, completed });
+
+const overrideOf = (carried: readonly ReadinessCheck[], changed: Partial<ReadinessOverride> = {}): ReadinessOverride => ({
+  operator: OPERATOR,
+  reason: 'The backup projector is on standby and the missing file is cosmetic',
+  auditEntry: OVERRIDE_ACTION,
+  runLabel: LIVE_OVERRIDDEN_LABEL,
+  carried,
+  ...changed,
+});
+
+describe('the vocabulary readiness is said in', () => {
+  it('declares the groups, the severities, the states and the targets, and only those', () => {
+    expect(READINESS_GROUPS).toEqual(['Content', 'Media', 'Bible', 'Offline', 'Outputs', 'Rehearsal']);
+    expect(CHECK_SEVERITIES).toEqual(['blocker', 'warning', 'complete']);
+    expect(READINESS_STATES).toEqual(['not prepared', 'preparing', 'ready', 'outdated', 'blocked']);
+    expect(READINESS_TARGETS).toEqual(['Ready', 'Rehearsal', 'Go Live']);
+    // Not a percentage, not a count of green checks, not a grade. Three severities and nothing to average.
+    expect(CHECK_SEVERITIES.some((severity) => Number.isFinite(Number(severity)))).toBe(false);
+  });
+});
+
+// ADR 0006: the manifest pins everything a run replays from, plus the two values it resolves once.
+describe('the prepared manifest', () => {
+  it('pins every revision a run replays from, with the geometry it resolved', async () => {
+    const { preparation, serviceId } = await prepared();
+
+    const record = await preparation.prepared(CONTEXT, serviceId);
+
+    expect(Object.keys(record?.snapshot.pins ?? {}).sort()).toEqual([...SNAPSHOT_PINS].sort());
+    expect(Object.values(record?.snapshot.pins ?? {}).every((pin) => pin !== '')).toBe(true);
+    expect(record?.snapshot.resolved).toEqual({
+      aspectRatio: '16:9',
+      safeAreaMargins: { top: 5, right: 5, bottom: 5, left: 5, unit: 'percent' },
+    });
+    expect(record?.snapshot.immutable).toBe(true);
+    expect(parsePreparedSnapshot(record?.snapshot).ok).toBe(true);
+  });
+
+  it('refuses a manifest whose pin is missing', async () => {
+    const built = harness();
+    const service = await built.services.create(EDITOR, DRAFT);
+
+    for (const pin of ['serviceTemplate', 'settings', 'media', 'corpus'] as const) {
+      const error = await refused(
+        built.preparation.prepare(CONTEXT, service.stamp.id, { ...INPUTS, [pin]: '' }),
+      );
+      expect(error.kind).toBe('schema');
+      expect(error.message).toContain(pin);
+    }
+    expect(rows(built.db, SNAPSHOTS)).toHaveLength(0);
+  });
+
+  it('pins the Service at the ordinal its standing stamp holds, so an edit needs a new manifest', async () => {
+    const { db, services, preparation, serviceId } = await prepared();
+    const before = await preparation.prepared(CONTEXT, serviceId);
+
+    await services.disableItem(EDITOR, serviceId, 'item-1');
+    await preparation.prepare(CONTEXT, serviceId, INPUTS);
+
+    const after = await preparation.prepared(CONTEXT, serviceId);
+    expect(after?.snapshot.pins.service).not.toBe(before?.snapshot.pins.service);
+    expect(after?.snapshot.pins.content).not.toBe(before?.snapshot.pins.content);
+    expect(rows(db, SNAPSHOTS)).toHaveLength(2);
+  });
+
+  it('pins the content of the items a run would show, addressed by what they are', async () => {
+    const { preparation, serviceId } = await prepared();
+
+    const record = await preparation.prepared(CONTEXT, serviceId);
+
+    expect(isRevisionAddress(record?.snapshot.pins.content ?? '')).toBe(true);
+    expect(record?.snapshot.pins.slideLayout).toBe('layout-1@3');
+  });
+
+  it('resolves a ratio to what it is rather than to the numbers it arrived as', async () => {
+    const built = harness();
+    const service = await built.services.create(EDITOR, DRAFT);
+
+    const record = await built.preparation.prepare(CONTEXT, service.stamp.id, { ...INPUTS, aspectRatio: '1920:1080' });
+
+    expect(record?.snapshot.resolved.aspectRatio).toBe('16:9');
+  });
+
+  it('refuses a ratio that is not one', async () => {
+    const built = harness();
+    const service = await built.services.create(EDITOR, DRAFT);
+
+    const error = await refused(built.preparation.prepare(CONTEXT, service.stamp.id, { ...INPUTS, aspectRatio: 'wide' }));
+
+    expect(error.kind).toBe('schema');
+  });
+
+  it('answers nothing for a Service that is not there', async () => {
+    const built = harness();
+
+    expect(await built.preparation.prepare(CONTEXT, 'service-missing', INPUTS)).toBeUndefined();
+    expect(await built.preparation.prepared(CONTEXT, 'service-missing')).toBeUndefined();
+    expect(await built.preparation.readiness(CONTEXT, 'service-missing')).toBeUndefined();
+  });
+});
+
+// ADR 0006 again: a mutation attempt fails at the storage layer, because no storage layer offers one.
+describe('a manifest once written', () => {
+  it('has no path through the data layer that could change or remove it', async () => {
+    const { db } = await prepared();
+
+    expect(Object.keys(repositoriesOn(db)[SNAPSHOT_RECORD]).sort()).toEqual(['append', 'count', 'read', 'record']);
+    expect(RECORDS.preparedSnapshots.kind).toBe('immutable');
+    expect(RECORDS.runEvents.kind).toBe('immutable');
+    for (const verb of ['delete', 'findAndModify', 'remove', 'replace', 'update']) {
+      expect(RECORD_ACTIONS).not.toContain(verb);
+    }
+  });
+
+  it('refuses a second manifest written over the one already there, and leaves it as it was', async () => {
+    const frozen = harness(() => new Date(START).toISOString());
+    const service = await frozen.services.create(EDITOR, DRAFT);
+    const first = await frozen.preparation.prepare(CONTEXT, service.stamp.id, INPUTS);
+    const written = structuredClone(rows(frozen.db, SNAPSHOTS));
+
+    const error = await refused(frozen.preparation.prepare(CONTEXT, service.stamp.id, { ...INPUTS, corpus: 'corpus@2026-09-01' }));
+
+    expect(error.kind).toBe('conflict');
+    expect(rows(frozen.db, SNAPSHOTS)).toEqual(written);
+    expect((await frozen.preparation.prepared(CONTEXT, service.stamp.id))?.snapshot).toEqual(first?.snapshot);
+  });
+});
+
+// ADR 0003: readiness is a severity-aware checklist. A percentage would let a blocker be averaged away.
+describe('readiness', () => {
+  it('is a checklist of blockers, warnings and completed checks, and carries no score', async () => {
+    const { preparation, serviceId } = await prepared();
+
+    const checklist = await preparation.readiness(CONTEXT, serviceId, {
+      checks: [MEDIA_MISSING, ONE_TRANSLATION, REHEARSED, CACHED],
+    });
+
+    expect(Object.keys(checklist ?? {}).sort()).toEqual(['blockers', 'completed', 'state', 'warnings']);
+    expect(checklist?.blockers).toContainEqual(MEDIA_MISSING);
+    expect(checklist?.warnings).toEqual([ONE_TRANSLATION]);
+    expect(checklist?.completed).toEqual(expect.arrayContaining([REHEARSED, CACHED]));
+    for (const check of [...(checklist?.blockers ?? []), ...(checklist?.warnings ?? []), ...(checklist?.completed ?? [])]) {
+      expect(READINESS_GROUPS).toContain(check.group);
+      expect(check.cause).not.toBe('');
+      expect(Object.values(check).some((field) => typeof field === 'number')).toBe(false);
+    }
+  });
+
+  it('reports not prepared before anything is pinned, and ready once nothing blocks', async () => {
+    const built = harness();
+    const service = await built.services.create(EDITOR, DRAFT);
+
+    expect((await built.preparation.readiness(CONTEXT, service.stamp.id))?.state).toBe('not prepared');
+
+    await built.preparation.prepare(CONTEXT, service.stamp.id, INPUTS);
+
+    expect((await built.preparation.readiness(CONTEXT, service.stamp.id))?.state).toBe('ready');
+  });
+
+  it('reports blocked while a blocker is open', async () => {
+    const { preparation, serviceId } = await prepared();
+
+    const checklist = await preparation.readiness(CONTEXT, serviceId, { checks: [NO_OUTPUT, ONE_TRANSLATION] });
+
+    expect(checklist?.state).toBe('blocked');
+  });
+
+  it('blocks a Service with nothing enabled to show', async () => {
+    const { services, preparation, serviceId } = await prepared();
+    for (const item of ['item-1', 'item-2', 'item-3']) await services.disableItem(EDITOR, serviceId, item);
+
+    const checklist = await preparation.readiness(CONTEXT, serviceId);
+
+    expect(checklist?.state).toBe('blocked');
+    expect(checklist?.blockers.map((check) => check.group)).toEqual(['Content']);
+    expect(checklist?.blockers[0]?.name).toBe('Content: nothing is enabled to show');
+  });
+
+  // ADR 0005 by way of T40: the one pin whose movement makes a prepared manifest stale.
+  it('reports outdated once the Slide Layout it pinned has moved on, and outdated is not ready', async () => {
+    const { preparation, serviceId } = await prepared();
+
+    const checklist = await preparation.readiness(CONTEXT, serviceId, { slideLayoutRevision: 4 });
+
+    expect(checklist?.state).toBe('outdated');
+    expect(checklist?.blockers.map((check) => check.name)).toContain('Content: the Slide Layout moved on');
+    expect(checklist?.blockers[0]?.cause).toContain('regeneration and revalidation');
+    expect(transitionProblem('outdated', 'Ready', checklist as ReadinessChecklist)).toBe(
+      'transition to Ready: Outdated is not Ready and must not report as Ready',
+    );
+  });
+
+  it('stays ready while the Slide Layout it pinned is still the current one', async () => {
+    const { preparation, serviceId } = await prepared();
+
+    const checklist = await preparation.readiness(CONTEXT, serviceId, { slideLayoutRevision: 3 });
+
+    expect(checklist?.state).toBe('ready');
+    expect(checklist?.completed.map((check) => check.name)).toContain('Content: the Slide Layout pinned is still current');
+  });
+});
+
+describe('the transition a blocker stops', () => {
+  it('cannot skip from Preparing to Ready with an open blocker', () => {
+    expect(transitionProblem('preparing', 'Ready', checklistOf([MEDIA_MISSING, NO_OUTPUT]))).toBe(
+      'transition to Ready: bypassed 2 blocker(s)',
+    );
+  });
+
+  it('cannot reach Rehearsal over a blocker either', () => {
+    expect(transitionProblem('preparing', 'Rehearsal', checklistOf([MEDIA_MISSING]))).toBe(
+      'transition to Rehearsal: bypassed 1 blocker(s)',
+    );
+  });
+
+  it('allows Preparing to Ready once nothing is open', () => {
+    expect(transitionProblem('preparing', 'Ready', checklistOf([], [ONE_TRANSLATION], [REHEARSED], 'ready'))).toBeUndefined();
+  });
+
+  it('refuses Go Live over a blocker that nobody overrode', () => {
+    expect(transitionProblem('blocked', 'Go Live', checklistOf([MEDIA_MISSING]))).toBe(
+      'transition to Go Live: bypassed 1 blocker(s) with no override',
+    );
+  });
+
+  it('allows Go Live over a blocker a complete override carries', () => {
+    const checklist = checklistOf([MEDIA_MISSING, NO_OUTPUT]);
+
+    expect(transitionProblem('blocked', 'Go Live', checklist, overrideOf(checklist.blockers))).toBeUndefined();
+  });
+});
+
+describe('what makes an override incomplete', () => {
+  const checklist = checklistOf([MEDIA_MISSING, NO_OUTPUT], [ONE_TRANSLATION]);
+  const cases: readonly (readonly [string, ReadinessOverride, string])[] = [
+    ['nobody named', overrideOf(checklist.blockers, { operator: '   ' }), 'overridden by nobody, not an Operator'],
+    ['no reason', overrideOf(checklist.blockers, { reason: '' }), 'overridden without a reason'],
+    ['a whitespace reason', overrideOf(checklist.blockers, { reason: '  \t ' }), 'overridden without a reason'],
+    ['no audit entry', overrideOf(checklist.blockers, { auditEntry: '' }), 'overridden without an audit entry'],
+    ['a run labelled nothing', overrideOf(checklist.blockers, { runLabel: '' }), 'the run is labelled nothing, not live overridden'],
+    ['a run labelled live', overrideOf(checklist.blockers, { runLabel: LIVE_LABEL }), 'the run is labelled live, not live overridden'],
+    ['too few checks carried', overrideOf([MEDIA_MISSING]), '1 check(s) carried against 2 open blocker(s)'],
+    [
+      'a check that was never blocking',
+      overrideOf([MEDIA_MISSING, { ...NO_OUTPUT, name: 'Outputs: something else' }]),
+      'Outputs: no output window was blocking and is not carried',
+    ],
+    [
+      'a cause rewritten on the way through',
+      overrideOf([MEDIA_MISSING, { ...NO_OUTPUT, cause: 'the operator said it was fine' }]),
+      'Outputs: no output window is carried with a cause it did not block for',
+    ],
+  ];
+
+  for (const [name, override, problem] of cases) {
+    it(`refuses ${name}`, () => {
+      expect(overrideProblem(checklist, override)).toBe(`transition to Go Live: ${problem}`);
+    });
+  }
+
+  it('accepts an override that carries every open blocker with the cause it blocked for', () => {
+    expect(overrideProblem(checklist, overrideOf(checklist.blockers))).toBeUndefined();
+  });
+});
+
+describe('the Operator override', () => {
+  const request = (serviceId: string): Parameters<PreparationStore['override']>[1] => ({
+    serviceId,
+    runId: 'run-1',
+    reason: 'The backup projector is on standby and the missing file is cosmetic',
+    observed: { checks: [MEDIA_MISSING, NO_OUTPUT, ONE_TRANSLATION, REHEARSED] },
+  });
+
+  it('carries every open blocking check, by name and with the cause it blocked for', async () => {
+    const { preparation, serviceId } = await prepared();
+
+    const outcome = await preparation.override(OPERATOR_SESSION, request(serviceId));
+
+    expect(outcome.override.carried).toEqual([MEDIA_MISSING, NO_OUTPUT]);
+    expect(outcome.override.operator).toBe(OPERATOR);
+    expect(outcome.override.auditEntry).toBe(OVERRIDE_ACTION);
+    expect(outcome.runLabel).toBe(LIVE_OVERRIDDEN_LABEL);
+  });
+
+  it('does not override on an empty reason', async () => {
+    const { db, preparation, serviceId } = await prepared();
+
+    for (const reason of ['', '   ']) {
+      const error = await refused(preparation.override(OPERATOR_SESSION, { ...request(serviceId), reason }));
+      expect(error.kind).toBe('reason');
+    }
+    expect(rows(db, RUN_EVENTS)).toHaveLength(0);
+    expect(rows(db, AUDIT).filter((row) => row['action'] === OVERRIDE_ACTION)).toHaveLength(0);
+  });
+
+  // THR-11: the refusal is the server's, not the client's. None of these sessions is ever offered the
+  // control, and every one of them is refused anyway when it asks for it directly.
+  it('refuses every session that is not an Operator, whether or not a client ever offered it', async () => {
+    const { db, preparation, serviceId } = await prepared();
+    const sessions: readonly (readonly [string, OperatorSession])[] = [
+      ['an admin', sessionOf(accountOf('admin'))],
+      ['an admin holding Control presentation', sessionOf(accountOf('admin', { controlPresentation: true }))],
+      ['an editor', sessionOf(accountOf('editor'))],
+      ['a member', sessionOf(accountOf('member'))],
+      ['a guest', { actor: 'guest:invited', permissions: [], correlationId: CORRELATION }],
+      ['a stage display', { actor: 'capability:output', permissions: [PRESENTATION_CONTROL], correlationId: CORRELATION }],
+    ];
+
+    for (const [who, session] of sessions) {
+      const error = await refused(preparation.override(session, request(serviceId)));
+      expect(error.kind, who).toBe('permission');
+      expect(error.message).toContain(OPERATOR_OVERRIDE);
+    }
+    expect(rows(db, RUN_EVENTS)).toHaveLength(0);
+    expect(sessions.every(([, session]) => !session.permissions.includes(OPERATOR_OVERRIDE))).toBe(true);
+    expect(permissionsFor(accountOf('admin'))).toEqual([ACCOUNTS_MANAGE, 'settings.manage', 'layouts.manage']);
+  });
+
+  it('leaves the warnings and the prepared manifest exactly as they were', async () => {
+    const { db, preparation, serviceId } = await prepared();
+    const before = structuredClone(rows(db, SNAPSHOTS));
+
+    const outcome = await preparation.override(OPERATOR_SESSION, request(serviceId));
+    const after = await preparation.readiness(CONTEXT, serviceId, { checks: [MEDIA_MISSING, NO_OUTPUT, ONE_TRANSLATION, REHEARSED] });
+
+    expect(rows(db, SNAPSHOTS)).toEqual(before);
+    expect(outcome.snapshot).toEqual((await preparation.prepared(CONTEXT, serviceId))?.snapshot);
+    expect(after?.warnings).toEqual([ONE_TRANSLATION]);
+    expect(after?.blockers).toEqual([MEDIA_MISSING, NO_OUTPUT]);
+  });
+
+  it('appends a run event and an audit entry naming the Operator, the reason and every check carried', async () => {
+    const { db, preparation, serviceId } = await prepared();
+
+    await preparation.override(OPERATOR_SESSION, request(serviceId));
+
+    const [event] = rows(db, RUN_EVENTS);
+    expect(event?.['kind']).toBe(OVERRIDE_ACTION);
+    expect(event?.['runId']).toBe('run-1');
+    expect(event?.['actor']).toBe(OPERATOR);
+    expect(event?.['pinnedRevisions']).toEqual((await preparation.prepared(CONTEXT, serviceId))?.snapshot.pins);
+
+    const [entry] = rows(db, AUDIT).filter((row) => row['action'] === OVERRIDE_ACTION);
+    expect(entry?.['actor']).toBe(OPERATOR);
+    expect(entry?.['subject']).toBe(`service:${serviceId}`);
+    expect(entry?.['outcome']).toBe('allowed');
+    expect(String(entry?.['detail'])).toContain('The backup projector is on standby');
+    for (const check of [MEDIA_MISSING, NO_OUTPUT]) expect(String(entry?.['detail'])).toContain(check.name);
+    expect(CATEGORY_OF[OVERRIDE_ACTION]).toBe('presentation');
+  });
+
+  it('reports the run as live overridden for its whole duration', async () => {
+    const { db, preparation, serviceId } = await prepared();
+    expect(await preparation.runLabel(CONTEXT, 'run-1')).toBe(LIVE_LABEL);
+
+    await preparation.override(OPERATOR_SESSION, request(serviceId));
+    expect(await preparation.runLabel(CONTEXT, 'run-1')).toBe(LIVE_OVERRIDDEN_LABEL);
+
+    // A later event in the same run does not put the label back: the run was overridden, and stays so.
+    await repositoriesOn(db)[RUN_EVENT_RECORD].append(CONTEXT, {
+      _id: 'run-1#2', runId: 'run-1', sequence: 2, at: new Date(START).toISOString(), kind: 'slide.shown',
+      pinnedRevisions: {}, actor: OPERATOR, correlationId: CORRELATION,
+    });
+
+    expect(await preparation.runLabel(CONTEXT, 'run-1')).toBe(LIVE_OVERRIDDEN_LABEL);
+    expect(await preparation.runLabel(CONTEXT, 'run-2')).toBe(LIVE_LABEL);
+  });
+
+  it('refuses when nothing is open to override, and before anything is prepared', async () => {
+    const { preparation, serviceId } = await prepared();
+    const unprepared = harness();
+    const service = await unprepared.services.create(EDITOR, DRAFT);
+
+    expect((await refused(preparation.override(OPERATOR_SESSION, { ...request(serviceId), observed: { checks: [ONE_TRANSLATION] } }))).kind).toBe('state');
+    expect((await refused(unprepared.preparation.override(OPERATOR_SESSION, request(service.stamp.id)))).kind).toBe('state');
+  });
+
+  it('writes its trail through a record class with no update or delete path', async () => {
+    const { db } = await prepared();
+
+    expect(RECORDS.auditEvents.kind).toBe('append-only');
+    expect(Object.keys(repositoriesOn(db).auditEvents).sort()).toEqual(['append', 'count', 'read', 'record']);
+  });
+});
+
+describe('a record this code cannot read back', () => {
+  it('refuses a Service or a manifest this code cannot read, rather than pinning a guess', async () => {
+    const db = fakeDb();
+    const preparation = preparationOn(db, { now: () => new Date(START).toISOString() });
+    db.rows.set(RECORDS.services.collection, [{ _id: 'service-9#1', serviceId: 'service-9', sequence: 'first' }]);
+    expect((await refused(preparation.prepare(CONTEXT, 'service-9', INPUTS))).kind).toBe('corrupt');
+
+    db.rows.set(RECORDS.services.collection, [{ _id: 'service-9#1', serviceId: 'service-9', sequence: 1 }]);
+    expect((await refused(preparation.prepare(CONTEXT, 'service-9', INPUTS))).kind).toBe('corrupt');
+
+    db.rows.set(SNAPSHOTS, [
+      { _id: 'service-9#1', serviceId: 'service-9', preparedAt: '2026-09-13T09:30:00.000Z', pins: {}, aspectRatio: '16:9', safeArea: {} },
+    ]);
+    expect((await refused(preparation.prepared(CONTEXT, 'service-9'))).kind).toBe('corrupt');
+  });
+
+  it('lets a write that failed for any other reason through as what it was', async () => {
+    const built = harness();
+    const service = await built.services.create(EDITOR, DRAFT);
+    built.db.failOn = (): Error => new Error('the volume is full');
+
+    await expect(built.preparation.prepare(CONTEXT, service.stamp.id, INPUTS)).rejects.toThrow('the volume is full');
+  });
+});

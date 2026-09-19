@@ -9,6 +9,13 @@ import type { AccountRecord, AccountRole } from '@holydeck/contracts/accounts';
 /** Presents Control to a viewer without being one of the three roles that make an account. */
 export const PRESENTATION_CONTROL = 'presentation.control';
 
+/**
+ * Takes a Service live over an open blocker, carrying every blocking check into the trail with a reason
+ * (ADR 0003). Held by the Operator alone and granted per account, never by role and never implied by
+ * Control presentation: operating the run is not the same answerability as overruling readiness.
+ */
+export const OPERATOR_OVERRIDE = 'operator.override';
+
 /** Administers accounts: grants and revokes what other accounts hold. Admin's alone, by role. */
 export const ACCOUNTS_MANAGE = 'accounts.manage';
 
@@ -37,5 +44,6 @@ export function permissionsFor(account: AccountRecord): readonly string[] {
   return Object.freeze([
     ...ROLE_PERMISSIONS[account.role],
     ...(account.controlPresentation ? [PRESENTATION_CONTROL] : []),
+    ...(account.operatorOverride ? [OPERATOR_OVERRIDE] : []),
   ]);
 }

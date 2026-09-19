@@ -75,6 +75,7 @@ const CARRIED = new Set<string>([
   'role',
   'createdAt',
   'controlPresentation',
+  'operatorOverride',
   'disabled',
   '_id',
   'credential',
@@ -152,6 +153,8 @@ export interface AccountStore {
   read(context: unknown, id: string): Promise<AccountRecord | undefined>;
   /** Grants or revokes Control presentation for the named account. Nothing for an identifier no account holds. */
   grantControl(context: unknown, id: string, granted: boolean): Promise<AccountRecord | undefined>;
+  /** Grants or revokes the Operator override, apart from Control presentation. Nothing for an unknown id. */
+  grantOperatorOverride(context: unknown, id: string, granted: boolean): Promise<AccountRecord | undefined>;
   /** Administers a new account into being, beyond the one founder `claim()` made. Refuses a name in use. */
   create(context: unknown, input: CreateAccount): Promise<AccountRecord>;
   /** Closes an account: kept, not deleted, and no longer able to authenticate. Nothing for an unknown id. */
@@ -199,6 +202,8 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
       // Absent on a document written before this flag existed. Reading it back as not holding it is the
       // migration: nothing anywhere is granted Control presentation by upgrading, only by being granted it.
       controlPresentation: found['controlPresentation'] ?? false,
+      // The same migration, for the same reason: nothing is granted the Operator override by upgrading.
+      operatorOverride: found['operatorOverride'] ?? false,
       // Same precedent: an account written before this flag existed reads back as not disabled, not as a
       // defect. Nothing is closed by upgrading, only by being closed.
       disabled: found['disabled'] ?? false,
@@ -211,9 +216,9 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
   };
 
   /**
-   * The one write shape `grantControl`, `disable`, `restore` and `assignRole` all are: set a field on the
-   * account an id names, and answer nothing for an id nothing holds — including the id that stopped
-   * holding it between this write and the read straight after.
+   * The one write shape `grantControl`, `grantOperatorOverride`, `disable`, `restore` and `assignRole`
+   * all are: set a field on the account an id names, and answer nothing for an id nothing holds —
+   * including the id that stopped holding it between this write and the read straight after.
    */
   const applyUpdate = async (id: string, set: Document): Promise<AccountRecord | undefined> => {
     const rows = db.collection(ACCOUNTS_COLLECTION);
@@ -233,8 +238,9 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
         displayName: claim.displayName,
         role: 'admin',
         createdAt: options.now(),
-        // Explicit, not implicit: the founder is Admin by role, and Admin does not carry this by being it.
+        // Explicit, not implicit: the founder is Admin by role, and Admin does not carry these by being it.
         controlPresentation: false,
+        operatorOverride: false,
         disabled: false,
       });
       if (!parsed.ok) {
@@ -253,6 +259,7 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
           role: record.role,
           createdAt: record.createdAt,
           controlPresentation: record.controlPresentation,
+          operatorOverride: record.operatorOverride,
           disabled: record.disabled,
           credential,
           founder: true,
@@ -276,6 +283,7 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
         role: input.role,
         createdAt: options.now(),
         controlPresentation: false,
+        operatorOverride: false,
         disabled: false,
       });
       if (!parsed.ok) {
@@ -292,6 +300,7 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
           role: record.role,
           createdAt: record.createdAt,
           controlPresentation: record.controlPresentation,
+          operatorOverride: record.operatorOverride,
           disabled: record.disabled,
           credential,
           founder: false,
@@ -326,6 +335,11 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
     async grantControl(context, id, granted) {
       permit(context, 'update');
       return applyUpdate(id, { controlPresentation: granted });
+    },
+
+    async grantOperatorOverride(context, id, granted) {
+      permit(context, 'update');
+      return applyUpdate(id, { operatorOverride: granted });
     },
 
     async disable(context, id) {

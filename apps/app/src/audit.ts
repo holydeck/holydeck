@@ -85,6 +85,9 @@ export const AUDIT_ACTIONS = [
   'service.item.revise',
   // Reserved for the presentation-run surface T76+ builds. Exercised only by this task's own tests today.
   'presentation.run',
+  // An Operator taking a Service live over an open blocker. Written by `snapshots.ts` itself — no routes
+  // task owns the readiness surface yet — and naming the Operator, the reason, and every check carried.
+  'readiness.override',
   // Reserved for the backup surface T100+ builds. Exercised only by this task's own tests today.
   'backup.run',
   // Reserved for the restore surface T101+ builds. Exercised only by this task's own tests today.
@@ -158,6 +161,7 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'service.item.reorder': 'content',
   'service.item.revise': 'content',
   'presentation.run': 'presentation',
+  'readiness.override': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',
   'integration.call': 'integration',

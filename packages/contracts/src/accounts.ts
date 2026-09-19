@@ -95,6 +95,8 @@ export interface AccountRecord {
   readonly createdAt: string;
   /** Administered on its own, apart from the three roles. Neither admin nor editor holds it implicitly. */
   readonly controlPresentation: boolean;
+  /** Goes live over an open blocker, carrying it in the trail. Administered on its own, like the above. */
+  readonly operatorOverride: boolean;
   /** Not deleted, not renamed, kept in every other respect — this is the entire distinction of being closed. */
   readonly disabled: boolean;
 }
@@ -108,6 +110,7 @@ export function parseAccountRecord(value: unknown): Parsed<AccountRecord> {
       role: reader.choice('role', ACCOUNT_ROLES),
       createdAt: reader.time('createdAt'),
       controlPresentation: reader.flag('controlPresentation'),
+      operatorOverride: reader.flag('operatorOverride'),
       disabled: reader.flag('disabled'),
     };
     if (record.id !== '' && !isAccountId(record.id)) {
