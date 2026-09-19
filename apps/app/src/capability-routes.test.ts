@@ -173,6 +173,12 @@ describe('issuing an output capability', () => {
     expect(response.json().data.view).toBe('audience');
   });
 
+  test('the singer view is issued exactly as asked, the same as audience and stage', async () => {
+    const response = await issuingOutput({ service: SERVICE, view: 'singer', expiresAt: EXPIRES });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data.view).toBe('singer');
+  });
+
   test('a view that is not audience or stage is refused, and live-control is never an answer this route gives', async () => {
     const response = await issuingOutput({ service: SERVICE, view: 'live-control', expiresAt: EXPIRES });
     expect(response.statusCode).toBe(422);

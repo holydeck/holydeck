@@ -61,7 +61,7 @@ const parseGuestInvitationBody = (value: unknown): Parsed<GuestInvitationBody> =
 const parseOutputCapabilityBody = (value: unknown): Parsed<OutputCapabilityBody> =>
   parseObject(value, 'outputCapability', (reader) => ({
     service: reader.text('service'),
-    view: reader.choice('view', ['audience', 'stage'] as const),
+    view: reader.choice('view', ['audience', 'stage', 'singer'] as const),
     expiresAt: reader.time('expiresAt'),
   }));
 

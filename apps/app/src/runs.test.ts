@@ -256,6 +256,57 @@ describe('ending a run', () => {
   });
 });
 
+describe('notifying a live session that a run’s phase moved', () => {
+  it('is told once a run starts, and not before — a session it never reached would answer for it', async () => {
+    const { db, serviceId } = await prepared();
+    let notified = 0;
+    const runs = runsOn(db, {
+      now: () => new Date(START).toISOString(),
+      observe: () => ({ slideLayoutRevision: 3, checks: [] }),
+      onRunStateChange: () => (notified += 1),
+    });
+
+    await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+
+    expect(notified).toBe(1);
+  });
+
+  it('is not told when starting was refused, since the phase never moved', async () => {
+    // The same Outdated fixture `starting a run` above refuses with — reconstructed over the same
+    // database with the hook wired, rather than reaching into `harness()`'s fixed `runsOn` options.
+    const { db, serviceId } = await prepared({ slideLayoutRevision: 4 });
+    let notified = 0;
+    const runs = runsOn(db, {
+      now: () => new Date(START).toISOString(),
+      observe: () => ({ slideLayoutRevision: 4, checks: [] }),
+      onRunStateChange: () => (notified += 1),
+    });
+
+    await refused(runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' }));
+
+    expect(notified).toBe(0);
+  });
+
+  it('is told again, separately, once a run ends', async () => {
+    const { db, serviceId } = await prepared();
+    let notified = 0;
+    const watched = runsOn(db, { now: () => new Date(START).toISOString(), onRunStateChange: () => (notified += 1) });
+    const started = await watched.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+    expect(notified).toBe(1);
+
+    await watched.end(OPERATOR_SESSION, started.runId);
+
+    expect(notified).toBe(2);
+  });
+
+  it('defaults to telling no one, for the run store built without anything listening', async () => {
+    const { runs, serviceId } = await prepared();
+    // No `onRunStateChange` supplied — proves the hook is optional and a run still starts and ends.
+    const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+    await expect(runs.end(OPERATOR_SESSION, started.runId)).resolves.toMatchObject({ phase: 'ended' });
+  });
+});
+
 describe('a Mongo interruption mid-run', () => {
   it('lets a write that failed for any other reason through as what it was, and leaves nothing behind', async () => {
     const { db, runs, serviceId } = await prepared();

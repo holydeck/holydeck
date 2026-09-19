@@ -121,6 +121,11 @@ export interface RunOptions {
   /** How this deployment observes the readiness `snapshots.ts` cannot compute for itself — see
    *  `PreparationOptions.observe`, which this mirrors exactly and passes straight through to `readiness`. */
   readonly observe?: (context: unknown, serviceId: string) => Promise<ReadinessObservation> | ReadinessObservation;
+  /** Told once a run's phase has actually moved — started or ended — so a live session watching
+   *  run-state (`live-events.ts`'s `publishRunStateChanged`) can be pushed the change without this
+   *  module knowing anything about how. Absent where nothing is listening yet: this store is what a
+   *  run's phase actually is, whether or not anyone is watching it move. */
+  readonly onRunStateChange?: () => void;
 }
 
 const RUN_ID_BYTES = 16;
@@ -151,6 +156,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
   const preparation: PreparationStore = preparationOn(db, { now: options.now });
   const newId = options.newId ?? ((): string => randomBytes(RUN_ID_BYTES).toString('base64url'));
   const observe = options.observe ?? ((): ReadinessObservation => ({}));
+  const onRunStateChange = options.onRunStateChange ?? ((): void => {});
 
   const author = (context: unknown): Pick<RequestContext, 'actor' | 'correlationId'> => {
     const { actor, correlationId } = context as RequestContext;
@@ -229,6 +235,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
           outcome: 'allowed',
           detail: `Started a ${request.mode} presentation run`,
         });
+        onRunStateChange();
         return started;
       }),
 
@@ -258,6 +265,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
           outcome: 'allowed',
           detail: 'Ended a presentation run',
         });
+        onRunStateChange();
         return record;
       }),
 

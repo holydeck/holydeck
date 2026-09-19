@@ -2,7 +2,7 @@ import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
 import { LIVE_CHANNELS, LIVE_CLOSE, MAX_CLOSE_REASON, OUTPUT_CHANNELS } from '@holydeck/contracts/live';
 import { describe, expect, it } from 'vitest';
 
-import { grantFor, liveHub } from './live-protocol.js';
+import { VIEW_GRANTS, grantFor, liveHub } from './live-protocol.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 
 import type { LiveGrant, LiveHub, LiveTransport } from './live-protocol.js';
@@ -96,6 +96,30 @@ describe('what a session is allowed to reach', () => {
   it('gives every other session the surfaces a service is shown on, and no authority at all', () => {
     expect(WATCHER).toEqual({ watch: OUTPUT_CHANNELS, command: false });
     expect(WATCHER.watch).not.toContain('live-control');
+  });
+
+  it('scopes a capability-carrying session to exactly the one view it was issued for, and no other', () => {
+    for (const view of OUTPUT_CHANNELS) {
+      expect(VIEW_GRANTS[view]).toEqual({ watch: [view], command: false });
+    }
+  });
+
+  it('joins the view a capability names, and is refused every channel it does not, receiving nothing from either', () => {
+    const hub = hubAt();
+    const admitted = joined(hub, 'singer', VIEW_GRANTS.singer);
+    expect(admitted.connection).toBeDefined();
+    expect(admitted.far.frames()).toMatchObject([{ kind: 'snapshot', channel: 'singer' }]);
+
+    const attempts = (['audience', 'stage', 'live-control'] as const).map((channel) => joined(hub, channel, VIEW_GRANTS.singer));
+    for (const attempt of attempts) {
+      expect(attempt.connection).toBeUndefined();
+      expect(attempt.far.frames()).toEqual([]);
+    }
+
+    // A channel this grant was refused never became a session in the first place, so a change published
+    // afterwards has nowhere on it to reach: the same transport read as empty above stays that way.
+    moved(hub, 1);
+    for (const attempt of attempts) expect(attempt.far.frames()).toEqual([]);
   });
 });
 
@@ -213,6 +237,60 @@ describe('a command', () => {
     expect(hub.stateRevision()).toBe(0);
     expect(audience.far.ended()).toBeUndefined();
     expect(audience.far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'unauthorized', channel: 'audience' });
+  });
+});
+
+describe('a change no client commanded', () => {
+  it('reaches every joined session, on every channel, as an event tagged with the type given', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    const singer = joined(hub, 'singer');
+    const control = joined(hub, 'live-control', OPERATOR);
+
+    const landed = hub.publish('run-state-changed');
+
+    expect(landed).toEqual({ stateRevision: 1, sequence: 1 });
+    expect(hub.stateRevision()).toBe(1);
+    expect(audience.far.frames().at(-1)).toEqual({
+      kind: 'event',
+      channel: 'audience',
+      sequence: 1,
+      stateRevision: 1,
+      type: 'run-state-changed',
+      mutatesState: true,
+      at: AT,
+    });
+    expect(singer.far.frames().at(-1)).toMatchObject({ channel: 'singer', type: 'run-state-changed' });
+    expect(control.far.frames().at(-1)).toMatchObject({ channel: 'live-control', type: 'run-state-changed' });
+  });
+
+  it('is answered to no one: it is pushed, never a reply a session asked for', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    hub.publish('theme-changed');
+    // Exactly the snapshot this session opened with, plus exactly one event — nothing it had to ask again
+    // for, and nothing sent twice for the one change that happened.
+    expect(audience.far.kinds()).toEqual(['snapshot', 'event']);
+  });
+
+  it('interleaves with operator commands in exactly the order the server processed them, never reordered', () => {
+    const hub = hubAt();
+    const control = joined(hub, 'live-control', OPERATOR);
+    const audience = joined(hub, 'audience');
+
+    control.connection?.receive(command({ id: 'c1', idempotencyKey: 'k1', type: 'show-slide', clientStateRevision: 0 }));
+    hub.publish('standby-changed');
+    control.connection?.receive(command({ id: 'c2', idempotencyKey: 'k2', type: 'current-slide-changed', clientStateRevision: 2 }));
+    hub.publish('theme-changed');
+
+    const events = audience.far.frames().filter((frame) => frame['kind'] === 'event');
+    expect(events.map((frame) => frame['type'])).toEqual([
+      'show-slide',
+      'standby-changed',
+      'current-slide-changed',
+      'theme-changed',
+    ]);
+    expect(events.map((frame) => frame['sequence'])).toEqual([1, 2, 3, 4]);
   });
 });
 

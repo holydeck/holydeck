@@ -151,6 +151,16 @@ describe('issuing a capability', () => {
     });
     expect(rows.get(issued.capabilityId)).toMatchObject({ kind: 'output', view: 'stage' });
   });
+
+  test('issues an output capability granting the singer view, alongside audience and stage', async () => {
+    const issued = await store.issue(context(), OPERATOR, {
+      kind: 'output',
+      service: SERVICE,
+      view: 'singer',
+      expiresAt: soon(),
+    });
+    expect(rows.get(issued.capabilityId)).toMatchObject({ kind: 'output', view: 'singer' });
+  });
 });
 
 describe('redeeming a capability', () => {
@@ -228,6 +238,17 @@ describe('redeeming a capability', () => {
     });
     const redeemed = await store.redeem(context(), issued.token, { service: SERVICE, view: 'stage' });
     expect(redeemed).toEqual({ kind: 'output', service: SERVICE, view: 'stage', canControl: false, grants: [] });
+  });
+
+  test('redeems a singer-view output window exactly as it was issued', async () => {
+    const issued = await store.issue(context(), OPERATOR, {
+      kind: 'output',
+      service: SERVICE,
+      view: 'singer',
+      expiresAt: soon(),
+    });
+    const redeemed = await store.redeem(context(), issued.token, { service: SERVICE, view: 'singer' });
+    expect(redeemed).toEqual({ kind: 'output', service: SERVICE, view: 'singer', canControl: false, grants: [] });
   });
 });
 

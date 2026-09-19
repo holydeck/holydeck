@@ -31,6 +31,7 @@ import type {
   HeartbeatFrame,
   LiveChannel,
   LiveFrame,
+  OutputChannel,
   SnapshotFrame,
 } from '@holydeck/contracts/live';
 
@@ -63,6 +64,24 @@ export function grantFor(permissions: readonly string[]): LiveGrant {
     : Object.freeze({ watch: OUTPUT_CHANNELS, command: false });
 }
 
+const grantForView = (view: OutputChannel): LiveGrant => Object.freeze({ watch: [view], command: false });
+
+/**
+ * The counterpart to `grantFor` above for a session that carries no permission at all, only a capability
+ * (`capabilities.ts`'s `CapabilityView` — a guest's or an output window's) scoped to one view. Where
+ * `grantFor([])` opens every output surface to a session identified by nothing, this opens exactly the
+ * one channel the capability was issued for and none other: an audience capability reaches `audience`,
+ * never `stage` or `singer`, whatever else this deployment is showing. `Record<OutputChannel, …>` is
+ * declared, not derived from `OUTPUT_CHANNELS` at runtime, so a channel this contract adds has to be
+ * added here too — the type checker refuses a build that leaves one out, the way this deployment once
+ * left `singer` out of `capabilities.ts`.
+ */
+export const VIEW_GRANTS: Readonly<Record<OutputChannel, LiveGrant>> = Object.freeze({
+  audience: grantForView('audience'),
+  stage: grantForView('stage'),
+  singer: grantForView('singer'),
+});
+
 export interface LiveHubOptions {
   /** Explicit, so a frame's time is the session's time and a test does not have to read a clock. */
   readonly clock: () => string;
@@ -91,6 +110,13 @@ export interface LiveHub {
   sequence(): number;
   /** Opens a session, or refuses it and answers nothing when the channel is outside what it may watch. */
   join(transport: LiveTransport, channel: LiveChannel, grant: LiveGrant): LiveConnection | undefined;
+  /**
+   * Announces a change no client commanded — a domain module's own state moved on its own authority, not
+   * a live-control session's. `command()` is the client-facing door onto the same movement; this is the
+   * server-facing one, for `live-events.ts`'s four change classes and whatever `runs.ts` and later tasks
+   * publish through it. Every joined session, on every channel, is written the resulting event.
+   */
+  publish(type: string): Landed;
   /** One beat: drains whatever a transport had room for, then asks every session whether it is still there. */
   tick(): void;
 }
@@ -112,7 +138,7 @@ interface Change {
 }
 
 /** Where a command left the state, which is the whole of what a replay of it has to be answered with. */
-interface Landed {
+export interface Landed {
   readonly stateRevision: number;
   readonly sequence: number;
 }
@@ -352,6 +378,8 @@ export function liveHub(options: LiveHubOptions): LiveHub {
         leave: (): void => forget(member),
       });
     },
+
+    publish,
 
     tick: (): void => {
       for (const member of [...members]) {

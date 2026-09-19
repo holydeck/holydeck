@@ -21,7 +21,7 @@ export const CAPABILITIES_COLLECTION = 'capabilities';
 export type CapabilityKind = 'guest' | 'output';
 
 /** Never `'live-control'`: a capability presents a channel to watch, not the one an operator runs on. */
-export type CapabilityView = 'audience' | 'stage';
+export type CapabilityView = 'audience' | 'stage' | 'singer';
 
 /** What an actor needs to reach the store. Issuing and revoking are an operator's; redeeming is a viewer's. */
 export const CAPABILITY_PERMISSIONS = Object.freeze({
