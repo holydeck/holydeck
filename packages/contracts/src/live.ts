@@ -18,6 +18,10 @@ export type OutputChannel = (typeof OUTPUT_CHANNELS)[number];
 export const LIVE_CHANNELS = [LIVE_CONTROL_CHANNEL, ...OUTPUT_CHANNELS] as const;
 export type LiveChannel = (typeof LIVE_CHANNELS)[number];
 
+/** Where an operator reads connection counts by view type — spec 9.5, LIVE-06. Shared so the
+ *  application that answers it and the client that reads it name the same path once. */
+export const LIVE_CONNECTIONS_PATH = '/api/v1/live/connections';
+
 /**
  * How a live session ends when it was not the client that ended it. 1003 is unsupported data and 1008 a
  * policy refusal, which is the difference those two carry. The other two are in the 4000s, the range

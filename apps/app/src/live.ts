@@ -9,7 +9,14 @@
 
 import { CLIENT_WINDOW, decideClient } from '@holydeck/contracts/clients';
 import { successEnvelope } from '@holydeck/contracts/http';
-import { LIVE_CHANNELS, LIVE_CLOSE, OUTPUT_CHANNELS, type LiveChannel, type OutputChannel } from '@holydeck/contracts/live';
+import {
+  LIVE_CHANNELS,
+  LIVE_CLOSE,
+  LIVE_CONNECTIONS_PATH,
+  OUTPUT_CHANNELS,
+  type LiveChannel,
+  type OutputChannel,
+} from '@holydeck/contracts/live';
 import { TICKET_QUERY, isSameOrigin } from '@holydeck/contracts/sessions';
 import websocket from '@fastify/websocket';
 
@@ -40,9 +47,7 @@ const PERMISSION: RouteNeed = { kind: 'permission', need: PRESENTATION_CONTROL }
 
 export const LIVE_PATH = '/api/v1/live';
 
-/** Where an operator reads connection counts by view type — spec 9.5, LIVE-06. Never a per-connection
- *  row: `live-protocol.ts`'s `connectionCounts()` is the only thing this route answers with. */
-export const LIVE_CONNECTIONS_PATH = `${LIVE_PATH}/connections`;
+export { LIVE_CONNECTIONS_PATH };
 
 export const CHANNEL_QUERY = 'channel';
 

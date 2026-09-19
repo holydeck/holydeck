@@ -5,6 +5,7 @@ import {
   ACK_OUTCOMES,
   LIVE_CHANNELS,
   LIVE_CLOSE,
+  LIVE_CONNECTIONS_PATH,
   LIVE_SESSION_STATES,
   OUTPUT_CHANNELS,
   parseAckFrame,
@@ -58,6 +59,10 @@ describe('the vocabulary a live session is limited to', () => {
       expect(code).toBeGreaterThanOrEqual(4000);
       expect(code).toBeLessThan(5000);
     }
+  });
+
+  it('names one path both the route that answers connection counts and the client that reads them share', () => {
+    expect(LIVE_CONNECTIONS_PATH).toBe('/api/v1/live/connections');
   });
 });
 
