@@ -80,3 +80,28 @@ export type PaletteHit =
   | SlidePaletteHit
   | SlideLayoutPaletteHit
   | ServicePaletteHit;
+
+// SRCH-02's discoverable, cross-platform open shortcut. Pure and platform-parameterized on purpose:
+// this package is browser-safe but framework-free (no DOM, no key-listener), so what it owns is only
+// the label a future UI renders and a key-event handler compares against, never the listening itself.
+
+export type ShortcutPlatform = 'mac' | 'windows';
+
+/** One shortcut: a bare key held with the platform's own primary modifier (Cmd on mac, Ctrl on
+ *  windows) — the only modifier the palette's open shortcut needs, so nothing else is carried. */
+export interface PaletteShortcut {
+  readonly key: string;
+}
+
+/** The palette's own open shortcut: the primary modifier plus K, the convention almost every command
+ *  palette already uses. */
+export const PALETTE_OPEN_SHORTCUT: PaletteShortcut = { key: 'K' };
+
+const MAC_PRIMARY_MODIFIER = '⌘';
+
+/** How a shortcut reads on the given platform — a mac shortcut as its glyph with no separator
+ *  (`⌘K`), a windows shortcut as the word a windows menu actually shows (`Ctrl+K`), since neither
+ *  platform's own convention is native to the other's keyboard. */
+export function shortcutLabel(platform: ShortcutPlatform, shortcut: PaletteShortcut): string {
+  return platform === 'mac' ? `${MAC_PRIMARY_MODIFIER}${shortcut.key}` : `Ctrl+${shortcut.key}`;
+}

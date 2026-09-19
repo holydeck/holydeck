@@ -23,6 +23,19 @@
 // below is the one place every source's failure is translated into `PaletteError`, so a caller of
 // `search` either gets every source's hits or none of them, never a partial answer with no way to know
 // what went missing.
+//
+// T73 (SRCH-02) adds two things to the one `search` above. A query's optional leading `token:` narrows
+// ranking to the one source that token names (`SOURCE_PREFIXES` below); no leading token, or one this
+// file does not recognize, searches every source `search` always did — widening is the default, not a
+// second code path. And `insert` turns a hit into a `ServiceItem` and appends it via `services.ts`'s own
+// `addItem`, but only for a `song` or `slide` hit: neither of those carries a `RevisionRef` itself, so
+// building one means finding what content the hit actually names and pinning its latest revision —
+// exactly as `services.ts`'s own `reviseItem` builds one. The other four sources name no such content (a
+// reference or a scripture match is text, not a library item; a Slide Layout and a Service are neither),
+// so `insert` refuses them with a typed `PaletteError`, the same error this file already raises for a
+// missing source, rather than half-guessing an insertion for them.
+
+import { randomBytes } from 'node:crypto';
 
 import { PALETTE_SOURCES } from '@holydeck/contracts/palette';
 import { formatVerseList, parseReference } from '@holydeck/core/references';
@@ -30,6 +43,7 @@ import { foldSearchText, NOT_A_WORD, phraseCount, scatteredCount } from '@holyde
 
 import { REFERENCE_NOT_FOUND, searchScripture, selectReference } from './corpus.js';
 import { libraryContext, libraryOn } from './library.js';
+import { revisionsOn } from './revisions.js';
 import { LAYOUTS_MANAGE, PRESENTATION_CONTROL } from './roles.js';
 import { serviceContext, servicesOn } from './services.js';
 import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
@@ -39,9 +53,12 @@ import type { PaletteHit, PaletteSource } from '@holydeck/contracts/palette';
 
 import type { Reference } from '@holydeck/core/references';
 
+import type { ItemKind, RevisionRef, ServiceItem } from '@holydeck/contracts/services';
+
 import type { corpusClient, ReferenceSelection } from './corpus.js';
 import type { LibraryStore } from './library.js';
 import type { RepositoryDb } from './repositories.js';
+import type { ServiceRecord } from './services.js';
 
 /** The one session shape the palette authorizes against — the operator-facing permission vocabulary a
  *  session is granted at sign-in (`roles.ts`), not `RequestContext`'s own store-permission strings. */
@@ -64,7 +81,19 @@ export class PaletteError extends Error {
 }
 
 export interface PaletteStore {
+  /** A query's optional leading `token:` (`SOURCE_PREFIXES`) narrows ranking to one source; no
+   *  recognized token searches every source `search` always did. */
   search(session: PaletteSession, query: string): Promise<readonly PaletteHit[]>;
+  /** Converts a `song` or `slide` hit into a `ServiceItem`, pinned to its content's latest revision,
+   *  and appends it to a named section of a Service (SRCH-02's direct insertion). Every other
+   *  source — `reference`, `scripture`, `slideLayout`, `service` — is refused with a `PaletteError`
+   *  naming that source, since none of them is `RevisionRef`-backed library content. */
+  insert(
+    session: PaletteSession,
+    hit: PaletteHit,
+    serviceId: string,
+    sectionId: string,
+  ): Promise<ServiceRecord | undefined>;
 }
 
 export interface PaletteOptions {
@@ -343,30 +372,111 @@ function compareHits(left: PaletteHit, right: PaletteHit): number {
   return left.id < right.id ? -1 : 1;
 }
 
+/** The concise, obvious token a query scopes each of `PALETTE_SOURCES`'s six entries with — named
+ *  once here, rather than scattered across `search`, since scoping and the source tag it narrows to
+ *  are the same vocabulary. */
+const SOURCE_PREFIXES: Readonly<Record<string, PaletteSource>> = {
+  ref: 'reference',
+  scripture: 'scripture',
+  song: 'song',
+  slide: 'slide',
+  layout: 'slideLayout',
+  service: 'service',
+};
+
+interface QueryScope {
+  /** Absent means unscoped: search every source `search` always did. */
+  readonly source: PaletteSource | undefined;
+  /** The query `search` actually ranks against — the token and its colon stripped off when it named
+   *  a recognized source, or `query` verbatim otherwise (an unrecognized `token:` is not scoping, so
+   *  it is left in place and searched as the literal text it is). */
+  readonly rest: string;
+}
+
+/** Parses a query's optional leading `token:` (T73/SRCH-02). Reads off `SOURCE_PREFIXES` alone, so a
+ *  token this file does not recognize — or one with no trailing colon at all — falls through to the
+ *  unscoped default, no special case needed for either. */
+function scopeOf(query: string): QueryScope {
+  const match = /^([A-Za-z]+):(.*)$/u.exec(query);
+  const source = match === null ? undefined : SOURCE_PREFIXES[match[1]!.toLowerCase()];
+  return source === undefined ? { source: undefined, rest: query } : { source, rest: match![2]!.trimStart() };
+}
+
+const INSERTABLE_ITEM_ID_BYTES = 16;
+
+/** The `ItemKind` and library content id a hit is inserted as — the only two sources T73 makes
+ *  directly insertable, mapped off `hit.source` alone: a `SlidePaletteHit`'s `kind` sub-tags
+ *  `reusableSlide` vs `slideGroup`, but both share one content store and one `ItemKind` ('slide-group',
+ *  `slide-groups.ts`'s own header), so nothing here reads that sub-tag. Every other source — a
+ *  reference, a scripture match, a Slide Layout, a Service — is refused: none of them is `RevisionRef`-
+ *  backed library content, so there is nothing here for `insert` to pin. */
+function insertableContentOf(hit: PaletteHit): { readonly kind: ItemKind; readonly contentId: string } {
+  switch (hit.source) {
+    case 'song':
+      return { kind: 'song', contentId: hit.songId };
+    case 'slide':
+      return { kind: 'slide-group', contentId: hit.contentId };
+    default:
+      throw new PaletteError(hit.source, `a ${hit.source} hit cannot be inserted directly; it names no library content to pin`);
+  }
+}
+
+/** Builds the `ServiceItem` a hit becomes and appends it — the exact `RevisionRef` shape
+ *  `services.ts`'s own `reviseItem` builds (`{ id, revision: String(revision), hash }`), sourced from
+ *  `revisions.current`, the latest revision, since a palette hit names content, not a pinned one. */
+async function insertHit(
+  services: ReturnType<typeof servicesOn>,
+  revisions: ReturnType<typeof revisionsOn>,
+  newId: () => string,
+  context: unknown,
+  hit: PaletteHit,
+  serviceId: string,
+  sectionId: string,
+): Promise<ServiceRecord | undefined> {
+  const { kind, contentId } = insertableContentOf(hit);
+  const revision = await revisions.current(context, contentId);
+  if (revision === undefined) {
+    throw new PaletteError(hit.source, `${contentId} has no saved content to insert`);
+  }
+  const content: RevisionRef = { id: contentId, revision: String(revision.revision), hash: revision.hash };
+  const item: ServiceItem = { id: newId(), kind, title: hit.title, enabled: true, content };
+  return services.addItem(context, serviceId, sectionId, item);
+}
+
 export function paletteOn(db: RepositoryDb, options: PaletteOptions): PaletteStore {
   const storeOptions = { now: options.now, newId: options.newId };
   const library = libraryOn(db, storeOptions);
   const songs = songsOn(db, storeOptions);
   const slideLayouts = slideLayoutsOn(db, storeOptions);
   const services = servicesOn(db, storeOptions);
+  const revisions = revisionsOn(db, { now: options.now });
+  const newId = options.newId ?? ((): string => randomBytes(INSERTABLE_ITEM_ID_BYTES).toString('base64url'));
 
   return {
     search: async (session, query) => {
-      const words = wordsOf(query);
+      const scope = scopeOf(query);
+      const wants = (source: PaletteSource): boolean => scope.source === undefined || scope.source === source;
+      const words = wordsOf(scope.rest);
       const libraryCtx = libraryContext(session.actor, session.correlationId);
       const tasks: Promise<readonly PaletteHit[]>[] = [];
 
-      if (session.permissions.includes(PRESENTATION_CONTROL)) {
-        tasks.push(ranked('reference', () => referenceHits(options.corpus, options.referenceTranslation, query)));
-        tasks.push(ranked('scripture', () => scriptureHits(options.corpus, query)));
+      if (wants('reference') && session.permissions.includes(PRESENTATION_CONTROL)) {
+        tasks.push(ranked('reference', () => referenceHits(options.corpus, options.referenceTranslation, scope.rest)));
+      }
+      if (wants('scripture') && session.permissions.includes(PRESENTATION_CONTROL)) {
+        tasks.push(ranked('scripture', () => scriptureHits(options.corpus, scope.rest)));
       }
 
-      tasks.push(
-        ranked('song', () => songHits(library, libraryCtx, songs, songContext(session.actor, session.correlationId), words)),
-      );
-      tasks.push(ranked('slide', () => slideHits(library, libraryCtx, words)));
+      if (wants('song')) {
+        tasks.push(
+          ranked('song', () => songHits(library, libraryCtx, songs, songContext(session.actor, session.correlationId), words)),
+        );
+      }
+      if (wants('slide')) {
+        tasks.push(ranked('slide', () => slideHits(library, libraryCtx, words)));
+      }
 
-      if (session.permissions.includes(LAYOUTS_MANAGE)) {
+      if (wants('slideLayout') && session.permissions.includes(LAYOUTS_MANAGE)) {
         tasks.push(
           ranked('slideLayout', () =>
             slideLayoutHits(slideLayouts, slideLayoutContext(session.actor, session.correlationId), words),
@@ -374,12 +484,17 @@ export function paletteOn(db: RepositoryDb, options: PaletteOptions): PaletteSto
         );
       }
 
-      tasks.push(
-        ranked('service', () => serviceHits(services, serviceContext(session.actor, session.correlationId), words)),
-      );
+      if (wants('service')) {
+        tasks.push(
+          ranked('service', () => serviceHits(services, serviceContext(session.actor, session.correlationId), words)),
+        );
+      }
 
       const results = await Promise.all(tasks);
       return Object.freeze(results.flat().sort(compareHits));
     },
+
+    insert: (session, hit, serviceId, sectionId) =>
+      insertHit(services, revisions, newId, serviceContext(session.actor, session.correlationId), hit, serviceId, sectionId),
   };
 }

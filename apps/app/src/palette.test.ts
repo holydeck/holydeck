@@ -6,6 +6,7 @@ import { libraryContext, libraryOn } from './library.js';
 import { PaletteError, paletteOn } from './palette.js';
 import { LAYOUTS_MANAGE, PRESENTATION_CONTROL } from './roles.js';
 import { serviceContext, servicesOn } from './services.js';
+import { slideGroupContext, slideGroupsOn } from './slide-groups.js';
 import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
 import { songContext, songsOn } from './songs.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -15,6 +16,8 @@ import type { CorpusSearchHit, CorpusTranslation } from '@holydeck/contracts/cor
 import type { SlideLayoutBody } from '@holydeck/contracts/layouts';
 
 import type { ServiceDraft } from '@holydeck/contracts/services';
+
+import type { Slide, SlideGroupBody } from '@holydeck/contracts/slide-groups';
 
 import type { SongBody } from '@holydeck/contracts/songs';
 
@@ -69,6 +72,22 @@ const LAYOUT_BOX = {
 const LAYOUT_BODY: SlideLayoutBody = { boxes: [LAYOUT_BOX] };
 
 const serviceDraft = (title: string): ServiceDraft => ({ title, date: '2026-09-13', site: 'Main Hall', sections: [] });
+
+const draftWithSection = (title: string, sectionId: string): ServiceDraft => ({
+  title,
+  date: '2026-09-13',
+  site: 'Main Hall',
+  sections: [{ id: sectionId, name: 'Main', items: [] }],
+});
+
+const A_SLIDE: Slide = { id: 'slide-1', enabled: true, label: 'Welcome', languageBlocks: [] };
+
+const slideGroupBody = (): SlideGroupBody => ({
+  mode: 'custom',
+  enabled: true,
+  slideLayoutId: 'layout-a',
+  slides: [A_SLIDE],
+});
 
 /** A fake `corpusClient` built as a plain object, not through `Fetching`: `PaletteOptions.corpus` is
  *  typed structurally, so there is nothing an HTTP mock would prove here that this does not. */
@@ -127,6 +146,7 @@ interface Scenario {
   readonly palette: PaletteStore;
   readonly library: ReturnType<typeof libraryOn>;
   readonly songs: ReturnType<typeof songsOn>;
+  readonly slideGroups: ReturnType<typeof slideGroupsOn>;
   readonly slideLayouts: ReturnType<typeof slideLayoutsOn>;
   readonly services: ReturnType<typeof servicesOn>;
 }
@@ -146,6 +166,7 @@ function scenario(corpus: ReturnType<typeof corpusClient> = fakeCorpus({})): Sce
     palette: paletteOn(db, { corpus, referenceTranslation: TRANSLATION, ...options }),
     library: libraryOn(db, options),
     songs: songsOn(db, options),
+    slideGroups: slideGroupsOn(db, options),
     slideLayouts: slideLayoutsOn(db, options),
     services: servicesOn(db, options),
   };
@@ -360,5 +381,197 @@ describe('paletteOn: the strongest field wins, not merely the first that matches
     const found = hits.find((hit) => hit.source === 'song');
 
     expect(found).toMatchObject({ explanation: 'matched the phrase in the romanized title', phrase: true, occurrences: 1 });
+  });
+});
+
+describe('paletteOn: scoping via a leading source-prefix token (SRCH-02)', () => {
+  it('an unprefixed query still searches every source a session is authorized for', async () => {
+    const { palette, songs, library } = scenario();
+    await songs.create(songContext(ACTOR, CORRELATION), 'Grace Song', { ...SONG, titles: { tamil: '', romanized: 'Grace Song' } });
+    await library.create(libraryContext(ACTOR, CORRELATION), { kind: 'reusableSlide', title: 'Grace Slide' });
+
+    const hits = await palette.search(ADMIN_SESSION, 'grace');
+
+    expect(hits.map((hit) => hit.source).toSorted()).toEqual(['slide', 'song']);
+  });
+
+  // Each fixture's title carries the shared word "beacon", plus a second word that is never the
+  // literal name of any prefix token below — so an unstripped, still-prefixed query (`song:beacon`
+  // searched literally) matches nothing at all, and only a prefix this file actually recognizes and
+  // strips could narrow "beacon" down to one of the four fixtures created together here.
+  it.each([
+    ['song:', 'song'],
+    ['slide:', 'slide'],
+    ['service:', 'service'],
+    ['layout:', 'slideLayout'],
+  ] as const)('a "%s" prefix narrows ranking to %s alone', async (prefix, source) => {
+    const { palette, songs, library, slideLayouts, services } = scenario();
+    await songs.create(songContext(ACTOR, CORRELATION), 'Beacon Hymn', { ...SONG, titles: { tamil: '', romanized: 'Beacon Hymn' } });
+    await library.create(libraryContext(ACTOR, CORRELATION), { kind: 'reusableSlide', title: 'Beacon Banner' });
+    await slideLayouts.create(slideLayoutContext(ACTOR, CORRELATION), { name: 'Beacon Frame', body: LAYOUT_BODY });
+    await services.create(serviceContext(ACTOR, CORRELATION), serviceDraft('Beacon Gathering'));
+
+    const hits = await palette.search(ADMIN_SESSION, `${prefix}beacon`);
+
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((hit) => hit.source === source)).toBe(true);
+  });
+
+  it('a "ref:" prefix narrows to a canon-validated reference alone', async () => {
+    const corpus = fakeCorpus({ canonBook: { usfm: 'JHN', chapter: '3' }, verseText: { 'JHN:3:16': 'For God so loved the world' } });
+    const { palette } = scenario(corpus);
+
+    const hits = await palette.search(ADMIN_SESSION, 'ref:John 3:16');
+
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.source).toBe('reference');
+  });
+
+  it('a "scripture:" prefix strips itself off before the corpus is searched, and narrows to scripture alone', async () => {
+    const hit: CorpusSearchHit = {
+      book: 'Romans', bookOrder: 6, chapter: 3, verse: 24, text: 'grace abounds', revision: 1, phrase: true, occurrences: 1,
+    };
+    const inner = fakeCorpus({ searchHits: [hit] });
+    const calls: string[] = [];
+    const corpus: ReturnType<typeof corpusClient> = {
+      ...inner,
+      search: (abbr, query) => {
+        calls.push(query);
+        return inner.search(abbr, query);
+      },
+    };
+    const { palette, songs } = scenario(corpus);
+    await songs.create(songContext(ACTOR, CORRELATION), 'Grace Song', { ...SONG, titles: { tamil: '', romanized: 'Grace Song' } });
+
+    const hits = await palette.search(ADMIN_SESSION, 'scripture:grace');
+
+    expect(calls).toEqual(['grace']);
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((entry) => entry.source === 'scripture')).toBe(true);
+  });
+
+  it('an unrecognized prefix names no source, so the whole query is searched literally, unstripped', async () => {
+    const { palette, songs } = scenario();
+    await songs.create(songContext(ACTOR, CORRELATION), 'Foo Grace Anthem', { ...SONG, titles: { tamil: '', romanized: 'Foo Grace Anthem' } });
+
+    const hits = await palette.search(BARE_SESSION, 'foo:grace');
+
+    expect(hits.find((hit) => hit.source === 'song')).toMatchObject({ title: 'Foo Grace Anthem' });
+  });
+});
+
+describe('paletteOn: direct insertion into a Service (SRCH-02)', () => {
+  it('inserts a song hit as a "song" item, pinned to its latest revision', async () => {
+    const { palette, songs, services } = scenario();
+    await songs.create(songContext(ACTOR, CORRELATION), 'Amazing Grace', { ...SONG, titles: { tamil: '', romanized: 'Amazing Grace' } });
+    const service = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Grace Service', 'section-1'));
+
+    const hits = await palette.search(ADMIN_SESSION, 'grace');
+    const hit = hits.find((entry) => entry.source === 'song');
+    if (hit === undefined) throw new Error('expected a song hit');
+
+    const updated = await palette.insert(ADMIN_SESSION, hit, service.stamp.id, 'section-1');
+
+    const item = updated?.sections[0]?.items[0];
+    expect(item).toMatchObject({ kind: 'song', title: 'Amazing Grace', enabled: true });
+    expect(item?.content).toMatchObject({ id: hit.id, revision: '1' });
+    expect(item?.content?.hash).toMatch(/^sha256-[0-9a-f]{64}$/);
+  });
+
+  it('inserts a reusableSlide hit as a "slide-group" item', async () => {
+    const { palette, slideGroups, services } = scenario();
+    await slideGroups.create(slideGroupContext(ACTOR, CORRELATION), 'reusableSlide', 'Grace Slide', slideGroupBody());
+    const service = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Grace Service', 'section-1'));
+
+    const hits = await palette.search(ADMIN_SESSION, 'grace');
+    const hit = hits.find((entry) => entry.source === 'slide');
+    if (hit === undefined) throw new Error('expected a slide hit');
+
+    const updated = await palette.insert(ADMIN_SESSION, hit, service.stamp.id, 'section-1');
+
+    const item = updated?.sections[0]?.items[0];
+    expect(item).toMatchObject({ kind: 'slide-group', title: 'Grace Slide', enabled: true });
+    expect(item?.content).toMatchObject({ id: hit.id, revision: '1' });
+  });
+
+  it('inserts a slideGroup hit as a "slide-group" item too — the same content store, the other sub-kind', async () => {
+    const { palette, slideGroups, services } = scenario();
+    await slideGroups.create(slideGroupContext(ACTOR, CORRELATION), 'slideGroup', 'Grace Group', slideGroupBody());
+    const service = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Grace Service', 'section-1'));
+
+    const hits = await palette.search(ADMIN_SESSION, 'grace');
+    const hit = hits.find((entry) => entry.source === 'slide');
+    if (hit === undefined) throw new Error('expected a slide hit');
+
+    const updated = await palette.insert(ADMIN_SESSION, hit, service.stamp.id, 'section-1');
+
+    const item = updated?.sections[0]?.items[0];
+    expect(item).toMatchObject({ kind: 'slide-group', title: 'Grace Group', enabled: true });
+  });
+
+  it('refuses a reference hit — not RevisionRef-backed library content — leaving the Service untouched', async () => {
+    const corpus = fakeCorpus({ canonBook: { usfm: 'JHN', chapter: '3' }, verseText: { 'JHN:3:16': 'For God so loved the world' } });
+    const { palette, services } = scenario(corpus);
+    const service = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Grace Service', 'section-1'));
+
+    const hits = await palette.search(ADMIN_SESSION, 'John 3:16');
+    const hit = hits.find((entry) => entry.source === 'reference');
+    if (hit === undefined) throw new Error('expected a reference hit');
+
+    const error = await refused(palette.insert(ADMIN_SESSION, hit, service.stamp.id, 'section-1'));
+    expect(error.source).toBe('reference');
+
+    const standing = await services.current(serviceContext(ACTOR, CORRELATION), service.stamp.id);
+    expect(standing?.sections[0]?.items).toHaveLength(0);
+  });
+
+  it('refuses a scripture hit the same way', async () => {
+    const hit: CorpusSearchHit = {
+      book: 'Romans', bookOrder: 6, chapter: 3, verse: 24, text: 'justified freely by his grace', revision: 1, phrase: true, occurrences: 1,
+    };
+    const { palette, services } = scenario(fakeCorpus({ searchHits: [hit] }));
+    const service = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Grace Service', 'section-1'));
+
+    const hits = await palette.search(ADMIN_SESSION, 'grace');
+    const scriptureHit = hits.find((entry) => entry.source === 'scripture');
+    if (scriptureHit === undefined) throw new Error('expected a scripture hit');
+
+    const error = await refused(palette.insert(ADMIN_SESSION, scriptureHit, service.stamp.id, 'section-1'));
+    expect(error.source).toBe('scripture');
+
+    const standing = await services.current(serviceContext(ACTOR, CORRELATION), service.stamp.id);
+    expect(standing?.sections[0]?.items).toHaveLength(0);
+  });
+
+  it('refuses a Slide Layout hit — Admin content, not a ServiceItem — the same way', async () => {
+    const { palette, slideLayouts, services } = scenario();
+    await slideLayouts.create(slideLayoutContext(ACTOR, CORRELATION), { name: 'Grace Layout', body: LAYOUT_BODY });
+    const service = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Grace Service', 'section-1'));
+
+    const hits = await palette.search(ADMIN_SESSION, 'grace');
+    const hit = hits.find((entry) => entry.source === 'slideLayout');
+    if (hit === undefined) throw new Error('expected a slideLayout hit');
+
+    const error = await refused(palette.insert(ADMIN_SESSION, hit, service.stamp.id, 'section-1'));
+    expect(error.source).toBe('slideLayout');
+
+    const standing = await services.current(serviceContext(ACTOR, CORRELATION), service.stamp.id);
+    expect(standing?.sections[0]?.items).toHaveLength(0);
+  });
+
+  it('refuses a service hit — a Service is not itself insertable content — the same way', async () => {
+    const { palette, services } = scenario();
+    await services.create(serviceContext(ACTOR, CORRELATION), serviceDraft('Grace Praise Service'));
+    const target = await services.create(serviceContext(ACTOR, CORRELATION), draftWithSection('Target Service', 'section-1'));
+
+    const hits = await palette.search(ADMIN_SESSION, 'grace');
+    const hit = hits.find((entry) => entry.source === 'service');
+    if (hit === undefined) throw new Error('expected a service hit');
+
+    const error = await refused(palette.insert(ADMIN_SESSION, hit, target.stamp.id, 'section-1'));
+    expect(error.source).toBe('service');
+
+    const standing = await services.current(serviceContext(ACTOR, CORRELATION), target.stamp.id);
+    expect(standing?.sections[0]?.items).toHaveLength(0);
   });
 });
