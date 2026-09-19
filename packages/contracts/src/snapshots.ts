@@ -37,10 +37,33 @@ export const DEFAULT_SAFE_AREA_MARGINS: SafeAreaMargins = {
 
 export type AspectRatio = { readonly width: number; readonly height: number };
 
+/**
+ * ADR 0004: what a generated slide group in this manifest was deterministically projected from — the
+ * pinned source revision and the pinned Slide Layout revision, both frozen at prepare time rather than
+ * re-read from whatever they stand at now. `slideGroupRevision` is the projection itself, content-addressed
+ * by `revisions.save()`, so two prepares with unchanged `sourceRevision`/`slideLayoutRevision` name the
+ * same `slideGroupRevision` back.
+ */
+export type GeneratedSlideProvenance = {
+  readonly slideGroupId: string;
+  readonly slideGroupRevision: number;
+  readonly sourceId: string;
+  readonly sourceRevision: number;
+  readonly slideLayoutId: string;
+  readonly slideLayoutRevision: number;
+};
+
 export type PreparedSnapshot = {
   readonly id: string;
   readonly pins: Record<SnapshotPin, string>;
   readonly resolved: { readonly aspectRatio: string; readonly safeAreaMargins: SafeAreaMargins };
+  /**
+   * Every generated slide group a run would show, with the source and Slide Layout revisions it was
+   * projected from. Empty for a manifest with nothing generated. A manifest written before this field
+   * existed has none of this recorded either — it parses back to an empty list rather than being refused,
+   * because a prepared snapshot is never rewritten and an earlier one must still read (ADR 0006).
+   */
+  readonly generatedSlides: readonly GeneratedSlideProvenance[];
   readonly immutable: true;
 };
 
@@ -102,6 +125,16 @@ const parsePins: ParseFn<Record<SnapshotPin, string>> = (value, path) =>
     return pins;
   });
 
+const parseGeneratedSlideProvenance: ParseFn<GeneratedSlideProvenance> = (value, path) =>
+  parseObject(value, path, (reader) => ({
+    slideGroupId: reader.text('slideGroupId'),
+    slideGroupRevision: reader.wholeNumber('slideGroupRevision', 1),
+    sourceId: reader.text('sourceId'),
+    sourceRevision: reader.wholeNumber('sourceRevision', 1),
+    slideLayoutId: reader.text('slideLayoutId'),
+    slideLayoutRevision: reader.wholeNumber('slideLayoutRevision', 1),
+  }));
+
 export function parsePreparedSnapshot(value: unknown): Parsed<PreparedSnapshot> {
   return parseObject(value, 'snapshot', (reader) => {
     const id = reader.text('id');
@@ -110,10 +143,13 @@ export function parsePreparedSnapshot(value: unknown): Parsed<PreparedSnapshot> 
       aspectRatio: '',
       safeAreaMargins: DEFAULT_SAFE_AREA_MARGINS,
     });
+    // Absent, not required: a manifest prepared before this field existed named nothing generated at all,
+    // and staying readable is what ADR 0006's "never rewritten" promises it.
+    const generatedSlides = reader.optionalParsedList('generatedSlides', parseGeneratedSlideProvenance) ?? [];
     // A manifest that records itself as mutable is a manifest nothing can be replayed from.
     if (!reader.flag('immutable')) {
       reader.reject('immutable', FIELD_CODES.notAllowed, 'must be true, because a prepared snapshot is never rewritten');
     }
-    return { id, pins, resolved, immutable: true };
+    return { id, pins, resolved, generatedSlides, immutable: true };
   });
 }

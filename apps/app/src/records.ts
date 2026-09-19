@@ -102,7 +102,17 @@ export const RECORDS = {
   preparedSnapshots: {
     collection: 'prepared_snapshots',
     kind: 'immutable',
-    fields: { ...HISTORY, serviceId: 'required', preparedAt: 'required', pins: 'required', aspectRatio: 'required', safeArea: 'required' },
+    fields: {
+      ...HISTORY,
+      serviceId: 'required',
+      preparedAt: 'required',
+      pins: 'required',
+      aspectRatio: 'required',
+      safeArea: 'required',
+      // ADR 0004: the source and Slide Layout revisions a generated slide group was projected from.
+      // Optional so a manifest written before this field existed reads back unchanged.
+      generatedSlides: 'optional',
+    },
   },
   // Spec LIVE-12: every shown slide and operator change, in server order, with the revisions it pinned.
   runEvents: {

@@ -3,16 +3,20 @@ import { describe, expect, it } from 'vitest';
 import { CONTENT_LANGUAGES } from '@holydeck/contracts/content-languages';
 import { exportSong } from '@holydeck/contracts/songs';
 
+import { libraryOn } from './library.js';
 import { RECORDS } from './records.js';
-import { addressOf } from './revisions.js';
+import { addressOf, revisionsOn } from './revisions.js';
+import { slideGroupsOn } from './slide-groups.js';
+import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
 import { songFromYaml, songToYaml } from './song-yaml.js';
 import { SongError, songContext, songsOn } from './songs.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
-import type { SongBody } from '@holydeck/contracts/songs';
+import type { BoxBinding, SlideLayoutBody, TextLayoutBox } from '@holydeck/contracts/layouts';
+import type { LyricSection, SongBody } from '@holydeck/contracts/songs';
 
 import type { Document } from './repositories.js';
-import type { SongStore } from './songs.js';
+import type { SongGeneration, SongStore } from './songs.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 
 const START = Date.parse('2026-09-17T09:30:00.000Z');
@@ -69,6 +73,63 @@ const store = (): { db: FakeDb; songs: SongStore } => {
     }),
   };
 };
+
+const LAYOUT_ADMIN = slideLayoutContext(ADMINISTRATOR, 'req-song-layout');
+
+const box = (id: string, binding: BoxBinding): TextLayoutBox => ({
+  id, kind: 'text', importance: 'required',
+  frame: { x: 0, y: 0, width: 1, height: 1 }, binding,
+  style: { fontFamily: 'Inter', fontWeight: 400, sizeRatio: 0.05, lineHeight: 1, align: 'start', verticalAlign: 'start' },
+});
+const keyed = (id: string, contentKey: string, languageKey = TA): TextLayoutBox =>
+  box(id, { mode: 'keyed', contentKind: 'song', contentKey, languageKey });
+const LAYOUT: SlideLayoutBody = { boxes: [
+  keyed('title', 'title'), keyed('title-latn', 'title', TA_LATN),
+  keyed('lyric', 'lyricLine'), keyed('lyric-latn', 'lyricLine', TA_LATN),
+  keyed('author', 'author'), keyed('copyright', 'copyright'),
+  box('static', { mode: 'static', text: 'Sunday' }),
+  { id: 'media', kind: 'media', importance: 'decoration', frame: { x: 0, y: 0, width: 1, height: 1 }, style: { fit: 'cover', opacity: 1 } },
+] };
+
+const SONG_WITH_META: SongBody = { ...SONG, metadata: { author: 'Author Name', copyright: '© 2026 Author' } };
+
+const CHORUS_SECTION: LyricSection = {
+  id: 'chorus',
+  label: 'Chorus',
+  repeat: { count: 2 },
+  text: [
+    { languageKey: TA, text: 'குரல் கூட்டணி' },
+    { languageKey: TA_LATN, text: 'Kural koottani' },
+  ],
+};
+
+const withSungChorus = (body: SongBody): SongBody => ({ ...body, sections: [...body.sections, CHORUS_SECTION] });
+
+const stores = () => {
+  const db = fakeDb();
+  let tick = 0;
+  let serial = 0;
+  const now = () => new Date(START + (tick += 1) * 1000 - 1000).toISOString();
+  const options = { now, newId: () => `id-${(serial += 1)}` };
+  return {
+    db,
+    songs: songsOn(db, options),
+    library: libraryOn(db, options),
+    revisions: revisionsOn(db, options),
+    groups: slideGroupsOn(db, options),
+    layouts: slideLayoutsOn(db, { now, newId: () => `layout-${(serial += 1)}` }),
+  };
+};
+
+async function generation(layout: SlideLayoutBody = LAYOUT, body: SongBody = SONG_WITH_META) {
+  const composed = stores();
+  const source = await composed.songs.create(ADMIN, 'Paadal', body);
+  const selected = await composed.layouts.create(LAYOUT_ADMIN, { name: 'Song', body: layout });
+  const input: SongGeneration = {
+    songRevision: source.revision, slideLayoutId: selected.stamp.id, slideLayoutRevision: selected.revision,
+  };
+  return { ...composed, source, selected, input };
+}
 
 const rows = (db: FakeDb, collection: string): Document[] => db.rows.get(collection) ?? [];
 
@@ -255,6 +316,93 @@ describe('a song as bytes that travel', () => {
     expect(error.problems.map((problem) => problem.path)).toEqual(['document']);
     expect(rows(db, STAMPS)).toHaveLength(0);
     expect(rows(db, REVISIONS)).toHaveLength(0);
+  });
+});
+
+// ADR 0004's decision: a generated slide is a deterministic projection of a pinned source revision and a
+// pinned Slide Layout revision, reading nothing that was not pinned
+// (adrs/0004-generated-slide-materialisation.md; adrs/index.json lists T75 under ADR 0004's enforcedBy).
+describe('song slide generation', () => {
+  it('uses the selected source and Layout revisions, mixed bindings, section order and repeat expansion', async () => {
+    const { songs, layouts, groups, source, selected, input } = await generation(LAYOUT, withSungChorus(SONG_WITH_META));
+    await layouts.version(LAYOUT_ADMIN, selected.stamp.id, { boxes: [keyed('new-title', 'title')] });
+    await songs.edit(ADMIN, source.stamp.id, { ...SONG_WITH_META, titles: { tamil: 'மாற்றம்', romanized: 'Maatram' } });
+    const group = await songs.generate(ADMIN, source.stamp.id, input);
+    expect(group.body.generatedFrom).toEqual({
+      songId: source.stamp.id, songRevision: 1, slideLayoutId: selected.stamp.id, slideLayoutRevision: 1,
+    });
+    expect(group.body.mode).toBe('generated');
+    expect(group.body.slides.map((slide) => slide.id)).toEqual(['verse-1', 'chorus-1', 'chorus-2']);
+    expect(group.body.slides.map((slide) => slide.label)).toEqual(['Verse 1', 'Chorus (1/2)', 'Chorus (2/2)']);
+    expect(group.body.slides[0]?.languageBlocks).toEqual([
+      { id: 'title', languageKey: TA, text: 'பாடல்' },
+      { id: 'title-latn', languageKey: TA_LATN, text: 'Paadal' },
+      { id: 'lyric', languageKey: TA, text: 'முதல் வரி' },
+      { id: 'lyric-latn', languageKey: TA_LATN, text: 'Muthal vari' },
+      { id: 'author', languageKey: TA, text: 'Author Name' },
+      { id: 'copyright', languageKey: TA, text: '© 2026 Author' },
+    ]);
+    expect(group.body.slides[1]?.languageBlocks.find((block) => block.id === 'lyric')?.text).toBe('குரல் கூட்டணி');
+    expect((await groups.current(ADMIN, group.stamp.id))?.body.generatedFrom).toEqual(group.body.generatedFrom);
+  });
+
+  it('regenerates identical slides without appending a revision; changed inputs append once', async () => {
+    const { songs, source, input, revisions, groups } = await generation();
+    const group = await songs.generate(ADMIN, source.stamp.id, input);
+    const repeated = await songs.generate(ADMIN, source.stamp.id, { ...input, slideGroupId: group.stamp.id });
+    expect(repeated.body).toEqual(group.body);
+    expect(await revisions.count(ADMIN, group.stamp.id)).toBe(1);
+    const changed = await songs.edit(ADMIN, source.stamp.id, { ...SONG_WITH_META, titles: { ...SONG_WITH_META.titles, romanized: 'New title' } });
+    await songs.generate(ADMIN, source.stamp.id, { ...input, songRevision: changed!.revision, slideGroupId: group.stamp.id });
+    expect(await revisions.count(ADMIN, group.stamp.id)).toBe(2);
+    expect((await groups.history(ADMIN, group.stamp.id))[0]?.body).toEqual(group.body);
+  });
+
+  it.each([undefined, 0, -1, 1.5, Number.NaN])('requires explicit positive source and Layout revisions (%s)', async (revision) => {
+    const { songs, source, input, library } = await generation();
+    for (const field of ['songRevision', 'slideLayoutRevision']) {
+      await expect(songs.generate(ADMIN, source.stamp.id, { ...input, [field]: revision } as SongGeneration))
+        .rejects.toMatchObject({ kind: 'schema' });
+    }
+    expect(await library.list(ADMIN, { kind: 'slideGroup' })).toEqual([]);
+  });
+
+  it.each(['source', 'source-revision', 'layout', 'layout-revision', 'group'])('refuses a missing %s without creating a group', async (missing) => {
+    const { songs, source, input, library } = await generation();
+    await expect(songs.generate(ADMIN, missing === 'source' ? 'missing' : source.stamp.id, {
+      ...input,
+      ...(missing === 'source-revision' ? { songRevision: 99 } : {}),
+      ...(missing === 'layout' ? { slideLayoutId: 'missing' } : {}),
+      ...(missing === 'layout-revision' ? { slideLayoutRevision: 99 } : {}),
+      ...(missing === 'group' ? { slideGroupId: 'missing' } : {}),
+    })).rejects.toMatchObject({ kind: 'state' });
+    expect(await library.list(ADMIN, { kind: 'slideGroup' })).toEqual([]);
+  });
+
+  it.each([
+    box('sermon-title', { mode: 'keyed', contentKind: 'sermon', contentKey: 'title', languageKey: TA }),
+    keyed('missing-language', 'lyricLine', 'en'),
+  ])('refuses unresolvable keyed boxes ($id)', async (binding) => {
+    const { songs, source, input, library } = await generation({ boxes: [binding] });
+    await expect(songs.generate(ADMIN, source.stamp.id, input)).rejects.toMatchObject({ kind: 'state' });
+    expect(await library.list(ADMIN, { kind: 'slideGroup' })).toEqual([]);
+  });
+
+  it('refuses missing bound metadata before writing', async () => {
+    const { songs, source, input, library } = await generation();
+    const minimal = await songs.edit(ADMIN, source.stamp.id, { ...SONG_WITH_META, metadata: undefined });
+    await expect(songs.generate(ADMIN, source.stamp.id, { ...input, songRevision: minimal!.revision })).rejects.toMatchObject({ kind: 'state' });
+    expect(await library.list(ADMIN, { kind: 'slideGroup' })).toEqual([]);
+  });
+
+  it('does not overwrite a custom group or another song’s generated group', async () => {
+    const { songs, source, input, groups } = await generation();
+    const generated = await songs.generate(ADMIN, source.stamp.id, input);
+    const custom = await groups.duplicate(ADMIN, generated.stamp.id);
+    await expect(songs.generate(ADMIN, source.stamp.id, { ...input, slideGroupId: custom!.stamp.id })).rejects.toMatchObject({ kind: 'state' });
+    const other = await songs.create(ADMIN, 'Other song', SONG_WITH_META);
+    await expect(songs.generate(ADMIN, other.stamp.id, { ...input, slideGroupId: generated.stamp.id })).rejects.toMatchObject({ kind: 'state' });
+    expect((await groups.current(ADMIN, generated.stamp.id))?.body).toEqual(generated.body);
   });
 });
 

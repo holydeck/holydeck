@@ -1,3 +1,4 @@
+import { CONTENT_LANGUAGES } from '@holydeck/contracts/content-languages';
 import { SNAPSHOT_PINS, parsePreparedSnapshot } from '@holydeck/contracts/snapshots';
 import { isRevisionAddress } from '@holydeck/contracts/revisions';
 import { describe, expect, it } from 'vitest';
@@ -5,8 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { CATEGORY_OF } from './audit.js';
 import { RECORDS, RECORD_ACTIONS } from './records.js';
 import { repositoriesOn } from './repositories.js';
+import { revisionsOn } from './revisions.js';
 import { ACCOUNTS_MANAGE, PRESENTATION_CONTROL, permissionsFor } from './roles.js';
 import { serviceContext, servicesOn } from './services.js';
+import { slideGroupsOn } from './slide-groups.js';
+import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
+import { songContext, songsOn } from './songs.js';
 import {
   CHECK_SEVERITIES,
   LIVE_LABEL,
@@ -26,9 +31,13 @@ import {
 import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { AccountRecord } from '@holydeck/contracts/accounts';
+import type { TextLayoutBox } from '@holydeck/contracts/layouts';
 import type { ServiceDraft, ServiceSection } from '@holydeck/contracts/services';
+import type { GeneratedSlideProvenance } from '@holydeck/contracts/snapshots';
+import type { SongBody } from '@holydeck/contracts/songs';
 
 import type { Document } from './repositories.js';
+import type { SongGeneration } from './songs.js';
 import type {
   OperatorSession,
   OverrideRequest,
@@ -216,6 +225,25 @@ describe('the prepared manifest', () => {
     expect(parsePreparedSnapshot(record?.snapshot).ok).toBe(true);
   });
 
+  // ADR 0004: what a preparer names as generated is recorded verbatim, and a manifest naming none
+  // reads back as an empty list rather than requiring one.
+  it('records the generated slide provenance a preparer names, and defaults to none', async () => {
+    const built = harness();
+    const service = await built.services.create(EDITOR, DRAFT);
+    const generatedSlides: readonly GeneratedSlideProvenance[] = [{
+      slideGroupId: 'group-1', slideGroupRevision: 2, sourceId: 'song-1', sourceRevision: 3,
+      slideLayoutId: 'layout-1', slideLayoutRevision: 3,
+    }];
+
+    await built.preparation.prepare(CONTEXT, service.stamp.id, { ...INPUTS, generatedSlides });
+    const withGenerated = await built.preparation.prepared(CONTEXT, service.stamp.id);
+    expect(withGenerated?.snapshot.generatedSlides).toEqual(generatedSlides);
+
+    const { preparation, serviceId } = await prepared();
+    const withNone = await preparation.prepared(CONTEXT, serviceId);
+    expect(withNone?.snapshot.generatedSlides).toEqual([]);
+  });
+
   it('refuses a manifest whose pin is missing', async () => {
     const built = harness();
     const service = await built.services.create(EDITOR, DRAFT);
@@ -377,6 +405,100 @@ describe('readiness', () => {
 
     expect(checklist?.state).toBe('ready');
     expect(checklist?.completed.map((check) => check.name)).toContain('Content: the Slide Layout pinned is still current');
+  });
+});
+
+// ADR 0004 + T40: a generated slide group is projected from the same pinned Slide Layout revision the
+// manifest's own pin names, so the Layout moving on is Outdated for both — and, T40's own rule, nothing
+// regenerates on its own. Only an explicit `generate` call followed by a fresh `prepare` ever produces
+// the new output; the Layout edit alone changes nothing already pinned.
+// ADR 0004's decision: a generated slide is a deterministic projection of a pinned source revision and a
+// pinned Slide Layout revision, and every generated slide records both
+// (adrs/0004-generated-slide-materialisation.md; adrs/index.json lists T75 under ADR 0004's enforcedBy).
+describe('a generated slide group after preparation (ADR 0004)', () => {
+  const TA = CONTENT_LANGUAGES[0]!.key;
+
+  const composed = () => {
+    const db = fakeDb();
+    let tick = 0;
+    let serial = 0;
+    const now = () => new Date(START + (tick += 1) * 1000 - 1000).toISOString();
+    const options = { now, newId: () => `id-${(serial += 1)}` };
+    return {
+      services: servicesOn(db, options),
+      songs: songsOn(db, options),
+      revisions: revisionsOn(db, options),
+      groups: slideGroupsOn(db, options),
+      layouts: slideLayoutsOn(db, { now, newId: () => `layout-${(serial += 1)}` }),
+      preparation: preparationOn(db, { now, newId: () => `audit-${(serial += 1)}`, observe: () => OBSERVED }),
+    };
+  };
+
+  const titleBox = (id: string): TextLayoutBox => ({
+    id, kind: 'text', importance: 'required', frame: { x: 0, y: 0, width: 1, height: 1 },
+    binding: { mode: 'keyed', contentKind: 'song', contentKey: 'title', languageKey: TA },
+    style: { fontFamily: 'Inter', fontWeight: 400, sizeRatio: 0.05, lineHeight: 1, align: 'start', verticalAlign: 'start' },
+  });
+
+  it('goes Outdated when the pinned Layout moves on, and regenerates only after an explicit revalidation', async () => {
+    const { services, songs, layouts, groups, revisions, preparation } = composed();
+    const layoutAdmin = slideLayoutContext(OPERATOR, CORRELATION);
+    const songAdmin = songContext(OPERATOR, CORRELATION);
+    const song: SongBody = {
+      titles: { tamil: 'பாடல்', romanized: 'Paadal' },
+      languages: [TA],
+      sections: [{ id: 'verse-1', label: 'Verse 1', text: [{ languageKey: TA, text: 'வரி' }] }],
+      provenance: { source: 'manual' },
+    };
+
+    const layout = await layouts.create(layoutAdmin, { name: 'Song layout', body: { boxes: [titleBox('title')] } });
+    const created = await songs.create(songAdmin, 'Paadal', song);
+    const first: SongGeneration = { songRevision: created.revision, slideLayoutId: layout.stamp.id, slideLayoutRevision: layout.revision };
+    const group = await songs.generate(songAdmin, created.stamp.id, first);
+    const groupRevision = (await revisions.current(songAdmin, group.stamp.id))!.revision;
+
+    const service = await services.create(EDITOR, DRAFT);
+    const pinnedAtOne: readonly GeneratedSlideProvenance[] = [{
+      slideGroupId: group.stamp.id, slideGroupRevision: groupRevision,
+      sourceId: created.stamp.id, sourceRevision: created.revision,
+      slideLayoutId: layout.stamp.id, slideLayoutRevision: layout.revision,
+    }];
+    await preparation.prepare(CONTEXT, service.stamp.id, {
+      ...INPUTS, slideLayout: { id: layout.stamp.id, revision: layout.revision }, generatedSlides: pinnedAtOne,
+    });
+
+    expect((await preparation.readiness(CONTEXT, service.stamp.id, { slideLayoutRevision: layout.revision }))?.state).toBe('ready');
+
+    // The Layout edit alone: nothing about the manifest or the generated group changes yet.
+    const edited = await layouts.version(layoutAdmin, layout.stamp.id, { boxes: [titleBox('title'), titleBox('title-2')] });
+
+    const outdated = await preparation.readiness(CONTEXT, service.stamp.id, { slideLayoutRevision: edited!.revision });
+    expect(outdated?.state).toBe('outdated');
+    expect(outdated?.blockers.map((check) => check.name)).toContain('Content: the Slide Layout moved on');
+    expect(outdated?.blockers[0]?.cause).toContain('regeneration and revalidation');
+    expect((await groups.current(songAdmin, group.stamp.id))?.body.generatedFrom).toEqual(group.body.generatedFrom);
+    expect((await preparation.prepared(CONTEXT, service.stamp.id))?.snapshot.generatedSlides).toEqual(pinnedAtOne);
+
+    // Explicit revalidation: regenerate against the new Layout revision, then prepare a fresh manifest.
+    const revalidated = await songs.generate(songAdmin, created.stamp.id, { ...first, slideLayoutRevision: edited!.revision, slideGroupId: group.stamp.id });
+    expect(revalidated.body.generatedFrom).toEqual({
+      songId: created.stamp.id, songRevision: created.revision, slideLayoutId: layout.stamp.id, slideLayoutRevision: edited!.revision,
+    });
+    const revalidatedRevision = (await revisions.current(songAdmin, group.stamp.id))!.revision;
+    expect(revalidatedRevision).not.toBe(groupRevision);
+
+    const pinnedAtTwo: readonly GeneratedSlideProvenance[] = [{
+      slideGroupId: group.stamp.id, slideGroupRevision: revalidatedRevision,
+      sourceId: created.stamp.id, sourceRevision: created.revision,
+      slideLayoutId: layout.stamp.id, slideLayoutRevision: edited!.revision,
+    }];
+    await preparation.prepare(CONTEXT, service.stamp.id, {
+      ...INPUTS, slideLayout: { id: layout.stamp.id, revision: edited!.revision }, generatedSlides: pinnedAtTwo,
+    });
+
+    const revalidatedReadiness = await preparation.readiness(CONTEXT, service.stamp.id, { slideLayoutRevision: edited!.revision });
+    expect(revalidatedReadiness?.state).toBe('ready');
+    expect((await preparation.prepared(CONTEXT, service.stamp.id))?.snapshot.generatedSlides).toEqual(pinnedAtTwo);
   });
 });
 

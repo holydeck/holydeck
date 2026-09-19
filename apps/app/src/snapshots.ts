@@ -46,7 +46,7 @@ import { PRESENTATION_CONTROL } from './roles.js';
 import { SERVICE_RECORD, subjectFor } from './services.js';
 import { OUTDATED_REQUIRES, isOutdated } from './slide-layout-propagation.js';
 
-import type { PreparedSnapshot, SafeAreaMargins } from '@holydeck/contracts/snapshots';
+import type { GeneratedSlideProvenance, PreparedSnapshot, SafeAreaMargins } from '@holydeck/contracts/snapshots';
 
 import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
@@ -124,6 +124,13 @@ export interface PreparationInputs {
   /** A ratio of two counts, such as `16:9`. Resolved to what it is, not kept as it arrived. */
   readonly aspectRatio: string;
   readonly safeAreaMargins?: SafeAreaMargins;
+  /**
+   * ADR 0004: every generated slide group this Service would show, and the pinned source and Slide
+   * Layout revisions it was deterministically projected from — resolved by whoever generated it (T75's
+   * song and sermon `generate()` verbs), never recomputed here. Left out, a manifest names nothing
+   * generated, which is correct for a Service with none.
+   */
+  readonly generatedSlides?: readonly GeneratedSlideProvenance[];
 }
 
 export interface PreparedRecord {
@@ -353,6 +360,8 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
       id: found['_id'],
       pins: found['pins'],
       resolved: { aspectRatio: found['aspectRatio'], safeAreaMargins: found['safeArea'] },
+      // Absent on a manifest written before this field existed — parsed back to an empty list, not refused.
+      generatedSlides: found['generatedSlides'],
       immutable: true,
     });
     if (!parsed.ok) {
@@ -387,6 +396,7 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
           aspectRatio: ratio === undefined ? inputs.aspectRatio : aspectRatioLabel(ratio),
           safeAreaMargins: inputs.safeAreaMargins ?? DEFAULT_SAFE_AREA_MARGINS,
         },
+        generatedSlides: inputs.generatedSlides ?? [],
         immutable: true,
       });
       if (!parsed.ok) {
@@ -401,6 +411,7 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
           pins: snapshot.pins,
           aspectRatio: snapshot.resolved.aspectRatio,
           safeArea: snapshot.resolved.safeAreaMargins,
+          generatedSlides: snapshot.generatedSlides,
           ...author(context),
         });
       } catch (error) {

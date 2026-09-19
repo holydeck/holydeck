@@ -27,6 +27,16 @@ const snapshot = () => ({
     aspectRatio: '16:9',
     safeAreaMargins: { top: 5, right: 5, bottom: 8, left: 5, unit: 'percent' },
   },
+  generatedSlides: [
+    {
+      slideGroupId: 'group-1',
+      slideGroupRevision: 2,
+      sourceId: 'song-1',
+      sourceRevision: 3,
+      slideLayoutId: 'layout-1',
+      slideLayoutRevision: 3,
+    },
+  ],
   immutable: true,
 });
 
@@ -136,6 +146,47 @@ describe('reading one prepared manifest', () => {
       `snapshot.resolved.aspectRatio=${FIELD_CODES.notAllowed}`,
       `snapshot.resolved.safeAreaMargins.bottom=${FIELD_CODES.notAllowed}`,
     ]);
+  });
+});
+
+describe('the generated slides a manifest records (ADR 0004)', () => {
+  it('reads the source and Slide Layout revisions recorded for a generated slide group', () => {
+    const parsed = parsePreparedSnapshot(snapshot());
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.generatedSlides : []).toEqual([
+      {
+        slideGroupId: 'group-1',
+        slideGroupRevision: 2,
+        sourceId: 'song-1',
+        sourceRevision: 3,
+        slideLayoutId: 'layout-1',
+        slideLayoutRevision: 3,
+      },
+    ]);
+  });
+
+  it('defaults to nothing generated for a manifest written before this field existed', () => {
+    const value = snapshot() as { generatedSlides?: unknown };
+    delete value.generatedSlides;
+    const parsed = parsePreparedSnapshot(value);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.generatedSlides : undefined).toEqual([]);
+  });
+
+  it('refuses a generated slide entry missing a pinned revision', () => {
+    expect(
+      defective((value) => {
+        (value as { generatedSlides: Array<Record<string, unknown>> }).generatedSlides[0]!['sourceRevision'] = 0;
+      }),
+    ).toEqual([`snapshot.generatedSlides.0.sourceRevision=${FIELD_CODES.tooSmall}`]);
+  });
+
+  it('refuses a generated slide entry with no source at all', () => {
+    expect(
+      defective((value) => {
+        delete (value as { generatedSlides: Array<Record<string, unknown>> }).generatedSlides[0]!['sourceId'];
+      }),
+    ).toEqual([`snapshot.generatedSlides.0.sourceId=${FIELD_CODES.required}`]);
   });
 });
 
