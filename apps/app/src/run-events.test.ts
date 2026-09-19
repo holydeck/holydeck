@@ -171,6 +171,10 @@ describe('recording a run event', () => {
   });
 });
 
+// ADR 0002's invariant: no mutation of delivery history once a service is Completed, and ADR 0007's
+// invariant: mutation and deletion of a run event are rejected at the storage layer
+// (adrs/0002-service-lifecycle-and-delivery-immutability.md, adrs/0007-immutable-run-event-log.md;
+// adrs/index.json lists T79 under both ADR 0002's and ADR 0007's enforcedBy).
 describe('a mutation or delete attempt on a run event', () => {
   it('has no verb to rewrite one: the repository this module writes through offers only append and read', async () => {
     const { store, db } = harness();
@@ -204,6 +208,9 @@ describe('a mutation or delete attempt on a run event', () => {
   });
 });
 
+// ADR 0007's invariant: the run is exactly reconstructable from its pinned revisions plus its log,
+// and reconstruction equals what was recorded (adrs/0007-immutable-run-event-log.md; adrs/index.json
+// lists T79 under ADR 0007's enforcedBy).
 describe('reconstructing a run', () => {
   it('is exactly the pinned revisions plus the log, replayed in order through the real renderer', async () => {
     const { store } = harness();
