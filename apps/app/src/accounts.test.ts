@@ -214,7 +214,6 @@ describe('signing in', () => {
       'role',
       'createdAt',
       'controlPresentation',
-      'operatorOverride',
       'disabled',
     ]);
   });
@@ -351,35 +350,6 @@ describe('administering Control presentation apart from role', () => {
     await expect(store.grantControl(undefined, 'B'.repeat(22), true)).rejects.toBeInstanceOf(AccountError);
     const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.read] };
     await expect(store.grantControl(blind, 'B'.repeat(22), true)).rejects.toMatchObject({ kind: 'permission' });
-  });
-});
-
-// Going live over an open blocker: granted per account like Control presentation, and never with it.
-describe('the Operator override', () => {
-  test('is granted and revoked on its own, leaving Control presentation where it was', async () => {
-    const claimed = await store.claim(FIRST_RUN, CLAIM);
-    await expect(store.grantOperatorOverride(FIRST_RUN, claimed.id, true)).resolves.toMatchObject({
-      operatorOverride: true,
-      controlPresentation: false,
-    });
-    await expect(store.read(FIRST_RUN, claimed.id)).resolves.toMatchObject({ operatorOverride: true });
-    await expect(store.grantOperatorOverride(FIRST_RUN, claimed.id, false)).resolves.toMatchObject({
-      operatorOverride: false,
-    });
-  });
-
-  test('is not held by an account written before the flag existed', async () => {
-    const claimed = await store.claim(FIRST_RUN, CLAIM);
-    const [stored] = storedAccounts(rows);
-    const legacy = Object.fromEntries(Object.entries(stored ?? {}).filter(([field]) => field !== 'operatorOverride'));
-    rows.set(claimed.id, legacy);
-    await expect(store.read(FIRST_RUN, claimed.id)).resolves.toMatchObject({ operatorOverride: false });
-  });
-
-  test('answers nothing for an unknown account, and is refused without the permission to write', async () => {
-    await expect(store.grantOperatorOverride(FIRST_RUN, 'B'.repeat(22), true)).resolves.toBeUndefined();
-    const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.read] };
-    await expect(store.grantOperatorOverride(blind, 'B'.repeat(22), true)).rejects.toMatchObject({ kind: 'permission' });
   });
 });
 

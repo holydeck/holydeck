@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { CATEGORY_OF } from './audit.js';
 import { RECORDS, RECORD_ACTIONS } from './records.js';
 import { repositoriesOn } from './repositories.js';
-import { ACCOUNTS_MANAGE, OPERATOR_OVERRIDE, PRESENTATION_CONTROL, permissionsFor } from './roles.js';
+import { ACCOUNTS_MANAGE, PRESENTATION_CONTROL, permissionsFor } from './roles.js';
 import { serviceContext, servicesOn } from './services.js';
 import {
   CHECK_SEVERITIES,
@@ -31,10 +31,12 @@ import type { ServiceDraft, ServiceSection } from '@holydeck/contracts/services'
 import type { Document } from './repositories.js';
 import type {
   OperatorSession,
+  OverrideRequest,
   PreparationInputs,
   PreparationStore,
   ReadinessCheck,
   ReadinessChecklist,
+  ReadinessObservation,
   ReadinessOverride,
 } from './snapshots.js';
 import type { ServiceStore } from './services.js';
@@ -112,7 +114,6 @@ const accountOf = (role: AccountRecord['role'], granted: Partial<AccountRecord> 
   role,
   createdAt: '2026-09-13T09:30:00.000Z',
   controlPresentation: false,
-  operatorOverride: false,
   disabled: false,
   ...granted,
 });
@@ -123,7 +124,12 @@ const sessionOf = (account: AccountRecord): OperatorSession => ({
   correlationId: CORRELATION,
 });
 
-const OPERATOR_SESSION = sessionOf(accountOf('member', { operatorOverride: true }));
+// The Operator is whoever holds Control presentation, whatever role they hold: a member here, because
+// the permission is granted per account and never implied by one of the three roles.
+const OPERATOR_SESSION = sessionOf(accountOf('member', { controlPresentation: true }));
+
+/** What the deployment sees for itself — the checks media, Bible and output readiness contribute. */
+const OBSERVED: ReadinessObservation = { checks: [MEDIA_MISSING, NO_OUTPUT, ONE_TRANSLATION, REHEARSED] };
 
 interface Harness {
   readonly db: FakeDb;
@@ -131,7 +137,7 @@ interface Harness {
   readonly preparation: PreparationStore;
 }
 
-const harness = (now?: () => string): Harness => {
+const harness = (now?: () => string, observed: ReadinessObservation = OBSERVED): Harness => {
   const db = fakeDb();
   let tick = 0;
   let serial = 0;
@@ -139,12 +145,16 @@ const harness = (now?: () => string): Harness => {
   return {
     db,
     services: servicesOn(db, { now: clock, newId: () => `service-${(serial += 1)}` }),
-    preparation: preparationOn(db, { now: clock, newId: () => `audit-${(serial += 1)}` }),
+    preparation: preparationOn(db, {
+      now: clock,
+      newId: () => `audit-${(serial += 1)}`,
+      observe: () => observed,
+    }),
   };
 };
 
-const prepared = async (): Promise<Harness & { readonly serviceId: string }> => {
-  const built = harness();
+const prepared = async (observed?: ReadinessObservation): Promise<Harness & { readonly serviceId: string }> => {
+  const built = harness(undefined, observed);
   const service = await built.services.create(EDITOR, DRAFT);
   await built.preparation.prepare(CONTEXT, service.stamp.id, INPUTS);
   return { ...built, serviceId: service.stamp.id };
@@ -434,11 +444,11 @@ describe('what makes an override incomplete', () => {
 });
 
 describe('the Operator override', () => {
-  const request = (serviceId: string): Parameters<PreparationStore['override']>[1] => ({
+  // Which Service, which run, and why. What was blocking is nowhere in here: that is the server's.
+  const request = (serviceId: string): OverrideRequest => ({
     serviceId,
     runId: 'run-1',
     reason: 'The backup projector is on standby and the missing file is cosmetic',
-    observed: { checks: [MEDIA_MISSING, NO_OUTPUT, ONE_TRANSLATION, REHEARSED] },
   });
 
   it('carries every open blocking check, by name and with the cause it blocked for', async () => {
@@ -464,26 +474,55 @@ describe('the Operator override', () => {
   });
 
   // THR-11: the refusal is the server's, not the client's. None of these sessions is ever offered the
-  // control, and every one of them is refused anyway when it asks for it directly.
-  it('refuses every session that is not an Operator, whether or not a client ever offered it', async () => {
+  // control, and every one of them is refused anyway when it asks for it directly. A guest and an output
+  // window hold no permission at all — redeeming a capability answers with `canControl: false` and no
+  // grants — and none of the three roles carries Control presentation for being that role.
+  it('refuses every session without Control presentation, whether or not a client ever offered it', async () => {
     const { db, preparation, serviceId } = await prepared();
     const sessions: readonly (readonly [string, OperatorSession])[] = [
       ['an admin', sessionOf(accountOf('admin'))],
-      ['an admin holding Control presentation', sessionOf(accountOf('admin', { controlPresentation: true }))],
       ['an editor', sessionOf(accountOf('editor'))],
       ['a member', sessionOf(accountOf('member'))],
       ['a guest', { actor: 'guest:invited', permissions: [], correlationId: CORRELATION }],
-      ['a stage display', { actor: 'capability:output', permissions: [PRESENTATION_CONTROL], correlationId: CORRELATION }],
+      ['a stage display', { actor: 'capability:output', permissions: [], correlationId: CORRELATION }],
     ];
 
     for (const [who, session] of sessions) {
       const error = await refused(preparation.override(session, request(serviceId)));
       expect(error.kind, who).toBe('permission');
-      expect(error.message).toContain(OPERATOR_OVERRIDE);
+      expect(error.message).toContain(PRESENTATION_CONTROL);
     }
     expect(rows(db, RUN_EVENTS)).toHaveLength(0);
-    expect(sessions.every(([, session]) => !session.permissions.includes(OPERATOR_OVERRIDE))).toBe(true);
+    expect(sessions.every(([, session]) => !session.permissions.includes(PRESENTATION_CONTROL))).toBe(true);
     expect(permissionsFor(accountOf('admin'))).toEqual([ACCOUNTS_MANAGE, 'settings.manage', 'layouts.manage']);
+  });
+
+  // The other half of the same rule: the Operator is whoever was granted Control presentation, and the
+  // grant is what decides it rather than the role the account happens to hold.
+  it('accepts every session holding Control presentation, whatever role carries it', async () => {
+    for (const role of ['admin', 'editor', 'member'] as const) {
+      const { preparation, serviceId } = await prepared();
+
+      const outcome = await preparation.override(sessionOf(accountOf(role, { controlPresentation: true })), request(serviceId));
+
+      expect(outcome.runLabel, role).toBe(LIVE_OVERRIDDEN_LABEL);
+      expect(outcome.override.carried, role).toEqual([MEDIA_MISSING, NO_OUTPUT]);
+    }
+  });
+
+  // The checklist is the server's own observation, run through the same readiness the Service's state
+  // produces for anyone asking. A request has nowhere to say what is open, and saying it anyway changes
+  // nothing: the blocker a caller would have left out is carried into the run event and the trail.
+  it('carries every blocker the server observes, even when the request claims fewer', async () => {
+    const { db, preparation, serviceId } = await prepared();
+    const smuggled = { ...request(serviceId), observed: { checks: [MEDIA_MISSING] } } as OverrideRequest;
+
+    const outcome = await preparation.override(OPERATOR_SESSION, smuggled);
+
+    expect(outcome.override.carried).toEqual([MEDIA_MISSING, NO_OUTPUT]);
+    const [entry] = rows(db, AUDIT).filter((row) => row['action'] === OVERRIDE_ACTION);
+    expect(String(entry?.['detail'])).toContain(NO_OUTPUT.name);
+    expect(String(entry?.['detail'])).toContain('2 open blocker(s)');
   });
 
   it('leaves the warnings and the prepared manifest exactly as they were', async () => {
@@ -537,11 +576,11 @@ describe('the Operator override', () => {
   });
 
   it('refuses when nothing is open to override, and before anything is prepared', async () => {
-    const { preparation, serviceId } = await prepared();
+    const clear = await prepared({ checks: [ONE_TRANSLATION] });
     const unprepared = harness();
     const service = await unprepared.services.create(EDITOR, DRAFT);
 
-    expect((await refused(preparation.override(OPERATOR_SESSION, { ...request(serviceId), observed: { checks: [ONE_TRANSLATION] } }))).kind).toBe('state');
+    expect((await refused(clear.preparation.override(OPERATOR_SESSION, request(clear.serviceId)))).kind).toBe('state');
     expect((await refused(unprepared.preparation.override(OPERATOR_SESSION, request(service.stamp.id)))).kind).toBe('state');
   });
 

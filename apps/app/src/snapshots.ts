@@ -15,9 +15,16 @@
 //     goes Outdated the moment that Layout moves past the revision it pinned. Outdated is not Ready.
 //
 // The Operator override is the one way past an open blocker, and it is authorized here rather than by a
-// client declining to draw the control (THR-11): the permission is checked before anything is read or
-// written, so an Admin, an Editor, a Member, a Guest or an output window asking for it directly is
-// refused exactly as if it had asked through a surface that never offered it.
+// client declining to draw the control (THR-11): Control presentation is checked before anything is read
+// or written, so an Admin, an Editor, a Member, a guest or an output window asking for it directly — none
+// of which holds that permission for being what it is — is refused exactly as if it had asked through a
+// surface that never offered it. The Operator is whoever was granted Control presentation, whatever role
+// they hold, which is the same permission `capability-routes.ts`, `reference-routes.ts` and `palette.ts`
+// already run the live desk from.
+//
+// What the override is measured against is the server's own checklist, never a checklist that arrived
+// with the request: one a caller could write is one a caller could clear, and the blockers it carries
+// into the run event and the trail would then be a claim about what was open rather than a record of it.
 
 import { createHash } from 'node:crypto';
 
@@ -34,7 +41,7 @@ import { auditOn } from './audit.js';
 import { requestContext } from './context.js';
 import { permissionsFor as recordPermissions } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
-import { OPERATOR_OVERRIDE } from './roles.js';
+import { PRESENTATION_CONTROL } from './roles.js';
 // The Service a manifest is prepared from is named in the trail the one way it is already named there.
 import { SERVICE_RECORD, subjectFor } from './services.js';
 import { OUTDATED_REQUIRES, isOutdated } from './slide-layout-propagation.js';
@@ -128,18 +135,22 @@ export interface PreparedRecord {
 /**
  * What the surfaces around readiness have seen that this module cannot see for itself: the checks media,
  * Bible, offline and output readiness contribute (their own tasks), and the revision the pinned Slide
- * Layout currently stands at.
+ * Layout currently stands at. Asking `readiness` what a given observation amounts to reads nothing back
+ * into a record; the override is the one caller that writes, and it observes for itself instead.
  */
 export interface ReadinessObservation {
   readonly checks?: readonly ReadinessCheck[];
   readonly slideLayoutRevision?: number;
 }
 
+/**
+ * Everything an override takes, and nothing about what is open: which Service, which run, and why. What
+ * was blocking is the server's to establish (THR-11), so there is deliberately nowhere here to say it.
+ */
 export interface OverrideRequest {
   readonly serviceId: string;
   readonly runId: string;
   readonly reason: string;
-  readonly observed?: ReadinessObservation;
 }
 
 export interface OverrideOutcome {
@@ -175,7 +186,10 @@ export interface PreparationStore {
   /** The standing manifest: the last one prepared for this Service, or nothing. */
   prepared(context: unknown, serviceId: string): Promise<PreparedRecord | undefined>;
   readiness(context: unknown, serviceId: string, observed?: ReadinessObservation): Promise<ReadinessChecklist | undefined>;
-  /** The one way past an open blocker. Refused for every session that is not an Operator. */
+  /**
+   * The one way past an open blocker. Refused for every session without Control presentation, and
+   * measured against the checklist this server observes rather than one the request brought with it.
+   */
   override(session: OperatorSession, request: OverrideRequest): Promise<OverrideOutcome>;
   /** What a run is called, decided by its own events rather than by anything a caller passes in. */
   runLabel(context: unknown, runId: string): Promise<string>;
@@ -184,6 +198,15 @@ export interface PreparationStore {
 export interface PreparationOptions {
   readonly now: () => string;
   readonly newId?: () => string;
+  /**
+   * How this deployment observes, for itself, the readiness this module cannot compute — what media,
+   * Bible, offline and output readiness report, and the revision the pinned Slide Layout stands at now.
+   * The override's checklist is built from this and from the Service as stored, never from the request.
+   * Left out, the server sees only what it can read for itself and refuses to override a blocker it
+   * cannot see, which is the safe way round: an unobserved blocker stops the run rather than being
+   * waved through on a caller's word that it is not there.
+   */
+  readonly observe?: (context: unknown, serviceId: string) => Promise<ReadinessObservation> | ReadinessObservation;
 }
 
 const LAYOUT_PIN_SEPARATOR = '@';
@@ -290,6 +313,7 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
   const runEvents = repositories[RUN_EVENT_RECORD];
   const services = repositories[SERVICE_RECORD];
   const trail = auditOn(db, { now: options.now, ...(options.newId === undefined ? {} : { newId: options.newId }) });
+  const observe = options.observe ?? ((): ReadinessObservation => ({}));
 
   const author = (context: unknown): Pick<RequestContext, 'actor' | 'correlationId'> => {
     const { actor, correlationId } = context as RequestContext;
@@ -451,10 +475,10 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
 
     async override(session, request) {
       // THR-11: checked first, before a single read, so the refusal is this server's and not a client's.
-      if (!session.permissions.includes(OPERATOR_OVERRIDE)) {
+      if (!session.permissions.includes(PRESENTATION_CONTROL)) {
         throw new PreparationError(
           'permission',
-          `going live over an open blocker is the Operator's alone, which needs ${OPERATOR_OVERRIDE}`,
+          `going live over an open blocker is the Operator's alone, which needs ${PRESENTATION_CONTROL}`,
         );
       }
       const reason = request.reason.trim();
@@ -466,7 +490,10 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
       if (record === undefined) {
         throw new PreparationError('state', `${request.serviceId} has no prepared manifest to go live from`);
       }
-      const checklist = await store.readiness(context, request.serviceId, request.observed);
+      // Observed here rather than taken from the request, and then run through the same checklist the
+      // Service's own state would produce for anyone asking: a caller that leaves a blocker out of its
+      // account of the world does not thereby leave it out of the trail.
+      const checklist = await store.readiness(context, request.serviceId, await observe(context, request.serviceId));
       if (checklist === undefined || checklist.blockers.length === 0) {
         throw new PreparationError('state', `${request.serviceId} has no open blocker to override`);
       }
@@ -475,7 +502,7 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
         reason,
         auditEntry: OVERRIDE_ACTION,
         runLabel: LIVE_OVERRIDDEN_LABEL,
-        // Every open blocker, by name and with the cause it blocked for. Carried, not cleared.
+        // Every open blocker the server saw, by name and with the cause it blocked for. Carried, not cleared.
         carried: checklist.blockers,
       };
       const problem = transitionProblem(checklist.state, 'Go Live', checklist, override);

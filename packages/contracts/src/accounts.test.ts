@@ -35,7 +35,6 @@ const RECORD: AccountRecord = {
   role: 'admin',
   createdAt: '2026-09-13T09:30:00.000Z',
   controlPresentation: false,
-  operatorOverride: false,
   disabled: false,
 };
 
@@ -95,7 +94,6 @@ describe('what an account is', () => {
       'account.role',
       'account.createdAt',
       'account.controlPresentation',
-      'account.operatorOverride',
       'account.disabled',
     ]);
   });
@@ -109,25 +107,10 @@ describe('what an account is', () => {
     expect(parseAccountRecord(RECORD)).toEqual({ ok: true, value: RECORD });
   });
 
-  // The Operator override is administered the same way and on its own: holding Control presentation is
-  // operating the run, and overruling readiness is answering for it — one never implies the other.
-  it('carries whether it holds the Operator override, independently of Control presentation', () => {
-    const overrideRecord = { ...RECORD, operatorOverride: true };
-    expect(parseAccountRecord(overrideRecord)).toEqual({ ok: true, value: overrideRecord });
-    expect(parseAccountRecord({ ...RECORD, controlPresentation: true }).ok).toBe(true);
-  });
-
   it('refuses a record whose Control presentation flag is not a plain boolean', () => {
     const parsed = parseAccountRecord({ ...RECORD, controlPresentation: 'yes' });
     expect(!parsed.ok && parsed.problems).toEqual([
       { path: 'account.controlPresentation', code: FIELD_CODES.notABoolean, message: 'must be true or false' },
-    ]);
-  });
-
-  it('refuses a record whose Operator override flag is not a plain boolean', () => {
-    const parsed = parseAccountRecord({ ...RECORD, operatorOverride: 'yes' });
-    expect(!parsed.ok && parsed.problems).toEqual([
-      { path: 'account.operatorOverride', code: FIELD_CODES.notABoolean, message: 'must be true or false' },
     ]);
   });
 
