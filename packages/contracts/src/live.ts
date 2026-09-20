@@ -31,10 +31,18 @@ export const LIVE_CONNECTIONS_PATH = `${LIVE_PATH}/connections`;
  * request header, so the channel asked for and the client version declared travel in the URL — as does
  * the capability a shared join link carries, with the service it opens (T81). The ticket a signed-in
  * session spends is `sessions.ts`'s `TICKET_QUERY`, because a ticket is a session's own thing.
+ *
+ * Which channel the connection is for.
  */
 export const CHANNEL_QUERY = 'channel';
+
+/** Which client version is connecting — read against `CLIENT_WINDOW` before the socket is accepted. */
 export const CLIENT_VERSION_QUERY = 'clientVersion';
+
+/** The capability a shared join link carries, where this connection is a Guest's rather than a session's. */
 export const CAPABILITY_QUERY = 'capability';
+
+/** Which service that capability opens. Sent with `CAPABILITY_QUERY`, and meaningless without it. */
 export const SERVICE_QUERY = 'service';
 
 /**
