@@ -10,6 +10,7 @@ export default defineConfig({
     'src/clients.ts',
     'src/corpus.ts',
     'src/live.ts',
+    'src/live-media.ts',
     'src/live-mode.ts',
     'src/live-theme.ts',
     'src/jobs.ts',

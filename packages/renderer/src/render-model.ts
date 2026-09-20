@@ -16,6 +16,8 @@
 // override them. Items and slides may not, and this file refuses a model that tries: a slide carrying an
 // `aspectRatio` is a defect in whatever produced it, not a preference to be honoured.
 
+import { recoveryFor } from '@holydeck/contracts/live-media';
+
 import { autoFitStyle, chooseFit, fitLadder, fitRequests } from './auto-fit.js';
 import { deepFreeze } from './internal/freeze.js';
 import { geometry, roundTo } from './internal/numbers.js';
@@ -24,6 +26,7 @@ import { MEASUREMENT_PRECISION } from './measure.js';
 import { canvasFor, resolveOutputProfile } from './output-profile.js';
 import { blocker, readinessOf, warning } from './readiness.js';
 
+import type { MediaPlaybackState, MediaRecovery } from '@holydeck/contracts/live-media';
 import type { FitConstraints } from './auto-fit.js';
 import type { IntrinsicSize, MediaFit } from './media-fit.js';
 import type { MeasureRequest, TextMeasurer, TextMetrics } from './measure.js';
@@ -38,6 +41,12 @@ import type { FindingSite, Readiness, ReadinessFinding } from './readiness.js';
 
 export type { IntrinsicSize, MediaFit } from './media-fit.js';
 export { MEDIA_FITS, MediaGeometryError } from './media-fit.js';
+
+// One vocabulary for one failure. A prepared media box and a live media element are two views of the
+// same stalled video, and both have to say the same three words about it, so the words are declared once
+// where neither package owns them (`@holydeck/contracts/live-media`, T87) and re-exported here — the web
+// client that drives a real element does not depend on this package and could not read them otherwise.
+export type { MediaPlaybackState, MediaRecovery } from '@holydeck/contracts/live-media';
 
 export class RenderModelError extends Error {
   constructor(message: string) {
@@ -101,13 +110,6 @@ export interface MediaAudio {
   /** As a fraction of the output's own volume, bounded by the resolved profile. */
   readonly volume: number;
 }
-
-/**
- * What the presenting surface saw happen. A pure function cannot observe a browser refusing to autoplay
- * or a file failing to load, so the surface that did observe it hands the fact back in and re-prepares;
- * nothing here goes looking.
- */
-export type MediaPlaybackState = 'ok' | 'autoplay-blocked' | 'load-error';
 
 export interface MediaBox {
   readonly id: string;
@@ -177,13 +179,6 @@ export interface PreparedMediaAudio {
   readonly requestedVolume: number;
   readonly maximumVolume: number;
 }
-
-/**
- * What a surface may offer somebody standing in front of a stalled slide. `'none'` is the ordinary case;
- * the other two say which affordance recovers this particular failure, so the surface shows a way back
- * rather than a dead rectangle. Never absent, whatever the playback state.
- */
-export type MediaRecovery = 'none' | 'resume-playback' | 'retry-load';
 
 export interface PreparedMediaBox extends PreparedBoxBase {
   readonly kind: 'media';
@@ -289,13 +284,6 @@ const refuseUnscalableSize = (size: IntrinsicSize, what: string): void => {
   }
 };
 
-/** Which affordance gets a stalled slide going again. Every state has one, including the good one. */
-const RECOVERY: Readonly<Record<MediaPlaybackState, MediaRecovery>> = Object.freeze({
-  ok: 'none',
-  'autoplay-blocked': 'resume-playback',
-  'load-error': 'retry-load',
-});
-
 /**
  * The volume a surface actually plays at. Out-of-bound is clamped and said out loud rather than thrown:
  * the same shape as text below the readable floor, for the same reason — the slide still shows, and an
@@ -368,7 +356,7 @@ const prepareMedia = (
     mediaRect: mediaRectFor(frame, box.intrinsicSize, box.fit),
     ...(audio === undefined ? {} : { audio }),
     playbackState,
-    recovery: RECOVERY[playbackState],
+    recovery: recoveryFor(playbackState),
   };
 };
 

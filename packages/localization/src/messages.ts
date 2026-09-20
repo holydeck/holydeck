@@ -34,6 +34,13 @@ const en = {
     "This browser cannot keep the screen awake automatically. Adjust this device's own sleep settings for the service.",
   'localOutput.wakeLock.denied':
     "Permission to keep the screen awake was not granted. Adjust this device's own sleep settings for the service.",
+  'liveMedia.playing': 'The media is playing.',
+  'liveMedia.autoplayBlocked': 'This browser would not start the media on its own. Press Play to start it.',
+  'liveMedia.loadError':
+    'The media could not be loaded. The last frame is still showing; press Retry to load it again.',
+  'liveMedia.follower.silent': 'This view is not playing the media. Opt in to play it in step with {view}.',
+  'liveMedia.follower.synchronized': 'Playing in step with {view}.',
+  'liveMedia.follower.resynchronized': 'Caught back up with {view}.',
   'control.skipLinks.label': 'Skip links',
   'control.skip.order': 'Skip to Order',
   'control.skip.editorPreview': 'Skip to Editor and Preview',
@@ -88,6 +95,15 @@ const de: Catalog = {
     'Dieser Browser kann den Bildschirm nicht automatisch wachhalten. Passen Sie die Energieeinstellungen dieses Geräts für den Gottesdienst an.',
   'localOutput.wakeLock.denied':
     'Die Berechtigung, den Bildschirm wachzuhalten, wurde nicht erteilt. Passen Sie die Energieeinstellungen dieses Geräts für den Gottesdienst an.',
+  'liveMedia.playing': 'Das Medium wird abgespielt.',
+  'liveMedia.autoplayBlocked':
+    'Dieser Browser hat das Medium nicht von selbst gestartet. Drücken Sie Wiedergabe, um es zu starten.',
+  'liveMedia.loadError':
+    'Das Medium konnte nicht geladen werden. Das letzte Bild wird weiterhin angezeigt; drücken Sie Erneut versuchen, um es noch einmal zu laden.',
+  'liveMedia.follower.silent':
+    'Diese Ansicht spielt das Medium nicht ab. Aktivieren Sie die Wiedergabe, um es synchron zu {view} abzuspielen.',
+  'liveMedia.follower.synchronized': 'Wiedergabe synchron zu {view}.',
+  'liveMedia.follower.resynchronized': 'Wieder synchron zu {view}.',
   'control.skipLinks.label': 'Sprungmarken',
   'control.skip.order': 'Zum Ablauf springen',
   'control.skip.editorPreview': 'Zu Editor und Vorschau springen',
@@ -138,6 +154,13 @@ const ta: Catalog = {
     'இந்த உலாவியால் திரையைத் தானாக விழிப்புடன் வைக்க முடியாது. இந்தச் சேவைக்காக இந்தச் சாதனத்தின் உறக்க அமைப்புகளை மாற்றவும்.',
   'localOutput.wakeLock.denied':
     'திரையை விழிப்புடன் வைக்க அனுமதி வழங்கப்படவில்லை. இந்தச் சேவைக்காக இந்தச் சாதனத்தின் உறக்க அமைப்புகளை மாற்றவும்.',
+  'liveMedia.playing': 'ஊடகம் இயக்கப்படுகிறது.',
+  'liveMedia.autoplayBlocked': 'இந்த உலாவி ஊடகத்தைத் தானாகத் தொடங்கவில்லை. தொடங்க இயக்கு பட்டனை அழுத்தவும்.',
+  'liveMedia.loadError':
+    'ஊடகத்தை ஏற்ற முடியவில்லை. கடைசி சட்டகம் இன்னும் காட்டப்படுகிறது; மீண்டும் ஏற்ற, மீண்டும் முயற்சி பட்டனை அழுத்தவும்.',
+  'liveMedia.follower.silent': 'இந்தக் காட்சி ஊடகத்தை இயக்கவில்லை. {view} உடன் ஒத்திசைவாக இயக்க இதைத் தேர்ந்தெடுக்கவும்.',
+  'liveMedia.follower.synchronized': '{view} உடன் ஒத்திசைவாக இயக்கப்படுகிறது.',
+  'liveMedia.follower.resynchronized': '{view} உடன் மீண்டும் ஒத்திசைக்கப்பட்டது.',
   'control.skipLinks.label': 'தாவல் இணைப்புகள்',
   'control.skip.order': 'வரிசைக்குச் செல்க',
   'control.skip.editorPreview': 'எடிட்டர் மற்றும் முன்னோட்டத்திற்குச் செல்க',
