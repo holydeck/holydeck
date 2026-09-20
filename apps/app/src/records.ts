@@ -146,7 +146,9 @@ export const RECORDS = {
   // Spec LIVE-12: every shown slide and operator change, in server order, with the revisions it pinned.
   // `shown` is optional because most of what this log holds moved nothing into view — a theme change, a
   // Standby, an override. An event that did carries what it put in front of the room, which is what spec
-  // LIVE-13's review of the exact references shown is derived from (`run-review.ts`).
+  // LIVE-13's review of the exact references shown is derived from (`run-review.ts`). Rows written before
+  // this field existed are never backfilled — an identity nobody recorded cannot be recovered, and this log
+  // is immutable besides — so a review of an older run leaves those out rather than guessing at them.
   runEvents: {
     collection: 'run_events',
     kind: 'immutable',

@@ -216,6 +216,36 @@ describe('the references a run showed', () => {
     expect(shown.map((entry) => entry.reference)).toEqual(['Psalm 23:1-6']);
   });
 
+  it('leaves out a slide event written before the log carried what it showed', async () => {
+    const { db, events, review, runId, pins } = await live();
+
+    await review.show(SESSION, { runId, itemId: 'item-2', reference: 'Psalm 23:1-6', pinnedRevisions: pins });
+    // A row already durable before `shown` existed: the right kind, and no identity to report. There is
+    // nothing to backfill it from, so the review under-reports that run rather than inventing a reference.
+    db.rows.set(RUN_EVENTS, [
+      ...rows(db, RUN_EVENTS),
+      {
+        _id: `${runId}#2`,
+        runId,
+        sequence: 2,
+        at: new Date(START + 30_000).toISOString(),
+        kind: 'current-slide-changed',
+        pinnedRevisions: pins,
+        actor: OPERATOR,
+        correlationId: CORRELATION,
+      },
+    ]);
+    await review.show(SESSION, { runId, itemId: 'item-1', reference: 'Welcome', pinnedRevisions: pins });
+
+    const shown = await review.review(READER, runId);
+
+    // The log still holds it — it is the review that cannot name it, and the recap numbers only what it can.
+    expect(await events.log(READER, runId)).toHaveLength(3);
+    expect(shown.map((entry) => entry.reference)).toEqual(['Psalm 23:1-6', 'Welcome']);
+    expect(shown.map((entry) => entry.sequence)).toEqual([1, 3]);
+    expect(await review.recap(READER, runId)).toEqual({ runId, lines: ['1. Psalm 23:1-6', '2. Welcome'] });
+  });
+
   it('is empty for a run that has shown nothing yet', async () => {
     const { review, runId } = await live();
 
