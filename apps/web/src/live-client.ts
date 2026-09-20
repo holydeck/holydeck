@@ -163,6 +163,11 @@ export type LiveFailureReason = (typeof LIVE_FAILURES)[number];
  */
 export interface LiveFailure {
   readonly reason: LiveFailureReason;
+  /**
+   * Diagnostic, never display copy. It is English, unlocalized, and sometimes a close reason written by
+   * the server verbatim — a surface tells a person what has happened from `reason` and `recoverable`,
+   * in its own localized words, and keeps this for a log or a details line.
+   */
   readonly message: string;
   /** The close code, where a closed connection is what went wrong. */
   readonly code?: number;
@@ -277,7 +282,18 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
   const awaiting = new Map<string, (ack: AckFrame | undefined) => void>();
 
   let socket: WebSocketLike | undefined;
-  let opening = false;
+  /**
+   * Which connection attempt this context is on. Every socket's listeners carry the generation they were
+   * opened in, every armed reconnect carries the one that armed it, and a deliberate close moves it on.
+   * A browser fires a close event *asynchronously*, sometimes after this context has already replaced or
+   * abandoned the socket that fired it — and news from a generation that is no longer the live one is
+   * not this context's news. Without this, a socket closed a moment ago can announce a dropped session
+   * over a healthy one, or null out the connection that replaced it and leave a window silently holding
+   * a socket nothing is written on.
+   */
+  let generation = 0;
+  /** The generation part-way through opening, or 0 when none is. */
+  let opening = 0;
   let state: LiveSessionState = 'closed';
   let failure: LiveFailure | undefined;
   let stateRevision = 0;
@@ -288,8 +304,6 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
   /** How many snapshots to let past unadopted — one, on a resuming connection, for the snapshot the hub
    *  writes on join before it has read the resume this client sends. */
   let skipSnapshots = 0;
-  /** Set by a deliberate close, so the close event that follows is not read as a connection that dropped. */
-  let leaving = false;
   let attempt = 0;
   let errored = false;
 
@@ -415,9 +429,12 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
     awaiting.clear();
   };
 
-  const scheduleRetry = (): void => {
+  const scheduleRetry = (from: number): void => {
     attempt += 1;
     retry(attempt, () => {
+      // Armed against one connection and fired later, by which time this context may have been closed
+      // or reconnected by hand. A timer does not get to reopen a session somebody ended.
+      if (from !== generation) return;
       void connect();
     });
   };
@@ -432,12 +449,11 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
     if (!sendFrame({ kind: 'resume', channel, fromSequence: sequence })) skipSnapshots = 0;
   };
 
-  const ended = (code: number, reason: string): void => {
-    socket = undefined;
+  const ended = (from: WebSocketLike, code: number, reason: string): void => {
+    // Only the connection that actually ended is let go of: this is reached for the live generation, and
+    // the socket it holds is the one that fired.
+    if (socket === from) socket = undefined;
     settleAwaiting();
-    // A context that left deliberately is already closed, and the close event a browser fires afterwards
-    // is not a connection that dropped.
-    if (leaving) return;
     const said = reason !== '' ? reason : errored ? 'the live connection failed' : 'the live session ended';
     const recoverable = !FINAL_CLOSE.has(code);
     const cause: LiveFailure = { reason: 'closed', message: said, code, recoverable };
@@ -446,13 +462,13 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
       return;
     }
     moveTo('degraded', cause);
-    scheduleRetry();
+    scheduleRetry(generation);
   };
 
   const connect = async (): Promise<LiveStatus> => {
-    if (socket !== undefined || opening) return statusNow();
-    opening = true;
-    leaving = false;
+    if (socket !== undefined || (opening !== 0 && opening === generation)) return statusNow();
+    const mine = (generation += 1);
+    opening = mine;
     errored = false;
     try {
       if (options.open === undefined) {
@@ -471,6 +487,10 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
       } catch {
         credentials = undefined;
       }
+      // Proving a context takes a round trip, and a person can close the window in the middle of one.
+      // A socket opened here would be one no caller believes exists: nothing reads it, nothing answers
+      // its heartbeats, and it sits in the connection counts an operator reads until the hub drops it.
+      if (mine !== generation) return statusNow();
       if (credentials === undefined) {
         // Not retried on a timer: a context that cannot prove itself will not start being able to on its
         // own, and a person signing in again is the way back.
@@ -492,21 +512,31 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
           message: error instanceof Error ? error.message : String(error),
           recoverable: true,
         });
-        scheduleRetry();
+        scheduleRetry(mine);
         return statusNow();
       }
 
       socket = fresh;
-      fresh.addEventListener('open', () => opened());
-      fresh.addEventListener('message', (event) => receive(event.data));
+      // Every one of these speaks only for the connection it was registered on. A browser delivers a
+      // close — and occasionally an error — after this context has moved on, and an event from a socket
+      // that is no longer the live one is dropped rather than acted on.
+      fresh.addEventListener('open', () => {
+        if (mine === generation) opened();
+      });
+      fresh.addEventListener('message', (event) => {
+        if (mine === generation) receive(event.data);
+      });
       fresh.addEventListener('error', () => {
         // A browser says only that something failed, never what; the close that follows carries the code.
-        errored = true;
+        if (mine === generation) errored = true;
       });
-      fresh.addEventListener('close', (event) => ended(event.code ?? NORMAL_CLOSE, event.reason ?? ''));
+      fresh.addEventListener('close', (event) => {
+        if (mine !== generation) return;
+        ended(fresh, event.code ?? NORMAL_CLOSE, event.reason ?? '');
+      });
       return statusNow();
     } finally {
-      opening = false;
+      if (opening === mine) opening = 0;
     }
   };
 
@@ -563,7 +593,11 @@ export function createLiveClient(options: LiveClientOptions): LiveClient {
     },
 
     close(): void {
-      leaving = true;
+      // A hard stop, not a request. Moving the generation on is what makes it one: the close event this
+      // is about to cause, a credentials promise still in flight, and any reconnect already on a timer
+      // all find themselves speaking for a connection this context no longer has, and are ignored.
+      generation += 1;
+      attempt = 0;
       const held = socket;
       socket = undefined;
       settleAwaiting();

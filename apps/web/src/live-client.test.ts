@@ -81,6 +81,10 @@ const far = (
       ended = { code, reason };
       readyState = 3;
       onClose();
+      // A browser never fires the close event during the `close()` call: it lands on a later turn, by
+      // which time the context that asked for it may have opened another socket entirely. Reproducing
+      // that is the only way a test can tell whether a late close is being read as this context's news.
+      queueMicrotask(() => fire('close', { code, reason }));
     },
     addEventListener(type: string, listener: (event: SocketEventLike) => void): void {
       listeners.set(type, [...(listeners.get(type) ?? []), listener]);
@@ -983,9 +987,119 @@ describe('reconnecting', () => {
     expect(client.status.state).toBe('closed');
 
     // The socket's own close event arrives afterwards, as a real one does, and changes nothing.
-    far.last().end(1000, '');
+    await Promise.resolve();
     expect(client.status.state).toBe('closed');
     expect(runs).toHaveLength(0);
+    expect(far.opened).toHaveLength(1);
+  });
+
+  it('closes a context that never got as far as holding a socket', () => {
+    const { client } = clientOn('audience', sockets().open);
+    client.close();
+    expect(client.status.state).toBe('closed');
+  });
+
+  it('lets no reconnect already on a timer reopen a context that has been closed', async () => {
+    const far = sockets();
+    const { client, runs } = clientOn('audience', far.open);
+    await client.connect();
+    far.last().accept();
+    far.last().end(1006, '');
+    expect(runs).toHaveLength(1);
+
+    // Closed while the reconnect was waiting out its delay. The timer still fires — a timer always does.
+    client.close();
+    runs.splice(0).forEach((run) => run());
+    await Promise.resolve();
+
+    expect(far.opened).toHaveLength(1);
+    expect(client.status.state).toBe('closed');
+    expect(client.status.failure).toBeUndefined();
+  });
+
+  it('opens nothing when the context is closed while it is still proving itself', async () => {
+    const far = sockets();
+    let prove: (credentials: LiveCredentials) => void = () => undefined;
+    const client = createLiveClient({
+      channel: 'audience',
+      origin: 'https://example.test',
+      credentials: async () =>
+        new Promise<LiveCredentials>((resolve) => {
+          prove = resolve;
+        }),
+      open: far.open,
+      clock: () => AT,
+      retry: () => undefined,
+    });
+
+    const opening = client.connect();
+    client.close();
+    prove({ kind: 'ticket', ticket: 'ticket-1' });
+    await opening;
+
+    // A socket opened here would be one no caller knows about: nothing reads it, nothing answers its
+    // heartbeats, and it counts as a watching connection until the hub gives up on it.
+    expect(far.opened).toHaveLength(0);
+    expect(client.status.state).toBe('closed');
+  });
+
+  it('ignores the late close of a socket it has already replaced', async () => {
+    const far = sockets();
+    const { client, runs } = clientOn('audience', far.open);
+    await client.connect();
+    far.last().accept();
+    far.last().deliver({ kind: 'snapshot', channel: 'audience', stateRevision: 2, sequence: 2, at: AT });
+
+    client.close();
+    // Watched from the reopen onwards: everything this context is told from here is about the new socket.
+    const states: string[] = [];
+    client.onStatus((status) => states.push(status.state));
+    await client.connect();
+    const second = far.last();
+    second.accept();
+    // Only now does the first socket's close event land, as a browser's does.
+    await Promise.resolve();
+
+    // The replacement is the live one: it carries the resume, and the connection this context has already
+    // left is not allowed to announce itself as a session that dropped.
+    expect(second.sent()).toMatchObject([{ kind: 'resume', fromSequence: 2 }]);
+    expect(states).toEqual(['authorizing', 'connecting', 'resuming']);
+    expect(client.status.failure).toBeUndefined();
+    expect(runs).toHaveLength(0);
+
+    second.deliver({ kind: 'snapshot', channel: 'audience', stateRevision: 2, sequence: 2, at: AT });
+    second.deliver({ kind: 'snapshot', channel: 'audience', stateRevision: 5, sequence: 5, at: AT });
+    expect(client.status).toMatchObject({ state: 'synchronised', stateRevision: 5, sequence: 5 });
+    expect(second.ended()).toBeUndefined();
+
+    // Nothing else the replaced socket says is heard either — not a frame, not an error, not an open.
+    const first = far.opened[0];
+    first?.deliver({ kind: 'event', channel: 'audience', type: 'blank', stateRevision: 9, sequence: 9, at: AT });
+    first?.fail();
+    first?.accept();
+    expect(client.status).toMatchObject({ state: 'synchronised', stateRevision: 5, sequence: 5 });
+  });
+
+  it('does not open a second socket while it is still proving itself', async () => {
+    const far = sockets();
+    let prove: (credentials: LiveCredentials) => void = () => undefined;
+    const client = createLiveClient({
+      channel: 'audience',
+      origin: 'https://example.test',
+      credentials: async () =>
+        new Promise<LiveCredentials>((resolve) => {
+          prove = resolve;
+        }),
+      open: far.open,
+      clock: () => AT,
+      retry: () => undefined,
+    });
+
+    const first = client.connect();
+    const second = client.connect();
+    prove({ kind: 'ticket', ticket: 'ticket-1' });
+    await Promise.all([first, second]);
+
     expect(far.opened).toHaveLength(1);
   });
 
