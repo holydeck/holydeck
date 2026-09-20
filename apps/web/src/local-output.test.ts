@@ -154,8 +154,12 @@ describe('presenting fullscreen state', () => {
 });
 
 describe('wiring local-output keyboard navigation', () => {
-  const fakeTarget = (): KeyboardTargetLike & { press: (key: string) => void } => {
-    let listener: ((event: { readonly key: string }) => void) | undefined;
+  const fakeTarget = (): KeyboardTargetLike & {
+    press: (key: string) => void;
+    lastPreventDefault: () => ReturnType<typeof vi.fn<() => void>> | undefined;
+  } => {
+    let listener: ((event: { readonly key: string; preventDefault(): void }) => void) | undefined;
+    let lastPreventDefault: ReturnType<typeof vi.fn<() => void>> | undefined;
     return {
       addEventListener: (_type, handler) => {
         listener = handler;
@@ -164,8 +168,10 @@ describe('wiring local-output keyboard navigation', () => {
         if (listener === handler) listener = undefined;
       },
       press(key: string) {
-        listener?.({ key });
+        lastPreventDefault = vi.fn<() => void>();
+        listener?.({ key, preventDefault: lastPreventDefault });
       },
+      lastPreventDefault: () => lastPreventDefault,
     };
   };
 
@@ -205,6 +211,25 @@ describe('wiring local-output keyboard navigation', () => {
     expect(previous).not.toHaveBeenCalled();
   });
 
+  it('prevents the browser default for a key it acts on, so Backspace cannot navigate away from a live presentation', () => {
+    const target = fakeTarget();
+    wireLocalOutputKeyboard(target, { next: vi.fn(), previous: vi.fn() });
+
+    target.press('Backspace');
+
+    expect(target.lastPreventDefault()).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves native browser behavior untouched for a key it does not act on', () => {
+    const target = fakeTarget();
+    wireLocalOutputKeyboard(target, { next: vi.fn(), previous: vi.fn() });
+
+    for (const key of ['Escape', 'Enter', 'a', 'F11']) {
+      target.press(key);
+      expect(target.lastPreventDefault()).not.toHaveBeenCalled();
+    }
+  });
+
   it('stops navigating once unsubscribed', () => {
     const target = fakeTarget();
     const next = vi.fn();
@@ -224,7 +249,7 @@ describe('fullscreen entry feeding straight into keyboard navigation, end to end
     expect(entry).toEqual({ kind: 'entered' });
 
     const target: KeyboardTargetLike & { press: (key: string) => void } = (() => {
-      let listener: ((event: { readonly key: string }) => void) | undefined;
+      let listener: ((event: { readonly key: string; preventDefault(): void }) => void) | undefined;
       return {
         addEventListener: (_type, handler) => {
           listener = handler;
@@ -233,7 +258,7 @@ describe('fullscreen entry feeding straight into keyboard navigation, end to end
           listener = undefined;
         },
         press(key: string) {
-          listener?.({ key });
+          listener?.({ key, preventDefault: () => undefined });
         },
       };
     })();
@@ -419,6 +444,19 @@ describe('holding a screen wake lock', () => {
     await Promise.resolve();
 
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases a still-held sentinel on dispose, rather than leaving the browser holding it forever', async () => {
+    const document = fakeDocument();
+    const sentinel = fakeSentinel();
+    const navigator: WakeLockNavigatorLike = { wakeLock: { request: async () => sentinel } };
+    const controller = createWakeLockController(navigator, document, () => undefined);
+
+    await controller.request();
+    controller.dispose();
+    await vi.waitFor(() => expect(sentinel.released).toBe(true));
+
+    expect(sentinel.release).toHaveBeenCalledTimes(1);
   });
 });
 

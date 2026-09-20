@@ -134,10 +134,19 @@ export interface LocalOutputNavigation {
   readonly previous: () => void;
 }
 
-/** The one method a keydown listener needs, injected so wiring is testable without a browser. */
+/** The one method a keydown listener needs, injected so wiring is testable without a browser.
+ *  `preventDefault` is part of the shape, not an afterthought: `wireLocalOutputKeyboard` calls it for
+ *  every key it acts on, so a real keydown event's native handling — Backspace as history-back, Space
+ *  and the paging keys as page-scroll — never fires behind a fullscreen presentation's back. */
 export interface KeyboardTargetLike {
-  addEventListener(type: 'keydown', listener: (event: { readonly key: string }) => void): void;
-  removeEventListener(type: 'keydown', listener: (event: { readonly key: string }) => void): void;
+  addEventListener(
+    type: 'keydown',
+    listener: (event: { readonly key: string; preventDefault(): void }) => void,
+  ): void;
+  removeEventListener(
+    type: 'keydown',
+    listener: (event: { readonly key: string; preventDefault(): void }) => void,
+  ): void;
 }
 
 const NEXT_KEYS: ReadonlySet<string> = new Set(['ArrowRight', 'ArrowDown', ' ', 'PageDown']);
@@ -154,9 +163,14 @@ export function wireLocalOutputKeyboard(
   target: KeyboardTargetLike,
   navigation: LocalOutputNavigation,
 ): () => void {
-  const listener = (event: { readonly key: string }): void => {
-    if (NEXT_KEYS.has(event.key)) navigation.next();
-    else if (PREVIOUS_KEYS.has(event.key)) navigation.previous();
+  const listener = (event: { readonly key: string; preventDefault(): void }): void => {
+    if (NEXT_KEYS.has(event.key)) {
+      event.preventDefault();
+      navigation.next();
+    } else if (PREVIOUS_KEYS.has(event.key)) {
+      event.preventDefault();
+      navigation.previous();
+    }
   };
   target.addEventListener('keydown', listener);
   return () => target.removeEventListener('keydown', listener);
@@ -279,6 +293,9 @@ export function createWakeLockController(
     },
     dispose() {
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      const held = sentinel;
+      sentinel = undefined;
+      if (held !== undefined && !held.released) void held.release().catch(() => undefined);
     },
   };
 }
