@@ -230,6 +230,13 @@ export function seekMediaTimeline(timeline: MediaTimeline, toMs: number, atEpoch
  * single frame interval at any frame rate this product presents at (17ms at 60fps, 42ms at 24fps) plus
  * the jitter of the heartbeat cadence a correction rides on, and comfortably below the roughly
  * four-hundred-millisecond offset at which a musician watching Stage sees it disagree with Audience.
+ *
+ * This is a tolerance for *pictures*, and it is deliberately not tight enough for two surfaces to be
+ * heard together: a quarter of a second between two audible sources is an echo, not a synchronisation,
+ * and no seek-based correction on a cadence this coarse could close it. That is why the browser half
+ * starts every follower muted and only this device's own opt-in unmutes it (LIVE-20): a Stage phone with
+ * an earpiece is one person's monitor feed, never a second speaker in the room. A deployment that does
+ * put two surfaces through one PA passes its own, far tighter, `toleranceMs` below.
  */
 export const MEDIA_DRIFT_TOLERANCE_MS = 250;
 
@@ -269,12 +276,19 @@ export type MediaCorrection =
  * hundred milliseconds short of the end of a lap and an authority a hundred past the start of the next
  * one are three hundred milliseconds apart, not a whole clip apart, and a correction that read it the
  * long way would rewind the follower through the entire video once every lap.
+ *
+ * The gap is folded into the clip before it is read the short way, because a declared length is only ever
+ * a claim: a file whose real duration runs past the metadata leaves a follower sitting beyond the end of
+ * the clip it is supposed to be in, and an unfolded subtraction would hand back a negative distance —
+ * which every tolerance comparison in this module would read as "close enough" and stop correcting
+ * entirely. A distance is never negative, whatever the metadata said.
  */
 export function driftMsBetween(timeline: MediaTimeline, follower: FollowerPlayback, nowEpochMs: number): number {
   const target = projectedMediaPositionMs(timeline, nowEpochMs);
   const apart = Math.abs(follower.positionMs - target);
   if (!timeline.loop || timeline.durationMs <= 0) return apart;
-  return Math.min(apart, timeline.durationMs - apart);
+  const withinALap = apart % timeline.durationMs;
+  return Math.min(withinALap, timeline.durationMs - withinALap);
 }
 
 /**

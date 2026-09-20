@@ -99,6 +99,9 @@ export interface MediaSettings {
   readonly loop: boolean;
   readonly muted: boolean;
   readonly volume: number;
+  /** Where in the clip this run of it starts — nonzero for a group re-entered where it was left. Absent
+   *  is the ordinary case and means the beginning. */
+  readonly startAtMs?: number;
 }
 
 /** Which surface this is, and — for a following one — whether this device has opted in to playing. */
@@ -214,9 +217,36 @@ export function createMediaAuthority(
     return next;
   };
 
-  const start = async (): Promise<MediaSurfaceState> => moveTo(settle(surface, await playing(element)));
+  /** Puts the element where the timeline says the service is. Called wherever the two could otherwise
+   *  part company — taking a slide whose live event is already some seconds old, and reloading after a
+   *  failed load, which resets an element to zero. */
+  const place = (): void => {
+    if (timeline !== undefined) element.currentTime = projectedMediaPositionMs(timeline, options.now()) / 1_000;
+  };
 
-  const stop = watchMediaFailure(element, (failed) => moveTo(settle(surface, failed.playback)));
+  /**
+   * Starts playback and then makes the published timeline say what the element actually did.
+   *
+   * This is the whole of keeping an authority honest. A timeline that goes on advertising a running clip
+   * while the element in front of it is stalled is worse than no timeline at all: every follower reads it,
+   * believes it, and obediently runs away from the picture the room is actually looking at — and the
+   * longer the stall lasts the further they go. So playback that did not start freezes the timeline where
+   * the element is standing, and playback that did start is what moves it back into `playing`.
+   */
+  const start = async (): Promise<MediaSurfaceState> => {
+    const playback = await playing(element);
+    if (timeline !== undefined) {
+      timeline = playback === 'ok' ? playMediaTimeline(timeline, options.now()) : pauseMediaTimeline(timeline, options.now());
+    }
+    return moveTo(settle(surface, playback));
+  };
+
+  const stop = watchMediaFailure(element, (failed) => {
+    // A file that stopped part-way through stops the timeline too, for the same reason: what the room can
+    // see is no longer advancing, so neither may what every other surface is told.
+    if (timeline !== undefined) timeline = pauseMediaTimeline(timeline, options.now());
+    return moveTo(settle(surface, failed.playback));
+  });
 
   return Object.freeze({
     get timeline() {
@@ -230,13 +260,16 @@ export function createMediaAuthority(
       settings = taken;
       timeline = mediaTimelineFromEvent(event, taken);
       applyMediaSettings(element, taken, role);
-      element.currentTime = timeline.anchorPositionMs / 1_000;
+      // Not the anchor position: `event.at` is a server time that has usually already passed by the time
+      // a surface acts on it, and is a good while past on the snapshot a rejoining client is caught up
+      // with. Starting such a clip at its beginning would put this element seconds behind the timeline it
+      // just published, and every follower would faithfully synchronise to the wrong one of the two.
+      place();
       return start();
     },
 
     async play(): Promise<MediaSurfaceState> {
       if (timeline === undefined) return state;
-      timeline = playMediaTimeline(timeline, options.now());
       return start();
     },
 
@@ -249,18 +282,18 @@ export function createMediaAuthority(
     seek(toMs: number): void {
       if (timeline === undefined) return;
       timeline = seekMediaTimeline(timeline, toMs, options.now());
-      element.currentTime = timeline.anchorPositionMs / 1_000;
+      place();
     },
 
     async recover(): Promise<MediaSurfaceState> {
       if (state.recovery === 'none' || settings === undefined) return state;
       if (state.recovery === 'retry-load') {
+        // A reload puts an element back at zero, which is nowhere near where a service that has been
+        // standing on a held frame now is.
         element.load();
         applyMediaSettings(element, settings, role);
-        if (timeline !== undefined) {
-          element.currentTime = projectedMediaPositionMs(timeline, options.now()) / 1_000;
-        }
       }
+      place();
       return start();
     },
 
@@ -287,6 +320,10 @@ export interface MediaFollowerOptions {
  * A following surface. Note what is absent: there is no `take`, no `play`, no `pause`, no `seek`, and
  * nothing here returns a `MediaTimeline`. That absence is the requirement — this view tracks the Audience
  * timeline and cannot move it — and it is checked by this module's own test rather than left to review.
+ *
+ * `recover` is not an exception to that. It reloads this device's own element and puts it back on the
+ * timeline it was already following; it moves nothing anybody else can see, and the service goes on
+ * exactly as it was whether or not this phone ever comes back.
  */
 export interface MediaFollower {
   readonly optedIn: boolean;
@@ -304,6 +341,9 @@ export interface MediaFollower {
   follow(timeline: MediaTimeline, settings: MediaSettings): void;
   /** One correction step, driven by the session's own cadence rather than by a timer of this module's. */
   synchronize(): Promise<MediaCorrection>;
+  /** The affordance this surface's own failure named: load this device's media again, or start playback
+   *  it was refused, and then land back on the timeline. Exists because `state.recovery` promises one. */
+  recover(): Promise<MediaCorrection>;
   dispose(): void;
 }
 
@@ -327,7 +367,15 @@ export function createMediaFollower(
     return next;
   };
 
-  const stop = watchMediaFailure(element, (failed) => moveTo(failed));
+  // Through `settle`, exactly as the authority does it: a Stage screen whose file drops out mid-clip has
+  // the same hole in it as an Audience one, and reporting the right state while leaving the dead element
+  // on screen would keep the letter of "visible and recoverable" and none of the point of it.
+  const stop = watchMediaFailure(element, (failed) => {
+    // It is also no longer holding usable media, whatever it was holding a moment ago, so the next
+    // correction has to be a whole load and not a seek into a file that stopped existing.
+    loaded = undefined;
+    return moveTo(settle(surface, failed.playback));
+  });
 
   const offset = (): number => serverClockOffsetMs(samples);
   const role = (): MediaRole => ({ channel: options.channel, optedIn });
@@ -345,15 +393,47 @@ export function createMediaFollower(
       silence();
       return;
     }
+    // Seeking into a file this element failed to load is seeking into nothing. A correction that follows
+    // a load failure therefore starts by asking for the file again, which is how an unattended Stage
+    // screen whose network blinked comes back on the next beat instead of staying dead for the service.
+    if (state.playback === 'load-error') element.load();
     if (settings !== undefined) applyMediaSettings(element, settings, role());
-    loaded = correction.mediaId;
     element.currentTime = correction.toMs / 1_000;
     if (!correction.playing) {
       if (!element.paused) element.pause();
+      loaded = correction.mediaId;
       moveTo(settle(surface, 'ok'));
       return;
     }
-    moveTo(settle(surface, await playing(element)));
+    const playback = await playing(element);
+    // Only media that actually loaded counts as loaded. Recording it before playback was known to have
+    // started would leave a failed element looking correctly loaded to the next correction, which would
+    // then seek it rather than load it, for the rest of the service.
+    loaded = playback === 'load-error' ? undefined : correction.mediaId;
+    moveTo(settle(surface, playback));
+  };
+
+  const step = async (): Promise<MediaCorrection> => {
+    if (timeline === undefined) {
+      silence();
+      return { kind: 'silent' };
+    }
+    const correction = correctionForFollower(
+      timeline,
+      {
+        channel: options.channel,
+        optedIn,
+        ...(loaded === undefined ? {} : { mediaId: loaded }),
+        // Read off the element rather than modelled here, so a decoder that quietly fell behind is
+        // caught as the drift it is instead of being assumed to be where it was told to go.
+        positionMs: element.currentTime * 1_000,
+        playing: !element.paused,
+      },
+      options.now() + offset(),
+      options.toleranceMs,
+    );
+    await apply(correction);
+    return correction;
   };
 
   return Object.freeze({
@@ -392,27 +472,13 @@ export function createMediaFollower(
       settings = followed;
     },
 
-    async synchronize(): Promise<MediaCorrection> {
-      if (timeline === undefined) {
-        silence();
-        return { kind: 'silent' };
-      }
-      const correction = correctionForFollower(
-        timeline,
-        {
-          channel: options.channel,
-          optedIn,
-          ...(loaded === undefined ? {} : { mediaId: loaded }),
-          // Read off the element rather than modelled here, so a decoder that quietly fell behind is
-          // caught as the drift it is instead of being assumed to be where it was told to go.
-          positionMs: element.currentTime * 1_000,
-          playing: !element.paused,
-        },
-        options.now() + offset(),
-        options.toleranceMs,
-      );
-      await apply(correction);
-      return correction;
+    synchronize: step,
+
+    async recover(): Promise<MediaCorrection> {
+      // Whatever went wrong, this element is not to be trusted to be holding usable media at a usable
+      // position any more, so the next correction is made a whole load rather than a seek.
+      if (state.recovery !== 'none') loaded = undefined;
+      return step();
     },
 
     dispose(): void {

@@ -265,6 +265,17 @@ describe('a follower correcting itself onto the Audience timeline', () => {
     });
   });
 
+  it('still reads a distance as a distance when the file outruns the length it declared', () => {
+    // A declared length is a claim, and a file whose real duration runs past its metadata leaves a
+    // follower sitting beyond the end of the clip it is supposed to be in. Folded into the lap that is
+    // three seconds of drift; subtracted raw it would be a negative number, which every tolerance
+    // comparison in this module would read as "close enough" and stop correcting on entirely.
+    const looping = timeline({ loop: true });
+    const pastTheEnd = follower({ positionMs: 63_000 });
+    expect(driftMsBetween(looping, pastTheEnd, AT)).toBe(3_000);
+    expect(correctionForFollower(looping, pastTheEnd, AT)).toMatchObject({ kind: 'adjust', reason: 'drift' });
+  });
+
   it('loads the other clip when the authority has moved on to different media', () => {
     const behind = follower({ mediaId: 'clip-0', positionMs: 5_000 });
     expect(correctionForFollower(timeline(), behind, AT + 5_000)).toEqual({

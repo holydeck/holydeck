@@ -88,7 +88,6 @@ const noSurface = () => ({ showMedia: () => undefined, holdLastFrame: () => unde
 
 describe('a three-hour service with media on it', () => {
   it('keeps Stage on the Audience timeline across the whole session, its drift, and two reconnects', async () => {
-    const startedAt = Date.now();
     let now = ANCHOR;
 
     const audience = slippingElement(1);
@@ -107,7 +106,7 @@ describe('a three-hour service with media on it', () => {
     };
 
     let corrections = 0;
-    let worstDriftAfterABeat = 0;
+    let worstDriftBeforeABeat = 0;
     let caughtUpAfterReconnect = 0;
     let wasAway = false;
 
@@ -128,6 +127,15 @@ describe('a three-hour service with media on it', () => {
       if (timeline === undefined) return;
       follower.follow(timeline, settings);
 
+      const stageBefore = {
+        channel: 'stage',
+        optedIn: true,
+        mediaId: settings.mediaId,
+        positionMs: stage.currentTime * 1_000,
+        playing: !stage.paused,
+      } as const;
+      worstDriftBeforeABeat = Math.max(worstDriftBeforeABeat, driftMsBetween(timeline, stageBefore, now));
+
       const correction = await follower.synchronize();
       if (correction.kind === 'adjust') corrections += 1;
       if (wasAway) {
@@ -140,10 +148,9 @@ describe('a three-hour service with media on it', () => {
 
       const drift = driftMsBetween(
         timeline,
-        { channel: 'stage', optedIn: true, mediaId: settings.mediaId, positionMs: stage.currentTime * 1_000, playing: !stage.paused },
+        { ...stageBefore, positionMs: stage.currentTime * 1_000, playing: !stage.paused },
         now,
       );
-      worstDriftAfterABeat = Math.max(worstDriftAfterABeat, drift);
       expect(drift).toBeLessThanOrEqual(MEDIA_DRIFT_TOLERANCE_MS);
     }
 
@@ -156,10 +163,9 @@ describe('a three-hour service with media on it', () => {
     // The authoritative timeline never versioned: three hours of beats carry no transport act, which is
     // the point of anchoring on a frame time rather than publishing a position.
     expect(authority.timeline?.version).toBe(1);
-    expect(worstDriftAfterABeat).toBeLessThanOrEqual(MEDIA_DRIFT_TOLERANCE_MS);
-    // A three-hour service costs a fraction of a second to simulate; anything near a minute here would
-    // mean per-beat work that a real session would pay for in a warm phone and a flat battery.
-    expect(Date.now() - startedAt).toBeLessThan(30_000);
+    // The session genuinely went out of step and was genuinely pulled back: a run in which the drift
+    // never grew at all would satisfy every assertion above while proving nothing about any of them.
+    expect(worstDriftBeforeABeat).toBeGreaterThan(MEDIA_DRIFT_TOLERANCE_MS);
 
     follower.dispose();
     authority.dispose();

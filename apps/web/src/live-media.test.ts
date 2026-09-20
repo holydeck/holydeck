@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { MEDIA_DRIFT_TOLERANCE_MS, mediaTimelineFromEvent } from '@holydeck/contracts/live-media';
+import {
+  MEDIA_DRIFT_TOLERANCE_MS,
+  mediaTimelineFromEvent,
+  projectedMediaPositionMs,
+} from '@holydeck/contracts/live-media';
 import { LOCALES } from '@holydeck/localization/locales';
 import { translate } from '@holydeck/localization/messages';
 
@@ -176,6 +180,25 @@ describe('the Audience surface, which owns the timeline', () => {
     expect(authority.timeline?.anchorPositionMs).toBe(30_000);
   });
 
+  it('starts a clip where the service already is, not at its beginning', async () => {
+    // The ordinary case, and the one a rejoining client always hits: the live event that put this slide
+    // up carries a server time that has already passed. Ninety seconds on a sixty-second loop is thirty
+    // seconds into its second lap, and starting at zero would put this element a lap and a half behind
+    // the timeline it just published, with every follower dutifully synchronising to the wrong one.
+    const element = fakeElement();
+    const authority = createMediaAuthority(element, fakeSurface(), { now: () => ANCHOR + 90_000 });
+    await authority.take({ at: AT }, settings);
+    expect(element.currentTime).toBe(30);
+  });
+
+  it('respects a start offset for a group picked up where it was left', async () => {
+    const element = fakeElement();
+    const authority = createMediaAuthority(element, fakeSurface(), { now: () => ANCHOR });
+    await authority.take({ at: AT }, { ...settings, startAtMs: 12_000 });
+    expect(element.currentTime).toBe(12);
+    expect(authority.timeline?.anchorPositionMs).toBe(12_000);
+  });
+
   it('does nothing to a surface that has taken no media', async () => {
     const element = fakeElement();
     const authority = createMediaAuthority(element, fakeSurface(), { now: () => ANCHOR });
@@ -230,6 +253,33 @@ describe('autoplay blocked mid-run', () => {
     await expect(authority.recover()).resolves.toMatchObject({ playback: 'autoplay-blocked', recovery: 'resume-playback' });
   });
 
+  it('stops the published timeline while the picture is stalled, and starts it again where it stopped', async () => {
+    // The failure that matters most here is not the block itself, it is a timeline that carries on
+    // advertising a running clip to three other screens while the room looks at a frozen one.
+    const element = fakeElement();
+    element.refuse = 'autoplay';
+    let now = ANCHOR;
+    const authority = createMediaAuthority(element, fakeSurface(), { now: () => now });
+    await authority.take({ at: AT }, settings);
+    expect(authority.timeline?.playing).toBe(false);
+
+    // Half a minute of somebody finding the machine. A follower reading the timeline through all of it
+    // is told the clip is stopped at zero, which is exactly what the Audience surface is showing.
+    now = ANCHOR + 30_000;
+    expect(authority.timeline).toBeDefined();
+    const stalled = authority.timeline;
+    if (stalled !== undefined) expect(projectedMediaPositionMs(stalled, now)).toBe(0);
+
+    element.refuse = undefined;
+    await authority.recover();
+    expect(authority.timeline).toMatchObject({ playing: true, anchorEpochMs: now, anchorPositionMs: 0 });
+    const resumed = authority.timeline;
+    if (resumed !== undefined) {
+      expect(projectedMediaPositionMs(resumed, now + 4_000)).toBe(4_000);
+    }
+    expect(element.currentTime).toBe(0);
+  });
+
   it('blocks a following surface the same way, without that surface touching the timeline', async () => {
     const element = fakeElement();
     element.refuse = 'autoplay';
@@ -277,6 +327,31 @@ describe('a media load failure mid-run', () => {
     expect(seen).toEqual(['load-error']);
   });
 
+  it('stops the timeline where the room last saw the picture when the file drops out mid-clip', async () => {
+    // The mid-run injection in its plainest form: nothing was asked of the element, it simply stopped.
+    const element = fakeElement();
+    const surface = fakeSurface();
+    let now = ANCHOR;
+    const authority = createMediaAuthority(element, surface, { now: () => now });
+    await authority.take({ at: AT }, settings);
+
+    now = ANCHOR + 20_000;
+    element.fireError();
+    expect(authority.state).toEqual({ playback: 'load-error', recovery: 'retry-load', fallback: 'last-frame' });
+    expect(surface.holdLastFrame).toHaveBeenCalledTimes(1);
+    expect(authority.timeline).toMatchObject({ playing: false, anchorPositionMs: 20_000 });
+
+    // A minute of a held frame moves nothing, so a follower joining now lands on the same still picture.
+    const stopped = authority.timeline;
+    expect(stopped).toBeDefined();
+    if (stopped !== undefined) expect(projectedMediaPositionMs(stopped, ANCHOR + 80_000)).toBe(20_000);
+
+    now = ANCHOR + 80_000;
+    await expect(authority.recover()).resolves.toMatchObject({ playback: 'ok' });
+    expect(element.currentTime).toBe(20);
+    expect(authority.timeline).toMatchObject({ playing: true, anchorPositionMs: 20_000, anchorEpochMs: now });
+  });
+
   it('retries the load on the affordance the failure named, and shows the media once it works', async () => {
     const element = fakeElement();
     element.refuse = 'load';
@@ -299,6 +374,59 @@ describe('a media load failure mid-run', () => {
     await expect(authority.recover()).resolves.toMatchObject({ playback: 'load-error', fallback: 'last-frame' });
     expect(surface.holdLastFrame).toHaveBeenCalledTimes(2);
     expect(surface.showMedia).not.toHaveBeenCalled();
+  });
+
+  it('holds the last frame on a following surface too, not just on the authoritative one', () => {
+    const element = fakeElement();
+    const surface = fakeSurface();
+    const follower = createMediaFollower(element, surface, { channel: 'stage', now: () => ANCHOR });
+    element.fireError();
+    expect(follower.state.fallback).toBe('last-frame');
+    expect(surface.holdLastFrame).toHaveBeenCalledTimes(1);
+    expect(surface.showMedia).not.toHaveBeenCalled();
+  });
+
+  it('lets a following surface act on the retry it was promised, and land back in step', async () => {
+    const element = fakeElement();
+    element.refuse = 'load';
+    let now = ANCHOR;
+    const follower = createMediaFollower(element, fakeSurface(), { channel: 'stage', now: () => now });
+    follower.follow(mediaTimelineFromEvent({ at: AT }, settings), settings);
+    follower.optIn();
+    await follower.synchronize();
+    expect(follower.state).toEqual({ playback: 'load-error', recovery: 'retry-load', fallback: 'last-frame' });
+
+    // The status line said "press Retry"; this is that button existing.
+    now = ANCHOR + 8_000;
+    element.refuse = undefined;
+    await expect(follower.recover()).resolves.toMatchObject({ kind: 'adjust', reason: 'media-changed' });
+    expect(element.loadCalls).toBe(1);
+    expect(element.currentTime).toBe(8);
+    expect(follower.state.playback).toBe('ok');
+  });
+
+  it('brings an unattended following surface back by itself on the next beat', async () => {
+    // Nobody is standing at a Stage screen to press anything, so a file that came back has to be picked
+    // up by the ordinary cadence — otherwise one blink of a network costs the whole service.
+    const element = fakeElement();
+    element.refuse = 'load';
+    let now = ANCHOR;
+    const follower = createMediaFollower(element, fakeSurface(), { channel: 'stage', now: () => now });
+    follower.follow(mediaTimelineFromEvent({ at: AT }, settings), settings);
+    follower.optIn();
+    await follower.synchronize();
+
+    now = ANCHOR + 5_000;
+    await follower.synchronize();
+    expect(element.loadCalls).toBe(1);
+    expect(follower.state.playback).toBe('load-error');
+
+    element.refuse = undefined;
+    now = ANCHOR + 10_000;
+    await expect(follower.synchronize()).resolves.toMatchObject({ kind: 'adjust', reason: 'media-changed' });
+    expect(element.loadCalls).toBe(2);
+    expect(element.currentTime).toBe(10);
+    expect(element.paused).toBe(false);
   });
 
   it('has nothing to recover when nothing went wrong', async () => {
@@ -524,6 +652,23 @@ describe('what a person standing in front of the surface is told', () => {
       expect(line.textContent).not.toBe('');
       expect(line.textContent).not.toBeNull();
     }
+  });
+
+  it('says a different thing per state, and says it in each locale rather than in English three times', () => {
+    // Reading the catalog for the expected value, as the tests above do, cannot catch a catalog whose
+    // German and Tamil entries were copied from the English one, or one whose three states all say the
+    // same sentence. Both are exactly what a hurried translation pass leaves behind.
+    const said = (playback: 'ok' | 'autoplay-blocked' | 'load-error', locale: (typeof LOCALES)[number]): string => {
+      const line = status();
+      presentMediaState(line, { playback, recovery: 'none', fallback: 'media' }, locale);
+      return line.textContent ?? '';
+    };
+
+    for (const locale of LOCALES) {
+      const states = new Set([said('ok', locale), said('autoplay-blocked', locale), said('load-error', locale)]);
+      expect(states.size).toBe(3);
+    }
+    expect(new Set(LOCALES.map((locale) => said('load-error', locale))).size).toBe(LOCALES.length);
   });
 
   it('tells a following surface which surface it is in step with', () => {
