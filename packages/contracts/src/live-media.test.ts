@@ -20,9 +20,16 @@ import {
   recoveryFor,
   seekMediaTimeline,
   serverClockOffsetMs,
+  slideGroupAudioAction,
 } from './live-media.js';
 
-import type { FollowerPlayback, MediaPlaybackState, MediaTimeline } from './live-media.js';
+import type {
+  FollowerPlayback,
+  MediaPlaybackState,
+  MediaTimeline,
+  PresentedSlideGroup,
+  SlideGroupAudioMemory,
+} from './live-media.js';
 
 const AT = Date.parse('2026-09-20T10:00:00.000Z');
 
@@ -364,5 +371,78 @@ describe('reading the server clock a surface is synchronising against', () => {
   it('keeps the sample window odd and small enough to hold for a whole service', () => {
     expect(MEDIA_CLOCK_SAMPLES % 2).toBe(1);
     expect(MEDIA_CLOCK_SAMPLES).toBeLessThanOrEqual(15);
+  });
+});
+
+describe("deciding what a slide group's backing track does when a slide goes live (LIVE-20)", () => {
+  const NO_MEMORY: SlideGroupAudioMemory = {};
+  const group = (over: Partial<PresentedSlideGroup> = {}): PresentedSlideGroup => ({
+    slideGroupId: 'group-1',
+    ...over,
+  });
+
+  it('does nothing for a group with no track, entered from nothing before it — the ordinary service', () => {
+    expect(slideGroupAudioAction(undefined, group(), NO_MEMORY)).toEqual({ kind: 'none' });
+  });
+
+  it('starts a track from the beginning the first time its group is entered', () => {
+    const next = group({ audioTrackId: 'clip-1' });
+    expect(slideGroupAudioAction(undefined, next, NO_MEMORY)).toEqual({
+      kind: 'start',
+      audioTrackId: 'clip-1',
+      startAtMs: 0,
+    });
+  });
+
+  it('carries on without a fresh decision when the next slide is still in the same group', () => {
+    const previous = group({ audioTrackId: 'clip-1' });
+    const next = group({ audioTrackId: 'clip-1' });
+    expect(slideGroupAudioAction(previous, next, NO_MEMORY)).toEqual({ kind: 'continue' });
+  });
+
+  it('carries on for a same-group move even when the group has no track at all', () => {
+    const previous = group();
+    const next = group();
+    expect(slideGroupAudioAction(previous, next, NO_MEMORY)).toEqual({ kind: 'continue' });
+  });
+
+  it('says stop when leaving a group whose track was playing for one with nothing to play', () => {
+    const previous = group({ slideGroupId: 'group-1', audioTrackId: 'clip-1' });
+    const next = group({ slideGroupId: 'group-2' });
+    expect(slideGroupAudioAction(previous, next, NO_MEMORY)).toEqual({ kind: 'stop' });
+  });
+
+  it('stays at none when moving between two groups that never had a track', () => {
+    const previous = group({ slideGroupId: 'group-1' });
+    const next = group({ slideGroupId: 'group-2' });
+    expect(slideGroupAudioAction(previous, next, NO_MEMORY)).toEqual({ kind: 'none' });
+  });
+
+  it('resumes a returned-to group from where its memory says it was left, not from the start', () => {
+    const previous = group({ slideGroupId: 'group-2' });
+    const next = group({ slideGroupId: 'group-1', audioTrackId: 'clip-1' });
+    const memory: SlideGroupAudioMemory = { 'group-1': 47_000 };
+    expect(slideGroupAudioAction(previous, next, memory)).toEqual({
+      kind: 'start',
+      audioTrackId: 'clip-1',
+      startAtMs: 47_000,
+    });
+  });
+
+  it('starts a track fresh from a group memory has no entry for, even with other groups remembered', () => {
+    const previous = group({ slideGroupId: 'group-2' });
+    const next = group({ slideGroupId: 'group-3', audioTrackId: 'clip-3' });
+    const memory: SlideGroupAudioMemory = { 'group-1': 47_000, 'group-2': 12_000 };
+    expect(slideGroupAudioAction(previous, next, memory)).toEqual({
+      kind: 'start',
+      audioTrackId: 'clip-3',
+      startAtMs: 0,
+    });
+  });
+
+  it('never returns a MediaTimeline itself — only a decision, kept from being mistaken for one', () => {
+    const action = slideGroupAudioAction(undefined, group({ audioTrackId: 'clip-1' }), NO_MEMORY);
+    expect(action).not.toHaveProperty('anchorEpochMs');
+    expect(action).not.toHaveProperty('version');
   });
 });

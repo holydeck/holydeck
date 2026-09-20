@@ -24,6 +24,14 @@
 // renderer (which prepares a media box) and the web client (which owns a real media element, and does not
 // depend on the renderer) have to say the same three words about the same failure. `render-model.ts`
 // re-exports them, so the prepared model's vocabulary and the live transport's are one vocabulary.
+//
+// LIVE-20 (this file, as of T114): a slide group's own backing track is the same media machinery above,
+// applied to a coarser unit than a slide. `slideGroupAudioAction` is the only addition this task makes
+// here — one more pure decision, not a second timeline model — because a group's track already rides the
+// same `MediaTimeline`, the same `MediaAuthority`/`MediaFollower` split, and the same anchor-on-the-frame
+// wiring a single slide's media used before it. What is new is only the question of *whether* to touch
+// any of that: moving within a group must not, and leaving one that was playing must, and this function
+// is where that single decision is made and tested once rather than at every call site.
 
 import { OUTPUT_CHANNELS } from './live.js';
 
@@ -355,4 +363,64 @@ export function serverClockOffsetMs(samples: readonly ClockSample[]): number {
   const lower = offsets[middle - 1] ?? 0;
   const upper = offsets[middle] ?? 0;
   return offsets.length % 2 === 1 ? upper : (lower + upper) / 2;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Slide-group backing audio (LIVE-20)
+// ---------------------------------------------------------------------------------------------------
+
+/** The one fact this decision needs about whatever is on screen: which group it belongs to, and which
+ *  backing track (if any) that group carries. A slide's own content has no bearing on any of this — only
+ *  its group does, because `@holydeck/contracts/slide-groups`' `audioTrackId` is a group-level field with
+ *  no per-slide override. */
+export interface PresentedSlideGroup {
+  readonly slideGroupId: string;
+  readonly audioTrackId?: string;
+}
+
+/** Where a group's track stood, in milliseconds, the moment its group was last left — keyed by
+ *  `slideGroupId`. A group never left, or never entered, has no entry, which reads the same as "start
+ *  from zero". This map is the caller's to keep: deciding what to do is stateless, but remembering where
+ *  a stopped track was is not, and the caller is the one place that already owns a `MediaAuthority` to
+ *  read a frozen position back off. */
+export type SlideGroupAudioMemory = Readonly<Record<string, number>>;
+
+/**
+ * The whole of what taking a slide live decides about its group's backing track. `'none'` is a group with
+ * nothing to play, staying that way — the ordinary case, and the only one a track-less service ever sees.
+ * `'continue'` is moving between slides inside the same group: deliberately silent about whatever the
+ * track is doing, because nothing about it changes. `'stop'` is leaving a group whose track was playing
+ * for one with nothing to play; it says a stop is owed, not where the track stopped, because only the
+ * caller — holding the live `MediaAuthority` — knows the position playback had actually reached. `'start'`
+ * is entering a group with a track, carrying `startAtMs` already resolved from the memory handed in: zero
+ * for a first entry, wherever it was left for a return.
+ */
+export type SlideGroupAudioAction =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'continue' }
+  | { readonly kind: 'stop' }
+  | { readonly kind: 'start'; readonly audioTrackId: string; readonly startAtMs: number };
+
+/**
+ * The one decision taking a slide live ever makes about its group's backing track, worked out from
+ * nothing but which group the previous and the next slide belonged to. Moving within a group is not "the
+ * same track re-decided" — it is not decided at all, because `previous` and `next` naming the same
+ * `slideGroupId` short-circuits before either one's `audioTrackId` is even read, which is what keeps a
+ * mid-song slide advance from so much as glancing at the track, restarting it, or repositioning it.
+ *
+ * A caller that is actually leaving a group whose track was playing owns the other half of this: freezing
+ * the authority and folding the position it had reached into `memory` before calling this function again
+ * for wherever the operator goes next, so a `'start'` for a group already visited resumes rather than
+ * restarts.
+ */
+export function slideGroupAudioAction(
+  previous: PresentedSlideGroup | undefined,
+  next: PresentedSlideGroup,
+  memory: SlideGroupAudioMemory,
+): SlideGroupAudioAction {
+  if (previous !== undefined && previous.slideGroupId === next.slideGroupId) return { kind: 'continue' };
+  if (next.audioTrackId === undefined) {
+    return previous?.audioTrackId === undefined ? { kind: 'none' } : { kind: 'stop' };
+  }
+  return { kind: 'start', audioTrackId: next.audioTrackId, startAtMs: memory[next.slideGroupId] ?? 0 };
 }

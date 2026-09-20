@@ -130,6 +130,35 @@ describe('reading a SlideGroupBody', () => {
     };
     expect(parseSlideGroupBody(body, 'group')).toEqual({ ok: true, value: body });
   });
+
+  it('round-trips a group backing audio track as a bare id, never bytes (LIVE-20)', () => {
+    const body = {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      audioTrackId: 'media-hymn-1',
+      slides: [SLIDE],
+    };
+    expect(parseSlideGroupBody(body, 'group')).toEqual({ ok: true, value: body });
+  });
+
+  it('leaves audioTrackId absent when not authored, the ordinary case', () => {
+    const body = { mode: 'custom', enabled: true, slideLayoutId: 'layout-a', slides: [SLIDE] };
+    const parsed = parseSlideGroupBody(body, 'group');
+    expect(parsed).toEqual({ ok: true, value: body });
+    expect(parsed.ok && 'audioTrackId' in parsed.value).toBe(false);
+  });
+
+  it('accepts a present-but-empty audioTrackId, matching background’s own group-level convention', () => {
+    const body = {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      audioTrackId: '',
+      slides: [SLIDE],
+    };
+    expect(parseSlideGroupBody(body, 'group')).toEqual({ ok: true, value: body });
+  });
 });
 
 describe("resolving a slide's effective background and Slide Layout (SLID-02)", () => {

@@ -1,3 +1,4 @@
+import { slideGroupAudioAction } from '@holydeck/contracts/live-media';
 import { prepareRenderModel } from '@holydeck/renderer/render-model';
 import { frameBytes, renderPrepared, serializeFrame } from '@holydeck/renderer/renderer';
 import { describe, expect, it } from 'vitest';
@@ -309,6 +310,29 @@ describe('Invariant 13', () => {
     const outcome = sweep([protectedEvent, expiredAuditEntry]);
     expect(outcome.removable).toEqual(['audit-1']);
     expect(outcome.retained).toEqual([{ id: `${RUN_ID}#1`, reason: 'protected-class', message: expect.any(String) }]);
+  });
+});
+
+// LIVE-20 (T114): a slide group's own backing track reuses the run event log a single slide's media
+// already writes through — `slideGroupAudioAction`'s decision names nothing about storage, and this is
+// the proof the two compose without either one being taught about the other.
+describe("a slide group's backing track starting, as a run event (LIVE-20)", () => {
+  it('reaches the run log with actor, time, and the pinned revisions LIVE-12 requires', async () => {
+    const { store } = harness();
+    const action = slideGroupAudioAction(undefined, { slideGroupId: 'group-1', audioTrackId: 'hymn-1' }, {});
+    expect(action.kind).toBe('start');
+
+    const event = await store.record(SESSION, { runId: RUN_ID, kind: 'current-slide-changed', pinnedRevisions: PINS_ONE });
+
+    expect(event).toMatchObject({
+      runId: RUN_ID,
+      kind: 'current-slide-changed',
+      actor: OPERATOR,
+      pinnedRevisions: PINS_ONE,
+    });
+    expect(event.at).toBe(new Date(START + 1000).toISOString());
+    const log = await store.log(READ_CONTEXT, RUN_ID);
+    expect(log).toEqual([event]);
   });
 });
 

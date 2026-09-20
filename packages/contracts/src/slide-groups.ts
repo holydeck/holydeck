@@ -35,6 +35,14 @@
 // is declaration order, so a future task that builds that bridge inherits this array's order as
 // its only source, the same way it will inherit `resolveSlide`'s resolved background and Slide
 // Layout.
+//
+// LIVE-20 (this file, as of T114): a group carries at most one backing audio track, named the same
+// way `background` already names a library item — a bare, non-empty id, never a copy of its bytes,
+// so the reference is what protects the asset from cleanup rather than a payload this file has any
+// business holding. Unlike `background`, there is no per-slide override: the track belongs to the
+// group as a whole (`@holydeck/contracts/live-media`'s `slideGroupAudioAction` is what decides
+// whether moving between slides changes anything about it), so it is declared once here and not on
+// `Slide`.
 
 import { isContentLanguageKey } from './content-languages.js';
 import { FIELD_CODES, type FieldReader, isRecord, type ParseFn, parseObject } from './problems.js';
@@ -75,6 +83,10 @@ export interface SlideGroupBody {
   readonly enabled: boolean;
   readonly slideLayoutId: string;
   readonly background?: string;
+  /** The group's own backing audio track (LIVE-20): a media library item's id, never its bytes,
+   *  following exactly the convention `background` above already set. Absent is the ordinary case
+   *  — a group with nothing to play, which behaves exactly as one always has. */
+  readonly audioTrackId?: string;
   /**
    * Present only when `mode === 'generated'`. Opaque here — the shape a concrete generator (T51
    * songs, later sermon/general projections) pins is that generator's to define; this file only
@@ -143,6 +155,7 @@ export const parseSlideGroupBody: ParseFn<SlideGroupBody> = (value, path) =>
     const enabled = reader.flag('enabled');
     const slideLayoutId = reader.text('slideLayoutId');
     const background = reader.optionalText('background');
+    const audioTrackId = reader.optionalText('audioTrackId');
     const slides = reader.parsedList('slides', parseSlide);
     const generatedFrom = reader.optionalParsed('generatedFrom', parseOpaqueRecord);
     return {
@@ -150,6 +163,7 @@ export const parseSlideGroupBody: ParseFn<SlideGroupBody> = (value, path) =>
       enabled,
       slideLayoutId,
       ...(background === undefined ? {} : { background }),
+      ...(audioTrackId === undefined ? {} : { audioTrackId }),
       slides,
       ...(generatedFrom === undefined ? {} : { generatedFrom }),
     };
