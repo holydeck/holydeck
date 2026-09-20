@@ -144,10 +144,21 @@ export const RECORDS = {
     },
   },
   // Spec LIVE-12: every shown slide and operator change, in server order, with the revisions it pinned.
+  // `shown` is optional because most of what this log holds moved nothing into view — a theme change, a
+  // Standby, an override. An event that did carries what it put in front of the room, which is what spec
+  // LIVE-13's review of the exact references shown is derived from (`run-review.ts`).
   runEvents: {
     collection: 'run_events',
     kind: 'immutable',
-    fields: { ...HISTORY, runId: 'required', sequence: 'required', at: 'required', kind: 'required', pinnedRevisions: 'required' },
+    fields: {
+      ...HISTORY,
+      runId: 'required',
+      sequence: 'required',
+      at: 'required',
+      kind: 'required',
+      pinnedRevisions: 'required',
+      shown: 'optional',
+    },
   },
   // ADR 0009's own ledger: the schema version is replayed from it rather than stored as a number to edit.
   schemaMigrations: {

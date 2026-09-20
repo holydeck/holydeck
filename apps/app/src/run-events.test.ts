@@ -125,6 +125,56 @@ describe('recording a run event', () => {
     expect(log.map((event) => event.sequence)).toEqual([1, 2, 3, 4]);
   });
 
+  it('carries what one event put in front of the room, read back exactly as it was shown', async () => {
+    const { store } = harness();
+
+    const event = await store.record(SESSION, {
+      runId: RUN_ID,
+      kind: 'current-slide-changed',
+      pinnedRevisions: PINS_ONE,
+      shown: { itemId: 'item-2', reference: 'Psalm 23:1-6' },
+    });
+
+    expect(event.shown).toEqual({ itemId: 'item-2', reference: 'Psalm 23:1-6' });
+    const [logged] = await store.log(READ_CONTEXT, RUN_ID);
+    expect(logged?.shown).toEqual({ itemId: 'item-2', reference: 'Psalm 23:1-6' });
+  });
+
+  it('carries no shown item for an event that put nothing in front of the room', async () => {
+    const { store } = harness();
+
+    const event = await store.record(SESSION, { runId: RUN_ID, kind: 'theme-changed', pinnedRevisions: PINS_ONE });
+
+    expect(event.shown).toBeUndefined();
+    expect((await store.log(READ_CONTEXT, RUN_ID))[0]?.shown).toBeUndefined();
+  });
+
+  it('refuses a shown item naming no item or no reference', async () => {
+    const { store } = harness();
+    const shown = { runId: RUN_ID, kind: 'current-slide-changed', pinnedRevisions: PINS_ONE } as const;
+
+    const nameless = await refused(store.record(SESSION, { ...shown, shown: { itemId: '', reference: 'Psalm 23:1-6' } }));
+    const blank = await refused(store.record(SESSION, { ...shown, shown: { itemId: 'item-2', reference: '  ' } }));
+
+    expect(nameless.kind).toBe('schema');
+    expect(blank.kind).toBe('schema');
+  });
+
+  it('refuses a change class that shows nothing claiming it showed something', async () => {
+    const { store } = harness();
+
+    const error = await refused(
+      store.record(SESSION, {
+        runId: RUN_ID,
+        kind: 'theme-changed',
+        pinnedRevisions: PINS_ONE,
+        shown: { itemId: 'item-2', reference: 'Psalm 23:1-6' },
+      }),
+    );
+
+    expect(error.kind).toBe('schema');
+  });
+
   it('refuses a session without Control presentation, before anything is read or written', async () => {
     const { store, db } = harness();
 
@@ -273,6 +323,31 @@ describe('reconstructing a run', () => {
     const log = await store.log(READ_CONTEXT, RUN_ID);
 
     expect(log.map((event) => event.kind)).toEqual(['current-slide-changed', OVERRIDE_ACTION]);
+  });
+
+  it('refuses to serve a stored shown item this code cannot read', async () => {
+    // Half a shown item, and a shown item that is not one at all: neither says what the room was shown,
+    // and a review of the references shown is only as true as what the log can be read back as.
+    for (const shown of [{ itemId: 'item-2' }, 'Psalm 23:1-6']) {
+      const { store, db } = harness();
+      db.rows.set(RECORDS.runEvents.collection, [
+        {
+          _id: `${RUN_ID}#1`,
+          runId: RUN_ID,
+          sequence: 1,
+          at: new Date(START).toISOString(),
+          kind: 'current-slide-changed',
+          pinnedRevisions: PINS_ONE,
+          shown,
+          actor: OPERATOR,
+          correlationId: CORRELATION,
+        },
+      ]);
+
+      const error = await refused(store.log(READ_CONTEXT, RUN_ID));
+
+      expect(error.kind).toBe('corrupt');
+    }
   });
 
   it('refuses to serve a stored row this code cannot read rather than reconstruct from a guess', async () => {

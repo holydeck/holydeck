@@ -263,7 +263,15 @@ export function midServiceOn(db: RepositoryDb, options: MidServiceOptions): MidS
           throw new MidServiceError('conflict', `${contentId} is content another writer added first`);
         }
         const saved = await revisions.save(context, { contentId, body: request.body, origin: 'manual-checkpoint' });
-        const event = await runEvents.record(session, { runId: run.runId, kind: LIVE_EVENT_TYPES.slide, pinnedRevisions });
+        // The run event names the addition the way it names any shown item, so LIVE-13's review of what a
+        // run showed reads this back from the log alone — which is the only place it could be read from:
+        // no Service definition ever held this content.
+        const event = await runEvents.record(session, {
+          runId: run.runId,
+          kind: LIVE_EVENT_TYPES.slide,
+          pinnedRevisions,
+          shown: { itemId: contentId, reference: parsed.value.title },
+        });
         const libraryId =
           request.saveToLibrary === true ? (await library.create(context, parsed.value)).stamp.id : undefined;
         const addition: MidServiceAddition = {

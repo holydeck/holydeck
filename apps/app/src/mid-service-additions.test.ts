@@ -129,6 +129,17 @@ describe('content added while a run is on', () => {
     expect(log).toEqual([outcome.event]);
   });
 
+  it('names what it put in front of the room, so a run’s review reads it back (LIVE-13)', async () => {
+    const { store, runId } = await live();
+
+    const outcome = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
+
+    // The title a person gave it, under the identifier the body was saved as: the addition is a reference
+    // shown, and the log is where a review of one is read from — never the Service definition, which
+    // never held this content at all.
+    expect(outcome.event.shown).toEqual({ itemId: outcome.addition.contentId, reference: 'Psalm 23' });
+  });
+
   it('carries the run’s own standing pins through unchanged, content pin included', async () => {
     const { db, store, runId, pins } = await live();
 

@@ -26,6 +26,14 @@
 // stays a domain of its own (`reference-routes.ts`) until a later task binds it to a run in flight. Folding
 // it in now would mean inventing that binding and reworking a route this task does not own, for a shape
 // this task's own tests never ask for.
+//
+// One field has since been added for LIVE-13: `shown`, what an event put in front of the room. It is not
+// that migration either — it names an item and the reference a person reads it as, not a translation,
+// book, chapter and verse list, and `reference-routes.ts` still writes nowhere near here. It is what makes
+// a review of the exact references a run showed derivable from this log alone (`run-review.ts`): the seven
+// pins are one digest of the whole bound manifest, identical on every event of a run, so they say what the
+// run could show and never which item it was on, and the Service definition is the one place that would
+// otherwise hold the answer — the place LIVE-13 says a review may not read it from.
 
 import { SNAPSHOT_PINS } from '@holydeck/contracts/snapshots';
 
@@ -63,6 +71,17 @@ export function runEventContext(actor: string, correlationId: string): RequestCo
   return requestContext({ actor, permissions: Object.values(RUN_EVENT_PERMISSIONS), correlationId });
 }
 
+/** What one event put in front of the room. Only `current-slide-changed` carries one — the other three
+ *  change classes move nothing into view — and the reference is stored rather than looked up later, so a
+ *  review of what a run showed (LIVE-13, `run-review.ts`) never has to consult the Service definition the
+ *  run may have outlived, and never has to guess what a pin that is invariant across a whole run meant. */
+export interface ShownItem {
+  /** What the run moved to: a Service item's own id, or the content id of a mid-service addition. */
+  readonly itemId: string;
+  /** What a person reads it as — 'Psalm 23:1-6' — exactly as the room was shown it. */
+  readonly reference: string;
+}
+
 /** What a shown slide or an operator state change appends. `kind` is `live-events.ts`'s own vocabulary — the
  *  four classes an authorized view is ever pushed — so a caller cannot log an event no view was told about. */
 export interface RunEventInput {
@@ -70,6 +89,8 @@ export interface RunEventInput {
   readonly kind: LiveEventType;
   /** Every one of `SNAPSHOT_PINS`, exactly as the run's prepared manifest pinned them at this moment. */
   readonly pinnedRevisions: Readonly<Record<SnapshotPin, string>>;
+  /** Present exactly when this event showed something, which is `current-slide-changed` and nothing else. */
+  readonly shown?: ShownItem;
 }
 
 /** A row as read back. `kind` widens to `string` here: the log also carries `snapshots.ts`'s own
@@ -82,6 +103,8 @@ export interface RunEventRecord {
   readonly kind: string;
   readonly pinnedRevisions: Readonly<Record<SnapshotPin, string>>;
   readonly actor: string;
+  /** Absent on every event that moved nothing into view — the override rows included. */
+  readonly shown?: ShownItem;
 }
 
 export interface RunEventStore {
@@ -109,6 +132,16 @@ const pinsFrom = (value: unknown, refusal: RunEventRefusal, id: string): Record<
     pins[pin] = pinned;
   }
   return pins as Record<SnapshotPin, string>;
+};
+
+const shownFrom = (value: unknown, refusal: RunEventRefusal, id: string): ShownItem | undefined => {
+  if (value === undefined) return undefined;
+  const candidate = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const { itemId, reference } = candidate;
+  if (typeof itemId !== 'string' || itemId.trim() === '' || typeof reference !== 'string' || reference.trim() === '') {
+    throw new RunEventError(refusal, `${id}: an event that showed something names the item it showed and the reference a person reads it as`);
+  }
+  return { itemId, reference };
 };
 
 function refusalFor(error: unknown): unknown {
@@ -141,8 +174,10 @@ export function runEventsOn(db: RepositoryDb, options: RunEventOptions): RunEven
     ) {
       throw new RunEventError('corrupt', `${String(runId)}${SEQUENCE_SEPARATOR}${String(sequence)} holds a run event this code cannot read`);
     }
-    const pinnedRevisions = pinsFrom(found['pinnedRevisions'], 'corrupt', `${runId}${SEQUENCE_SEPARATOR}${sequence}`);
-    return { runId, sequence, at, kind, pinnedRevisions, actor };
+    const id = `${runId}${SEQUENCE_SEPARATOR}${sequence}`;
+    const pinnedRevisions = pinsFrom(found['pinnedRevisions'], 'corrupt', id);
+    const shown = shownFrom(found['shown'], 'corrupt', id);
+    return { runId, sequence, at, kind, pinnedRevisions, actor, ...(shown === undefined ? {} : { shown }) };
   };
 
   const store: RunEventStore = {
@@ -156,9 +191,16 @@ export function runEventsOn(db: RepositoryDb, options: RunEventOptions): RunEven
           throw new RunEventError('schema', `${input.kind} is not one of the change classes live-events.ts names`);
         }
         const pinnedRevisions = pinsFrom(input.pinnedRevisions, 'schema', input.runId);
+        const shown = shownFrom(input.shown, 'schema', input.runId);
+        // A change class that moves nothing into view may not claim it showed something: the review this
+        // field exists for (LIVE-13) is only as true as the log, and a lie here is one no later read can see.
+        if (shown !== undefined && input.kind !== LIVE_EVENT_TYPES.slide) {
+          throw new RunEventError('schema', `${input.kind} moves nothing into view, so it shows no reference`);
+        }
         const context = runEventContext(session.actor, session.correlationId);
         const sequence = (await runEvents.count(context, { runId: input.runId })) + 1;
         const at = options.now();
+        const carried = shown === undefined ? {} : { shown };
         await runEvents.append(context, {
           _id: `${input.runId}${SEQUENCE_SEPARATOR}${sequence}`,
           runId: input.runId,
@@ -166,10 +208,11 @@ export function runEventsOn(db: RepositoryDb, options: RunEventOptions): RunEven
           at,
           kind: input.kind,
           pinnedRevisions,
+          ...carried,
           actor: session.actor,
           correlationId: session.correlationId,
         });
-        return { runId: input.runId, sequence, at, kind: input.kind, pinnedRevisions, actor: session.actor };
+        return { runId: input.runId, sequence, at, kind: input.kind, pinnedRevisions, actor: session.actor, ...carried };
       }),
 
     log: (context, runId) =>
