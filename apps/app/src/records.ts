@@ -98,6 +98,17 @@ export const RECORDS = {
     kind: 'append-only',
     fields: { ...HISTORY, assetId: 'required', sequence: 'required', at: 'required', manifest: 'required', storageKey: 'required', stamp: 'required' },
   },
+  // Spec LIVE-14: content a run took on while it was already on. A class of its own rather than a field
+  // on `contentRevisions`, because a revision records how a save was triggered and never when in a
+  // service's life it happened; that a row is here at all is what says the content was added mid-service.
+  // `contentId` is the same word `contentRevisions` uses, and names the same key space: the body is saved
+  // there under exactly this identifier. `libraryId` is the separate identifier `contentLibrary` minted
+  // for the one addition somebody explicitly decided to keep, and is absent for every addition nobody did.
+  midServiceAdditions: {
+    collection: 'mid_service_additions',
+    kind: 'immutable',
+    fields: { ...HISTORY, contentId: 'required', runId: 'required', at: 'required', libraryId: 'optional' },
+  },
   // Spec PREP-01: the manifest pinning everything a run replays from, including the resolved geometry.
   preparedSnapshots: {
     collection: 'prepared_snapshots',

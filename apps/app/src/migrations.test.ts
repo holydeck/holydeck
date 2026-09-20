@@ -96,6 +96,7 @@ describe('the shipped migrations', () => {
       'content_revisions',
       'jobs',
       'media_assets',
+      'mid_service_additions',
       'passkey_challenges',
       'passkey_credentials',
       'prepared_snapshots',

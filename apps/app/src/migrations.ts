@@ -13,6 +13,7 @@ import { SHELF_INDEXES, SHELF_RECORD } from './conflicts.js';
 import { CONTENT_LANGUAGE_INDEXES, CONTENT_LANGUAGE_RECORD } from './content-languages.js';
 import { LIBRARY_INDEXES, LIBRARY_RECORD } from './library.js';
 import { MEDIA_ASSET_RECORD, MEDIA_INDEXES } from './media.js';
+import { MID_SERVICE_INDEXES, MID_SERVICE_RECORD } from './mid-service-additions.js';
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
 import { PRESENCE_INDEXES, createPresenceIndexOn, dropPresenceIndexOn } from './presence.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
@@ -327,6 +328,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...RUN_INDEXES].reverse()) await api.dropIndex(RUN_RECORD, index.name);
+    },
+  },
+  {
+    version: 18,
+    name: 'the index everything a run took on mid-service is read in order by',
+    async up(api) {
+      for (const index of MID_SERVICE_INDEXES) {
+        await api.createIndex(MID_SERVICE_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...MID_SERVICE_INDEXES].reverse()) await api.dropIndex(MID_SERVICE_RECORD, index.name);
     },
   },
 ]);
