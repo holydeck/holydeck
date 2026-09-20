@@ -23,10 +23,14 @@
 // `revisions.ts`'s `RevisionOrigin` says how a save was triggered, never when in a service's life it
 // happened, and folding the two together would leave neither answerable on its own.
 //
-// The writes are ordered so that nothing durable ever claims content that does not exist: the body first,
-// then the provenance, then the run event. An interruption between them leaves content nobody saw, which
-// an Operator notices as the addition not appearing and adds again — the other order would leave a run
-// event pinned to a body that was never written, which is a run that cannot be reconstructed (ADR 0007).
+// The writes are ordered so that nothing durable ever claims something that did not happen: the body
+// first, then the run event, and the provenance last. The body leads because a run event pinned to a body
+// that was never written is a run that cannot be reconstructed (ADR 0007). The provenance trails because
+// neither record class can be taken back — two Operators adding to the same run at the same moment race
+// for the same ordinal in the log, and the one that loses must not leave a row saying an addition joined
+// a run it never joined. What a loser does leave is a saved body nothing points at, which claims nothing;
+// what an interruption leaves is at worst a missing row, which an Operator notices as the addition not
+// appearing and adds again. A record kept to be believed is better silent than wrong.
 
 import { randomBytes } from 'node:crypto';
 
@@ -160,9 +164,9 @@ function refusalFor(error: unknown): unknown {
   if (error instanceof RepositoryError && error.kind === 'duplicate') {
     return new MidServiceError('conflict', `${error.message}, so another writer added this content first`);
   }
-  // The run event is appended last and is the one composed write every check above cannot rule out: two
-  // Operators adding to the same run at the same moment race for the same ordinal in the log. Its refusal
-  // is carried over under this store's own name rather than leaking a second vocabulary to the caller.
+  // The run event is the one write every check above cannot rule out: two Operators adding to the same run
+  // at the same moment race for the same ordinal in the log. Its refusal is carried over under this
+  // store's own name rather than leaking a second vocabulary to the caller.
   if (error instanceof RunEventError) {
     return new MidServiceError(error.kind, `${error.message}, so this addition never joined the run`);
   }
@@ -259,6 +263,7 @@ export function midServiceOn(db: RepositoryDb, options: MidServiceOptions): MidS
           throw new MidServiceError('conflict', `${contentId} is content another writer added first`);
         }
         const saved = await revisions.save(context, { contentId, body: request.body, origin: 'manual-checkpoint' });
+        const event = await runEvents.record(session, { runId: run.runId, kind: LIVE_EVENT_TYPES.slide, pinnedRevisions });
         const libraryId =
           request.saveToLibrary === true ? (await library.create(context, parsed.value)).stamp.id : undefined;
         const addition: MidServiceAddition = {
@@ -268,8 +273,8 @@ export function midServiceOn(db: RepositoryDb, options: MidServiceOptions): MidS
           at: options.now(),
           ...(libraryId === undefined ? {} : { libraryId }),
         };
+        // Last, and only once the run has actually taken the content on: the row is the whole claim.
         await records.append(context, { _id: contentId, ...addition, correlationId: session.correlationId });
-        const event = await runEvents.record(session, { runId: run.runId, kind: LIVE_EVENT_TYPES.slide, pinnedRevisions });
         return { addition, revision: saved.revision, event };
       }),
 

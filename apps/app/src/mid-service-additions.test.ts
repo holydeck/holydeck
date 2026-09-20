@@ -22,7 +22,7 @@ import type { RevisionBody } from '@holydeck/contracts/revisions';
 import type { ServiceDraft, ServiceSection } from '@holydeck/contracts/services';
 import type { SnapshotPin } from '@holydeck/contracts/snapshots';
 
-import type { MidServiceStore } from './mid-service-additions.js';
+import type { MidServiceOutcome, MidServiceStore } from './mid-service-additions.js';
 import type { Document } from './repositories.js';
 import type { OperatorSession, PreparationInputs } from './snapshots.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
@@ -71,6 +71,7 @@ interface Live {
   readonly db: FakeDb;
   readonly store: MidServiceStore;
   readonly runId: string;
+  readonly serviceId: string;
   readonly pins: Readonly<Record<SnapshotPin, string>>;
   readonly end: () => Promise<void>;
 }
@@ -91,6 +92,7 @@ const live = async (): Promise<Live> => {
     db,
     store: midServiceOn(db, { now: () => ADDED_AT, newId: () => CONTENT_ID }),
     runId: run.runId,
+    serviceId: service.stamp.id,
     pins: record!.snapshot.pins,
     end: async () => {
       await runs.end(SESSION, run.runId);
@@ -138,6 +140,29 @@ describe('content added while a run is on', () => {
     expect(outcome.event.pinnedRevisions.content).toBe(pins.content);
     expect(rows(db, SNAPSHOTS)).toHaveLength(1);
     expect(rows(db, SNAPSHOTS)[0]?.['pins']).toEqual(pins);
+  });
+
+  it('pins the manifest its own run replays from, not whichever one the Service last prepared', async () => {
+    const { db, store, runId, serviceId, pins } = await live();
+    // The Service is edited and prepared again while the run is on — a second, different manifest, which
+    // ADR 0006 leaves standing beside the first rather than rewriting it. A run replays from the one it
+    // went live on, so nothing the Service does afterwards may move what its run events pin.
+    await servicesOn(db, { now: () => '2026-09-20T09:44:00.000Z' }).addItem(EDITOR, serviceId, 'section-1', {
+      id: 'item-2',
+      kind: 'custom-slide',
+      title: 'Announcements',
+      enabled: true,
+      content: undefined,
+    });
+    const newer = await preparationOn(db, { now: () => '2026-09-20T09:45:00.000Z' }).prepare(PREPARER, serviceId, INPUTS);
+    expect(rows(db, SNAPSHOTS)).toHaveLength(2);
+    expect(newer!.snapshot.pins.content).not.toBe(pins.content);
+
+    const outcome = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
+
+    expect(outcome.event.pinnedRevisions).toEqual(pins);
+    expect(outcome.event.pinnedRevisions.content).toBe(pins.content);
+    expect(outcome.event.pinnedRevisions.service).toBe(pins.service);
   });
 
   it('saves the body under the identifier it minted, as the explicit save a person made', async () => {
@@ -295,7 +320,26 @@ describe('what a mid-service addition is refused for', () => {
     );
   });
 
-  it('refuses when the manifest the run replays from is gone', async () => {
+  it('refuses when the manifest the run replays from is gone, newer one standing or not', async () => {
+    const { db, store, runId, serviceId } = await live();
+    await servicesOn(db, { now: () => '2026-09-20T09:44:00.000Z' }).addItem(EDITOR, serviceId, 'section-1', {
+      id: 'item-2',
+      kind: 'custom-slide',
+      title: 'Announcements',
+      enabled: true,
+      content: undefined,
+    });
+    await preparationOn(db, { now: () => '2026-09-20T09:45:00.000Z' }).prepare(PREPARER, serviceId, INPUTS);
+    // Only the run's own manifest is dropped. A newer one for the same Service is still there, and is not
+    // an answer to what this run is pinned to: a refusal is right where a substitute would be a lie.
+    db.rows.set(SNAPSHOTS, rows(db, SNAPSHOTS).slice(1));
+
+    expect((await refused(store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING }))).kind).toBe(
+      'state',
+    );
+  });
+
+  it('refuses when no manifest is left at all', async () => {
     const { db, store, runId } = await live();
     db.rows.set(SNAPSHOTS, []);
 
@@ -326,11 +370,19 @@ describe('what a mid-service addition is refused for', () => {
       store.add(SESSION, { runId, kind: 'song', title: 'Amazing Grace', body: SONG }),
     ]);
 
-    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const fulfilled = outcomes.filter((outcome) => outcome.status === 'fulfilled');
+    expect(fulfilled).toHaveLength(1);
     const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
     expect(rejected?.status === 'rejected' && rejected.reason).toBeInstanceOf(MidServiceError);
     if (rejected?.status === 'rejected') expect((rejected.reason as MidServiceError).kind).toBe('conflict');
     expect(rows(db, RECORDS.runEvents.collection)).toHaveLength(1);
+    // The loser leaves no provenance: a row saying an addition joined this run would be saying something
+    // that never happened, and no record class here can be taken back. What it does leave is the body it
+    // saved under the identifier it minted — a body nothing points at, which claims nothing.
+    expect(rows(db, ADDITIONS)).toHaveLength(1);
+    expect(rows(db, RECORDS.contentRevisions.collection)).toHaveLength(2);
+    const winner = fulfilled[0] as PromiseFulfilledResult<MidServiceOutcome>;
+    expect(await store.additions(READER, runId)).toEqual([winner.value.addition]);
   });
 });
 
