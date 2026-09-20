@@ -20,6 +20,20 @@ const en = {
   'output.launch.manual':
     "{view} opened. Drag this window onto its screen, then use the display's own fullscreen control.",
   'output.launch.blocked': "{view} was blocked by the browser's popup policy. Click to open it.",
+  'localOutput.fullscreen.entered': 'Presenting fullscreen.',
+  'localOutput.fullscreen.exited': 'No longer presenting fullscreen.',
+  'localOutput.fullscreen.absent':
+    "This browser cannot enter fullscreen from the page. Press F11, or your browser's own fullscreen key, instead.",
+  'localOutput.fullscreen.denied':
+    "Fullscreen was not granted. Press F11, or your browser's own fullscreen key, instead.",
+  'localOutput.wakeLock.active': 'Keeping this screen awake.',
+  'localOutput.wakeLock.released': 'Not keeping this screen awake.',
+  'localOutput.wakeLock.lost':
+    'The screen wake lock was lost. It will be requested again once this tab is active.',
+  'localOutput.wakeLock.absent':
+    "This browser cannot keep the screen awake automatically. Adjust this device's own sleep settings for the service.",
+  'localOutput.wakeLock.denied':
+    "Permission to keep the screen awake was not granted. Adjust this device's own sleep settings for the service.",
   'control.skipLinks.label': 'Skip links',
   'control.skip.order': 'Skip to Order',
   'control.skip.editorPreview': 'Skip to Editor and Preview',
@@ -60,6 +74,20 @@ const de: Catalog = {
   'output.launch.manual':
     '{view} wurde geöffnet. Ziehen Sie dieses Fenster auf seinen Bildschirm und nutzen Sie dann die Vollbildfunktion des Displays.',
   'output.launch.blocked': '{view} wurde von der Popup-Blockierung des Browsers verhindert. Zum Öffnen klicken.',
+  'localOutput.fullscreen.entered': 'Vollbildpräsentation aktiv.',
+  'localOutput.fullscreen.exited': 'Vollbildmodus beendet.',
+  'localOutput.fullscreen.absent':
+    'Dieser Browser kann von der Seite aus nicht in den Vollbildmodus wechseln. Drücken Sie stattdessen F11 oder die Vollbildtaste Ihres Browsers.',
+  'localOutput.fullscreen.denied':
+    'Der Vollbildmodus wurde nicht gewährt. Drücken Sie stattdessen F11 oder die Vollbildtaste Ihres Browsers.',
+  'localOutput.wakeLock.active': 'Dieser Bildschirm wird wachgehalten.',
+  'localOutput.wakeLock.released': 'Dieser Bildschirm wird nicht wachgehalten.',
+  'localOutput.wakeLock.lost':
+    'Die Bildschirmsperre wurde verloren. Sie wird erneut angefordert, sobald dieser Tab aktiv ist.',
+  'localOutput.wakeLock.absent':
+    'Dieser Browser kann den Bildschirm nicht automatisch wachhalten. Passen Sie die Energieeinstellungen dieses Geräts für den Gottesdienst an.',
+  'localOutput.wakeLock.denied':
+    'Die Berechtigung, den Bildschirm wachzuhalten, wurde nicht erteilt. Passen Sie die Energieeinstellungen dieses Geräts für den Gottesdienst an.',
   'control.skipLinks.label': 'Sprungmarken',
   'control.skip.order': 'Zum Ablauf springen',
   'control.skip.editorPreview': 'Zu Editor und Vorschau springen',
@@ -96,6 +124,20 @@ const ta: Catalog = {
   'output.launch.manual':
     '{view} திறக்கப்பட்டது. இந்த சாளரத்தை அதற்கான திரைக்கு இழுத்துச் சென்று, பின்னர் காட்சியின் முழுத்திரைக் கட்டுப்பாட்டைப் பயன்படுத்தவும்.',
   'output.launch.blocked': '{view} உலாவியின் பாப்-அப் கொள்கையால் தடுக்கப்பட்டது. திறக்க கிளிக் செய்யவும்.',
+  'localOutput.fullscreen.entered': 'முழுத்திரையில் காட்டப்படுகிறது.',
+  'localOutput.fullscreen.exited': 'முழுத்திரை பயன்முறை நிறுத்தப்பட்டது.',
+  'localOutput.fullscreen.absent':
+    'இந்த உலாவியால் பக்கத்திலிருந்து முழுத்திரைக்குச் செல்ல முடியாது. அதற்குப் பதிலாக F11 ஐ அழுத்தவும், அல்லது உங்கள் உலாவியின் முழுத்திரைப் பட்டனைப் பயன்படுத்தவும்.',
+  'localOutput.fullscreen.denied':
+    'முழுத்திரைக்கான அனுமதி வழங்கப்படவில்லை. அதற்குப் பதிலாக F11 ஐ அழுத்தவும், அல்லது உங்கள் உலாவியின் முழுத்திரைப் பட்டனைப் பயன்படுத்தவும்.',
+  'localOutput.wakeLock.active': 'இந்தத் திரை விழிப்புடன் வைக்கப்பட்டுள்ளது.',
+  'localOutput.wakeLock.released': 'இந்தத் திரை விழிப்புடன் வைக்கப்படவில்லை.',
+  'localOutput.wakeLock.lost':
+    'திரை விழிப்புப் பூட்டு இழக்கப்பட்டது. இந்தத் தாவல் மீண்டும் செயலில் வரும்போது மீண்டும் கோரப்படும்.',
+  'localOutput.wakeLock.absent':
+    'இந்த உலாவியால் திரையைத் தானாக விழிப்புடன் வைக்க முடியாது. இந்தச் சேவைக்காக இந்தச் சாதனத்தின் உறக்க அமைப்புகளை மாற்றவும்.',
+  'localOutput.wakeLock.denied':
+    'திரையை விழிப்புடன் வைக்க அனுமதி வழங்கப்படவில்லை. இந்தச் சேவைக்காக இந்தச் சாதனத்தின் உறக்க அமைப்புகளை மாற்றவும்.',
   'control.skipLinks.label': 'தாவல் இணைப்புகள்',
   'control.skip.order': 'வரிசைக்குச் செல்க',
   'control.skip.editorPreview': 'எடிட்டர் மற்றும் முன்னோட்டத்திற்குச் செல்க',
