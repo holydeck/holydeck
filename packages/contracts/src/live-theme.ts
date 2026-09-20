@@ -114,13 +114,12 @@ export function meetsThemeContrast(theme: Theme): boolean {
 
 /**
  * The theme each surface ships under until an operator changes it. Backgrounds are deliberately dark
- * across Audience, Stage, and Singer — the three surfaces a room full of people reads from a distance —
- * and light for Operator, the one surface read up close on Control's own device; every pair here is proven
- * against `meetsThemeContrast` in this module's own test, not asserted on faith.
+ * across all four surfaces — Operator included, since it too is read in a dim room rather than daylight —
+ * every pair here is proven against `meetsThemeContrast` in this module's own test, not asserted on faith.
  */
 export const DEFAULT_THEMES: Readonly<Record<ThemeSurface, Theme>> = Object.freeze({
   audience: { id: 'audience-default', background: '#0B0E14', foreground: '#F5F7FA', accent: '#7DD3FC' },
   stage: { id: 'stage-default', background: '#101010', foreground: '#FFFFFF', accent: '#FACC15' },
   singer: { id: 'singer-default', background: '#111827', foreground: '#F9FAFB', accent: '#34D399' },
-  operator: { id: 'operator-default', background: '#FFFFFF', foreground: '#111827', accent: '#2563EB' },
+  operator: { id: 'operator-default', background: '#0F172A', foreground: '#E2E8F0', accent: '#3B82F6' },
 });
