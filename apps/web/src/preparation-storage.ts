@@ -94,7 +94,8 @@ export function estimateMatchesCachedBytes(estimatedBytes: number, cachedBytes: 
 }
 
 /** The two fields this module reads from a storage estimate. Both are optional in the API itself, and a
- *  browser answering without a quota has told us nothing about capacity. */
+ *  browser answering without either one has told us nothing usable about capacity: room left is the
+ *  difference between them, and a difference needs both halves measured. */
 export interface StorageEstimateLike {
   readonly quota?: number;
   readonly usage?: number;
@@ -151,12 +152,21 @@ export type PreparationPreflight =
     }
   | { readonly kind: 'blocked'; readonly blockers: readonly PreparationBlocker[] };
 
-/** Room left for this origin. A browser reporting more used than it grants — a recalculated quota, an
- *  eviction pass that has not run yet — is simply full, never negative. */
+/**
+ * Room left for this origin, or nothing when the browser did not measure both halves of it.
+ *
+ * An absent `usage` is an absent measurement, never a measured zero. Substituting zero for it is the one
+ * mistake this module could make that points the wrong way: `quota - 0` reports more room than the
+ * origin really has, and the preparation it would wave through is exactly the one that dies half-cached
+ * on a Sunday morning. An unanswered half is therefore refused the same way an unanswered quota is —
+ * blocked as unmeasurable, rather than admitted on a number nobody reported.
+ *
+ * A browser reporting more used than it grants — a recalculated quota, an eviction pass that has not run
+ * yet — is simply full, never negative.
+ */
 const availableBytesOf = (estimate: StorageEstimateLike): number | undefined => {
-  if (!isMeasured(estimate.quota)) return undefined;
-  const used = isMeasured(estimate.usage) ? estimate.usage : 0;
-  return Math.max(0, estimate.quota - used);
+  if (!isMeasured(estimate.quota) || !isMeasured(estimate.usage)) return undefined;
+  return Math.max(0, estimate.quota - estimate.usage);
 };
 
 const measure = async (storage: PreparationStorageLike): Promise<number | undefined> => {

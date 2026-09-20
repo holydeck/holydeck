@@ -105,6 +105,17 @@ describe('estimating what a prepared service needs before anything is cached', (
     expect(estimateMatchesCachedBytes(0, 0)).toBe(true);
   });
 
+  it('treats the tolerance as the last acceptable byte and not the first unacceptable one', () => {
+    // A size whose tenth is exact in binary, so the edge is pinned at a byte rather than at a rounding.
+    const estimated = 40 * MIB;
+    const tolerated = estimated * ESTIMATE_TOLERANCE_RATIO;
+
+    expect(estimateMatchesCachedBytes(estimated, estimated + tolerated)).toBe(true);
+    expect(estimateMatchesCachedBytes(estimated, estimated - tolerated)).toBe(true);
+    expect(estimateMatchesCachedBytes(estimated, estimated + tolerated + 1)).toBe(false);
+    expect(estimateMatchesCachedBytes(estimated, estimated - tolerated - 1)).toBe(false);
+  });
+
   it("insists on a margin above the estimate that covers the estimate's own error", () => {
     expect(ESTIMATE_TOLERANCE_RATIO).toBe(0.1);
     expect(ADMISSION_HEADROOM_RATIO).toBe(0.1);
@@ -331,12 +342,34 @@ describe('a browser that cannot measure its own storage', () => {
     expect(quotaless.calls.persist).toBe(0);
   });
 
-  it('reads a missing usage as nothing used, which is a measurement and not a guess', async () => {
-    const { storage } = fakeStorage({ quota: 512 * MIB });
+  it('refuses a quota reported without the usage to subtract from it', async () => {
+    // An omitted usage is an absent measurement, never a measured zero. Reading it as zero would report
+    // the whole quota as free and admit a preparation that then dies half-cached — the one mistake this
+    // module could make that points the wrong way.
+    const { storage, calls } = fakeStorage({ quota: 512 * MIB });
 
     const preflight = await preflightPreparationStorage(storage, SERVICE);
 
-    expect(preflight).toMatchObject({ kind: 'admitted', availableBytes: 512 * MIB });
+    expect(preflight).toEqual({
+      kind: 'blocked',
+      blockers: [{ code: 'storage.estimateUnavailable' }],
+    });
+    expect(calls.persist).toBe(0);
+  });
+
+  it('names the assets it cannot size alongside the storage it cannot measure', async () => {
+    const { storage, calls } = fakeStorage({ estimate: 'absent' });
+
+    const preflight = await preflightPreparationStorage(storage, [...SERVICE, UNSIZED_MANDATORY]);
+
+    expect(preflight).toEqual({
+      kind: 'blocked',
+      blockers: [
+        { code: 'asset.sizeUnknown', assetId: 'font-latin-subset' },
+        { code: 'storage.estimateUnavailable' },
+      ],
+    });
+    expect(calls.persist).toBe(0);
   });
 
   it('refuses a quota no browser could mean, the same way it refuses none at all', async () => {
