@@ -20,6 +20,8 @@ const en = {
   'output.launch.manual':
     "{view} opened. Drag this window onto its screen, then use the display's own fullscreen control.",
   'output.launch.blocked': "{view} was blocked by the browser's popup policy. Click to open it.",
+  'arrangement.preview.screen': '{view} will open on its saved screen.',
+  'arrangement.preview.manual': '{view} will open without its saved screen; drag it into place once it opens.',
   'localOutput.fullscreen.entered': 'Presenting fullscreen.',
   'localOutput.fullscreen.exited': 'No longer presenting fullscreen.',
   'localOutput.fullscreen.absent':
@@ -81,6 +83,9 @@ const de: Catalog = {
   'output.launch.manual':
     '{view} wurde geöffnet. Ziehen Sie dieses Fenster auf seinen Bildschirm und nutzen Sie dann die Vollbildfunktion des Displays.',
   'output.launch.blocked': '{view} wurde von der Popup-Blockierung des Browsers verhindert. Zum Öffnen klicken.',
+  'arrangement.preview.screen': '{view} wird auf dem gespeicherten Bildschirm geöffnet.',
+  'arrangement.preview.manual':
+    '{view} wird ohne den gespeicherten Bildschirm geöffnet; ziehen Sie es nach dem Öffnen an seinen Platz.',
   'localOutput.fullscreen.entered': 'Vollbildpräsentation aktiv.',
   'localOutput.fullscreen.exited': 'Vollbildmodus beendet.',
   'localOutput.fullscreen.absent':
@@ -140,6 +145,9 @@ const ta: Catalog = {
   'output.launch.manual':
     '{view} திறக்கப்பட்டது. இந்த சாளரத்தை அதற்கான திரைக்கு இழுத்துச் சென்று, பின்னர் காட்சியின் முழுத்திரைக் கட்டுப்பாட்டைப் பயன்படுத்தவும்.',
   'output.launch.blocked': '{view} உலாவியின் பாப்-அப் கொள்கையால் தடுக்கப்பட்டது. திறக்க கிளிக் செய்யவும்.',
+  'arrangement.preview.screen': '{view} அதற்கான சேமிக்கப்பட்ட திரையில் திறக்கப்படும்.',
+  'arrangement.preview.manual':
+    '{view} சேமிக்கப்பட்ட திரை இல்லாமல் திறக்கப்படும்; திறந்தவுடன் அதை இழுத்து வைக்கவும்.',
   'localOutput.fullscreen.entered': 'முழுத்திரையில் காட்டப்படுகிறது.',
   'localOutput.fullscreen.exited': 'முழுத்திரை பயன்முறை நிறுத்தப்பட்டது.',
   'localOutput.fullscreen.absent':
