@@ -5,9 +5,12 @@ import {
   ACK_OUTCOMES,
   LIVE_CHANNELS,
   LIVE_CLOSE,
+  CAPABILITIES_PATH,
   LIVE_CONNECTIONS_PATH,
   LIVE_SESSION_STATES,
+  OUTPUT_CAPABILITY_PATH,
   OUTPUT_CHANNELS,
+  capabilityPath,
   parseAckFrame,
   parseCommandFrame,
   parseEventFrame,
@@ -63,6 +66,17 @@ describe('the vocabulary a live session is limited to', () => {
 
   it('names one path both the route that answers connection counts and the client that reads them share', () => {
     expect(LIVE_CONNECTIONS_PATH).toBe('/api/v1/live/connections');
+  });
+
+  it('names one path both the route that issues an output capability and the client that asks for one share', () => {
+    expect(OUTPUT_CAPABILITY_PATH).toBe('/api/v1/live/output-capability');
+    expect(CAPABILITIES_PATH).toBe('/api/v1/live/capabilities');
+  });
+
+  it('builds one capability’s own path, with an identifier a path segment can carry', () => {
+    expect(capabilityPath('cap-7a3')).toBe('/api/v1/live/capabilities/cap-7a3');
+    // An identifier is opaque, and an opaque value is not trusted to be free of path separators.
+    expect(capabilityPath('a/b?c')).toBe('/api/v1/live/capabilities/a%2Fb%3Fc');
   });
 });
 

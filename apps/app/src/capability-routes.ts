@@ -7,6 +7,7 @@
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { VALIDATION_FAILED, successEnvelope, validationFailure } from '@holydeck/contracts/http';
+import { CAPABILITIES_PATH, OUTPUT_CAPABILITY_PATH } from '@holydeck/contracts/live';
 import { type Parsed, parseObject } from '@holydeck/contracts/problems';
 
 import { auditContext } from './audit.js';
@@ -26,9 +27,9 @@ const CAPABILITY_PREFIX = 'capability:';
 
 export const GUEST_INVITATION_PATH = '/api/v1/live/guest-invitation';
 
-export const OUTPUT_CAPABILITY_PATH = '/api/v1/live/output-capability';
-
-export const CAPABILITIES_PATH = '/api/v1/live/capabilities';
+// The two paths a client in another workspace also has to name are declared once, in the contract both
+// sides already share, and re-exported here so this module stays the one place the surface is read off.
+export { CAPABILITIES_PATH, OUTPUT_CAPABILITY_PATH };
 
 const REVOKE_PATH = `${CAPABILITIES_PATH}/:capabilityId`;
 

@@ -22,6 +22,19 @@ const en = {
   'output.launch.blocked': "{view} was blocked by the browser's popup policy. Click to open it.",
   'arrangement.preview.screen': '{view} will open on its saved screen.',
   'arrangement.preview.manual': '{view} will open without its saved screen; drag it into place once it opens.',
+  'placement.screen.primary': 'Screen {number} (main), {width} × {height}',
+  'placement.screen.secondary': 'Screen {number}, {width} × {height}',
+  'placement.applied': '{view} opened on {screen}.',
+  'placement.unapplied.notAuthorized': '{view} was not opened: this session may not control the presentation.',
+  'placement.unapplied.notIssued':
+    "{view} was not opened: the server's answer carried no capability this client could read.",
+  'placement.unapplied.detection':
+    '{view} opened without its assigned screen, because this browser did not list the screens. Drag it into place.',
+  'placement.unapplied.screenAbsent':
+    '{view} opened without its assigned screen, because that screen is no longer there. Drag it into place.',
+  'placement.unapplied.unassigned': '{view} opened without a screen, because none is assigned to it. Drag it into place.',
+  'placement.unapplied.blocked':
+    "{view} was blocked by the browser's popup policy, so it was not placed. Click to open it.",
   'localOutput.fullscreen.entered': 'Presenting fullscreen.',
   'localOutput.fullscreen.exited': 'No longer presenting fullscreen.',
   'localOutput.fullscreen.absent':
@@ -86,6 +99,21 @@ const de: Catalog = {
   'arrangement.preview.screen': '{view} wird auf dem gespeicherten Bildschirm geöffnet.',
   'arrangement.preview.manual':
     '{view} wird ohne den gespeicherten Bildschirm geöffnet; ziehen Sie es nach dem Öffnen an seinen Platz.',
+  'placement.screen.primary': 'Bildschirm {number} (Haupt), {width} × {height}',
+  'placement.screen.secondary': 'Bildschirm {number}, {width} × {height}',
+  'placement.applied': '{view} wurde auf {screen} geöffnet.',
+  'placement.unapplied.notAuthorized':
+    '{view} wurde nicht geöffnet: Diese Sitzung darf die Präsentation nicht steuern.',
+  'placement.unapplied.notIssued':
+    '{view} wurde nicht geöffnet: Die Antwort des Servers enthielt keine Berechtigung, die dieser Client lesen konnte.',
+  'placement.unapplied.detection':
+    '{view} wurde ohne den zugewiesenen Bildschirm geöffnet, da dieser Browser die Bildschirme nicht aufgelistet hat. Ziehen Sie es an seinen Platz.',
+  'placement.unapplied.screenAbsent':
+    '{view} wurde ohne den zugewiesenen Bildschirm geöffnet, da dieser Bildschirm nicht mehr vorhanden ist. Ziehen Sie es an seinen Platz.',
+  'placement.unapplied.unassigned':
+    '{view} wurde ohne Bildschirm geöffnet, da ihm keiner zugewiesen ist. Ziehen Sie es an seinen Platz.',
+  'placement.unapplied.blocked':
+    '{view} wurde von der Popup-Blockierung des Browsers verhindert und daher nicht platziert. Zum Öffnen klicken.',
   'localOutput.fullscreen.entered': 'Vollbildpräsentation aktiv.',
   'localOutput.fullscreen.exited': 'Vollbildmodus beendet.',
   'localOutput.fullscreen.absent':
@@ -148,6 +176,21 @@ const ta: Catalog = {
   'arrangement.preview.screen': '{view} அதற்கான சேமிக்கப்பட்ட திரையில் திறக்கப்படும்.',
   'arrangement.preview.manual':
     '{view} சேமிக்கப்பட்ட திரை இல்லாமல் திறக்கப்படும்; திறந்தவுடன் அதை இழுத்து வைக்கவும்.',
+  'placement.screen.primary': 'திரை {number} (முதன்மை), {width} × {height}',
+  'placement.screen.secondary': 'திரை {number}, {width} × {height}',
+  'placement.applied': '{view} {screen} இல் திறக்கப்பட்டது.',
+  'placement.unapplied.notAuthorized':
+    '{view} திறக்கப்படவில்லை: இந்த அமர்வு வழிபாட்டுக் காட்சியைக் கட்டுப்படுத்த அனுமதிக்கப்படவில்லை.',
+  'placement.unapplied.notIssued':
+    '{view} திறக்கப்படவில்லை: சேவையகத்தின் பதிலில் இந்த கிளையன்ட் படிக்கக்கூடிய அனுமதி எதுவும் இல்லை.',
+  'placement.unapplied.detection':
+    '{view} அதற்கான திரை இல்லாமல் திறக்கப்பட்டது, ஏனெனில் இந்த உலாவி திரைகளைப் பட்டியலிடவில்லை. அதை இழுத்து வைக்கவும்.',
+  'placement.unapplied.screenAbsent':
+    '{view} அதற்கான திரை இல்லாமல் திறக்கப்பட்டது, ஏனெனில் அந்தத் திரை இனி இல்லை. அதை இழுத்து வைக்கவும்.',
+  'placement.unapplied.unassigned':
+    '{view} திரை இல்லாமல் திறக்கப்பட்டது, ஏனெனில் அதற்கு எதுவும் ஒதுக்கப்படவில்லை. அதை இழுத்து வைக்கவும்.',
+  'placement.unapplied.blocked':
+    '{view} உலாவியின் பாப்-அப் கொள்கையால் தடுக்கப்பட்டது, எனவே அது வைக்கப்படவில்லை. திறக்க கிளிக் செய்யவும்.',
   'localOutput.fullscreen.entered': 'முழுத்திரையில் காட்டப்படுகிறது.',
   'localOutput.fullscreen.exited': 'முழுத்திரை பயன்முறை நிறுத்தப்பட்டது.',
   'localOutput.fullscreen.absent':

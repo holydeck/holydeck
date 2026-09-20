@@ -4,6 +4,8 @@
 
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { type FieldProblem, UPDATE_REQUIRED, parseErrorEnvelope, parseSuccessEnvelope } from '@holydeck/contracts/http';
+import { CSRF_HEADER } from '@holydeck/contracts/sessions';
+
 import type { Problem } from '@holydeck/contracts/problems';
 
 export interface ResponseLike {
@@ -11,7 +13,36 @@ export interface ResponseLike {
   json(): Promise<unknown>;
 }
 
-export type FetchLike = (url: string, init: { readonly headers: Record<string, string> }) => Promise<ResponseLike>;
+export interface RequestInitLike {
+  readonly method?: string;
+  readonly headers: Record<string, string>;
+  readonly body?: string;
+}
+
+export type FetchLike = (url: string, init: RequestInitLike) => Promise<ResponseLike>;
+
+/**
+ * What a request that changes something carries beyond a plain read: the method it changes with, the
+ * session's CSRF token, and whatever it is sending. A read carries none of these, which is why this is a
+ * separate argument rather than three optional ones — `ask(path, fetching)` is still exactly a read, and
+ * the server refuses a change that arrives without the token this is the only way to send.
+ */
+export interface Change {
+  readonly method: 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  /** Held in memory by the client and nowhere else, the way `sessions.ts` says it is. */
+  readonly csrf: string;
+  /** Absent where the change is the request itself — a revocation names its subject in the path. */
+  readonly body?: unknown;
+}
+
+const initFor = (change: Change | undefined): RequestInitLike => {
+  const headers: Record<string, string> = { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) };
+  if (change === undefined) return { headers };
+  headers[CSRF_HEADER] = change.csrf;
+  if (change.body === undefined) return { method: change.method, headers };
+  headers['content-type'] = 'application/json';
+  return { method: change.method, headers, body: JSON.stringify(change.body) };
+};
 
 /** Said by the client, never by the server: the answer arrived but was not the answer it promised. */
 export const UNREADABLE_RESPONSE = 'client.unreadable_response';
@@ -49,11 +80,11 @@ const unreadable = (problems: readonly Problem[]): Refused => ({
 
 const failed = (code: string, message: string): Refused => ({ ok: false, code, message, requestId: '', fields: [] });
 
-export async function ask(path: string, fetching: FetchLike): Promise<ApiResult<unknown>> {
+export async function ask(path: string, fetching: FetchLike, change?: Change): Promise<ApiResult<unknown>> {
   let response: ResponseLike;
   let body: unknown;
   try {
-    response = await fetching(path, { headers: { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) } });
+    response = await fetching(path, initFor(change));
     body = await response.json();
   } catch (error) {
     // A rejected fetch is an unreachable network; a rejected read is a body that was not the JSON the

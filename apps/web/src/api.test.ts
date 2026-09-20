@@ -1,5 +1,6 @@
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { UPDATE_REQUIRED } from '@holydeck/contracts/http';
+import { CSRF_HEADER } from '@holydeck/contracts/sessions';
 import { describe, expect, it, vi } from 'vitest';
 
 import { NETWORK_UNREACHABLE, UNREADABLE_RESPONSE, ask, needsUpdate } from './api.js';
@@ -104,6 +105,46 @@ describe('asking the application for something', () => {
       code: UNREADABLE_RESPONSE,
       message: 'the worker went away',
       requestId: '',
+      fields: [],
+    });
+  });
+});
+
+describe('asking the application to change something', () => {
+  it('sends the method, the body and the session’s CSRF token, which a read never carries', async () => {
+    const fetching = answering(201, { data: { issued: true }, meta: { requestId: 'req-6' } });
+    await ask('/api/v1/live/output-capability', fetching, {
+      method: 'POST',
+      csrf: 'csrf-token',
+      body: { view: 'stage' },
+    });
+    expect(fetching).toHaveBeenCalledWith('/api/v1/live/output-capability', {
+      method: 'POST',
+      headers: {
+        [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
+        [CSRF_HEADER]: 'csrf-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ view: 'stage' }),
+    });
+  });
+
+  it('sends no body, and claims no content type, for a change that names its subject in the path', async () => {
+    const fetching = answering(200, { data: { revoked: true }, meta: { requestId: 'req-7' } });
+    await ask('/api/v1/live/capabilities/cap-1', fetching, { method: 'DELETE', csrf: 'csrf-token' });
+    expect(fetching).toHaveBeenCalledWith('/api/v1/live/capabilities/cap-1', {
+      method: 'DELETE',
+      headers: { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), [CSRF_HEADER]: 'csrf-token' },
+    });
+  });
+
+  it('reads a change the server refused exactly the way it reads a refused read', async () => {
+    const body = { error: { code: 'request.forbidden', message: 'not allowed', requestId: 'req-8' } };
+    expect(await ask('/api/v1/live/output-capability', answering(403, body), { method: 'POST', csrf: 'c' })).toEqual({
+      ok: false,
+      code: 'request.forbidden',
+      message: 'not allowed',
+      requestId: 'req-8',
       fields: [],
     });
   });

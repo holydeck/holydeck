@@ -27,6 +27,22 @@ export const LIVE_PATH = '/api/v1/live';
 export const LIVE_CONNECTIONS_PATH = `${LIVE_PATH}/connections`;
 
 /**
+ * Where an output window's capability is issued — IDEN-08, granted to Control presentation alone. Named
+ * here for the same reason the connections path above is: the route that serves it (`capability-routes.ts`)
+ * and the client that asks it for the token a surface opens with are in two different workspaces, and a
+ * path spelled twice is a path one of them will eventually spell differently.
+ */
+export const OUTPUT_CAPABILITY_PATH = `${LIVE_PATH}/output-capability`;
+
+/** Where a capability already issued is given up again, one identifier at a time. */
+export const CAPABILITIES_PATH = `${LIVE_PATH}/capabilities`;
+
+/** One capability's own path. The identifier is encoded, because an opaque value is not trusted to be
+ *  free of the separators the segment it travels in is read by. */
+export const capabilityPath = (capabilityId: string): string =>
+  `${CAPABILITIES_PATH}/${encodeURIComponent(capabilityId)}`;
+
+/**
  * What an upgrade request carries in its query string, and only there: a browser WebSocket can set no
  * request header, so the channel asked for and the client version declared travel in the URL — as does
  * the capability a shared join link carries, with the service it opens (T81). The ticket a signed-in
