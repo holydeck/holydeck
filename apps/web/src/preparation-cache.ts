@@ -210,14 +210,15 @@ export interface PreparationCacheClients {
 const hexOf = (digest: ArrayBuffer): string =>
   Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 
-/** The digest the manifest pinned, in the one form this module compares in, or nothing when what was
- *  recorded is not a digest it can check at all. */
-const recordedDigestOf = (hash: string): string | undefined =>
+/** The digest the manifest pinned, as lowercase hex, or nothing when what was recorded is not a digest
+ *  this codebase can check at all. Exported because OFFL-03's rehearsal reads a recorded digest of its
+ *  own — the frame the online render produced — and two readings of one grammar would be two grammars. */
+export const recordedDigestOf = (hash: string): string | undefined =>
   RECORDED_DIGEST.exec(hash)?.[1]?.toLowerCase();
 
 /** The digest of these bytes, or nothing when this browser cannot compute one. An unverifiable asset is
  *  never a verified one, so the absent answer is carried rather than thrown. */
-const digestOf = async (subtle: PreparationSubtleLike, bytes: PreparationBytes): Promise<string | undefined> => {
+export const digestOf = async (subtle: PreparationSubtleLike, bytes: PreparationBytes): Promise<string | undefined> => {
   try {
     return hexOf(await subtle.digest(DIGEST_ALGORITHM, bytes));
   } catch {
@@ -226,8 +227,12 @@ const digestOf = async (subtle: PreparationSubtleLike, bytes: PreparationBytes):
 };
 
 /** What the cache holds at this url, or nothing. A read that throws is nothing known — neither a hit nor
- *  a corruption — and is answered by fetching, which is the same thing an absent entry is answered by. */
-const readCached = async (cache: PreparationCacheLike, url: string): Promise<PreparationBytes | undefined> => {
+ *  a corruption — and is answered the same way an absent entry is: here by fetching, and in OFFL-03's
+ *  rehearsal, which has nothing to fetch with, by reporting the document uncached. */
+export const readCachedBytes = async (
+  cache: PreparationCacheLike,
+  url: string,
+): Promise<PreparationBytes | undefined> => {
   try {
     const held = await cache.match(url);
     return held === undefined ? undefined : new Uint8Array(await held.arrayBuffer());
@@ -324,7 +329,7 @@ async function cacheEntry(
   if (pinned === undefined) return failed(entry, 'asset.hashUnknown', 0, 0);
 
   let repairs = 0;
-  const held = await readCached(cache, entry.url);
+  const held = await readCachedBytes(cache, entry.url);
   if (held !== undefined) {
     emit('verifying', 0, held.length);
     const digest = await digestOf(subtle, held);
@@ -366,7 +371,7 @@ async function cacheEntry(
       return failed(entry, 'cache.writeFailed', attempt, repairs);
     }
 
-    const stored = await readCached(cache, entry.url);
+    const stored = await readCachedBytes(cache, entry.url);
     if (stored !== undefined && (await digestOf(subtle, stored)) === pinned) {
       return cached(entry, stored.length, attempt, repairs);
     }
@@ -472,7 +477,7 @@ export async function planPreparationCache(
 
   for (const entry of entries) {
     const pinned = recordedDigestOf(entry.hash);
-    const held = pinned === undefined ? undefined : await readCached(cache, entry.url);
+    const held = pinned === undefined ? undefined : await readCachedBytes(cache, entry.url);
     const digest = held === undefined ? undefined : await digestOf(subtle, held);
     if (held !== undefined && digest === pinned) {
       cachedAssetIds.push(entry.id);

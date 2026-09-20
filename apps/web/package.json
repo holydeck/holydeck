@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@holydeck/contracts": "workspace:*",
-    "@holydeck/localization": "workspace:*"
+    "@holydeck/localization": "workspace:*",
+    "@holydeck/renderer": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.0",
