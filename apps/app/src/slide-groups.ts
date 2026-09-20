@@ -340,14 +340,15 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
         if (row === undefined) return undefined;
         // Breaks the link to whatever pinned inputs a generated source was projected from: nothing
         // downstream could reproduce it, so a duplicate is always a starting point for customizing.
-        // The group's own inheritance defaults (slideLayoutId, background) are not provenance —
-        // they carry forward exactly like `enabled` and `slides` do.
+        // The group's own inheritance defaults (slideLayoutId, background, audioTrackId) are not
+        // provenance — they carry forward exactly like `enabled` and `slides` do.
         const body: SlideGroupBody = {
           mode: 'custom',
           enabled: row.body.enabled,
           slideLayoutId: row.body.slideLayoutId,
           slides: row.body.slides,
           ...(row.body.background === undefined ? {} : { background: row.body.background }),
+          ...(row.body.audioTrackId === undefined ? {} : { audioTrackId: row.body.audioTrackId }),
         };
         const record = await library.create(context, { kind: row.stamp.kind as LibraryKind, title: row.title });
         return save(context, record, record.stamp.id, body);

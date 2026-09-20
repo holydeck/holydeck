@@ -229,6 +229,13 @@ describe('a custom group is never overwritten by regeneration, symmetrically', (
     });
     expect(duplicated?.body.generatedFrom).toBeUndefined();
   });
+
+  it('duplicate carries the backing audio track forward, the same as background (LIVE-20)', async () => {
+    const { groups } = store();
+    const created = await groups.create(ADMIN, 'slideGroup', 'Song words', { ...CUSTOM, audioTrackId: 'media-hymn-1' });
+    const duplicated = await groups.duplicate(ADMIN, created.stamp.id);
+    expect(duplicated?.body.audioTrackId).toBe('media-hymn-1');
+  });
 });
 
 describe('reordering slides', () => {

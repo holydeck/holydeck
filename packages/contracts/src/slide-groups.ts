@@ -37,12 +37,12 @@
 // Layout.
 //
 // LIVE-20 (this file, as of T114): a group carries at most one backing audio track, named the same
-// way `background` already names a library item — a bare, non-empty id, never a copy of its bytes,
-// so the reference is what protects the asset from cleanup rather than a payload this file has any
-// business holding. Unlike `background`, there is no per-slide override: the track belongs to the
-// group as a whole (`@holydeck/contracts/live-media`'s `slideGroupAudioAction` is what decides
-// whether moving between slides changes anything about it), so it is declared once here and not on
-// `Slide`.
+// way `background` already names a library item — a bare id, never a copy of its bytes, so the
+// reference is meant to protect the asset from cleanup once a scanner walks group fields the way
+// it already should for `background` — that scanner does not exist yet for either field. Unlike
+// `background`, there is no per-slide override: the track belongs to the group as a whole
+// (`@holydeck/contracts/live-media`'s `slideGroupAudioAction` is what decides whether moving
+// between slides changes anything about it), so it is declared once here and not on `Slide`.
 
 import { isContentLanguageKey } from './content-languages.js';
 import { FIELD_CODES, type FieldReader, isRecord, type ParseFn, parseObject } from './problems.js';

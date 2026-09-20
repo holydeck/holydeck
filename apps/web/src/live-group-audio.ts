@@ -55,7 +55,12 @@ export function createSlideGroupAudioController(authority: MediaAuthority): Slid
       if (previous !== undefined && previous.slideGroupId !== next.slideGroupId && previous.audioTrackId !== undefined) {
         authority.pause();
         const timeline = authority.timeline;
-        if (timeline !== undefined) memory = { ...memory, [previous.slideGroupId]: timeline.anchorPositionMs };
+        // Guards against a single `MediaAuthority` ever being shared with something else's media (a
+        // slide's own video, say): without checking whose track the timeline actually belongs to, this
+        // fold could memorize a stranger's position under this group's id.
+        if (timeline !== undefined && timeline.mediaId === previous.audioTrackId) {
+          memory = { ...memory, [previous.slideGroupId]: timeline.anchorPositionMs };
+        }
       }
 
       const action = slideGroupAudioAction(previous, next, memory);

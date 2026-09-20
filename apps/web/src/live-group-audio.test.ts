@@ -158,6 +158,15 @@ describe("driving a slide group's backing track off the same authority a single 
 
     const drifted = { ...optedIn, positionMs: 3_000 };
     expect(correctionForFollower(timeline, drifted, now)).toMatchObject({ kind: 'adjust', reason: 'drift' });
+
+    // The Control-side half of the same bullet: a seek issued straight on the authority (not through
+    // this controller, which never re-decides an in-group move) is what a follower reading the timeline
+    // afterward has to reflect.
+    authority.seek(20_000);
+    const seeked = authority.timeline;
+    if (seeked === undefined) throw new Error('expected a timeline');
+    expect(correctionForFollower(seeked, { ...optedIn, positionMs: 20_000 }, now)).toEqual({ kind: 'in-sync' });
+    expect(correctionForFollower(seeked, optedIn, now)).toMatchObject({ kind: 'adjust', reason: 'drift' });
   });
 
   it('never lets a local follower action move the authoritative timeline it is reading', async () => {
@@ -222,6 +231,7 @@ describe("driving a slide group's backing track off the same authority a single 
     element.fireError();
     expect(authority.state.playback).toBe('load-error');
     expect(authority.state.fallback).toBe('last-frame');
+    expect(states.map((state) => state.playback)).toEqual(['ok', 'load-error']);
 
     const next = await controller.present({ slideGroupId: 'group-1', audioTrackId: 'hymn-1' }, { at: AT }, settingsFor);
     expect(next).toEqual({ kind: 'continue' });
