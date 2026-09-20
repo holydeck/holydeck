@@ -18,9 +18,24 @@ export type OutputChannel = (typeof OUTPUT_CHANNELS)[number];
 export const LIVE_CHANNELS = [LIVE_CONTROL_CHANNEL, ...OUTPUT_CHANNELS] as const;
 export type LiveChannel = (typeof LIVE_CHANNELS)[number];
 
+/** Where a live session is opened. Shared for the same reason the connections path below is: the
+ *  application that serves the socket and the client that opens one name it once. */
+export const LIVE_PATH = '/api/v1/live';
+
 /** Where an operator reads connection counts by view type — spec 9.5, LIVE-06. Shared so the
  *  application that answers it and the client that reads it name the same path once. */
-export const LIVE_CONNECTIONS_PATH = '/api/v1/live/connections';
+export const LIVE_CONNECTIONS_PATH = `${LIVE_PATH}/connections`;
+
+/**
+ * What an upgrade request carries in its query string, and only there: a browser WebSocket can set no
+ * request header, so the channel asked for and the client version declared travel in the URL — as does
+ * the capability a shared join link carries, with the service it opens (T81). The ticket a signed-in
+ * session spends is `sessions.ts`'s `TICKET_QUERY`, because a ticket is a session's own thing.
+ */
+export const CHANNEL_QUERY = 'channel';
+export const CLIENT_VERSION_QUERY = 'clientVersion';
+export const CAPABILITY_QUERY = 'capability';
+export const SERVICE_QUERY = 'service';
 
 /**
  * How a live session ends when it was not the client that ended it. 1003 is unsupported data and 1008 a

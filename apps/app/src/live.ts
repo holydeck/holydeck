@@ -10,10 +10,15 @@
 import { CLIENT_WINDOW, decideClient } from '@holydeck/contracts/clients';
 import { successEnvelope } from '@holydeck/contracts/http';
 import {
+  CAPABILITY_QUERY,
+  CHANNEL_QUERY,
+  CLIENT_VERSION_QUERY,
   LIVE_CHANNELS,
   LIVE_CLOSE,
   LIVE_CONNECTIONS_PATH,
+  LIVE_PATH,
   OUTPUT_CHANNELS,
+  SERVICE_QUERY,
   type LiveChannel,
   type OutputChannel,
 } from '@holydeck/contracts/live';
@@ -45,21 +50,12 @@ const PUBLIC: RouteNeed = { kind: 'public' };
 // operator-only surface in this deployment is behind.
 const PERMISSION: RouteNeed = { kind: 'permission', need: PRESENTATION_CONTROL };
 
-export const LIVE_PATH = '/api/v1/live';
-
-export { LIVE_CONNECTIONS_PATH };
-
-export const CHANNEL_QUERY = 'channel';
-
-/** The Guest capability a shared join link carries, and the Service it names — spec 9.3/9.5, T81. */
-export const CAPABILITY_QUERY = 'capability';
-export const SERVICE_QUERY = 'service';
-
-/**
- * A browser WebSocket cannot set a request header, so the version a client declares on an upgrade has
- * to travel in the query string. Only on an upgrade: an ordinary request keeps one way to state it.
- */
-export const CLIENT_VERSION_QUERY = 'clientVersion';
+// The path this route answers on, and the query names an upgrade carries — a browser WebSocket can set
+// no request header, so the channel, the client version, and a Guest capability with the service it
+// opens all travel in the URL. All five are the contract's (`@holydeck/contracts/live`), so the client
+// that opens a socket and the route that answers it name them once; re-exported here because this is
+// where this application's own modules and tests have always read them from.
+export { CAPABILITY_QUERY, CHANNEL_QUERY, CLIENT_VERSION_QUERY, LIVE_CONNECTIONS_PATH, LIVE_PATH, SERVICE_QUERY };
 
 /** How often a session is asked whether it is still there, and whatever it fell behind on is drained. */
 export const HEARTBEAT_MS = 5_000;
