@@ -253,17 +253,25 @@ async function rehearseDocument(
   }
 
   let frame: RenderFrame;
+  let frameBytesCopy: PreparationBytes;
   try {
     frame = renderPrepared(
-      await prepareRenderModel({ model, measurer, defaults: options.defaults, service: options.service, stepPx: options.stepPx }),
+      await prepareRenderModel({
+        model,
+        measurer,
+        defaults: options.defaults,
+        service: options.service,
+        stepPx: options.stepPx,
+      }),
     );
+    // Copied into its own buffer because WebCrypto refuses a view that could be over a
+    // `SharedArrayBuffer`, which is the same reason `PreparationBytes` is narrower than `Uint8Array`.
+    frameBytesCopy = new Uint8Array(frameBytes(frame));
   } catch (error) {
     return failedBefore(id, { code: 'render.failed', documentId: id, reason: nameOf(error) });
   }
 
-  // Copied into its own buffer because WebCrypto refuses a view that could be over a `SharedArrayBuffer`,
-  // which is the same reason `PreparationBytes` is narrower than `Uint8Array`.
-  const digest = await digestOf(subtle, new Uint8Array(frameBytes(frame)));
+  const digest = await digestOf(subtle, frameBytesCopy);
   if (digest === undefined) {
     return {
       documentId: id,
@@ -305,6 +313,15 @@ async function rehearseDocument(
  * and nothing is rendered: a rehearsal of a half-cached service would pass or fail for reasons that have
  * nothing to do with rendering.
  *
+ * The precondition is scoped to `necessity: 'mandatory'` entries on purpose. `planPreparationCache`
+ * puts every unverified entry — mandatory or optional — into `pending`, because its own job is feeding
+ * storage admission, where an optional asset's bytes cost the same room as a mandatory one's. But
+ * `cachePreparation` already settled what "completely cached" means for readiness: `kind: 'complete'`
+ * even when only optional assets are missing (`preparation-cache.ts:439`), tracked in `degradedAssetIds`
+ * rather than treated as incomplete. A pending optional asset is therefore not a reason this rehearsal
+ * may not proceed — only a pending mandatory one is, for the same reason a missing hymn slide blocks and
+ * a missing decorative background does not.
+ *
  * Every document is rehearsed even after one of them fails, so an operator sees the whole repair at once
  * rather than rediscovering the next problem after each attempt. Nothing here writes to the cache, and
  * nothing here has anything to write with.
@@ -320,10 +337,11 @@ export async function rehearsePreparation(
   if (documents.length === 0) return blockedReport({ code: 'snapshot.noDocuments' });
 
   const plan = await planPreparationCache(snapshot, clients);
-  if (plan.pending.length > 0) {
+  const pendingMandatory = plan.pending.filter((entry) => entry.necessity === 'mandatory');
+  if (pendingMandatory.length > 0) {
     return blockedReport({
       code: 'cache.incomplete',
-      pendingAssetIds: Object.freeze(plan.pending.map((entry) => entry.id)),
+      pendingAssetIds: Object.freeze(pendingMandatory.map((entry) => entry.id)),
     });
   }
 

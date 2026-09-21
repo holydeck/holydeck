@@ -182,6 +182,19 @@ const BACKGROUND_ENTRY: PinnedEntry = {
   bytes: BACKGROUND_BODY.length,
 };
 
+const OPTIONAL_ASSET_URL = '/media/sermon-loop.mp4';
+const OPTIONAL_ASSET_BODY = Uint8Array.from({ length: 256 }, (_, index) => (index * 7) % 251);
+
+/** An asset pinned `necessity: 'optional'` — the kind `cachePreparation` grades complete-and-degraded
+ *  rather than incomplete when it cannot be fetched (`preparation-cache.ts:439`). */
+const OPTIONAL_ASSET_ENTRY: PinnedEntry = {
+  id: 'sermon-loop-video',
+  url: OPTIONAL_ASSET_URL,
+  hash: recordedDigest(OPTIONAL_ASSET_BODY),
+  necessity: 'optional',
+  bytes: OPTIONAL_ASSET_BODY.length,
+};
+
 interface Snapshot {
   readonly pinned: readonly PinnedEntry[];
   readonly seed: Map<string, Uint8Array>;
@@ -199,6 +212,13 @@ const snapshot = async (): Promise<Snapshot> => ({
     [BACKGROUND_URL, BACKGROUND_BODY],
   ]),
 });
+
+/** The same snapshot with one optional asset pinned beside it. The seed never holds its bytes, so it is
+ *  always pending — the fixture every test below about necessity shares. */
+const snapshotWithOptionalAsset = async (): Promise<Snapshot> => {
+  const base = await snapshot();
+  return { pinned: [...base.pinned, OPTIONAL_ASSET_ENTRY], seed: base.seed };
+};
 
 /** A pinned entry with one field replaced, for a snapshot that is wrong in exactly one way. */
 const replacing = (pinned: readonly PinnedEntry[], id: string, patch: Partial<RehearsalDocument>): PinnedEntry[] =>
@@ -292,6 +312,32 @@ describe('refusing to rehearse a cache that is not complete', () => {
 
     expect(report.kind).toBe('blocked');
     expect(report.blockers).toEqual([{ code: 'cache.incomplete', pendingAssetIds: ['song-grace'] }]);
+  });
+
+  it('rehearses a snapshot whose only pending entry is an optional asset', async () => {
+    const { pinned, seed } = await snapshotWithOptionalAsset();
+    const cache = fakeCache(seed);
+
+    // T96 already grades a preparation complete-but-degraded when only optional assets are missing
+    // (`cachePreparation`, preparation-cache.ts:439). Importing `planPreparationCache`'s stricter
+    // preflight rule — every unverified entry pending, optional included — would refuse offline
+    // readiness for a snapshot T96 itself calls ready.
+    const report = await rehearsePreparation(pinned, { cache: cache.cache, subtle, measurer: onlineMeasurer });
+
+    expect(report.kind).toBe('rehearsed');
+    expect(report.blockers).toEqual([]);
+  });
+
+  it('still blocks on a pending mandatory asset when a pending optional one sits beside it', async () => {
+    const { pinned, seed } = await snapshotWithOptionalAsset();
+    seed.delete(BACKGROUND_URL);
+    const cache = fakeCache(seed);
+
+    const report = await rehearsePreparation(pinned, { cache: cache.cache, subtle, measurer: onlineMeasurer });
+
+    // Only the mandatory entry is named: the optional one pending beside it is not what is blocking.
+    expect(report.kind).toBe('blocked');
+    expect(report.blockers).toEqual([{ code: 'cache.incomplete', pendingAssetIds: ['sermon-background'] }]);
   });
 
   it('never reports a snapshot rehearsed when there was nothing to rehearse', async () => {
