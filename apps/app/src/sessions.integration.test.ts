@@ -111,7 +111,8 @@ describe('a session in a real database', () => {
     await createSessionIndexOn(db, SESSION_INDEXES[0] as (typeof SESSION_INDEXES)[number]);
     const first = await store.start(GATEKEEPER, { actor: ACTOR, permissions: ['services.read'] });
     const joined = await store.start(GATEKEEPER, { actor: 'account:9b12', permissions: ['services.read'] }, first.token);
-    expect(joined.token).toBe(first.token);
+    expect(joined.token).not.toBe(first.token);
+    await expect(store.read(GATEKEEPER, first.token)).rejects.toMatchObject({ kind: 'unknown' });
 
     await expect(store.revokeAllFor(GATEKEEPER, ACTOR)).resolves.toBe(1);
     const left = await sessions().find({}).toArray();

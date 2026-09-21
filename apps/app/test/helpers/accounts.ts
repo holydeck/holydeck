@@ -16,7 +16,11 @@ export const memoryAccounts = (): { rows: Map<string, Document>; db: AccountDb; 
   const names: string[] = [];
 
   const matches = (row: Document, filter: Filter): boolean =>
-    Object.entries(filter).every(([field, wanted]) => row[field] === wanted);
+    Object.entries(filter).every(([field, wanted]) =>
+      typeof wanted === 'object' && wanted !== null && '$ne' in wanted
+        ? row[field] !== wanted.$ne
+        : row[field] === wanted,
+    );
 
   const collection: AccountCollection = {
     insertOne: async (document) => {

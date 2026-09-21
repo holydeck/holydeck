@@ -163,6 +163,7 @@ describe('joining an existing container', () => {
   test('no join token starts a fresh container, the same as ever', async () => {
     const session = await started();
     expect(session.record.actor).toBe(ACTOR);
+    expect(session.joined).toBe(false);
     expect(db.rows.size).toBe(1);
   });
 
@@ -170,6 +171,7 @@ describe('joining an existing container', () => {
     const unknown = 'not-a-token'.padEnd(43, '0');
     const session = await store.start(GATEKEEPER, { actor: ACTOR, permissions: ['services.read'] }, unknown);
     expect(session.token).not.toBe(unknown);
+    expect(session.joined).toBe(false);
     expect(db.rows.size).toBe(1);
   });
 
@@ -178,6 +180,7 @@ describe('joining an existing container', () => {
     clock = START + (SESSION_IDLE_MINUTES + 1) * MINUTE;
     const session = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, stale.token);
     expect(session.token).not.toBe(stale.token);
+    expect(session.joined).toBe(false);
     expect(session.record.actor).toBe(OTHER);
   });
 
@@ -188,11 +191,13 @@ describe('joining an existing container', () => {
       { actor: OTHER, permissions: ['presentation.control'] },
       first.token,
     );
-    expect(second.token).toBe(first.token);
+    expect(second.token).not.toBe(first.token);
+    expect(second.joined).toBe(true);
+    await expect(store.read(GATEKEEPER, first.token)).rejects.toMatchObject({ kind: 'unknown' });
     expect(db.rows.size).toBe(1);
-    const stored = db.rows.get(tokenDigest(first.token)) as Document;
+    const stored = db.rows.get(tokenDigest(second.token)) as Document;
     expect((stored['slots'] as Document[]).length).toBe(2);
-    expect(stored['active']).toBe(slotIdOf(first.token, OTHER));
+    expect(stored['active']).toBe(slotIdOf(second.token, OTHER));
     expect(second.record.actor).toBe(OTHER);
     expect(second.record.permissions).toEqual(['presentation.control']);
     expect(second.record.csrf).not.toBe(first.record.csrf);
@@ -210,10 +215,12 @@ describe('joining an existing container', () => {
       { actor: ACTOR, permissions: ['services.read', 'services.write'] },
       first.token,
     );
-    expect(second.token).toBe(first.token);
-    const stored = db.rows.get(tokenDigest(first.token)) as Document;
+    expect(second.token).not.toBe(first.token);
+    expect(second.joined).toBe(true);
+    await expect(store.read(GATEKEEPER, first.token)).rejects.toMatchObject({ kind: 'unknown' });
+    const stored = db.rows.get(tokenDigest(second.token)) as Document;
     expect((stored['slots'] as Document[]).length).toBe(1);
-    expect(slotIdOf(first.token, ACTOR)).toBe(before);
+    expect(slotIdOf(second.token, ACTOR)).toBe(before);
     expect(second.record.permissions).toEqual(['services.read', 'services.write']);
     expect(second.record.csrf).not.toBe(first.record.csrf);
   });
@@ -224,7 +231,7 @@ describe('joining an existing container', () => {
     const second = await store.start(
       GATEKEEPER,
       { actor: ACTOR, permissions: ['services.read', 'services.write'] },
-      first.token,
+      sibling.token,
     );
     const stored = db.rows.get(tokenDigest(second.token)) as Document;
     expect((stored['slots'] as Document[]).length).toBe(2);
@@ -242,12 +249,12 @@ describe('switching the active slot', () => {
       { actor: OTHER, permissions: ['presentation.control'] },
       first.token,
     );
-    const firstId = slotIdOf(first.token, ACTOR);
+    const firstId = slotIdOf(second.token, ACTOR);
     clock = START + MINUTE;
-    const record = await store.activate(GATEKEEPER, first.token, firstId);
+    const record = await store.activate(GATEKEEPER, second.token, firstId);
     expect(record.actor).toBe(ACTOR);
     expect(record.lastSeenAt).toBe(at(MINUTE));
-    const stored = db.rows.get(tokenDigest(first.token)) as Document;
+    const stored = db.rows.get(tokenDigest(second.token)) as Document;
     expect(stored['active']).toBe(firstId);
     const untouchedOther = (stored['slots'] as Document[]).find((slot) => slot['actor'] === OTHER);
     expect(untouchedOther?.['lastSeenAt']).toBe(second.record.lastSeenAt);
@@ -270,11 +277,11 @@ describe('switching the active slot', () => {
 describe('reporting the slots a container holds', () => {
   test('lists exactly slotId and actor for every slot, and nothing a sibling should not see', async () => {
     const first = await started(['services.read']);
-    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['presentation.control'] }, first.token);
-    const firstId = slotIdOf(first.token, ACTOR);
-    const secondId = slotIdOf(first.token, OTHER);
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['presentation.control'] }, first.token);
+    const firstId = slotIdOf(joined.token, ACTOR);
+    const secondId = slotIdOf(joined.token, OTHER);
     const byActor = (left: { actor: string }, right: { actor: string }): number => left.actor.localeCompare(right.actor);
-    const summaries = await store.slots(GATEKEEPER, first.token);
+    const summaries = await store.slots(GATEKEEPER, joined.token);
     expect([...summaries].sort(byActor)).toEqual(
       [
         { slotId: firstId, actor: ACTOR },
@@ -488,8 +495,8 @@ describe('rotation invalidates the identifier that came before', () => {
     const first = await started(['services.read']);
     // Joining a slot makes it the active one, so this rotation lands on the sibling that just joined —
     // and it is the first, now-inactive slot whose fields must be the ones nothing here touches.
-    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['presentation.control'] }, first.token);
-    const rotated = await store.rotate(GATEKEEPER, first.token, { rotation: 'privilege-change', permissions: ['services.read', 'services.write'] });
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['presentation.control'] }, first.token);
+    const rotated = await store.rotate(GATEKEEPER, joined.token, { rotation: 'privilege-change', permissions: ['services.read', 'services.write'] });
     const stored = db.rows.get(tokenDigest(rotated.token)) as Document;
     const untouched = (stored['slots'] as Document[]).find((slot) => slot['actor'] === ACTOR);
     expect(untouched?.['csrf']).toBe(first.record.csrf);
@@ -513,10 +520,10 @@ describe('ending a session', () => {
 
   test('signing out ends every slot in the container at once — there is no partial sign-out', async () => {
     const first = await started();
-    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
-    await expect(store.revoke(GATEKEEPER, first.token)).resolves.toBe(true);
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
+    await expect(store.revoke(GATEKEEPER, joined.token)).resolves.toBe(true);
     expect(db.rows.size).toBe(0);
-    expect((await refusal(() => store.read(GATEKEEPER, first.token))).kind).toBe('unknown');
+    expect((await refusal(() => store.read(GATEKEEPER, joined.token))).kind).toBe('unknown');
   });
 
   test('recovering a credential ends every session that actor holds and nobody else’s', async () => {
@@ -530,19 +537,19 @@ describe('ending a session', () => {
 
   test('recovering a credential leaves a sibling actor’s own slot in the same container untouched', async () => {
     const first = await started();
-    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
     await expect(store.revokeAllFor(GATEKEEPER, ACTOR)).resolves.toBe(1);
-    const stored = db.rows.get(tokenDigest(first.token)) as Document;
+    const stored = db.rows.get(tokenDigest(joined.token)) as Document;
     expect((stored['slots'] as Document[]).map((slot) => slot['actor'])).toEqual([OTHER]);
   });
 
   test('recovering a credential that held the active slot promotes a sibling automatically', async () => {
     const first = await started();
-    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
     // The join above made OTHER's slot active; switch back so the revoked actor's slot is the active one.
-    await store.activate(GATEKEEPER, first.token, slotIdOf(first.token, ACTOR));
+    await store.activate(GATEKEEPER, joined.token, slotIdOf(joined.token, ACTOR));
     await store.revokeAllFor(GATEKEEPER, ACTOR);
-    await expect(store.read(GATEKEEPER, first.token)).resolves.toMatchObject({ actor: OTHER });
+    await expect(store.read(GATEKEEPER, joined.token)).resolves.toMatchObject({ actor: OTHER });
   });
 
   test('ending a session needs the permission to end one', async () => {
@@ -556,11 +563,11 @@ describe('ending a session', () => {
   // needing to be told who was signed in, which is exactly what nobody would know after a restore.
   test('a restore ends every session at once, whoever holds it', async () => {
     const first = await started();
-    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
     const other = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] });
     await expect(store.revokeEvery(GATEKEEPER)).resolves.toBe(2);
     expect(db.rows.size).toBe(0);
-    expect((await refusal(() => store.read(GATEKEEPER, first.token))).kind).toBe('unknown');
+    expect((await refusal(() => store.read(GATEKEEPER, joined.token))).kind).toBe('unknown');
     expect((await refusal(() => store.read(GATEKEEPER, other.token))).kind).toBe('unknown');
   });
 
@@ -608,34 +615,44 @@ describe('the ticket a socket handshake carries', () => {
 
   test('a ticket minted for a low-privilege slot never resolves to a sibling switched into afterward', async () => {
     const member = await started(['services.read']);
-    const ticket = await store.issueTicket(GATEKEEPER, member.token);
-    // The join makes the Control-holding sibling active — the ticket must still resolve to the slot that
-    // minted it, never to whichever slot happens to be active when it is redeemed.
-    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['presentation.control'] }, member.token);
-    const record = await store.redeemTicket(GATEKEEPER, member.token, ticket);
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['presentation.control'] }, member.token);
+    await store.activate(GATEKEEPER, joined.token, slotIdOf(joined.token, ACTOR));
+    const ticket = await store.issueTicket(GATEKEEPER, joined.token);
+    await store.activate(GATEKEEPER, joined.token, slotIdOf(joined.token, OTHER));
+    const record = await store.redeemTicket(GATEKEEPER, joined.token, ticket);
     expect(record.actor).toBe(ACTOR);
     expect(record.permissions).not.toContain('presentation.control');
   });
 
   test('a ticket whose slot has since been pruned is refused the same way any other bad ticket is', async () => {
     const first = await started();
-    // Minted just before the first slot's own idle deadline, so both it and the ticket are alive here.
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
+    await store.activate(GATEKEEPER, joined.token, slotIdOf(joined.token, ACTOR));
     clock = START + SESSION_IDLE_MINUTES * MINUTE - 10_000;
-    const ticket = await store.issueTicket(GATEKEEPER, first.token);
-    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
-    // Past the first slot's idle deadline, but still inside the ticket's own thirty seconds.
+    const ticket = await store.issueTicket(GATEKEEPER, joined.token);
+    await store.activate(GATEKEEPER, joined.token, slotIdOf(joined.token, OTHER));
     clock = START + SESSION_IDLE_MINUTES * MINUTE + 5_000;
-    expect((await refusal(() => store.redeemTicket(GATEKEEPER, first.token, ticket))).kind).toBe('ticket');
+    expect((await refusal(() => store.redeemTicket(GATEKEEPER, joined.token, ticket))).kind).toBe('ticket');
   });
 
-  test('switching back to the slot that minted a ticket resumes it, undisturbed by what happened in between', async () => {
+  test('switching back to the slot that minted a ticket resumes it', async () => {
     const first = await started(['services.read']);
-    const firstId = slotIdOf(first.token, ACTOR);
-    const ticket = await store.issueTicket(GATEKEEPER, first.token);
-    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['presentation.control'] }, first.token);
-    await store.activate(GATEKEEPER, first.token, firstId);
-    const record = await store.redeemTicket(GATEKEEPER, first.token, ticket);
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['presentation.control'] }, first.token);
+    const firstId = slotIdOf(joined.token, ACTOR);
+    await store.activate(GATEKEEPER, joined.token, firstId);
+    const ticket = await store.issueTicket(GATEKEEPER, joined.token);
+    await store.activate(GATEKEEPER, joined.token, slotIdOf(joined.token, OTHER));
+    await store.activate(GATEKEEPER, joined.token, firstId);
+    const record = await store.redeemTicket(GATEKEEPER, joined.token, ticket);
     expect(record.actor).toBe(ACTOR);
+  });
+
+  test('authentication rotation invalidates outstanding handshake tickets', async () => {
+    const first = await started();
+    const ticket = await store.issueTicket(GATEKEEPER, first.token);
+    const joined = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
+    await expect(store.redeemTicket(GATEKEEPER, first.token, ticket)).rejects.toMatchObject({ kind: 'unknown' });
+    await expect(store.redeemTicket(GATEKEEPER, joined.token, ticket)).rejects.toMatchObject({ kind: 'ticket' });
   });
 
   test('an operator opening several outputs keeps the newest tickets and no more', async () => {

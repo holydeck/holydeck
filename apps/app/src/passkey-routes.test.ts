@@ -381,7 +381,7 @@ describe('naming a key', () => {
 describe('giving a key up', () => {
   test('removes it, writes that down, and the list no longer shows it', async () => {
     await registering();
-    const response = await asking('DELETE', passkeyPath(device.credentialId));
+    const response = await asking('DELETE', passkeyPath(device.credentialId), { password: CLAIM.password });
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toEqual({ revoked: true });
     expect(await listed()).toEqual([]);
@@ -399,7 +399,7 @@ describe('giving a key up', () => {
     await registering();
     const other = await accounts_other();
     const theirs = await sessions.start(sessionContext(CORRELATION), { actor: actorFor(other), permissions: [] });
-    await expect(asking('DELETE', passkeyPath(device.credentialId), undefined, theirs)).resolves.toMatchObject({
+    await expect(asking('DELETE', passkeyPath(device.credentialId), { password: 'another-long-enough-passphrase' }, theirs)).resolves.toMatchObject({
       statusCode: 404,
     });
     expect(await listed()).toHaveLength(1);
@@ -478,3 +478,55 @@ const accounts_other = async (): Promise<string> => {
   });
   return OTHER_ID;
 };
+
+
+describe('password confirmation before credential removal', () => {
+  test.each([undefined, {}, { password: 'wrong' }, { password: 12 }, { password: 'x'.repeat(1025) }])(
+    'refuses missing or invalid confirmation (%j) and preserves the credential', async (body) => {
+      await registering();
+      const response = await asking('DELETE', passkeyPath(device.credentialId), body);
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error.code).toBe('auth.sign_in_refused');
+      expect(await listed()).toHaveLength(1);
+      expect(entries().at(-1)).toMatchObject({ action: 'passkey.revoke', outcome: 'refused', actor: actorFor(ID) });
+      expect(JSON.stringify(entries())).not.toContain('wrong');
+    },
+  );
+
+  test('locks repeated guesses even when the next password is correct', async () => {
+    await registering();
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await asking('DELETE', passkeyPath(device.credentialId), { password: 'wrong' });
+    }
+    const response = await asking('DELETE', passkeyPath(device.credentialId), { password: CLAIM.password });
+    expect(response.statusCode).toBe(401);
+    expect(await listed()).toHaveLength(1);
+  });
+});
+
+
+test('a different account’s password cannot confirm removal, even when its name is supplied', async () => {
+  await registering();
+  await accounts_other();
+  const response = await asking('DELETE', passkeyPath(device.credentialId), {
+    name: 'mattia', password: 'another-long-enough-passphrase',
+  });
+  expect(response.statusCode).toBe(401);
+  expect(await listed()).toHaveLength(1);
+});
+
+test('a disabled account cannot confirm removal with its correct password', async () => {
+  await registering();
+  await accountsDb.collection(ACCOUNTS_COLLECTION).updateOne({ _id: ID }, { $set: { disabled: true } });
+  const response = await asking('DELETE', passkeyPath(device.credentialId), { password: CLAIM.password });
+  expect(response.statusCode).toBe(401);
+  expect(await listed()).toHaveLength(1);
+});
+
+test('a session naming a missing account cannot confirm removal', async () => {
+  await registering();
+  const stale = await sessions.start(sessionContext(CORRELATION), { actor: actorFor(OTHER_ID), permissions: [] });
+  const response = await asking('DELETE', passkeyPath(device.credentialId), { password: CLAIM.password }, stale);
+  expect(response.statusCode).toBe(401);
+  expect(await listed()).toHaveLength(1);
+});

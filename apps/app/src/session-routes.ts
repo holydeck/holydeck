@@ -121,10 +121,8 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
       recorded(request, 'the sign-in trail refused an entry', async () => {
         await identity.audit.record(auditContext(actor, correlation), entry);
       });
-    // A join is only ever recorded once the container answers with the same identifier it was given: a
-    // fresh start, or a fallback from a stale or dead one, always mints a new token instead.
-    const notedJoin = (opened: { readonly token: string }, actor: string): Promise<void> =>
-      opened.token === join
+    const notedJoin = (opened: { readonly joined: boolean }, actor: string): Promise<void> =>
+      opened.joined
         ? note(actor, { action: 'session.slot.add', subject: actor, outcome: 'allowed' })
         : Promise.resolve();
 

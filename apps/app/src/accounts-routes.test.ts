@@ -390,3 +390,16 @@ describe('what this surface refuses to answer at all', () => {
     expect(response.json().data).toMatchObject({ controlPresentation: true });
   });
 });
+
+
+test.each([
+  [statusPath(ID), { disabled: true }, 'account.disable'],
+  [rolePath(ID), { role: 'member' }, 'account.role'],
+] as const)('refuses removing the last enabled admin at %s', async (url, body, action) => {
+  const response = await asking(url, body);
+  expect(response.statusCode).toBe(422);
+  expect(response.json().error.code).toBe(VALIDATION_FAILED);
+  expect(response.json().error.fields[0].message).toBe('At least one enabled administrator must remain.');
+  expect(entries().at(-1)).toMatchObject({ action, outcome: 'refused' });
+  await expect(sessions.read(sessionContext(CORRELATION), admin.token)).resolves.toBeDefined();
+});

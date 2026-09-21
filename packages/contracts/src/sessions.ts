@@ -16,7 +16,7 @@ export const SESSION_PATH = '/api/v1/session';
 export const TICKET_PATH = '/api/v1/live/ticket';
 
 /** The cookie the identifier travels in, and the only place it ever travels. */
-export const SESSION_COOKIE = 'holydeck_session';
+export const SESSION_COOKIE = '__Host-holydeck_session';
 
 /**
  * `Lax` rather than `Strict`: a service opened from a link in a message has to arrive signed in, and every

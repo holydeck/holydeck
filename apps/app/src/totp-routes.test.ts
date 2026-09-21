@@ -218,10 +218,10 @@ describe('replacing the recovery codes', () => {
 describe('giving up a second factor', () => {
   test('answers whether there was one, and the password it was a second factor to is untouched', async () => {
     await proved();
-    const first = await asking('DELETE', TOTP_PATH);
+    const first = await asking('DELETE', TOTP_PATH, { password: CLAIM.password });
     expect(first.statusCode).toBe(200);
     expect(first.json().data).toEqual({ revoked: true });
-    const again = await asking('DELETE', TOTP_PATH);
+    const again = await asking('DELETE', TOTP_PATH, { password: CLAIM.password });
     expect(again.json().data).toEqual({ revoked: false });
     const account = await identity.accounts.authenticate(accountContext(CORRELATION), {
       name: CLAIM.name,
@@ -234,7 +234,7 @@ describe('giving up a second factor', () => {
   test('the trail records every turn a second factor took, under the account it belonged to', async () => {
     await proved();
     await asking('POST', TOTP_RECOVERY_PATH);
-    await asking('DELETE', TOTP_PATH);
+    await asking('DELETE', TOTP_PATH, { password: CLAIM.password });
     expect(actions()).toEqual(['totp.enroll', 'totp.verify', 'totp.regenerate', 'totp.revoke']);
     for (const entry of entries()) expect(entry['actor']).toBe(actorFor(ID));
   });
@@ -332,5 +332,30 @@ describe('what this surface refuses to answer at all', () => {
     });
     const response = await asking('POST', TOTP_PATH);
     expect(response.statusCode).toBe(201);
+  });
+});
+
+
+describe('password confirmation before credential removal', () => {
+  test.each([undefined, {}, { password: 'wrong' }, { password: 12 }, { password: 'x'.repeat(1025) }])(
+    'refuses missing or invalid confirmation (%j) and preserves the credential', async (body) => {
+      await proved();
+      const response = await asking('DELETE', TOTP_PATH, body);
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error.code).toBe('auth.sign_in_refused');
+      expect(await totp.satisfied(totpContext(CORRELATION), ID, 'wrong')).toBe('refused');
+      expect(entries().at(-1)).toMatchObject({ action: 'totp.revoke', outcome: 'refused', actor: actorFor(ID) });
+      expect(JSON.stringify(entries())).not.toContain('wrong');
+    },
+  );
+
+  test('locks repeated guesses even when the next password is correct', async () => {
+    await proved();
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await asking('DELETE', TOTP_PATH, { password: 'wrong' });
+    }
+    const response = await asking('DELETE', TOTP_PATH, { password: CLAIM.password });
+    expect(response.statusCode).toBe(401);
+    expect(await totp.satisfied(totpContext(CORRELATION), ID, 'wrong')).toBe('refused');
   });
 });

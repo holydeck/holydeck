@@ -19,7 +19,7 @@ import {
   parsePasskeyRegistration,
 } from '@holydeck/contracts/webauthn';
 
-import { accountContext } from './accounts.js';
+import { accountContext, passwordConfirmed } from './accounts.js';
 import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { originOf, provenSession, refuseAsForbidden } from './csrf.js';
@@ -231,6 +231,12 @@ export function servePasskeyRoutes(app: FastifyInstance, { identity }: PasskeyRo
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const key = (request.params as { readonly id: string }).id;
+    if (!await passwordConfirmed(identity, id, request.body, correlationFor(PASSKEY_PREFIX, request.id))) {
+      await note(request, provenSession(request).record.actor, 'passkey.revoke', key, 'refused');
+      return reply.code(401).send(errorEnvelope(
+        'auth.sign_in_refused', 'Confirm your password and try again in a few minutes.', request.id,
+      ));
+    }
     const revoked = await identity.passkeys.revoke(passkeyContext(correlationFor(PASSKEY_PREFIX, request.id)), id, key);
     if (!revoked) return reply.code(404).send(notFound(request));
     await note(request, provenSession(request).record.actor, 'passkey.revoke', key, 'allowed');

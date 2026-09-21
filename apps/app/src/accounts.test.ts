@@ -1,5 +1,5 @@
 import { actorFor, isAccountId } from '@holydeck/contracts/accounts';
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import {
   ACCOUNTS_COLLECTION,
@@ -261,6 +261,7 @@ describe('signing in', () => {
   test('a disabled account is refused even with its own correct password, distinctly from one merely wrong', async () => {
     const claimed = await store.claim(FIRST_RUN, CLAIM);
     await expect(store.authenticate(FIRST_RUN, { name: CLAIM.name, password: PASSWORD })).resolves.toEqual(claimed);
+    await store.create(FIRST_RUN, { ...CLAIM, name: 'other-admin', role: 'admin' });
     await store.disable(FIRST_RUN, claimed.id);
     await expect(store.authenticate(FIRST_RUN, { name: CLAIM.name, password: PASSWORD })).resolves.toBeUndefined();
   });
@@ -411,6 +412,7 @@ describe('creating an account beyond the one the founder claims', () => {
 describe('closing an account, and reopening it', () => {
   test('is closed without being deleted or renamed, and a later read carries that', async () => {
     const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await store.create(FIRST_RUN, { ...CLAIM, name: 'other-admin', role: 'admin' });
     await expect(store.disable(FIRST_RUN, claimed.id)).resolves.toMatchObject({ id: claimed.id, disabled: true });
     await expect(store.read(FIRST_RUN, claimed.id)).resolves.toMatchObject({
       disabled: true,
@@ -421,6 +423,7 @@ describe('closing an account, and reopening it', () => {
 
   test('is reopened the same way it is closed', async () => {
     const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await store.create(FIRST_RUN, { ...CLAIM, name: 'other-admin', role: 'admin' });
     await store.disable(FIRST_RUN, claimed.id);
     await expect(store.restore(FIRST_RUN, claimed.id)).resolves.toMatchObject({ disabled: false });
   });
@@ -449,6 +452,7 @@ describe('closing an account, and reopening it', () => {
 describe('reassigning which of the three roles an account holds', () => {
   test('is granted, and a later read answers with the new role', async () => {
     const claimed = await store.claim(FIRST_RUN, CLAIM);
+    await store.create(FIRST_RUN, { ...CLAIM, name: 'other-admin', role: 'admin' });
     await expect(store.assignRole(FIRST_RUN, claimed.id, 'member')).resolves.toMatchObject({ role: 'member' });
     await expect(store.read(FIRST_RUN, claimed.id)).resolves.toMatchObject({ role: 'member' });
   });
@@ -462,4 +466,58 @@ describe('reassigning which of the three roles an account holds', () => {
     const blind = { ...FIRST_RUN, permissions: [ACCOUNT_PERMISSIONS.read] };
     await expect(store.assignRole(blind, 'B'.repeat(22), 'editor')).rejects.toMatchObject({ kind: 'permission' });
   });
+});
+
+
+describe('preserving an enabled administrator', () => {
+  test.each(['disable', 'demote'] as const)('refuses to %s the last enabled admin before writing', async (change) => {
+    const admin = await store.claim(FIRST_RUN, CLAIM);
+    const disabled = await store.create(FIRST_RUN, { ...CLAIM, name: 'disabled-admin', role: 'admin' });
+    await store.disable(FIRST_RUN, disabled.id);
+    await store.create(FIRST_RUN, { ...CLAIM, name: 'member', role: 'member' });
+    const before = JSON.stringify(storedAccounts(rows));
+    const mutation = change === 'disable'
+      ? store.disable(FIRST_RUN, admin.id)
+      : store.assignRole(FIRST_RUN, admin.id, 'member');
+    await expect(mutation).rejects.toMatchObject({ kind: 'state', message: 'At least one enabled administrator must remain.' });
+    expect(JSON.stringify(storedAccounts(rows))).toBe(before);
+  });
+
+  test.each(['disable', 'demote'] as const)('allows %s when a legacy enabled admin remains', async (change) => {
+    const admin = await store.claim(FIRST_RUN, CLAIM);
+    const legacy = await store.create(FIRST_RUN, { ...CLAIM, name: 'legacy-admin', role: 'admin' });
+    const document = { ...rows.get(legacy.id)! };
+    delete document['disabled'];
+    rows.set(legacy.id, document);
+    expect(rows.get(legacy.id)).not.toHaveProperty('disabled');
+    const mutation = change === 'disable'
+      ? store.disable(FIRST_RUN, admin.id)
+      : store.assignRole(FIRST_RUN, admin.id, 'member');
+    await expect(mutation).resolves.toMatchObject(change === 'disable' ? { disabled: true } : { role: 'member' });
+    await expect(store.read(FIRST_RUN, legacy.id)).resolves.toMatchObject({ role: 'admin', disabled: false });
+  });
+
+  test('allows retaining the admin role and changing an already disabled admin', async () => {
+    const admin = await store.claim(FIRST_RUN, CLAIM);
+    await expect(store.assignRole(FIRST_RUN, admin.id, 'admin')).resolves.toMatchObject({ role: 'admin' });
+    const other = await store.create(FIRST_RUN, { ...CLAIM, name: 'other', role: 'admin' });
+    await store.disable(FIRST_RUN, other.id);
+    await expect(store.disable(FIRST_RUN, other.id)).resolves.toMatchObject({ disabled: true });
+    await expect(store.assignRole(FIRST_RUN, other.id, 'member')).resolves.toMatchObject({ role: 'member' });
+  });
+});
+
+
+test.each(['disable', 'demote'] as const)('counts enabled admins before the %s write', async (change) => {
+  const memory = memoryAccounts();
+  const collection = memory.db.collection(ACCOUNTS_COLLECTION);
+  const counted = vi.spyOn(collection, 'countDocuments');
+  const updated = vi.spyOn(collection, 'updateOne');
+  const accounts = accountsOn(memory.db, { now: () => NOW, hash: weakly });
+  const admin = await accounts.claim(FIRST_RUN, CLAIM);
+  await accounts.create(FIRST_RUN, { ...CLAIM, name: 'other-admin', role: 'admin' });
+  if (change === 'disable') await accounts.disable(FIRST_RUN, admin.id);
+  else await accounts.assignRole(FIRST_RUN, admin.id, 'member');
+  expect(counted).toHaveBeenCalledExactlyOnceWith({ role: 'admin', disabled: { $ne: true } });
+  expect(counted.mock.invocationCallOrder[0]).toBeLessThan(updated.mock.invocationCallOrder[0] as number);
 });

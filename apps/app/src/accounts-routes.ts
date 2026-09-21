@@ -156,9 +156,18 @@ export function serveAccountRoutes(app: FastifyInstance, { identity, sessions }:
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = (request.params as { readonly id: string }).id;
     const call = accountContext(correlationFor(ACCOUNT_PREFIX, request.id));
-    const updated = parsed.value.disabled
-      ? await identity.accounts.disable(call, id)
-      : await identity.accounts.restore(call, id);
+    let updated;
+    try {
+      updated = parsed.value.disabled
+        ? await identity.accounts.disable(call, id)
+        : await identity.accounts.restore(call, id);
+    } catch (error: unknown) {
+      if (!(error instanceof AccountError) || error.kind !== 'state') throw error;
+      await note(request, 'account.disable', provenSession(request).record.actor, actorFor(id), 'refused');
+      return reply.code(422).send(validationFailure(request.id, [
+        { path: 'status.disabled', code: FIELD_CODES.notAllowed, message: error.message },
+      ]));
+    }
     if (updated === undefined) return reply.code(404).send(notFound(request));
     // A closed account has nothing left to reopen a session with; a reopened one asks for a fresh sign-in
     // rather than inheriting whatever slot happened to survive its closing.
@@ -174,11 +183,20 @@ export function serveAccountRoutes(app: FastifyInstance, { identity, sessions }:
     const parsed = parseRoleAssignment(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = (request.params as { readonly id: string }).id;
-    const updated = await identity.accounts.assignRole(
-      accountContext(correlationFor(ACCOUNT_PREFIX, request.id)),
-      id,
-      parsed.value.role,
-    );
+    let updated;
+    try {
+      updated = await identity.accounts.assignRole(
+        accountContext(correlationFor(ACCOUNT_PREFIX, request.id)),
+        id,
+        parsed.value.role,
+      );
+    } catch (error: unknown) {
+      if (!(error instanceof AccountError) || error.kind !== 'state') throw error;
+      await note(request, 'account.role', provenSession(request).record.actor, actorFor(id), 'refused');
+      return reply.code(422).send(validationFailure(request.id, [
+        { path: 'roleAssignment.role', code: FIELD_CODES.notAllowed, message: error.message },
+      ]));
+    }
     if (updated === undefined) return reply.code(404).send(notFound(request));
     await revoked(request, id);
     // The action name alone does not say which role was assigned, so the detail names it.

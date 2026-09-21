@@ -44,6 +44,7 @@ describe('a capability already issued, once some account is disabled', () => {
       expiresAt: SOON,
     });
 
+    await accounts.create(accountContext(CORRELATION), { ...CLAIM, name: 'other-admin', role: 'admin' });
     await accounts.disable(accountContext(CORRELATION), founder.id);
 
     await expect(
@@ -73,6 +74,7 @@ describe('an audit entry already written, once the account it names is disabled'
     const before = entries();
     expect(before).toHaveLength(1);
 
+    await accounts.create(accountContext(CORRELATION), { ...CLAIM, name: 'other-admin', role: 'admin' });
     await accounts.disable(accountContext(CORRELATION), founder.id);
 
     expect(entries()).toEqual(before);

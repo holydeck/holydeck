@@ -38,7 +38,9 @@ const RECORD: SessionRecord = {
 describe('what a session is', () => {
   it('is carried by a cookie a script cannot read and a foreign site cannot send', () => {
     const header = sessionCookie(TOKEN, 3600);
+    expect(SESSION_COOKIE).toBe('__Host-holydeck_session');
     expect(header.startsWith(`${SESSION_COOKIE}=${TOKEN};`)).toBe(true);
+    expect(header).not.toMatch(/Domain=/iu);
     expect(header).toContain('Secure');
     expect(header).toContain('HttpOnly');
     expect(header).toContain('SameSite=Lax');

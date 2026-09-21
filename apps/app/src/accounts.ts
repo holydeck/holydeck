@@ -8,9 +8,10 @@
 // before it writes, because two claims arriving together is precisely when that question answers "no"
 // twice. The write is the decision; a refusal from it is what "already claimed" means.
 
-import { ACCOUNT_ID_BYTES, actorFor, parseAccountRecord } from '@holydeck/contracts/accounts';
+import { ACCOUNT_ID_BYTES, actorFor, parseAccountRecord, parseSignIn } from '@holydeck/contracts/accounts';
 import { randomBytes } from 'node:crypto';
 
+import { accountScope, attemptContext } from './attempts.js';
 import { contextProblems, requestContext } from './context.js';
 import { droppedIndex } from './repositories.js';
 import { hashPassword, verifyPassword } from './credentials.js';
@@ -18,6 +19,7 @@ import { hashPassword, verifyPassword } from './credentials.js';
 import type { AccountRecord, AccountRole, CreateAccount, InstanceClaim, SignIn } from '@holydeck/contracts/accounts';
 import type { Db } from 'mongodb';
 
+import type { Identity } from './onboarding.js';
 import type { RequestContext } from './context.js';
 import type { Document, Filter } from './repositories.js';
 
@@ -82,7 +84,7 @@ const CARRIED = new Set<string>([
   'founder',
 ]);
 
-export type AccountRefusal = 'context' | 'permission' | 'schema' | 'claimed' | 'duplicate';
+export type AccountRefusal = 'context' | 'permission' | 'schema' | 'claimed' | 'duplicate' | 'state';
 
 /** Carries why the call was refused, so a caller can tell a defect from an instance already claimed. */
 export class AccountError extends Error {
@@ -163,6 +165,29 @@ export interface AccountStore {
   assignRole(context: unknown, id: string, role: AccountRole): Promise<AccountRecord | undefined>;
 }
 
+export async function passwordConfirmed(
+  identity: Pick<Identity, 'accounts' | 'attempts'>,
+  id: string,
+  body: unknown,
+  correlation: string,
+): Promise<boolean> {
+  const context = accountContext(correlation);
+  const account = await identity.accounts.read(context, id);
+  if (account === undefined) return false;
+  const gate = attemptContext(correlation);
+  const scope = accountScope(account.name);
+  if (await identity.attempts.locked(gate, scope)) return false;
+  const password = (body as { readonly password?: unknown } | null)?.password;
+  const parsed = parseSignIn({ name: account.name, password });
+  const confirmed = parsed.ok ? await identity.accounts.authenticate(context, parsed.value) : undefined;
+  if (confirmed?.id !== id) {
+    await identity.attempts.failed(gate, scope);
+    return false;
+  }
+  await identity.attempts.forgiven(gate, scope);
+  return true;
+}
+
 export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore {
   const newId = options.newId ?? ((): string => randomBytes(ACCOUNT_ID_BYTES).toString('base64url'));
   const hash = options.hash ?? hashPassword;
@@ -222,6 +247,16 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
     if (matchedCount === 0) return undefined;
     const found = await rows.findOne({ _id: id });
     return found === null ? undefined : readBack(found);
+  };
+
+  // The count and subsequent write are not atomic across concurrent admin mutations.
+  const preserveAdmin = async (id: string): Promise<void> => {
+    const rows = db.collection(ACCOUNTS_COLLECTION);
+    const found = await rows.findOne({ _id: id });
+    if (found === null || found['role'] !== 'admin' || found['disabled'] === true) return;
+    if (await rows.countDocuments({ role: 'admin', disabled: { $ne: true } }) <= 1) {
+      throw new AccountError('state', 'At least one enabled administrator must remain.');
+    }
   };
 
   const store: AccountStore = {
@@ -331,6 +366,7 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
 
     async disable(context, id) {
       permit(context, 'update');
+      await preserveAdmin(id);
       return applyUpdate(id, { disabled: true });
     },
 
@@ -341,6 +377,7 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
 
     async assignRole(context, id, role) {
       permit(context, 'update');
+      if (role !== 'admin') await preserveAdmin(id);
       return applyUpdate(id, { role });
     },
 

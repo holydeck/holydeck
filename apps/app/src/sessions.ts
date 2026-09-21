@@ -234,6 +234,7 @@ const mostRecentlySeen = (slots: readonly StoredSlot[]): StoredSlot =>
   [...slots].sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt))[0] as StoredSlot;
 
 export interface StartedSession {
+  readonly joined: boolean;
   /** The identifier the client is given. It exists in this answer, in a cookie, and nowhere else. */
   readonly token: string;
   readonly record: SessionRecord;
@@ -383,7 +384,7 @@ export function sessionsOn(db: SessionDb, options: SessionOptions): SessionStore
         const slot = newSlot(actor, permissions, now);
         const token = newToken();
         await rows.insertOne(containerFor(token, slot));
-        return { token, record: recordOf(slot) };
+        return { token, record: recordOf(slot), joined: false };
       } else {
         // Re-signing in as an account already holding a slot here replaces it in place, so re-authenticating
         // never accumulates stale duplicates of the same actor's slot.
@@ -393,13 +394,16 @@ export function sessionsOn(db: SessionDb, options: SessionOptions): SessionStore
           existing === undefined
             ? [...container.slots, slot]
             : container.slots.map((candidate) => (candidate.slotId === slot.slotId ? slot : candidate));
-        await rows.updateOne(
-          { _id: container.id },
-          { $set: { active: slot.slotId, slots: nextSlots.map(slotDocument), expiresOn: maxExpiry(nextSlots) } },
-        );
-        // The container's own identifier never changes when a slot is added to it — the same raw value the
-        // request already carried is handed back, not a freshly minted one.
-        return { token: join as string, record: recordOf(slot) };
+        const token = newToken();
+        await rows.deleteOne({ _id: container.id });
+        await rows.insertOne({
+          _id: tokenDigest(token),
+          active: slot.slotId,
+          slots: nextSlots.map(slotDocument),
+          expiresOn: maxExpiry(nextSlots),
+          tickets: [],
+        });
+        return { token, record: recordOf(slot), joined: true };
       }
     },
 
@@ -469,7 +473,7 @@ export function sessionsOn(db: SessionDb, options: SessionOptions): SessionStore
         expiresOn: maxExpiry(nextSlots),
         tickets: [],
       });
-      return { token: fresh, record: recordOf(graded) };
+      return { token: fresh, record: recordOf(graded), joined: false };
     },
 
     async revoke(context, token) {

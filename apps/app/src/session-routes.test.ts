@@ -131,7 +131,7 @@ const joined = async (): Promise<{ readonly control: StartedSession; readonly me
     { actor: 'account:9b12', permissions: ['services.read'] },
     control.token,
   );
-  return { control, member };
+  return { control: { ...control, token: member.token }, member };
 };
 
 const signingIn = (
@@ -219,9 +219,10 @@ beforeEach(async () => {
   const sessions = memorySessions();
   sessionRows = sessions.rows;
   store = sessionsOn(sessions.db, { now });
+  let accountNumber = 0;
   accounts = accountsOn(memoryAccounts().db, {
     now,
-    newId: () => ID,
+    newId: () => String.fromCharCode(65 + accountNumber++).repeat(22),
     hash: async (password) => `test-hash:${password}`,
     verify: async (password, stored) => stored === `test-hash:${password}`,
   });
@@ -280,7 +281,7 @@ describe('adversarial: session hijack', () => {
     // that digest as though it were the token is refused exactly as any other unknown token is: hashing
     // it again never lands on the `_id` a real token's digest would.
     const stolen = tokenDigest(session.token);
-    const response = await asking('GET', SESSION_PATH, { token: stolen, record: session.record });
+    const response = await asking('GET', SESSION_PATH, { ...session, token: stolen });
     expect(response.statusCode).toBe(401);
     expect(response.headers['set-cookie']).toBe(clearedSessionCookie());
 
@@ -338,9 +339,9 @@ describe('signing in', () => {
 });
 
 describe('signing in while a session is already open in this browser', () => {
-  test('joins a second slot onto the same container rather than opening a new one', async () => {
-    const first = await signingIn();
-    const cookie = String(first.headers['set-cookie']);
+  test('audits a genuine join even though authentication rotates the container token', async () => {
+    const first = await signedIn();
+    const cookie = sessionCookie(first.token, 60);
     const response = await app.inject({
       method: 'POST',
       url: SESSION_PATH,
@@ -348,8 +349,10 @@ describe('signing in while a session is already open in this browser', () => {
       payload: { name: CLAIM.name, password: CLAIM.password },
     });
     expect(response.statusCode).toBe(201);
-    // A live join keeps the container's own identifier rather than minting a fresh one.
-    expect(tokenIn(response.headers['set-cookie'])).toBe(tokenIn(cookie));
+    const token = tokenIn(response.headers['set-cookie']);
+    expect(token).not.toBe(first.token);
+    expect(await store.slots(sessionContext('req-join-audit'), token)).toHaveLength(2);
+    await expect(store.read(sessionContext('req-join-audit'), first.token)).rejects.toMatchObject({ kind: 'unknown' });
     expect(entries()).toContainEqual(
       expect.objectContaining({ action: 'session.slot.add', subject: actorFor(ID), outcome: 'allowed' }),
     );
@@ -509,6 +512,7 @@ describe('signing in with a passkey', () => {
 
   test('an account this deployment has disabled is refused its key, exactly as it is refused its password', async () => {
     const device = await registered();
+    await accounts.create(accountContext('req-passkey-disabled'), { ...CLAIM, name: 'other-admin', role: 'admin' });
     await accounts.disable(accountContext('req-passkey-disabled'), ID);
     const withPassword = await signingIn();
     expect(withPassword.statusCode).toBe(401);
@@ -522,6 +526,7 @@ describe('signing in with a passkey', () => {
 
   test('an account this deployment has not disabled still opens a session with its key', async () => {
     const device = await registered();
+    await accounts.create(accountContext('req-passkey-disabled'), { ...CLAIM, name: 'other-admin', role: 'admin' });
     await accounts.disable(accountContext('req-passkey-disabled'), ID);
     await accounts.restore(accountContext('req-passkey-restored'), ID);
     const challenge = await passkeyChallenge();

@@ -21,7 +21,7 @@ import {
   parseSecondFactor,
 } from '@holydeck/contracts/totp';
 
-import { accountContext } from './accounts.js';
+import { accountContext, passwordConfirmed } from './accounts.js';
 import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession, refuseAsForbidden } from './csrf.js';
@@ -188,6 +188,12 @@ export function serveTotpRoutes(app: FastifyInstance, { identity }: TotpRoutesOp
   app.delete(TOTP_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
+    if (!await passwordConfirmed(identity, id, request.body, correlationFor(TOTP_PREFIX, request.id))) {
+      await note(request, provenSession(request).record.actor, 'totp.revoke', 'refused');
+      return reply.code(401).send(errorEnvelope(
+        'auth.sign_in_refused', 'Confirm your password and try again in a few minutes.', request.id,
+      ));
+    }
     const revoked = await identity.totp.revoke(totpContext(correlationFor(TOTP_PREFIX, request.id)), id);
     await note(request, provenSession(request).record.actor, 'totp.revoke', revoked ? 'allowed' : 'refused');
     return reply.send(successEnvelope({ revoked }, request.id, CLIENT_WINDOW.current));
