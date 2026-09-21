@@ -8,6 +8,10 @@ import { fromRepoRoot } from './pipeline.mjs';
 
 export const ROUTES_DIR = 'apps/app/src';
 
+// These two register routes directly rather than through a *-routes.ts module; readRoles() reads them
+// too, and route-coverage.mjs's own directRoutesIn() discovers the same two files for its census.
+const DIRECT_ROUTE_FILES = ['app.ts', 'live.ts'];
+
 // Entries take { testPath, testName }, naming a reviewed wrong-permission HTTP test in the harness.
 // The census checks that the named, enabled test still contains a forbidden-status assertion; the
 // harness itself proves the behavior. No existing harness HTTP test supplies that evidence yet.
@@ -22,6 +26,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'capability-routes.ts POST GUEST_INVITATION_PATH PRESENTATION_CONTROL': 'no harness test refuses guest invitations without Control presentation',
   'capability-routes.ts POST OUTPUT_CAPABILITY_PATH PRESENTATION_CONTROL': 'no harness test refuses output capabilities without Control presentation',
   'capability-routes.ts DELETE REVOKE_PATH PRESENTATION_CONTROL': 'no harness test refuses capability revocation without Control presentation',
+  'live.ts GET LIVE_CONNECTIONS_PATH PRESENTATION_CONTROL': 'no harness test refuses live connection counts without Control presentation',
   'media-routes.ts POST MEDIA_PATH MEDIA_MANAGE': 'no harness test refuses media uploads to a non-admin',
   'reference-routes.ts GET LOOKUP_PATH PRESENTATION_CONTROL': 'no harness test refuses reference lookup without Control presentation',
   'reference-routes.ts POST SHOWN_REFERENCES_PATH PRESENTATION_CONTROL': 'no harness test refuses showing references without Control presentation',
@@ -39,22 +44,60 @@ export const KNOWN_INTEGRATION_GAPS = {
 
 const parse = (name, text) => ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 
-const property = (node, name) => {
-  if (node === undefined || !ts.isObjectLiteralExpression(node) || node.properties.some(ts.isSpreadAssignment)) {
-    return undefined;
-  }
-  const entry = node.properties.find((entry) =>
-    (ts.isPropertyAssignment(entry) || ts.isShorthandPropertyAssignment(entry)) && entry.name.text === name);
-  return entry === undefined ? undefined : ts.isShorthandPropertyAssignment(entry) ? entry.name : entry.initializer;
-};
-
 const walk = (node, visit) => {
   visit(node);
   ts.forEachChild(node, (child) => { walk(child, visit); });
 };
 
+// The nearest top-level `const <name> = ...` in this file, or undefined — the same trust boundary
+// permissionRoutesIn() already applies to every other guard lookup (`let`/`var` stay unresolved).
+function constInitializer(tree, name) {
+  let initializer;
+  walk(tree, (node) => {
+    if (initializer !== undefined || !ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) ||
+        node.name.text !== name || !ts.isVariableDeclarationList(node.parent) ||
+        !(node.parent.flags & ts.NodeFlags.Const)) return;
+    initializer = node.initializer;
+  });
+  return initializer;
+}
+
+// Whether every statically-resolvable shape `expression` can take is an object literal that never
+// declares `name` — recursing through a ternary's branches and through one level of identifier lookup.
+// Anything else (a call, an import, an unresolved identifier, a nested spread) cannot be proven, so it
+// answers false and the spread that carries it stays rejected.
+function neverDeclares(tree, expression, name) {
+  if (ts.isObjectLiteralExpression(expression)) {
+    return expression.properties.every((entry) => !ts.isSpreadAssignment(entry) &&
+      !((ts.isPropertyAssignment(entry) || ts.isShorthandPropertyAssignment(entry)) && entry.name.text === name));
+  }
+  if (ts.isConditionalExpression(expression)) {
+    return neverDeclares(tree, expression.whenTrue, name) && neverDeclares(tree, expression.whenFalse, name);
+  }
+  if (ts.isIdentifier(expression)) {
+    const initializer = constInitializer(tree, expression.text);
+    return initializer !== undefined && neverDeclares(tree, initializer, name);
+  }
+  return false;
+}
+
+// A spread makes `name` unrecognizable unless every spread in the object is provably incapable of
+// carrying it — e.g. live.ts's `...proving`, which resolves to `{}` or a lone `preValidation`, can never
+// smuggle in a competing `config`. This is the one place the fail-closed default (reject any spread)
+// bends, and only when the bend can be proven; every unresolvable spread still fails closed as before.
+function propertyIn(tree) {
+  return (node, name) => {
+    if (node === undefined || !ts.isObjectLiteralExpression(node)) return undefined;
+    const spreadIsSafe = (entry) => !ts.isSpreadAssignment(entry) || neverDeclares(tree, entry.expression, name);
+    if (!node.properties.every(spreadIsSafe)) return undefined;
+    const entry = node.properties.find((entry) =>
+      (ts.isPropertyAssignment(entry) || ts.isShorthandPropertyAssignment(entry)) && entry.name.text === name);
+    return entry === undefined ? undefined : ts.isShorthandPropertyAssignment(entry) ? entry.name : entry.initializer;
+  };
+}
+
 // The no-store branches register the same routes from a const table using destructuring.
-function tableBindings(node, constants) {
+function tableBindings(node, constants, property) {
   let loop = node.parent;
   while (loop !== undefined && !ts.isForOfStatement(loop)) loop = loop.parent;
   if (loop === undefined || !ts.isIdentifier(loop.expression) || !ts.isVariableDeclarationList(loop.initializer)) return undefined;
@@ -82,6 +125,7 @@ export function permissionRoutesIn(routeSources) {
   for (const [file, source] of Object.entries(routeSources)) {
     const tree = parse(file, source);
     if (tree.parseDiagnostics.length > 0) problems.push(`${file} cannot be parsed for permission routes`);
+    const property = propertyIn(tree);
     const constants = new Map();
     const guards = new Map();
     for (const statement of tree.statements) {
@@ -116,7 +160,7 @@ export function permissionRoutesIn(routeSources) {
       const method = call.name.text;
       if (method === 'route') {
         const options = node.arguments[0];
-        const bindings = tableBindings(node, constants) ?? [new Map()];
+        const bindings = tableBindings(node, constants, property) ?? [new Map()];
         for (const values of bindings) {
           const resolve = (value) => value !== undefined && ts.isIdentifier(value) && values.has(value.text) ? values.get(value.text) : value;
           const verb = resolve(property(options, 'method'));
@@ -202,7 +246,7 @@ export function verifyRoleCoverage({ routeSources, readTest }, {
 export function readRoles() {
   const routeSources = {};
   for (const entry of readdirSync(fromRepoRoot(ROUTES_DIR), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isFile() && entry.name.endsWith('-routes.ts')) {
+    if (entry.isFile() && (entry.name.endsWith('-routes.ts') || DIRECT_ROUTE_FILES.includes(entry.name))) {
       routeSources[entry.name] = readFileSync(fromRepoRoot(`${ROUTES_DIR}/${entry.name}`), 'utf8');
     }
   }

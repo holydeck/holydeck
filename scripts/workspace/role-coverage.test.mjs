@@ -156,10 +156,10 @@ test('in-process route tests cannot be claimed as harness integration evidence',
 
 test('the repository itself accounts for every permission registration it ships', () => {
   const repo = readRoles();
-  assert.equal(Object.keys(repo.routeSources).length, 10);
-  assert.equal(permissionRoutesIn(repo.routeSources).routes.length, 20);
+  assert.equal(Object.keys(repo.routeSources).length, 12);
+  assert.equal(permissionRoutesIn(repo.routeSources).routes.length, 21);
   assert.deepEqual(verifyRoleCoverage(repo), []);
-  assert.equal(verifyRoleCoverage(repo, { tested: {}, gaps: {} }).length, 20);
+  assert.equal(verifyRoleCoverage(repo, { tested: {}, gaps: {} }).length, 21);
 });
 
 test('repository guard removal is detected even while its negative test is a known gap', () => {
@@ -169,6 +169,40 @@ test('repository guard removal is detected even while its negative test is a kno
   );
   const problems = verifyRoleCoverage(repo);
   assert.ok(problems.some((problem) => problem.includes('PATCH CONTROL_PATH has no recognizable authorization guard')));
+});
+
+test('weakening live.ts\'s connection-counts guard is caught even though it is a known gap', () => {
+  const repo = readRoles();
+  repo.routeSources['live.ts'] = repo.routeSources['live.ts'].replace(
+    'app.get(LIVE_CONNECTIONS_PATH, { config: { need: PERMISSION } }', 'app.get(LIVE_CONNECTIONS_PATH, { config: { need: PUBLIC } }',
+  );
+  const problems = verifyRoleCoverage(repo);
+  assert.ok(problems.some((problem) => problem === 'live.ts GET LIVE_CONNECTIONS_PATH PRESENTATION_CONTROL is a known integration gap that is not a permission route on disk'));
+});
+
+test('a route options spread is resolved when it provably cannot smuggle in a guard, rejected otherwise', () => {
+  const safe = `
+    const PUBLIC: RouteNeed = { kind: 'public' };
+    const proving = flag ? {} : { preValidation: async () => {} };
+    app.get(PATH, { websocket: true, config: { need: PUBLIC }, ...proving }, () => {});
+  `;
+  assert.deepEqual(permissionRoutesIn({ 'live.ts': safe }).problems, []);
+  assert.deepEqual(permissionRoutesIn({ 'live.ts': safe }).routes, []);
+
+  const unproven = `
+    const PUBLIC: RouteNeed = { kind: 'public' };
+    app.get(PATH, { websocket: true, config: { need: PUBLIC }, ...unknown }, () => {});
+  `;
+  assert.ok(permissionRoutesIn({ 'live.ts': unproven }).problems
+    .some((problem) => problem.includes('has no recognizable authorization guard')));
+
+  const unsafe = `
+    const PUBLIC: RouteNeed = { kind: 'public' };
+    const proving = flag ? {} : { config: { need: SOMETHING } };
+    app.get(PATH, { websocket: true, config: { need: PUBLIC }, ...proving }, () => {});
+  `;
+  assert.ok(permissionRoutesIn({ 'live.ts': unsafe }).problems
+    .some((problem) => problem.includes('has no recognizable authorization guard')));
 });
 
 test('table registration branches cannot weaken a guard while the normal branch retains it', () => {
