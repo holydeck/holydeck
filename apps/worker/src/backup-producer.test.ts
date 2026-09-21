@@ -69,6 +69,41 @@ const OPTIONS = {
   newId: () => 'backup-fixed',
 };
 
+/** A backup an earlier run recorded, spread across one snapshot of its own. */
+const recorded = (day: string): Record<string, unknown> => ({
+  _id: `backup:backup-${day}`,
+  actor: 'system',
+  correlationId: 'req-earlier',
+  backupId: `backup-${day}`,
+  at: `${day}T02:00:00.000Z`,
+  manifest: {
+    id: `backup-${day}`,
+    createdAt: `${day}T02:00:00.000Z`,
+    schemaVersion: 19,
+    contents: [{ class: 'media', count: 1, bytes: 1, hash: `restic:snap-${day}` }],
+    excludedSecrets: [],
+  },
+  consistency: { pointInTime: true, method: 'a session read at one snapshot cluster time' },
+});
+
+/** Drives the four restic calls a successful backup makes, in order, to their summaries. */
+const completeBackupCalls = async (): Promise<void> => {
+  await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(1));
+  children[0]?.emit('close', 0);
+  for (const [at, snapshot] of [
+    [1, 'mongo-snap'],
+    [2, 'settings-snap'],
+    [3, 'media-snap'],
+  ] as const) {
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(at + 1));
+    children[at]?.stdout.emit(
+      'data',
+      Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 1, snapshot_id: snapshot })),
+    );
+    children[at]?.emit('close', 0);
+  }
+};
+
 describe('producing a backup', () => {
   beforeEach(() => {
     children.length = 0;
@@ -214,5 +249,57 @@ describe('producing a backup', () => {
     expect(children[1]?.kill).not.toHaveBeenCalled();
     expect(db.rows.get('backups') ?? []).toHaveLength(0);
     expect(db.rows.get('audit_events') ?? []).toHaveLength(0);
+  });
+});
+
+describe('forgetting what retention no longer keeps', () => {
+  beforeEach(() => {
+    children.length = 0;
+    spawned.mockClear();
+  });
+
+  // Eight distinct days of runs against a seven-daily rule: the oldest is the first run no rule claims,
+  // and its snapshot is the only one the repository is asked to forget.
+  it('prunes the snapshots of the run nothing keeps once the new one is recorded', async () => {
+    const db = fakeDb();
+    db.rows.set(
+      'backups',
+      ['2026-09-20', '2026-09-19', '2026-09-18', '2026-09-17', '2026-09-16', '2026-09-15', '2026-09-14'].map(recorded),
+    );
+    const handler = backupProducerOn({ ...OPTIONS, archive: fakeArchiveDb(), db });
+
+    const running = handler(job(), new AbortController().signal);
+    await completeBackupCalls();
+
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(5));
+    children[4]?.emit('close', 0);
+    await expect(running).resolves.toBeUndefined();
+
+    expect(spawned).toHaveBeenNthCalledWith(
+      5,
+      'restic',
+      [
+        'forget',
+        '--repo',
+        OPTIONS.restic.repository,
+        '--insecure-no-password',
+        '--json',
+        '--prune',
+        'snap-2026-09-14',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+  });
+
+  it('asks restic to forget nothing while every run is one a rule still claims', async () => {
+    const db = fakeDb();
+    db.rows.set('backups', [recorded('2026-09-20')]);
+    const handler = backupProducerOn({ ...OPTIONS, archive: fakeArchiveDb(), db });
+
+    const running = handler(job(), new AbortController().signal);
+    await completeBackupCalls();
+
+    await expect(running).resolves.toBeUndefined();
+    expect(spawned).toHaveBeenCalledTimes(4);
   });
 });

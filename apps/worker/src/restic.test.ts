@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { backupPath, initRepository } from './restic.js';
+import { backupPath, checkRepository, forgetSnapshots, initRepository, restoreSnapshot } from './restic.js';
 
 class FakeChild extends EventEmitter {
   readonly kill = vi.fn();
@@ -149,5 +149,112 @@ describe('backing up a path with restic', () => {
     child.emit('close', 130);
 
     await expect(backing).rejects.toThrow('restic exited with code 130');
+  });
+});
+
+describe('restoring a snapshot with restic', () => {
+  it('puts one snapshot back under a target of the caller’s choosing', async () => {
+    const child = new FakeChild();
+    spawned.mockReturnValue(child);
+
+    const restoring = restoreSnapshot(OPTIONS, 'a1b2c3d4', '/tmp/rehearsal', new AbortController().signal);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalled());
+    child.emit('close', 0);
+
+    await expect(restoring).resolves.toBeUndefined();
+    expect(spawned).toHaveBeenCalledWith(
+      'restic',
+      [
+        'restore',
+        'a1b2c3d4',
+        '--repo',
+        OPTIONS.repository,
+        '--insecure-no-password',
+        '--json',
+        '--target',
+        '/tmp/rehearsal',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+  });
+
+  it('rejects when the snapshot cannot be restored', async () => {
+    const child = new FakeChild();
+    spawned.mockReturnValue(child);
+
+    const restoring = restoreSnapshot(OPTIONS, 'missing', '/tmp/rehearsal', new AbortController().signal);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalled());
+    child.stderr.emit('data', Buffer.from('Fatal: no matching ID found\n'));
+    child.emit('close', 1);
+
+    await expect(restoring).rejects.toThrow('no matching ID found');
+  });
+});
+
+describe('checking the restic repository', () => {
+  // The snapshot-addressed content classes carry `restic:<id>` rather than a digest, so there is nothing
+  // in the manifest to rehash for them. What proves those is the repository's own check.
+  it('asks restic to verify its own structure', async () => {
+    const child = new FakeChild();
+    spawned.mockReturnValue(child);
+
+    const checking = checkRepository(OPTIONS, new AbortController().signal);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalled());
+    child.emit('close', 0);
+
+    await expect(checking).resolves.toBeUndefined();
+    expect(spawned).toHaveBeenCalledWith('restic', ['check', '--repo', OPTIONS.repository, '--insecure-no-password'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  });
+
+  it('rejects a repository restic finds damaged', async () => {
+    const child = new FakeChild();
+    spawned.mockReturnValue(child);
+
+    const checking = checkRepository(OPTIONS, new AbortController().signal);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalled());
+    child.stderr.emit('data', Buffer.from('Fatal: repository contains errors\n'));
+    child.emit('close', 1);
+
+    await expect(checking).rejects.toThrow('repository contains errors');
+  });
+});
+
+describe('forgetting snapshots retention no longer keeps', () => {
+  it('forgets exactly the snapshots it was given, and prunes what only they held', async () => {
+    const child = new FakeChild();
+    spawned.mockReturnValue(child);
+
+    const forgetting = forgetSnapshots(OPTIONS, ['aaa111', 'bbb222'], new AbortController().signal);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalled());
+    child.emit('close', 0);
+
+    await expect(forgetting).resolves.toBe(2);
+    expect(spawned).toHaveBeenCalledWith(
+      'restic',
+      ['forget', '--repo', OPTIONS.repository, '--insecure-no-password', '--json', '--prune', 'aaa111', 'bbb222'],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+  });
+
+  // Asking a tool to forget an empty list is a question with a different answer in every tool, and the
+  // cost of finding out which kind restic is would be somebody's repository. Answered here instead.
+  it('runs nothing at all when there is nothing to forget', async () => {
+    spawned.mockClear();
+    await expect(forgetSnapshots(OPTIONS, [], new AbortController().signal)).resolves.toBe(0);
+    expect(spawned).not.toHaveBeenCalled();
+  });
+
+  it('rejects when restic refuses to forget them', async () => {
+    const child = new FakeChild();
+    spawned.mockReturnValue(child);
+
+    const forgetting = forgetSnapshots(OPTIONS, ['aaa111'], new AbortController().signal);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalled());
+    child.stderr.emit('data', Buffer.from('Fatal: no matching ID found\n'));
+    child.emit('close', 1);
+
+    await expect(forgetting).rejects.toThrow('no matching ID found');
   });
 });

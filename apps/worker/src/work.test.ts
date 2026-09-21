@@ -4,6 +4,7 @@ import { HANDLERS, handlersOn, workToDo } from './work.js';
 
 import type { BackupProducerOptions } from './backup-producer.js';
 import type { MediaIngestOptions } from './media-ingest.js';
+import type { RestoreRehearsalOptions } from './restore-rehearsal.js';
 import type { Handler } from './runner.js';
 
 const handler: Handler = async () => undefined;
@@ -29,8 +30,8 @@ test('a registered handler and a store to claim from is work to do', () => {
   });
 });
 
-test('this build registers media ingestion and backup production as its kinds of job', () => {
-  expect(Object.keys(HANDLERS)).toEqual(['media-ingest', 'backup-run']);
+test('this build registers media ingestion, backup production and restore rehearsal as its kinds of job', () => {
+  expect(Object.keys(HANDLERS)).toEqual(['media-ingest', 'backup-run', 'restore-run']);
 });
 
 test('the unconfigured media-ingest placeholder refuses to run a job until an entry point wires it up', async () => {
@@ -45,7 +46,13 @@ test('the unconfigured backup-run placeholder refuses to run a job until an entr
   );
 });
 
-test('an entry point supplying its dependencies replaces both placeholders with real handlers', () => {
+test('the unconfigured restore-run placeholder refuses to run a job until an entry point wires it up', async () => {
+  await expect(HANDLERS['restore-run']?.({} as never, new AbortController().signal)).rejects.toThrow(
+    'restore rehearsal has not been configured',
+  );
+});
+
+test('an entry point supplying its dependencies replaces every placeholder with a real handler', () => {
   const media = {
     context: undefined,
     media: {} as MediaIngestOptions['media'],
@@ -63,8 +70,18 @@ test('an entry point supplying its dependencies replaces both placeholders with 
     schemaVersion: 1,
     now: () => '2026-09-21T00:00:00.000Z',
   };
-  const handlers = handlersOn(media, backupProducer);
-  expect(Object.keys(handlers)).toEqual(['media-ingest', 'backup-run']);
+  const restoreRehearsal = {
+    context: undefined,
+    db: {} as RestoreRehearsalOptions['db'],
+    target: {} as RestoreRehearsalOptions['target'],
+    sessions: {} as RestoreRehearsalOptions['sessions'],
+    restic: { repository: '/data/holydeck/restic' },
+    schemaVersion: 1,
+    now: () => '2026-09-21T00:00:00.000Z',
+  };
+  const handlers = handlersOn(media, backupProducer, restoreRehearsal);
+  expect(Object.keys(handlers)).toEqual(['media-ingest', 'backup-run', 'restore-run']);
   expect(handlers['media-ingest']).not.toBe(HANDLERS['media-ingest']);
   expect(handlers['backup-run']).not.toBe(HANDLERS['backup-run']);
+  expect(handlers['restore-run']).not.toBe(HANDLERS['restore-run']);
 });

@@ -18,6 +18,7 @@ import { MID_SERVICE_INDEXES, MID_SERVICE_RECORD } from './mid-service-additions
 import { PASSKEY_INDEXES, createPasskeyIndexOn, dropPasskeyIndexOn } from './passkeys.js';
 import { PRESENCE_INDEXES, createPresenceIndexOn, dropPresenceIndexOn } from './presence.js';
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
+import { RESTORE_INDEXES, RESTORE_RECORD } from './restores.js';
 import { RUN_INDEXES, RUN_RECORD } from './runs.js';
 import { SERVICE_INDEXES, SERVICE_RECORD } from './services.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
@@ -353,6 +354,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...BACKUP_INDEXES].reverse()) await api.dropIndex(BACKUP_RECORD, index.name);
+    },
+  },
+  {
+    version: 20,
+    name: 'the index the newest restore rehearsal is found by',
+    async up(api) {
+      for (const index of RESTORE_INDEXES) {
+        await api.createIndex(RESTORE_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...RESTORE_INDEXES].reverse()) await api.dropIndex(RESTORE_RECORD, index.name);
     },
   },
 ]);

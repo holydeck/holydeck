@@ -8,6 +8,8 @@ import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
 import { SCHEMA_VERSION } from '@holydeck/app/migrations';
 import { queueDb, queueOn, workerContext } from '@holydeck/app/queue';
 import { repositoryDb } from '@holydeck/app/repositories';
+import { rehearsalDatabaseName, restoreContext, restoreDb } from '@holydeck/app/restores';
+import { sessionDb, sessionsOn } from '@holydeck/app/sessions';
 import { loadSettings, settingsPath } from '@holydeck/app/settings';
 import { MongoClient } from 'mongodb';
 
@@ -102,6 +104,11 @@ if (work.runs === 'nothing') {
   // Restic itself is only touched once a backup job actually claims and runs: a build that never claims
   // `backup-run` never needs the binary present, the same way `ffmpeg` is only ever reached per poster job.
   const restic = { repository: settings.values.resticRepository };
+  // A rehearsal aims the whole of a real restore somewhere it cannot hurt anyone: not only the database
+  // the archive is applied to, but the sessions it ends. Pointing the session store at the live
+  // deployment would prove the same thing at the price of signing a congregation out mid-service, which
+  // is not a price a rehearsal ever gets to charge.
+  const rehearsal = store.db(rehearsalDatabaseName(store.db().databaseName));
   const handlers = handlersOn(
     {
       context: mediaContext('system', name),
@@ -117,6 +124,15 @@ if (work.runs === 'nothing') {
       restic,
       settingsDir: dirname(path),
       mediaRoot: settings.values.mediaRoot,
+      schemaVersion: SCHEMA_VERSION,
+      now,
+    },
+    {
+      context: restoreContext('system', name),
+      db: repositoryDb(store.db()),
+      target: restoreDb(rehearsal),
+      sessions: sessionsOn(sessionDb(rehearsal), { now }),
+      restic,
       schemaVersion: SCHEMA_VERSION,
       now,
     },

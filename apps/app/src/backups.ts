@@ -25,13 +25,22 @@ import type { Document, Filter, RepositoryDb } from './repositories.js';
 
 export const BACKUP_RECORD: RecordName = 'backups';
 
-/** Every Mongo-held durable record class the archive inventories, and the manifest name each reads as. */
-const MONGO_CONTENTS: readonly { readonly record: RecordName; readonly class: string }[] = [
+export interface MongoContent {
+  readonly record: RecordName;
+  readonly class: string;
+}
+
+/**
+ * Every Mongo-held durable record class the archive inventories, and the manifest name each reads as.
+ * Exported because a restore has to put back exactly this list, under exactly these names: an archive
+ * missing one of them is an archive that cannot be restored whole, and only this list can say so.
+ */
+export const MONGO_CONTENTS: readonly MongoContent[] = Object.freeze([
   { record: 'services', class: 'services' },
   { record: 'contentRevisions', class: 'content-revisions' },
   { record: 'preparedSnapshots', class: 'prepared-snapshots' },
   { record: 'runEvents', class: 'run-events' },
-];
+]);
 
 /** What a backup deliberately never carries, named once so a class here can never also appear in `contents`. */
 export const EXCLUDED_SECRETS: readonly string[] = Object.freeze([
@@ -109,14 +118,20 @@ function canonical(value: unknown): unknown {
   return value;
 }
 
-interface MongoArchiveEntry {
+export interface MongoArchiveEntry {
   readonly content: BackupContent;
   /** The exact bytes `content.hash` was computed over — what a dump file must hold, verbatim, for the two
    * to provably agree. */
   readonly text: string;
 }
 
-function archiveEntryOf(className: string, documents: readonly Document[]): MongoArchiveEntry {
+/**
+ * One content class, inventoried and serialised together so the hash and the bytes can never disagree.
+ * Exported for the restore side, which needs the same canonical form to say whether the state it put back
+ * after a rehearsal is the state it found — a comparison that is only worth anything if both sides of it
+ * are written the same way.
+ */
+export function archiveEntryOf(className: string, documents: readonly Document[]): MongoArchiveEntry {
   const text = JSON.stringify(documents.map((document) => canonical(document)));
   return { content: { class: className, count: documents.length, bytes: Buffer.byteLength(text, 'utf8'), hash: HASH(text) }, text };
 }
@@ -264,4 +279,47 @@ export async function finalizeBackup(
   });
 
   return graded.value;
+}
+
+/** How a content class that lives in the Restic repository is addressed, as opposed to digested. */
+export const SNAPSHOT_PREFIX = 'restic:';
+
+export interface RecordedBackup {
+  readonly backupId: string;
+  readonly at: string;
+  readonly production: BackupProduction;
+  /**
+   * Every Restic snapshot this run's restore set is spread across. Derived from the manifest rather than
+   * stored beside it, so there is one place a run's snapshots are named and it is the manifest itself —
+   * which is what makes "keep or forget a whole run" a statement about the restore set and not a guess.
+   */
+  readonly snapshots: readonly string[];
+}
+
+const snapshotsOf = (production: BackupProduction): readonly string[] =>
+  production.manifest.contents
+    .filter((content) => content.hash.startsWith(SNAPSHOT_PREFIX))
+    .map((content) => content.hash.slice(SNAPSHOT_PREFIX.length));
+
+/**
+ * Every backup run this deployment recorded, newest first. Sorted here rather than by the database,
+ * because the field is an instant written as text and a reader that assumes otherwise reads them in
+ * whatever order the collection happens to hold.
+ */
+export async function recordedBackups(db: RepositoryDb, context: unknown): Promise<readonly RecordedBackup[]> {
+  const rows = await repositoriesOn(db)[BACKUP_RECORD].read(context, {});
+  return rows
+    .map((row) => {
+      const production = {
+        manifest: row['manifest'],
+        consistency: row['consistency'],
+      } as unknown as BackupProduction;
+      return {
+        backupId: String(row['backupId']),
+        at: String(row['at']),
+        production,
+        snapshots: snapshotsOf(production),
+      };
+    })
+    .sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
 }

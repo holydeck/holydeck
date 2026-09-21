@@ -8,9 +8,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { finalizeBackup, readMongoArchive } from '@holydeck/app/backups';
+import { retentionFor } from '@holydeck/app/backup-retention';
+import { finalizeBackup, readMongoArchive, recordedBackups } from '@holydeck/app/backups';
 
-import { backupPath, initRepository } from './restic.js';
+import { backupPath, forgetSnapshots, initRepository } from './restic.js';
 
 import type { BackupDb } from '@holydeck/app/backups';
 import type { RepositoryDb } from '@holydeck/app/repositories';
@@ -35,6 +36,9 @@ const stopped = (signal: AbortSignal): void => {
   if (signal.aborted) throw new Error('backup production stopped after its lease was lost');
 };
 
+/** The content class the Mongo archive's own dump is backed up as — what a restore has to put back first. */
+export const MONGO_DUMP_CLASS = 'mongo';
+
 /**
  * Produces one backup: the Mongo archive (read, dumped to a temp directory, then backed up through Restic
  * so it is actually restorable rather than a fingerprint of data nothing durable ever holds), Restic's
@@ -52,7 +56,7 @@ export function backupProducerOn(options: BackupProducerOptions): Handler {
       await initRepository(options.restic, signal);
       stopped(signal);
 
-      const mongo = await backupPath(options.restic, 'mongo', 'mongo', dumpDir, signal);
+      const mongo = await backupPath(options.restic, MONGO_DUMP_CLASS, MONGO_DUMP_CLASS, dumpDir, signal);
       stopped(signal);
       const settings = await backupPath(options.restic, 'settings', 'settings', options.settingsDir, signal);
       stopped(signal);
@@ -65,6 +69,12 @@ export function backupProducerOn(options: BackupProducerOptions): Handler {
         { mongoContents: archive.contents, otherContents: [mongo, settings, media], consistency: archive.consistency },
         { now: options.now, newId: options.newId, schemaVersion: options.schemaVersion },
       );
+      stopped(signal);
+
+      // Last, and only once the new backup is recorded: retention decides what to keep out of everything
+      // that now exists, so a run that failed before finalizing can never be the reason an older one goes.
+      const decided = retentionFor(await recordedBackups(options.db, options.context));
+      await forgetSnapshots(options.restic, decided.snapshotsToForget, signal);
     } finally {
       await rm(dumpDir, { recursive: true, force: true });
     }

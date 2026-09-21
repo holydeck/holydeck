@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseBackupProduction } from './backups.js';
+import { parseBackupManifest, parseBackupProduction } from './backups.js';
 
 // Mirrors the valid fixture and the counterexamples backup-manifest.v1.json carries for `manifest` and
 // `consistency` — the two sections a backup run itself produces. The other three sections belong to
@@ -81,6 +81,168 @@ describe('what a backup run itself produces', () => {
         'backup.manifest.excludedSecrets',
         'backup.consistency.pointInTime',
         'backup.consistency.method',
+      ]),
+    );
+  });
+});
+
+// The whole of backup-manifest.v1.json, not only the half a producer writes: the valid fixture and every
+// counterexample it carries for `integrity`, `objectives` and `restore` — the three sections that exist
+// because somebody restored the backup and measured what it cost.
+const restored = () => ({
+  ...production(),
+  integrity: {
+    verifiedBeforeRestore: true,
+    algorithm: 'sha256 per content class plus a manifest digest',
+    mismatchAborts: true,
+  },
+  objectives: { rpoMinutes: 60, rtoMinutes: 240, measured: { rpoMinutes: 15, rtoMinutes: 96 } },
+  restore: {
+    sessionsInvalidated: true,
+    rollback: {
+      plan: 'Keep the pre-restore volume for 14 days and re-point at it; no restored write is destructive.',
+      verified: true,
+      verifiedOn: '2026-09-12',
+    },
+  },
+});
+
+const messagesOf = (parsed: ReturnType<typeof parseBackupManifest>): readonly string[] =>
+  parsed.ok ? [] : parsed.problems.map((problem) => problem.message);
+
+const pathsOf = (parsed: ReturnType<typeof parseBackupManifest>): readonly string[] =>
+  parsed.ok ? [] : parsed.problems.map((problem) => problem.path);
+
+describe('what a verified restore proves about a backup', () => {
+  it('accepts a manifest whose restore was verified, timed and session-invalidating', () => {
+    const parsed = parseBackupManifest(restored());
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.objectives.measured : undefined).toEqual({ rpoMinutes: 15, rtoMinutes: 96 });
+    expect(parsed.ok ? parsed.value.restore.rollback.verifiedOn : undefined).toBe('2026-09-12');
+  });
+
+  it('accepts a rollback whose verification date was not recorded', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({
+      ...input,
+      restore: { ...input.restore, rollback: { plan: input.restore.rollback.plan, verified: true } },
+    });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.restore.rollback.verifiedOn : 'unset').toBeUndefined();
+  });
+
+  it('still refuses everything a backup run alone would be refused for', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({ ...input, manifest: { ...input.manifest, contents: [] } });
+    expect(parsed.ok).toBe(false);
+    expect(pathsOf(parsed)).toContain('backup.manifest.contents');
+  });
+
+  it('refuses a restore that does not verify integrity first', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({ ...input, integrity: { ...input.integrity, verifiedBeforeRestore: false } });
+    expect(parsed.ok).toBe(false);
+    expect(messagesOf(parsed)).toContain('did not verify integrity first');
+  });
+
+  it('refuses a restore that continues past an integrity mismatch', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({ ...input, integrity: { ...input.integrity, mismatchAborts: false } });
+    expect(parsed.ok).toBe(false);
+    expect(messagesOf(parsed)).toContain('continues past an integrity mismatch');
+  });
+
+  it('refuses a restore naming no integrity algorithm', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({ ...input, integrity: { ...input.integrity, algorithm: '' } });
+    expect(parsed.ok).toBe(false);
+    expect(pathsOf(parsed)).toContain('backup.integrity.algorithm');
+  });
+
+  it('refuses a recovery objective that was never measured', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({
+      ...input,
+      objectives: { ...input.objectives, measured: { rpoMinutes: 15 } },
+    });
+    expect(parsed.ok).toBe(false);
+    expect(messagesOf(parsed)).toContain('was never measured');
+    expect(pathsOf(parsed)).toContain('backup.objectives.measured.rtoMinutes');
+  });
+
+  it('refuses a measured recovery time that misses its target', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({
+      ...input,
+      objectives: { ...input.objectives, measured: { rpoMinutes: 15, rtoMinutes: 600 } },
+    });
+    expect(parsed.ok).toBe(false);
+    expect(messagesOf(parsed)).toContain('measured rtoMinutes misses its target');
+  });
+
+  it('refuses a measured recovery point that misses its target', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({
+      ...input,
+      objectives: { ...input.objectives, measured: { rpoMinutes: 90, rtoMinutes: 96 } },
+    });
+    expect(parsed.ok).toBe(false);
+    expect(messagesOf(parsed)).toContain('measured rpoMinutes misses its target');
+  });
+
+  it('refuses a restore that left existing sessions valid', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({ ...input, restore: { ...input.restore, sessionsInvalidated: false } });
+    expect(parsed.ok).toBe(false);
+    expect(messagesOf(parsed)).toContain('left sessions valid across a restore');
+  });
+
+  it('refuses a restore with no rollback plan', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({
+      ...input,
+      restore: { ...input.restore, rollback: { ...input.restore.rollback, plan: '' } },
+    });
+    expect(parsed.ok).toBe(false);
+    expect(pathsOf(parsed)).toContain('backup.restore.rollback.plan');
+  });
+
+  it('refuses a rollback that was never verified', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({
+      ...input,
+      restore: { ...input.restore, rollback: { ...input.restore.rollback, verified: false } },
+    });
+    expect(parsed.ok).toBe(false);
+    expect(messagesOf(parsed)).toContain('the rollback was never verified');
+  });
+
+  it('refuses a manifest missing the three sections a restore is what produces', () => {
+    const parsed = parseBackupManifest(production());
+    expect(parsed.ok).toBe(false);
+    expect(pathsOf(parsed)).toEqual(
+      expect.arrayContaining(['backup.integrity', 'backup.objectives', 'backup.restore']),
+    );
+  });
+
+  it('reports every problem in one pass rather than the first', () => {
+    const parsed = parseBackupManifest({
+      ...restored(),
+      integrity: { verifiedBeforeRestore: false, algorithm: '', mismatchAborts: false },
+      objectives: { rpoMinutes: 60, rtoMinutes: 240, measured: { rpoMinutes: 900, rtoMinutes: 900 } },
+      restore: { sessionsInvalidated: false, rollback: { plan: '', verified: false } },
+    });
+    expect(parsed.ok).toBe(false);
+    expect(pathsOf(parsed)).toEqual(
+      expect.arrayContaining([
+        'backup.integrity.verifiedBeforeRestore',
+        'backup.integrity.mismatchAborts',
+        'backup.integrity.algorithm',
+        'backup.objectives.measured.rpoMinutes',
+        'backup.objectives.measured.rtoMinutes',
+        'backup.restore.sessionsInvalidated',
+        'backup.restore.rollback.plan',
+        'backup.restore.rollback.verified',
       ]),
     );
   });

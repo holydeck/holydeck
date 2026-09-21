@@ -13,6 +13,7 @@ import {
   backupContext,
   finalizeBackup,
   readMongoArchive,
+  recordedBackups,
 } from './backups.js';
 import { requestContext } from './context.js';
 import { RECORDS } from './records.js';
@@ -287,5 +288,47 @@ describe('finalizing a backup', () => {
 describe('the backup index', () => {
   it('orders backups by when they were made, most recent first', () => {
     expect(BACKUP_INDEXES).toEqual([{ name: 'backup_time', keys: { at: -1 }, options: {} }]);
+  });
+});
+
+describe('reading back what has been backed up', () => {
+  const runsOn = async (db: FakeDb): Promise<void> => {
+    for (const [day, snapshot] of [
+      ['2026-09-17', 'aaa111'],
+      ['2026-09-19', 'ccc333'],
+      ['2026-09-18', 'bbb222'],
+    ] as const) {
+      await finalizeBackup(
+        db,
+        CONTEXT,
+        {
+          mongoContents,
+          otherContents: [{ class: 'settings', count: 1, bytes: 4, hash: `restic:${snapshot}` }],
+          consistency,
+        },
+        { now: () => `${day}T02:00:00.000Z`, schemaVersion: 19, newId: () => `backup-${day}` },
+      );
+    }
+  };
+
+  it('answers newest-first, whatever order the collection holds them in', async () => {
+    const db = fakeDb();
+    await runsOn(db);
+    const recorded = await recordedBackups(db, CONTEXT);
+    expect(recorded.map((run) => run.backupId)).toEqual(['backup-2026-09-19', 'backup-2026-09-18', 'backup-2026-09-17']);
+  });
+
+  // Which snapshots a run's restore set spans is read off the manifest rather than stored beside it, so
+  // there is exactly one place a run names them and it is the thing a restore would be reading.
+  it('names the snapshots each run is spread across, and only those', async () => {
+    const db = fakeDb();
+    await runsOn(db);
+    const [newest] = await recordedBackups(db, CONTEXT);
+    expect(newest?.snapshots).toEqual(['ccc333']);
+    expect(newest?.production.consistency).toEqual(consistency);
+  });
+
+  it('answers with nothing when nothing has been backed up', async () => {
+    await expect(recordedBackups(fakeDb(), CONTEXT)).resolves.toEqual([]);
   });
 });

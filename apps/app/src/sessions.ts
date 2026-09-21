@@ -266,6 +266,13 @@ export interface SessionStore {
   /** Ends the whole container — every slot at once. There is no per-slot sign-out. */
   revoke(context: unknown, token: string): Promise<boolean>;
   revokeAllFor(context: unknown, actor: string): Promise<number>;
+  /**
+   * Ends every session this deployment holds, and answers how many containers that was. Restoring a
+   * backup is what this exists for: the archive deliberately carries no session, so a restore puts back a
+   * world every open session predates without ending any of them. Whole containers, not per-actor —
+   * afterwards nobody is signed in, which is the only safe thing to be sure of about who was.
+   */
+  revokeEvery(context: unknown): Promise<number>;
   issueTicket(context: unknown, token: string): Promise<string>;
   redeemTicket(context: unknown, token: string, ticket: string): Promise<SessionRecord>;
 }
@@ -478,6 +485,12 @@ export function sessionsOn(db: SessionDb, options: SessionOptions): SessionStore
       const pulled = await rows.updateMany({ 'slots.actor': actor }, { $pull: { slots: { actor } } });
       await rows.deleteMany({ slots: { $size: 0 } });
       return pulled.modifiedCount;
+    },
+
+    async revokeEvery(context) {
+      permit(context, 'end');
+      const { deletedCount } = await db.collection(SESSIONS_COLLECTION).deleteMany({});
+      return deletedCount;
     },
 
     async issueTicket(context, token) {

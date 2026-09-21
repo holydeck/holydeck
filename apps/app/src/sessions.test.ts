@@ -550,6 +550,25 @@ describe('ending a session', () => {
     expect((await refusal(() => store.revoke(READER, session.token))).kind).toBe('permission');
     expect((await refusal(() => store.revokeAllFor(READER, ACTOR))).kind).toBe('permission');
   });
+
+  // Restoring a backup puts data back that every open session predates. Nothing in the archive can end
+  // them — sessions are never in it — so the store has to be able to end all of them at once, without
+  // needing to be told who was signed in, which is exactly what nobody would know after a restore.
+  test('a restore ends every session at once, whoever holds it', async () => {
+    const first = await started();
+    await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] }, first.token);
+    const other = await store.start(GATEKEEPER, { actor: OTHER, permissions: ['services.read'] });
+    await expect(store.revokeEvery(GATEKEEPER)).resolves.toBe(2);
+    expect(db.rows.size).toBe(0);
+    expect((await refusal(() => store.read(GATEKEEPER, first.token))).kind).toBe('unknown');
+    expect((await refusal(() => store.read(GATEKEEPER, other.token))).kind).toBe('unknown');
+  });
+
+  test('ending every session needs the permission to end one', async () => {
+    await started();
+    expect((await refusal(() => store.revokeEvery(READER))).kind).toBe('permission');
+    expect(db.rows.size).toBe(1);
+  });
 });
 
 describe('the ticket a socket handshake carries', () => {

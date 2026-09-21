@@ -16,6 +16,7 @@ import {
   statusFrom,
 } from './migrations.js';
 import { QUEUE_INDEXES } from './queue.js';
+import { RESTORE_INDEXES } from './restores.js';
 import { SESSION_INDEXES } from './sessions.js';
 import { TOTP_INDEXES } from './totp.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -103,6 +104,7 @@ describe('the shipped migrations', () => {
       'prepared_snapshots',
       'presence',
       'presentation_runs',
+      'restores',
       'run_events',
       'schema_migrations',
       'services',
@@ -164,6 +166,14 @@ describe('the shipped migrations', () => {
     const db = fakeDb();
     await migrate(db, CONTEXT, { now: clock });
     expect(db.indexes.get('capabilities')).toEqual(CAPABILITY_INDEXES.map((index) => index.name));
+  });
+
+  // A rehearsal is read newest-first — the last one that proved a backup restorable is the answer to
+  // whether one has been proved lately — so the index it is read by ships as a version like the rest.
+  test('build the restore rehearsals the index the newest one is found by', async () => {
+    const db = fakeDb();
+    await migrate(db, CONTEXT, { now: clock });
+    expect(db.indexes.get('restores')).toEqual(RESTORE_INDEXES.map((index) => index.name));
   });
 });
 

@@ -33,6 +33,18 @@
       "types": "./dist/backups.d.ts",
       "import": "./dist/backups.js"
     },
+    "./backup-retention": {
+      "types": "./dist/backup-retention.d.ts",
+      "import": "./dist/backup-retention.js"
+    },
+    "./restores": {
+      "types": "./dist/restores.d.ts",
+      "import": "./dist/restores.js"
+    },
+    "./sessions": {
+      "types": "./dist/sessions.d.ts",
+      "import": "./dist/sessions.js"
+    },
     "./migrations": {
       "types": "./dist/migrations.d.ts",
       "import": "./dist/migrations.js"

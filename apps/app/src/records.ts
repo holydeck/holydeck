@@ -151,6 +151,26 @@ export const RECORDS = {
       position: 'required',
     },
   },
+  // Spec BACK-02: one row per restore rehearsal, holding the whole manifest a restore is what completes —
+  // the `manifest` and `consistency` the backup run produced, plus the `integrity`, `objectives` and
+  // `restore` sections only actually recovering from it can fill in. A class of its own rather than an
+  // amendment to the `backups` row, because that row is immutable: a rehearsal is a new fact about an old
+  // backup, and rewriting the backup to carry it would be the one thing these classes never do.
+  restores: {
+    collection: 'restores',
+    kind: 'immutable',
+    fields: {
+      ...HISTORY,
+      restoreId: 'required',
+      backupId: 'required',
+      at: 'required',
+      manifest: 'required',
+      consistency: 'required',
+      integrity: 'required',
+      objectives: 'required',
+      restore: 'required',
+    },
+  },
   // Spec LIVE-12: every shown slide and operator change, in server order, with the revisions it pinned.
   // `shown` is optional because most of what this log holds moved nothing into view — a theme change, a
   // Standby, an override. An event that did carries what it put in front of the room, which is what spec

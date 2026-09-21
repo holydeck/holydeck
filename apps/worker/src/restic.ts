@@ -97,3 +97,42 @@ export async function backupPath(
     hash: `restic:${summary.snapshot_id}`,
   };
 }
+
+/** Puts one snapshot back under `target`, which is a directory of the rehearsal's choosing and never a live one. */
+export async function restoreSnapshot(
+  options: ResticOptions,
+  snapshot: string,
+  target: string,
+  signal: AbortSignal,
+): Promise<void> {
+  await run(
+    ['restore', snapshot, '--repo', options.repository, '--insecure-no-password', '--json', '--target', target],
+    signal,
+  );
+}
+
+/**
+ * What stands in for rehashing the snapshot-addressed content classes. Their manifest entries carry
+ * `restic:<id>` — an address, not a digest — so there is nothing in the manifest to compare bytes against;
+ * the repository's own check is the proof that what those addresses point at is intact.
+ */
+export async function checkRepository(options: ResticOptions, signal: AbortSignal): Promise<void> {
+  await run(['check', '--repo', options.repository, '--insecure-no-password'], signal);
+}
+
+/**
+ * Forgets exactly the snapshots named and prunes what only they held. Retention decided which those are
+ * (see `backup-retention`); this only carries it out, and does nothing at all when the answer was none.
+ */
+export async function forgetSnapshots(
+  options: ResticOptions,
+  snapshots: readonly string[],
+  signal: AbortSignal,
+): Promise<number> {
+  if (snapshots.length === 0) return 0;
+  await run(
+    ['forget', '--repo', options.repository, '--insecure-no-password', '--json', '--prune', ...snapshots],
+    signal,
+  );
+  return snapshots.length;
+}

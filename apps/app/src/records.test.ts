@@ -25,6 +25,7 @@ describe('the durable record classes', () => {
       'midServiceAdditions',
       'preparedSnapshots',
       'presentationRuns',
+      'restores',
       'runEvents',
       'schemaMigrations',
       'serviceTemplates',

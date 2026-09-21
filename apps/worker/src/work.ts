@@ -8,9 +8,11 @@
 
 import { backupProducerOn } from './backup-producer.js';
 import { mediaIngestOn } from './media-ingest.js';
+import { restoreRehearsalOn } from './restore-rehearsal.js';
 
 import type { BackupProducerOptions } from './backup-producer.js';
 import type { MediaIngestOptions } from './media-ingest.js';
+import type { RestoreRehearsalOptions } from './restore-rehearsal.js';
 import type { Handler } from './runner.js';
 
 export type Handlers = Readonly<Record<string, Handler>>;
@@ -27,17 +29,27 @@ const unconfiguredBackupRun: Handler = async () => {
   throw new Error('backup production has not been configured');
 };
 
+const unconfiguredRestoreRun: Handler = async () => {
+  throw new Error('restore rehearsal has not been configured');
+};
+
 /** The kinds this build registers before the entry point supplies their deployment dependencies. */
 export const HANDLERS: Handlers = Object.freeze({
   'media-ingest': unconfiguredMediaIngest,
   'backup-run': unconfiguredBackupRun,
+  'restore-run': unconfiguredRestoreRun,
 });
 
-export function handlersOn(mediaIngest: MediaIngestOptions, backupProducer: BackupProducerOptions): Handlers {
+export function handlersOn(
+  mediaIngest: MediaIngestOptions,
+  backupProducer: BackupProducerOptions,
+  restoreRehearsal: RestoreRehearsalOptions,
+): Handlers {
   return Object.freeze({
     ...HANDLERS,
     'media-ingest': mediaIngestOn(mediaIngest),
     'backup-run': backupProducerOn(backupProducer),
+    'restore-run': restoreRehearsalOn(restoreRehearsal),
   });
 }
 
