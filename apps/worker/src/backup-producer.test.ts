@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -62,7 +62,9 @@ const summaryLine = (fields: Record<string, unknown>): string =>
 const OPTIONS = {
   context: CONTEXT,
   restic: { repository: '/data/holydeck/restic' },
-  settingsDir: '/data/holydeck/config',
+  // Left pointing at nothing on disk: most of these tests do not care what the "settings" class holds,
+  // and `stageRedactedSettings` treats a missing file as "nothing configured yet" rather than a failure.
+  settingsPath: '/data/holydeck/config/settings.yaml',
   mediaRoot: '/data/holydeck/media',
   schemaVersion: 19,
   now: () => NOW,
@@ -181,10 +183,13 @@ describe('producing a backup', () => {
       ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'mongo', dumpDir],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
+    const settingsArgs = spawned.mock.calls[2]?.[1] as string[];
+    const settingsStagingDir = settingsArgs.at(-1) as string;
+    expect(settingsStagingDir).toContain(join(tmpdir(), 'holydeck-backup-settings-'));
     expect(spawned).toHaveBeenNthCalledWith(
       3,
       'restic',
-      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'settings', OPTIONS.settingsDir],
+      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'settings', settingsStagingDir],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
     expect(spawned).toHaveBeenNthCalledWith(
@@ -193,6 +198,53 @@ describe('producing a backup', () => {
       ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'media', OPTIONS.mediaRoot],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
+  });
+
+  it('redacts the settings file before backing it up, so no export ever carries a secret', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'holydeck-backup-producer-settings-'));
+    const settingsPath = join(configDir, 'settings.yaml');
+    const secretToken = 'super-secret-corpus-token-value';
+    await writeFile(
+      settingsPath,
+      `port: 4100\ncorpusToken: ${secretToken}\nmongoUrl: mongodb://operator:hunter2@mongo:27017/holydeck\n`,
+    );
+
+    const db = fakeDb();
+    const handler = backupProducerOn({ ...OPTIONS, settingsPath, archive: fakeArchiveDb(), db });
+
+    const running = handler(job(), new AbortController().signal);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(1));
+    children[0]?.emit('close', 0);
+
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(2));
+    children[1]?.stdout.emit(
+      'data',
+      Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 1, snapshot_id: 'mongo-snap' })),
+    );
+    children[1]?.emit('close', 0);
+
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(3));
+    const settingsArgs = spawned.mock.calls[2]?.[1] as string[];
+    const settingsStagingDir = settingsArgs.at(-1) as string;
+    const staged = await readFile(join(settingsStagingDir, 'settings.yaml'), 'utf8');
+    expect(staged).not.toContain(secretToken);
+    expect(staged).not.toContain('hunter2');
+    expect(staged).toContain('port: 4100');
+
+    children[2]?.stdout.emit(
+      'data',
+      Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 1, snapshot_id: 'settings-snap' })),
+    );
+    children[2]?.emit('close', 0);
+
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(4));
+    children[3]?.stdout.emit(
+      'data',
+      Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 1, snapshot_id: 'media-snap' })),
+    );
+    children[3]?.emit('close', 0);
+
+    await expect(running).resolves.toBeUndefined();
   });
 
   it('kills an in-flight restic process and writes nothing when the lease is lost mid-run', async () => {

@@ -242,7 +242,12 @@ interface CapturedCollection {
   readonly digest: string;
 }
 
-const replace = async (target: RestoreDb, collection: string, documents: readonly Document[]): Promise<void> => {
+/** Replaces one collection's contents outright — the one operation a v1 restore ever does to a target. */
+export const replaceCollection = async (
+  target: RestoreDb,
+  collection: string,
+  documents: readonly Document[],
+): Promise<void> => {
   const rows = target.collection(collection);
   await rows.deleteMany({});
   if (documents.length > 0) await rows.insertMany(documents);
@@ -337,7 +342,7 @@ async function run(
   // Everything, before anything: a mismatch in the last class has to stop the first one being written.
   const verified = await verifyMongoArchive(options.restoredRoot, production);
 
-  for (const entry of verified) await replace(options.target, entry.collection, entry.documents);
+  for (const entry of verified) await replaceCollection(options.target, entry.collection, entry.documents);
 
   // The archive carries no session, so putting it back leaves every open one holding authority over a
   // world that has just been replaced underneath it. Ending them is part of the restore, not after it.
@@ -354,7 +359,7 @@ async function run(
   // The rollback is carried out rather than described, and then checked: `verified: true` in the manifest
   // means this deployment put the target back and reproduced the digest it started from.
   for (const entry of captured) {
-    await replace(options.target, entry.collection, entry.documents);
+    await replaceCollection(options.target, entry.collection, entry.documents);
     const after = await options.target.collection(entry.collection).find({}).toArray();
     if (stateOf(entry.collection, after) !== entry.digest) {
       throw new RestoreError(

@@ -6,7 +6,7 @@
 
 import { INTERNAL_BINDINGS, MINIMUM_CORPUS_TOKEN_LENGTH } from '@holydeck/contracts/corpus';
 import { LOCALES, type Locale } from '@holydeck/localization/locales';
-import { parse } from 'yaml';
+import { parse, stringify } from 'yaml';
 
 import { bindingOf, corpusBinding } from './corpus.js';
 
@@ -287,4 +287,38 @@ export function loadSettings(input: {
     },
     path,
   };
+}
+
+/** The fields this file holds a credential in — see `parseCorpusToken` and `parseMongoUrl` above. */
+export const SETTINGS_SECRET_FIELDS: readonly (keyof Settings)[] = ['corpusToken', 'mongoUrl'];
+
+const UNREADABLE_SETTINGS_PLACEHOLDER = '# settings file was not valid YAML; omitted from the backup\n';
+
+/**
+ * The settings file with every credential-bearing field blanked out, for the one caller that must never
+ * hold onto a secret: a backup. Not run through `loadSettings`' own validation — a file already on disk
+ * has already passed it once, and a backup should protect what it cannot fully parse rather than refuse
+ * to run. A file this cannot parse as a mapping is replaced outright: there is nothing in it to single a
+ * secret field out from, so the whole of it is withheld rather than exported unredacted.
+ */
+export function redactSettingsText(fileText: string): string {
+  if (fileText.trim() === '') return fileText;
+  let raw: unknown;
+  try {
+    raw = parse(fileText);
+  } catch {
+    return UNREADABLE_SETTINGS_PLACEHOLDER;
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return UNREADABLE_SETTINGS_PLACEHOLDER;
+  const mapping = raw as Record<string, unknown>;
+  let redacted = false;
+  for (const field of SETTINGS_SECRET_FIELDS) {
+    if (typeof mapping[field] === 'string' && mapping[field] !== '') {
+      // Blanked rather than marked: empty is what every reader of this file already treats as "unset",
+      // for both fields, so a redacted export still loads clean instead of failing that field's own shape.
+      mapping[field] = '';
+      redacted = true;
+    }
+  }
+  return redacted ? stringify(mapping) : fileText;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseBackupManifest, parseBackupProduction } from './backups.js';
+import { RESTORE_CLASSES, parseBackupManifest, parseBackupProduction, parseRestoreSelection } from './backups.js';
 
 // Mirrors the valid fixture and the counterexamples backup-manifest.v1.json carries for `manifest` and
 // `consistency` — the two sections a backup run itself produces. The other three sections belong to
@@ -259,5 +259,55 @@ describe('what a verified restore proves about a backup', () => {
         'backup.restore.rollback.verified',
       ]),
     );
+  });
+});
+
+// What a restore is asked to do: which content classes to put back, independently of one another, and
+// that it replaces what is there rather than merging with it — see `apps/app/src/restore-apply.ts`.
+describe('what a restore may be asked to do', () => {
+  it('accepts one class selected on its own', () => {
+    const parsed = parseRestoreSelection({ mode: 'replace', classes: ['mongo'] });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.classes : undefined).toEqual(['mongo']);
+  });
+
+  it('accepts every class independently selected in any combination', () => {
+    for (const combination of [['mongo'], ['settings'], ['media'], ['mongo', 'media'], [...RESTORE_CLASSES]]) {
+      const parsed = parseRestoreSelection({ mode: 'replace', classes: combination });
+      expect(parsed.ok).toBe(true);
+      expect(parsed.ok ? [...parsed.value.classes].sort() : undefined).toEqual([...combination].sort());
+    }
+  });
+
+  it('refuses a selection that names nothing to restore', () => {
+    const parsed = parseRestoreSelection({ mode: 'replace', classes: [] });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('restore.classes');
+  });
+
+  it('refuses a class this release does not back up', () => {
+    const parsed = parseRestoreSelection({ mode: 'replace', classes: ['mongo', 'themes'] });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('restore.classes.1');
+  });
+
+  it('refuses the same class selected twice', () => {
+    const parsed = parseRestoreSelection({ mode: 'replace', classes: ['mongo', 'mongo'] });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.message)).toContain(
+      'mongo is selected more than once',
+    );
+  });
+
+  it('rejects a merge rather than partially applying it', () => {
+    const parsed = parseRestoreSelection({ mode: 'merge', classes: ['mongo'] });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('restore.mode');
+  });
+
+  it('refuses a selection with no mode at all', () => {
+    const parsed = parseRestoreSelection({ classes: ['mongo'] });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('restore.mode');
   });
 });

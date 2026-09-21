@@ -231,3 +231,42 @@ export function parseBackupManifest(value: unknown): Parsed<BackupManifest> {
     restore: reader.parsed('restore', parseRestore, EMPTY_RESTORE),
   }));
 }
+
+/** The content classes a backup keeps as independent snapshots, and so a restore may put back independently. */
+export const RESTORE_CLASSES = ['mongo', 'settings', 'media'] as const;
+
+export type RestoreClass = (typeof RESTORE_CLASSES)[number];
+
+/**
+ * What a restore is asked to do: put back whichever classes were selected, on their own or together, and
+ * always by replacing what is there — a v1 restore never merges, so `mode` names the one value it accepts
+ * rather than a choice between two.
+ */
+export interface RestoreSelection {
+  readonly mode: 'replace';
+  readonly classes: readonly RestoreClass[];
+}
+
+const readRestoreClasses = (reader: FieldReader): readonly RestoreClass[] => {
+  const raw = reader.textList('classes');
+  const classes: RestoreClass[] = [];
+  for (const [index, value] of raw.entries()) {
+    const found = RESTORE_CLASSES.find((candidate) => candidate === value);
+    if (found === undefined) {
+      reader.reject(`classes.${index}`, FIELD_CODES.notAllowed, `must be one of ${RESTORE_CLASSES.join(', ')}`);
+    } else if (classes.includes(found)) {
+      reader.reject(`classes.${index}`, FIELD_CODES.notAllowed, `${found} is selected more than once`);
+    } else {
+      classes.push(found);
+    }
+  }
+  if (classes.length === 0) reader.reject('classes', FIELD_CODES.notAllowed, 'selects nothing to restore');
+  return classes;
+};
+
+export function parseRestoreSelection(value: unknown): Parsed<RestoreSelection> {
+  return parseObject(value, 'restore', (reader) => ({
+    mode: reader.choice('mode', ['replace'] as const),
+    classes: readRestoreClasses(reader),
+  }));
+}

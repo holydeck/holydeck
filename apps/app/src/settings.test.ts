@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_SETTINGS_PATH,
   DEFAULT_SETTINGS,
+  SETTINGS_SECRET_FIELDS,
   SettingsError,
   loadSettings,
+  redactSettingsText,
   settingsPath,
 } from './settings.js';
 
@@ -358,5 +360,39 @@ describe('the durable store address', () => {
 
   it('refuses a setting the file names but nothing reads under another name', () => {
     expect(load('mongoUrl: mongodb://mongo:27017/holydeck\n').sources.mongoUrl).toBe('file');
+  });
+});
+
+// A backup keeps the settings file verbatim through Restic, so this is the one place that file is ever
+// written back out somewhere new — and the one place its two credential-bearing fields must not survive.
+describe('redacting the settings file for a backup', () => {
+  it('names exactly the two fields this file holds a credential in', () => {
+    expect(SETTINGS_SECRET_FIELDS).toEqual(['corpusToken', 'mongoUrl']);
+  });
+
+  it('strips the corpus token and the store address, leaving every other field untouched', () => {
+    const token = 'c'.repeat(24);
+    const text = `port: 4100\ncorpusToken: ${token}\nmongoUrl: mongodb://operator:hunter2@mongo:27017/holydeck\n`;
+    const redacted = redactSettingsText(text);
+    expect(redacted).not.toContain('hunter2');
+    expect(redacted).not.toContain(token);
+    const reloaded = load(redacted);
+    expect(reloaded.values.port).toBe(4100);
+    expect(reloaded.values.corpusToken).toBe('');
+    expect(reloaded.values.mongoUrl).toBe('');
+  });
+
+  it('leaves a file with no secret set alone, byte for byte in substance', () => {
+    const redacted = redactSettingsText('port: 4100\n');
+    expect(load(redacted).values).toEqual({ ...DEFAULT_SETTINGS, port: 4100 });
+  });
+
+  it('redacts an empty file to itself, which is what a fresh deployment mounts', () => {
+    expect(redactSettingsText('')).toBe('');
+  });
+
+  it('does not fail a backup over a file it cannot parse, and holds nothing of it back either', () => {
+    expect(() => redactSettingsText('port: [\n')).not.toThrow();
+    expect(redactSettingsText('port: [\n')).not.toContain('[');
   });
 });

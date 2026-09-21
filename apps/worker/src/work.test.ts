@@ -65,7 +65,7 @@ test('an entry point supplying its dependencies replaces every placeholder with 
     archive: {} as BackupProducerOptions['archive'],
     db: {} as BackupProducerOptions['db'],
     restic: { repository: '/data/holydeck/restic' },
-    settingsDir: '/data/holydeck/config',
+    settingsPath: '/data/holydeck/config/settings.yaml',
     mediaRoot: '/media',
     schemaVersion: 1,
     now: () => '2026-09-21T00:00:00.000Z',

@@ -122,7 +122,7 @@ if (work.runs === 'nothing') {
       archive: backupDb(store, store.db()),
       db: repositoryDb(store.db()),
       restic,
-      settingsDir: dirname(path),
+      settingsPath: path,
       mediaRoot: settings.values.mediaRoot,
       schemaVersion: SCHEMA_VERSION,
       now,

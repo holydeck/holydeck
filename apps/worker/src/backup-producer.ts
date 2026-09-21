@@ -4,12 +4,13 @@
 // "complete" means; both are `apps/app`'s and Restic's to answer, and this module is only their meeting
 // point.
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { retentionFor } from '@holydeck/app/backup-retention';
 import { finalizeBackup, readMongoArchive, recordedBackups } from '@holydeck/app/backups';
+import { redactSettingsText } from '@holydeck/app/settings';
 
 import { backupPath, forgetSnapshots, initRepository } from './restic.js';
 
@@ -25,7 +26,9 @@ export interface BackupProducerOptions {
   /** The database `finalizeBackup` writes the finished manifest and its audit entry through. */
   readonly db: RepositoryDb;
   readonly restic: ResticOptions;
-  readonly settingsDir: string;
+  /** The settings file itself, not its directory: only this file is staged into the "settings" class, and
+   * redacted first — see `stageRedactedSettings`. */
+  readonly settingsPath: string;
   readonly mediaRoot: string;
   readonly schemaVersion: number;
   readonly now: () => string;
@@ -38,6 +41,25 @@ const stopped = (signal: AbortSignal): void => {
   if (signal.aborted) throw new Error('backup production stopped after its lease was lost');
 };
 
+const isEnoent = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+
+/**
+ * Stages a redacted copy of the settings file into an otherwise-empty directory, so the "settings" class
+ * Restic backs up never carries `corpusToken` or `mongoUrl` verbatim. A deployment with no settings file
+ * yet — everything at defaults or in the environment — stages nothing at all, and Restic backs up an
+ * empty directory rather than this step failing the run.
+ */
+async function stageRedactedSettings(settingsPath: string, stagingDir: string): Promise<void> {
+  let fileText: string;
+  try {
+    fileText = await readFile(settingsPath, 'utf8');
+  } catch (error) {
+    if (isEnoent(error)) return;
+    throw error;
+  }
+  await writeFile(join(stagingDir, basename(settingsPath)), redactSettingsText(fileText));
+}
+
 /** The content class the Mongo archive's own dump is backed up as — what a restore has to put back first. */
 export const MONGO_DUMP_CLASS = 'mongo';
 
@@ -49,8 +71,12 @@ export const MONGO_DUMP_CLASS = 'mongo';
 export function backupProducerOn(options: BackupProducerOptions): Handler {
   return async (_job, signal) => {
     const dumpDir = await mkdtemp(join(tmpdir(), 'holydeck-backup-mongo-'));
+    const settingsStagingDir = await mkdtemp(join(tmpdir(), 'holydeck-backup-settings-'));
     try {
       const archive = await readMongoArchive(options.archive, options.context, { dumpDir });
+      stopped(signal);
+
+      await stageRedactedSettings(options.settingsPath, settingsStagingDir);
       stopped(signal);
 
       // Deferred to here rather than done once at worker start-up: a build that never claims a `backup-run`
@@ -60,7 +86,7 @@ export function backupProducerOn(options: BackupProducerOptions): Handler {
 
       const mongo = await backupPath(options.restic, MONGO_DUMP_CLASS, MONGO_DUMP_CLASS, dumpDir, signal);
       stopped(signal);
-      const settings = await backupPath(options.restic, 'settings', 'settings', options.settingsDir, signal);
+      const settings = await backupPath(options.restic, 'settings', 'settings', settingsStagingDir, signal);
       stopped(signal);
       const media = await backupPath(options.restic, 'media', 'media', options.mediaRoot, signal);
       stopped(signal);
@@ -90,6 +116,7 @@ export function backupProducerOn(options: BackupProducerOptions): Handler {
       }
     } finally {
       await rm(dumpDir, { recursive: true, force: true });
+      await rm(settingsStagingDir, { recursive: true, force: true });
     }
   };
 }
