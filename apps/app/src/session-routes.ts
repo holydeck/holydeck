@@ -29,7 +29,7 @@ import {
 import { isPasskeySignIn, parsePasskeySignIn } from '@holydeck/contracts/webauthn';
 
 import { accountContext } from './accounts.js';
-import { accountScope, attemptContext } from './attempts.js';
+import { accountScope, addressScope, attemptContext } from './attempts.js';
 import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { originOf, provenSession, refuseAsForbidden, refuseAsStoreSaid, sessionCallFor } from './csrf.js';
@@ -128,6 +128,33 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
         ? note(actor, { action: 'session.slot.add', subject: actor, outcome: 'allowed' })
         : Promise.resolve();
 
+    // The handle gate below cannot see a caller working through a list of handles: a hundred handles
+    // guessed once each never reaches any one handle's threshold. So the caller is gated too, by where it
+    // is speaking from, on a far looser threshold — the two are asked together and neither stands in for
+    // the other. The scope is a digest of the address rather than the address itself, so the ledger and
+    // the trail it writes hold no record of who connected from where.
+    const from = addressScope(request.ip);
+    if (await identity.attempts.locked(gate, from)) return refused();
+
+    /**
+     * Charges a refusal that cost this server real work to the address it came from. Only refusals that
+     * reached a credential are charged: a body that failed its grading never got far enough to be a guess.
+     * Nothing forgives this scope, unlike the handle's — a caller who guesses their way to one success
+     * must not buy a fresh run of guesses with it, and the threshold is set high enough that an office
+     * or a household behind one address never reaches it by signing in the way people actually do.
+     */
+    const chargeAddress = (): Promise<void> =>
+      recorded(request, 'the sign-in gate could not count a failure against an address', async () => {
+        if (await identity.attempts.failed(gate, from)) {
+          await note('system', {
+            action: 'session.lock',
+            subject: from,
+            outcome: 'refused',
+            detail: 'too many attempts have been made from this address',
+          });
+        }
+      });
+
     // A passkey names no handle up front — that is the point of a resident key — so it is told apart from
     // a password before either is read, and answered in the same refusal a wrong password is.
     if (isPasskeySignIn(request.body)) {
@@ -149,6 +176,7 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
       }
       const spent = await identity.passkeys.spend(context, 'authentication', drawnChallenge);
       if (spent === undefined) {
+        await chargeAddress();
         await note('system', {
           action: 'passkey.use',
           subject: assertion.id,
@@ -163,6 +191,9 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
       const stored = await identity.passkeys.find(context, assertion.id);
       const account = stored === undefined ? undefined : await identity.accounts.read(accountContext(correlation), stored.account);
       if (stored === undefined || account === undefined) {
+        // Charged to the address and to nothing else: there is no handle to charge, which is exactly the
+        // gap a caller working through stolen credential identifiers would otherwise sit in forever.
+        await chargeAddress();
         await note('system', { action: 'passkey.use', subject: assertion.id, outcome: 'refused', detail: 'no key answers that identifier' });
         return refused();
       }
@@ -179,6 +210,7 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
         credential: stored,
       });
       if (!verified.ok) {
+        await chargeAddress();
         await recorded(request, 'the sign-in gate could not count a failure', async () => {
           if (await identity.attempts.failed(gate, asked)) {
             await note('system', {
@@ -192,6 +224,22 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
         // Found does not mean proven: a signature that did not check out is answered the way any other
         // unproven caller is, under the actor a proven one would be recorded under.
         await note('system', { action: 'passkey.use', subject: stored.id, outcome: 'refused', detail: verified.reason });
+        return refused();
+      }
+
+      // Proven is not the same as permitted. The password path gets this refusal from `authenticate`,
+      // which reads a disabled account back as nobody; the key path looks the account up itself, so the
+      // same refusal is made here rather than inside `read`, which every other caller needs to hand back
+      // a disabled account exactly as it stands. Asked after the signature, so a disabled handle costs a
+      // caller the same work a live one does and tells them nothing by answering faster.
+      if (account.disabled) {
+        await chargeAddress();
+        await note('system', {
+          action: 'passkey.use',
+          subject: stored.id,
+          outcome: 'refused',
+          detail: 'the account this key was registered to is disabled',
+        });
         return refused();
       }
 
@@ -222,6 +270,7 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
 
     /** One refusal, whichever half of the sign-in was wrong. What differs is written down, not answered. */
     const denied = async (actor: string, subject: string, detail: string): Promise<FastifyReply> => {
+      await chargeAddress();
       await recorded(request, 'the sign-in gate could not count a failure', async () => {
         if (await identity.attempts.failed(gate, asked)) {
           await note('system', {

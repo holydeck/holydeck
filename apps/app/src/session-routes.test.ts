@@ -17,7 +17,15 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { accountContext, accountsOn } from './accounts.js';
-import { ACCOUNT_ATTEMPT_LIMIT, LOCK_MINUTES, accountScope, attemptContext, attemptsOn } from './attempts.js';
+import {
+  ACCOUNT_ATTEMPT_LIMIT,
+  ADDRESS_ATTEMPT_LIMIT,
+  LOCK_MINUTES,
+  accountScope,
+  addressScope,
+  attemptContext,
+  attemptsOn,
+} from './attempts.js';
 import { auditOn } from './audit.js';
 import { enforceAuthorization } from './authorization.js';
 import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
@@ -51,6 +59,8 @@ const NOW = '2026-09-13T09:30:00.000Z';
 const ORIGIN = 'https://holydeck.example.invalid';
 const HOST = 'holydeck.example.invalid';
 const ID = 'A'.repeat(22);
+/** The address an injected request arrives from when it names none, which is what the gate scopes by. */
+const CALLER = '127.0.0.1';
 
 const CLAIM = { name: 'lucia', displayName: 'Lucia Brandt', password: 'a-long-enough-passphrase' };
 
@@ -127,10 +137,12 @@ const joined = async (): Promise<{ readonly control: StartedSession; readonly me
 const signingIn = (
   payload: unknown = { name: CLAIM.name, password: CLAIM.password },
   headers: Record<string, string | undefined> = {},
+  remoteAddress?: string,
 ) =>
   app.inject({
     method: 'POST',
     url: SESSION_PATH,
+    ...(remoteAddress === undefined ? {} : { remoteAddress }),
     headers: {
       [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
       host: HOST,
@@ -141,7 +153,8 @@ const signingIn = (
     payload: payload as InjectOptions['payload'],
   });
 
-const failing = (password = 'not-the-passphrase', name = CLAIM.name) => signingIn({ name, password });
+const failing = (password = 'not-the-passphrase', name = CLAIM.name, remoteAddress?: string) =>
+  signingIn({ name, password }, {}, remoteAddress);
 
 const withCode = (code: string) => signingIn({ name: CLAIM.name, password: CLAIM.password, code });
 
@@ -494,6 +507,29 @@ describe('signing in with a passkey', () => {
     expect(sessionRows.size).toBe(0);
   });
 
+  test('an account this deployment has disabled is refused its key, exactly as it is refused its password', async () => {
+    const device = await registered();
+    await accounts.disable(accountContext('req-passkey-disabled'), ID);
+    const withPassword = await signingIn();
+    expect(withPassword.statusCode).toBe(401);
+    const challenge = await passkeyChallenge();
+    const response = await signingInWithPasskey(device, challenge);
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe(SIGN_IN_REFUSED);
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(sessionRows.size).toBe(0);
+  });
+
+  test('an account this deployment has not disabled still opens a session with its key', async () => {
+    const device = await registered();
+    await accounts.disable(accountContext('req-passkey-disabled'), ID);
+    await accounts.restore(accountContext('req-passkey-restored'), ID);
+    const challenge = await passkeyChallenge();
+    const response = await signingInWithPasskey(device, challenge);
+    expect(response.statusCode).toBe(201);
+    expect(sessionRows.size).toBe(1);
+  });
+
   test('a sign-in that succeeds forgives the failures that came before it, the gate a password shares', async () => {
     const device = await registered();
     for (let attempt = 0; attempt < ACCOUNT_ATTEMPT_LIMIT - 1; attempt += 1) await failing();
@@ -670,6 +706,92 @@ describe('too many attempts', () => {
     expect(entries().filter((entry) => entry['action'] === 'session.lock')).toMatchObject([
       { actor: 'system', subject: accountScope(CLAIM.name), outcome: 'refused' },
     ]);
+  });
+
+  test('the handle gate is asked on its own terms: a handle locks without the address it came from locking', async () => {
+    await lockingOut();
+    const gate = attemptContext('req-4d5e6f70');
+    expect(await attempts.locked(gate, accountScope(CLAIM.name))).toBe(true);
+    expect(await attempts.locked(gate, addressScope(CALLER))).toBe(false);
+  });
+});
+
+describe('too many attempts from one address', () => {
+  const ELSEWHERE = '203.0.113.7';
+
+  /** A run of failures spread over as many handles, which is what no per-handle gate can ever see. */
+  const guessing = async (handles: number, address?: string): Promise<void> => {
+    for (let attempt = 0; attempt < handles; attempt += 1) {
+      expect((await failing('not-the-passphrase', `nobody-${attempt}`, address)).statusCode).toBe(401);
+    }
+  };
+
+  test('a caller working through a list of handles is locked out, though no single handle ever was', async () => {
+    await guessing(ADDRESS_ATTEMPT_LIMIT);
+    const gate = attemptContext('req-4d5e6f70');
+    expect(await attempts.locked(gate, addressScope(CALLER))).toBe(true);
+    expect(await attempts.locked(gate, accountScope('nobody-0'))).toBe(false);
+    const right = await signingIn();
+    expect(right.statusCode).toBe(401);
+    expect(right.json().error.code).toBe(SIGN_IN_REFUSED);
+    expect(sessionRows.size).toBe(0);
+  });
+
+  test('a caller that stays under the threshold is held against nothing, and signs in as normal', async () => {
+    await guessing(ADDRESS_ATTEMPT_LIMIT - 1);
+    expect(await attempts.locked(attemptContext('req-4d5e6f70'), addressScope(CALLER))).toBe(false);
+    expect((await signingIn()).statusCode).toBe(201);
+  });
+
+  test('one address guessing locks nobody else, which is what keeps the gate from being a weapon', async () => {
+    await guessing(ADDRESS_ATTEMPT_LIMIT, ELSEWHERE);
+    expect(await attempts.locked(attemptContext('req-4d5e6f70'), addressScope(ELSEWHERE))).toBe(true);
+    expect((await signingIn(undefined, {}, CALLER)).statusCode).toBe(201);
+  });
+
+  test('the lock releases when its window is over, and the same caller is served again', async () => {
+    await guessing(ADDRESS_ATTEMPT_LIMIT);
+    expect((await signingIn()).statusCode).toBe(401);
+    clock += LOCK_MINUTES[0]! * MINUTE + 1000;
+    expect((await signingIn()).statusCode).toBe(201);
+  });
+
+  test('a locked address is refused a key as well as a password, before the key is read at all', async () => {
+    const device = await registered();
+    const challenge = await passkeyChallenge();
+    await guessing(ADDRESS_ATTEMPT_LIMIT);
+    const response = await signingInWithPasskey(device, challenge);
+    expect(response.statusCode).toBe(401);
+    expect(sessionRows.size).toBe(0);
+  });
+
+  test('a locked address is not even drawn a fresh challenge to answer', async () => {
+    await guessing(ADDRESS_ATTEMPT_LIMIT);
+    const response = await signingIn({ passkey: { step: 'challenge' } });
+    expect(response.statusCode).toBe(401);
+  });
+
+  test('a run of keys this deployment never registered locks the address the run came from', async () => {
+    const stranger = webauthnDevice({ rpId: HOST, origin: ORIGIN });
+    for (let attempt = 0; attempt < ADDRESS_ATTEMPT_LIMIT; attempt += 1) {
+      const challenge = await passkeyChallenge();
+      expect((await signingInWithPasskey(stranger, challenge)).statusCode).toBe(401);
+    }
+    expect(await attempts.locked(attemptContext('req-4d5e6f70'), addressScope(CALLER))).toBe(true);
+  });
+
+  test('one sign-in does not buy a fresh run of guesses, because the address keeps what it earned', async () => {
+    await guessing(ADDRESS_ATTEMPT_LIMIT - 1);
+    expect((await signingIn()).statusCode).toBe(201);
+    expect((await failing('not-the-passphrase', 'nobody-last')).statusCode).toBe(401);
+    expect(await attempts.locked(attemptContext('req-4d5e6f70'), addressScope(CALLER))).toBe(true);
+  });
+
+  test('the trail says an address was locked, under a scope that is not the address itself', async () => {
+    await guessing(ADDRESS_ATTEMPT_LIMIT);
+    const locks = entries().filter((entry) => entry['action'] === 'session.lock');
+    expect(locks).toMatchObject([{ actor: 'system', subject: addressScope(CALLER), outcome: 'refused' }]);
+    expect(JSON.stringify(entries())).not.toContain(CALLER);
   });
 });
 
