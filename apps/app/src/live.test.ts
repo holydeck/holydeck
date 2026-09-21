@@ -656,6 +656,30 @@ describe('a Guest joining the Audience view on a shared capability', () => {
   });
 });
 
+describe('adversarial: a capability past its expiry', () => {
+  it('is refused at the socket handshake, not only where redeeming it is proven in isolation', async () => {
+    let clockAt = Date.parse(AT);
+    const services = servicesOn(fakeDb(), { now: () => AT });
+    const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => new Date(clockAt).toISOString() });
+    const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
+    const created = await services.create(context, {
+      title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
+    });
+    await services.transition(context, created.stamp.id, 'presenting');
+    const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
+      kind: 'guest', service: created.stamp.id, view: 'audience', expiresAt: new Date(clockAt + 1000).toISOString(),
+    });
+
+    // Minted for one second's use and then let run out — the clock below is the one `redeem` itself
+    // reads at handshake time, not a value this test only asserts against, so the socket sees exactly
+    // what an attacker trying a stolen capability after its window closed would.
+    clockAt += 2000;
+    const base = await listening(undefined, { capabilities, services });
+    const query = `channel=audience&${SERVICE_QUERY}=${created.stamp.id}&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
+    expect(await handshake(base, query, {})).toBe(403);
+  });
+});
+
 // LIVE-06, spec 9.5: an operator reads how many of each view type are connected, never who — the route
 // below is the only thing that answers that count, and it never answers with anything else.
 describe('operator-visible connection counts by view type', () => {

@@ -126,6 +126,30 @@ describe('what a session is allowed to reach', () => {
   });
 });
 
+describe('adversarial: an output capability reaching past the channel it was issued for', () => {
+  it('is ended, not answered, when a frame it sends declares a channel other than the one it joined', () => {
+    const hub = hubAt();
+    const stage = joined(hub, 'stage', VIEW_GRANTS.stage, true);
+    expect(stage.connection).toBeDefined();
+
+    // Nothing but the channel label changed here — command:false still governs anything this grant could
+    // ever be allowed to do — but the isolation a capability's view is supposed to guarantee has to hold
+    // even before authorization is checked: a connection scoped to `stage` must never be answered for a
+    // frame that names any other channel, live-control included.
+    stage.connection?.receive(command({ channel: 'live-control' }));
+    expect(stage.far.ended()).toEqual({
+      code: LIVE_CLOSE.refused,
+      reason: 'command.channel: this session is connected to stage',
+    });
+    expect(hub.stateRevision()).toBe(0);
+
+    // No other output channel's session saw anything from the attempt either: it reached no one but the
+    // connection that made it, and closed only that one.
+    const audience = joined(hub, 'audience');
+    expect(audience.far.frames()).toMatchObject([{ kind: 'snapshot', channel: 'audience' }]);
+  });
+});
+
 describe('joining a live session', () => {
   it('opens with a snapshot of the channel joined, at the revision and sequence the hub stands at', () => {
     const hub = hubAt();
@@ -334,6 +358,40 @@ describe('a command sent twice under one idempotency key', () => {
     // Forgotten rather than remembered, so it is judged as a command in its own right and applied again.
     expect(hub.stateRevision()).toBe(4);
     expect(control.far.frames().at(-1)).toMatchObject({ outcome: 'applied' });
+  });
+});
+
+describe('adversarial: a stale command injected from outside the run that produced it', () => {
+  it('is rejected by the server’s own authoritative revision, not by anything the sender remembers', () => {
+    const hub = hubAt();
+    // Two independently connected Control sessions — the second stands in for an attacker holding a
+    // second, Control-permissioned connection (a stolen credential, a compromised device) who was never
+    // party to the first command at all. It captures that command's own event off the live-control
+    // channel and replays it, moments later, as if it were issuing a fresh one of its own.
+    const legitimate = joined(hub, 'live-control', OPERATOR);
+    const intruder = joined(hub, 'live-control', OPERATOR);
+    legitimate.connection?.receive(command({ id: 'command-a', idempotencyKey: 'key-a', clientStateRevision: 0 }));
+    expect(hub.stateRevision()).toBe(1);
+    const captured = intruder.far.frames().find((frame) => frame['kind'] === 'event');
+    expect(captured).toMatchObject({ stateRevision: 1 });
+
+    // Replayed under a key of the intruder's own choosing — an attacker rewriting the frame to dodge the
+    // duplicate check gets no further: the revision it carries is the one that was current when it was
+    // captured, and the hub has already moved past it.
+    intruder.connection?.receive(
+      command({ id: 'command-replayed', idempotencyKey: 'key-intruder-1', clientStateRevision: 0 }),
+    );
+    expect(hub.stateRevision()).toBe(1);
+    expect(intruder.far.frames().at(-1)).toMatchObject({
+      kind: 'ack',
+      id: 'command-replayed',
+      outcome: 'stale',
+      conflictCode: STALE_STATE_REVISION,
+      stateRevision: 1,
+    });
+    // Nothing landed for it: the one event either session has seen is still the legitimate command's own.
+    expect(legitimate.far.frames().filter((frame) => frame['kind'] === 'event')).toHaveLength(1);
+    expect(intruder.far.frames().filter((frame) => frame['kind'] === 'event')).toHaveLength(1);
   });
 });
 

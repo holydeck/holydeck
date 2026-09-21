@@ -259,6 +259,24 @@ describe('what an operator can ask about their own session', () => {
   });
 });
 
+describe('adversarial: session hijack', () => {
+  test('a digest read from the store cannot open the session it was computed from', async () => {
+    const session = await signedIn();
+    // An attacker who reached the database — a breached backup, a leaked log line — holds only the
+    // digest sessions.ts stores as `_id`, never the bearer token a browser actually carries. Presenting
+    // that digest as though it were the token is refused exactly as any other unknown token is: hashing
+    // it again never lands on the `_id` a real token's digest would.
+    const stolen = tokenDigest(session.token);
+    const response = await asking('GET', SESSION_PATH, { token: stolen, record: session.record });
+    expect(response.statusCode).toBe(401);
+    expect(response.headers['set-cookie']).toBe(clearedSessionCookie());
+
+    // Nothing about the real session was disturbed by the attempt: the token it was actually issued
+    // still opens it.
+    expect((await asking('GET', SESSION_PATH, session)).statusCode).toBe(200);
+  });
+});
+
 describe('signing in', () => {
   test('a handle and the password it was claimed with open a session, given as a cookie', async () => {
     const response = await signingIn();
