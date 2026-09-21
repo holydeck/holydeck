@@ -126,6 +126,7 @@ if (work.runs === 'nothing') {
       mediaRoot: settings.values.mediaRoot,
       schemaVersion: SCHEMA_VERSION,
       now,
+      report: (line) => void process.stdout.write(`${line}\n`),
     },
     {
       context: restoreContext('system', name),

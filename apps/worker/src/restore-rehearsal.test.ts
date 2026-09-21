@@ -148,7 +148,7 @@ describe('rehearsing a restore', () => {
     expect(spawned).toHaveBeenNthCalledWith(
       1,
       'restic',
-      ['check', '--repo', '/data/holydeck/restic', '--insecure-no-password'],
+      ['check', '--repo', '/data/holydeck/restic', '--insecure-no-password', '--read-data-subset=5%'],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
     expect(spawned).toHaveBeenNthCalledWith(
@@ -165,7 +165,7 @@ describe('rehearsing a restore', () => {
       restoreId: 'restore-fixed',
       backupId: 'backup-fixed',
       integrity: { verifiedBeforeRestore: true, mismatchAborts: true },
-      restore: { sessionsInvalidated: true, rollback: { verified: true } },
+      restore: { sessionsInvalidated: true, sessionsInvalidatedCount: 3, rollback: { verified: true } },
     });
     // Rolled back: the rehearsal target is left holding what it held before, which was nothing.
     expect(target.rows.get('services') ?? []).toEqual([]);

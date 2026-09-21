@@ -139,6 +139,7 @@ describe('rehearsing a restore against a real database', () => {
 
     expect(observed).toEqual({ services: 1, production: 1, rejected: 'unknown' });
     expect(sessionsEnded).toBe(1);
+    expect(manifest.restore.sessionsInvalidatedCount).toBe(1);
     expect(manifest.objectives.measured).toEqual({ rpoMinutes: 10, rtoMinutes: 2 });
     expect(manifest.restore.rollback.verified).toBe(true);
 

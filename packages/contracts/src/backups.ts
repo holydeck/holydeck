@@ -103,6 +103,12 @@ export interface RecoveryMeasurement {
 }
 
 export interface BackupObjectives {
+  /**
+   * The recovery point this deployment aims at. Recorded beside what was measured rather than enforced
+   * against it: how old the newest backup is was decided by the backup cadence, and a restore that works
+   * perfectly still reports whatever gap the cadence left. Only `rtoMinutes` is a bound (see
+   * `parseObjectives`).
+   */
   readonly rpoMinutes: number;
   readonly rtoMinutes: number;
   /** Timed, never assumed: a target with nothing measured against it is a target nobody has met. */
@@ -118,6 +124,11 @@ export interface BackupRollback {
 
 export interface BackupRestore {
   readonly sessionsInvalidated: true;
+  /**
+   * How many sessions ending them actually ended. Optional, because a manifest that never counted is not
+   * malformed — but a count is the only thing that tells "ended forty" apart from "found none to end".
+   */
+  readonly sessionsInvalidatedCount?: number;
   readonly rollback: BackupRollback;
 }
 
@@ -140,13 +151,13 @@ const parseIntegrity: ParseFn<BackupIntegrity> = (value, path) =>
     return { verifiedBeforeRestore: true, algorithm, mismatchAborts: true };
   });
 
-const RECOVERY_KEYS = ['rpoMinutes', 'rtoMinutes'] as const;
+type RecoveryKey = 'rpoMinutes' | 'rtoMinutes';
 
 /**
  * A figure a rehearsal timed. Absent reads as "was never measured" rather than "is required", because
  * the two say different things: one is a malformed payload, the other is an objective nobody has tested.
  */
-const readMeasured = (reader: FieldReader, name: (typeof RECOVERY_KEYS)[number]): number => {
+const readMeasured = (reader: FieldReader, name: RecoveryKey): number => {
   if (!reader.names.includes(name)) {
     reader.reject(name, FIELD_CODES.required, 'was never measured');
     return 0;
@@ -166,10 +177,11 @@ const parseObjectives: ParseFn<BackupObjectives> = (value, path) =>
   parseObject(value, path, (reader) => {
     const targets = { rpoMinutes: reader.wholeNumber('rpoMinutes', 1), rtoMinutes: reader.wholeNumber('rtoMinutes', 1) };
     const measured = reader.parsed('measured', parseMeasurement, EMPTY_MEASUREMENT);
-    for (const key of RECOVERY_KEYS) {
-      if (measured[key] > targets[key]) {
-        reader.reject(`measured.${key}`, FIELD_CODES.tooLarge, `measured ${key} misses its target`);
-      }
+    // Only the recovery time is a bound a manifest is refused for. It is the one figure the restore itself
+    // produced, so missing it says the restore is too slow to recover with; the recovery point says only
+    // how long ago the last backup was taken, which the cadence decided and no restore can improve on.
+    if (measured.rtoMinutes > targets.rtoMinutes) {
+      reader.reject('measured.rtoMinutes', FIELD_CODES.tooLarge, 'measured rtoMinutes misses its target');
     }
     return { ...targets, measured };
   });
@@ -190,7 +202,12 @@ const parseRestore: ParseFn<BackupRestore> = (value, path) =>
     if (!reader.flag('sessionsInvalidated')) {
       reader.reject('sessionsInvalidated', FIELD_CODES.notAllowed, 'left sessions valid across a restore');
     }
-    return { sessionsInvalidated: true, rollback: reader.parsed('rollback', parseRollback, EMPTY_ROLLBACK) };
+    const sessionsInvalidatedCount = reader.optionalWholeNumber('sessionsInvalidatedCount');
+    return {
+      sessionsInvalidated: true,
+      sessionsInvalidatedCount,
+      rollback: reader.parsed('rollback', parseRollback, EMPTY_ROLLBACK),
+    };
   });
 
 const EMPTY_INTEGRITY: BackupIntegrity = { verifiedBeforeRestore: true, algorithm: '', mismatchAborts: true };
@@ -202,8 +219,8 @@ const EMPTY_RESTORE: BackupRestore = { sessionsInvalidated: true, rollback: EMPT
 /**
  * Grades the whole manifest, which only a restore can fill in: everything a backup run had to get right,
  * plus the four things nothing but actually restoring it can answer — that the archive was checked before
- * it was applied, that a mismatch stops the restore rather than being noted in passing, that the recovery
- * came in inside the objectives it is held to, and that the sessions open before it no longer are.
+ * it was applied, that a mismatch stops the restore rather than being noted in passing, that recovering
+ * came in inside the time it is held to, and that the sessions open before it no longer are.
  */
 export function parseBackupManifest(value: unknown): Parsed<BackupManifest> {
   return parseObject(value, 'backup', (reader) => ({

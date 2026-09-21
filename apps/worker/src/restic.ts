@@ -112,12 +112,21 @@ export async function restoreSnapshot(
 }
 
 /**
+ * A bounded sample of the pack data, rather than all of it: `--read-data` re-reads the whole repository,
+ * and how long that takes grows with everything ever backed up, which is not a cost a rehearsal can take
+ * on unbounded. Five percent is a probability of catching rot, not a proof of its absence.
+ */
+const READ_DATA_SAMPLE = '--read-data-subset=5%';
+
+/**
  * What stands in for rehashing the snapshot-addressed content classes. Their manifest entries carry
  * `restic:<id>` — an address, not a digest — so there is nothing in the manifest to compare bytes against;
- * the repository's own check is the proof that what those addresses point at is intact.
+ * the repository's own check is what says that what those addresses point at is intact. A plain `check`
+ * reads the repository's structure and never a byte of the pack data the snapshots are actually made of,
+ * so a sample of that data is read back as well.
  */
 export async function checkRepository(options: ResticOptions, signal: AbortSignal): Promise<void> {
-  await run(['check', '--repo', options.repository, '--insecure-no-password'], signal);
+  await run(['check', '--repo', options.repository, '--insecure-no-password', READ_DATA_SAMPLE], signal);
 }
 
 /**

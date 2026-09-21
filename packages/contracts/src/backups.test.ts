@@ -121,6 +121,19 @@ describe('what a verified restore proves about a backup', () => {
     expect(parsed.ok ? parsed.value.restore.rollback.verifiedOn : undefined).toBe('2026-09-12');
   });
 
+  // "Ended every session" and "ended none because there were none" are different things to have proved,
+  // and only a count tells them apart. Optional, so a manifest written before anyone counted still parses.
+  it('records how many sessions the restore ended, when the rehearsal counted them', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({
+      ...input,
+      restore: { ...input.restore, sessionsInvalidatedCount: 40 },
+    });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.restore.sessionsInvalidatedCount : undefined).toBe(40);
+    expect(parseBackupManifest(input).ok).toBe(true);
+  });
+
   it('accepts a rollback whose verification date was not recorded', () => {
     const input = restored();
     const parsed = parseBackupManifest({
@@ -180,14 +193,16 @@ describe('what a verified restore proves about a backup', () => {
     expect(messagesOf(parsed)).toContain('measured rtoMinutes misses its target');
   });
 
-  it('refuses a measured recovery point that misses its target', () => {
+  // The recovery point is decided by how often backups are taken, not by whether restoring one works, so
+  // it is a figure the manifest records rather than a bound it is refused against — see `parseObjectives`.
+  it('accepts a measured recovery point older than the target, which is recorded and not enforced', () => {
     const input = restored();
     const parsed = parseBackupManifest({
       ...input,
-      objectives: { ...input.objectives, measured: { rpoMinutes: 90, rtoMinutes: 96 } },
+      objectives: { ...input.objectives, measured: { rpoMinutes: 2880, rtoMinutes: 96 } },
     });
-    expect(parsed.ok).toBe(false);
-    expect(messagesOf(parsed)).toContain('measured rpoMinutes misses its target');
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.objectives.measured.rpoMinutes : undefined).toBe(2880);
   });
 
   it('refuses a restore that left existing sessions valid', () => {
@@ -238,7 +253,6 @@ describe('what a verified restore proves about a backup', () => {
         'backup.integrity.verifiedBeforeRestore',
         'backup.integrity.mismatchAborts',
         'backup.integrity.algorithm',
-        'backup.objectives.measured.rpoMinutes',
         'backup.objectives.measured.rtoMinutes',
         'backup.restore.sessionsInvalidated',
         'backup.restore.rollback.plan',

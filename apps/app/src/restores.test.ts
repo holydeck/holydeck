@@ -267,6 +267,9 @@ describe('a timed restore rehearsal', () => {
       mismatchAborts: true,
     });
     expect(manifest.restore.sessionsInvalidated).toBe(true);
+    // The count, not only the fact: a rehearsal that ended four sessions and one that found none to end
+    // are different things to have proved, and the flag alone reads the same for both.
+    expect(manifest.restore.sessionsInvalidatedCount).toBe(4);
     expect(manifest.restore.rollback.verified).toBe(true);
     expect(manifest.restore.rollback.verifiedOn).toBe('2026-09-19');
     expect(manifest.manifest.id).toBe(production.manifest.id);
@@ -282,11 +285,16 @@ describe('a timed restore rehearsal', () => {
     expect(error.message).toContain(String(RECOVERY_OBJECTIVES.rtoMinutes));
   });
 
-  test('refuses a rehearsal whose recovery point missed the objective it is held to', async () => {
-    const production = productionOf(await archiveIn(root), '2026-09-18T20:00:00.000Z');
-    const error = await refusal(() => rehearseRestore(fakeDb(), CONTEXT, production, optionsFor()));
-    expect(error.kind).toBe('objective');
-    expect(error.message).toContain('recovery point');
+  // How old the newest backup is was decided by the backup cadence, not by this restore, so a rehearsal
+  // of a backup older than the recovery-point target records the figure and carries on: refusing here
+  // would report "the restore does not work" for something the restore had no part in.
+  test('records a recovery point older than the objective rather than refusing the rehearsal', async () => {
+    const db = fakeDb();
+    const production = productionOf(await archiveIn(root), '2026-09-17T00:00:00.000Z');
+    const { manifest } = await rehearseRestore(db, CONTEXT, production, optionsFor());
+    expect(manifest.objectives.measured.rpoMinutes).toBeGreaterThan(RECOVERY_OBJECTIVES.rpoMinutes);
+    expect(manifest.objectives.measured.rpoMinutes).toBe(3030);
+    expect(db.rows.get(RECORDS[RESTORE_RECORD].collection) ?? []).toHaveLength(1);
   });
 
   // Failure injection: the mismatch has to stop the restore, not be noted while it carries on.
@@ -352,6 +360,7 @@ describe('what a rehearsal leaves behind', () => {
       objectives: manifest.objectives,
       restore: manifest.restore,
     });
+    expect(rows[0]).toMatchObject({ restore: { sessionsInvalidatedCount: 4 } });
   });
 
   test('audits the rehearsal with the figures it measured', async () => {

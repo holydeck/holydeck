@@ -30,6 +30,8 @@ export interface BackupProducerOptions {
   readonly schemaVersion: number;
   readonly now: () => string;
   readonly newId?: () => string;
+  /** Where a condition worth knowing about but not worth failing the job over is written. */
+  readonly report?: (line: string) => void;
 }
 
 const stopped = (signal: AbortSignal): void => {
@@ -63,7 +65,7 @@ export function backupProducerOn(options: BackupProducerOptions): Handler {
       const media = await backupPath(options.restic, 'media', 'media', options.mediaRoot, signal);
       stopped(signal);
 
-      await finalizeBackup(
+      const produced = await finalizeBackup(
         options.db,
         options.context,
         { mongoContents: archive.contents, otherContents: [mongo, settings, media], consistency: archive.consistency },
@@ -73,8 +75,19 @@ export function backupProducerOn(options: BackupProducerOptions): Handler {
 
       // Last, and only once the new backup is recorded: retention decides what to keep out of everything
       // that now exists, so a run that failed before finalizing can never be the reason an older one goes.
-      const decided = retentionFor(await recordedBackups(options.db, options.context));
-      await forgetSnapshots(options.restic, decided.snapshotsToForget, signal);
+      //
+      // And reported rather than thrown, because by here the backup this job was for is already recorded:
+      // letting retention fail the job would retry the whole of it — a second Mongo dump, three more
+      // snapshots and a second recorded run — to repeat work that succeeded. The snapshots retention did
+      // not get to forget are still there for the next run to decide about, which is the cheaper wrong.
+      try {
+        const decided = retentionFor(await recordedBackups(options.db, options.context));
+        await forgetSnapshots(options.restic, decided.snapshotsToForget, signal);
+      } catch (error) {
+        options.report?.(
+          `backup ${produced.manifest.id}: recorded, but retention kept every snapshot: ${(error as Error).message}`,
+        );
+      }
     } finally {
       await rm(dumpDir, { recursive: true, force: true });
     }

@@ -193,8 +193,9 @@ describe('restoring a snapshot with restic', () => {
 
 describe('checking the restic repository', () => {
   // The snapshot-addressed content classes carry `restic:<id>` rather than a digest, so there is nothing
-  // in the manifest to rehash for them. What proves those is the repository's own check.
-  it('asks restic to verify its own structure', async () => {
+  // in the manifest to rehash for them. What proves those is the repository's own check — and a structure
+  // check alone never reads a byte of pack data, so a sample of it is read too.
+  it('asks restic to verify its own structure and to read a sample of the data', async () => {
     const child = new FakeChild();
     spawned.mockReturnValue(child);
 
@@ -203,9 +204,11 @@ describe('checking the restic repository', () => {
     child.emit('close', 0);
 
     await expect(checking).resolves.toBeUndefined();
-    expect(spawned).toHaveBeenCalledWith('restic', ['check', '--repo', OPTIONS.repository, '--insecure-no-password'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    expect(spawned).toHaveBeenCalledWith(
+      'restic',
+      ['check', '--repo', OPTIONS.repository, '--insecure-no-password', '--read-data-subset=5%'],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
   });
 
   it('rejects a repository restic finds damaged', async () => {

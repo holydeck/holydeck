@@ -291,6 +291,36 @@ describe('forgetting what retention no longer keeps', () => {
     );
   });
 
+  // Retention runs after the backup is already recorded, so a failure there is not a reason to run the
+  // whole backup again: a retry would re-dump Mongo, re-take all three snapshots, and record a second row
+  // for work that already succeeded. It is reported and left for the next run to decide again.
+  it('keeps the backup it already recorded when the repository refuses to forget', async () => {
+    const db = fakeDb();
+    db.rows.set(
+      'backups',
+      ['2026-09-20', '2026-09-19', '2026-09-18', '2026-09-17', '2026-09-16', '2026-09-15', '2026-09-14'].map(recorded),
+    );
+    const reported: string[] = [];
+    const handler = backupProducerOn({
+      ...OPTIONS,
+      archive: fakeArchiveDb(),
+      db,
+      report: (line) => reported.push(line),
+    });
+
+    const running = handler(job(), new AbortController().signal);
+    await completeBackupCalls();
+
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(5));
+    children[4]?.stderr.emit('data', Buffer.from('Fatal: unable to create lock in backend\n'));
+    children[4]?.emit('close', 1);
+
+    await expect(running).resolves.toBeUndefined();
+    expect(db.rows.get('backups') ?? []).toHaveLength(8);
+    expect(reported.join('\n')).toContain('unable to create lock in backend');
+    expect(reported.join('\n')).toContain('backup-fixed');
+  });
+
   it('asks restic to forget nothing while every run is one a rule still claims', async () => {
     const db = fakeDb();
     db.rows.set('backups', [recorded('2026-09-20')]);
