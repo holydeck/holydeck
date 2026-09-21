@@ -76,7 +76,7 @@ describe('parseServiceTemplateBody', () => {
               slot: 'fixed',
               itemKind: 'custom-slide',
               title: 'Welcome slide',
-              content: { id: 'x', revision: '1' },
+              content: { id: 'x', revision: 1 },
             },
           ],
         },
@@ -154,7 +154,7 @@ const BODY: ServiceTemplateBody = {
 const SONG_FILL: EntryFill = {
   entryId: 'song-1',
   title: 'Amazing Grace',
-  content: { id: 'song-amazing-grace', revision: '3', hash: undefined },
+  content: { id: 'song-amazing-grace', revision: 3, hash: undefined },
 };
 
 describe('instantiate', () => {
@@ -208,7 +208,7 @@ describe('instantiate', () => {
 
   it('refuses a fill that pins content onto a typed custom-slide slot', () => {
     const outcome = instantiate(TYPED_CUSTOM_SLIDE, [
-      { entryId: 'slide-1', title: 'Not allowed', content: { id: 'song-x', revision: '1', hash: undefined } },
+      { entryId: 'slide-1', title: 'Not allowed', content: { id: 'song-x', revision: 1, hash: undefined } },
     ]);
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error('expected instantiation to be refused');
@@ -275,7 +275,7 @@ const SERVICE: Service = {
           kind: 'song',
           title: 'Amazing Grace',
           enabled: true,
-          content: { id: 'song-amazing-grace', revision: '3', hash: undefined },
+          content: { id: 'song-amazing-grace', revision: 3, hash: undefined },
         },
       ],
     },
@@ -297,7 +297,7 @@ describe('templateFromService', () => {
               slot: 'fixed',
               itemKind: 'song',
               title: 'Amazing Grace',
-              content: { id: 'song-amazing-grace', revision: '3', hash: undefined },
+              content: { id: 'song-amazing-grace', revision: 3, hash: undefined },
             },
           ],
         },

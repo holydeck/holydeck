@@ -118,7 +118,7 @@ describe('content survives the deletion of every service that referenced it', ()
     const sections: readonly ServiceSection[] = [
       {
         id: 'section-1', name: 'Worship',
-        items: [{ id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: song.stamp.id, revision: 'rev-1', hash: 'fnv1a-6fe1d1e9' } }],
+        items: [{ id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: song.stamp.id, revision: 1, hash: 'fnv1a-6fe1d1e9' } }],
       },
     ];
     const created = await services.create(serviceContext(LIBRARIAN, 'req-svc'), {

@@ -491,7 +491,7 @@ describe('paletteOn: direct insertion into a Service (SRCH-02)', () => {
 
     const item = updated?.sections[0]?.items[0];
     expect(item).toMatchObject({ kind: 'song', title: 'Amazing Grace', enabled: true });
-    expect(item?.content).toMatchObject({ id: hit.id, revision: '1' });
+    expect(item?.content).toMatchObject({ id: hit.id, revision: 1 });
     expect(item?.content?.hash).toMatch(/^sha256-[0-9a-f]{64}$/);
   });
 
@@ -508,7 +508,7 @@ describe('paletteOn: direct insertion into a Service (SRCH-02)', () => {
 
     const item = updated?.sections[0]?.items[0];
     expect(item).toMatchObject({ kind: 'slide-group', title: 'Grace Slide', enabled: true });
-    expect(item?.content).toMatchObject({ id: hit.id, revision: '1' });
+    expect(item?.content).toMatchObject({ id: hit.id, revision: 1 });
   });
 
   it('inserts a slideGroup hit as a "slide-group" item too — the same content store, the other sub-kind', async () => {

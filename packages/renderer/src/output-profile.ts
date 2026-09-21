@@ -10,6 +10,8 @@
 // When an administration surface does arrive it fills `AdministrativeRenderDefaults` and changes nothing
 // else here.
 
+import { MAX_SAFE_AREA_PERCENT, SAFE_AREA_EDGES } from '@holydeck/contracts/snapshots';
+
 export interface AspectRatio {
   readonly width: number;
   readonly height: number;
@@ -17,6 +19,7 @@ export interface AspectRatio {
 
 /** Each edge as a fraction of the canvas dimension it eats into. */
 export interface SafeAreaMargins {
+  readonly unit: 'percent';
   readonly top: number;
   readonly right: number;
   readonly bottom: number;
@@ -72,7 +75,7 @@ export const REFERENCE_CANVAS_WIDTH = 1920;
 export const RATIO_BOUNDS = Object.freeze({ min: 0.25, max: 4 });
 
 export const safeAreaOf = (margin: number): SafeAreaMargins =>
-  Object.freeze({ top: margin, right: margin, bottom: margin, left: margin });
+  Object.freeze({ unit: 'percent', top: margin, right: margin, bottom: margin, left: margin });
 
 export const DEFAULT_SAFE_AREA: SafeAreaMargins = safeAreaOf(DEFAULT_SAFE_AREA_MARGIN);
 
@@ -138,9 +141,15 @@ export function validateAspectRatio(ratio: AspectRatio): AspectRatio {
 }
 
 export function validateSafeArea(safeArea: SafeAreaMargins): SafeAreaMargins {
-  for (const [edge, margin] of Object.entries(safeArea)) {
-    if (!Number.isFinite(margin) || margin < 0 || margin >= 0.5) {
-      throw new RenderConfigurationError(`safe-area margin ${edge}=${margin} is not a fraction below half the canvas`);
+  if (safeArea.unit !== 'percent') {
+    throw new RenderConfigurationError('safe-area unit must be percent');
+  }
+  for (const edge of SAFE_AREA_EDGES) {
+    const margin = safeArea[edge];
+    if (!Number.isFinite(margin) || margin < 0 || margin > MAX_SAFE_AREA_PERCENT / 100) {
+      throw new RenderConfigurationError(
+        `safe-area margin ${edge}=${margin} must be a fraction between 0 and ${MAX_SAFE_AREA_PERCENT} percent`,
+      );
     }
   }
   return Object.freeze({ ...safeArea });

@@ -27,14 +27,14 @@ const service = () => ({
       id: 'section-1',
       name: 'Worship',
       items: [
-        { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song-4', revision: 'rev-5', hash: 'fnv1a-6fe1d1e9' } },
+        { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song-4', revision: 5, hash: 'fnv1a-6fe1d1e9' } },
         { id: 'item-2', kind: 'custom-slide', title: 'Welcome', enabled: true },
       ],
     },
     {
       id: 'section-2',
       name: 'Word',
-      items: [{ id: 'item-3', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 'rev-9' } }],
+      items: [{ id: 'item-3', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 9 } }],
     },
   ],
 });
@@ -151,13 +151,22 @@ describe('joinAllowedFor', () => {
 
 describe('a reference to one immutable revision', () => {
   it('parses a reference with the hash the revision is addressed by, and one without', () => {
-    const withHash = { id: 'song-4', revision: 'rev-5', hash: 'fnv1a-6fe1d1e9' };
+    const withHash = { id: 'song-4', revision: 5, hash: 'fnv1a-6fe1d1e9' };
     expect(parseRevisionRef(withHash, 'content')).toEqual({ ok: true, value: withHash });
-    expect(parseRevisionRef({ id: 'song-4', revision: 'rev-5' }, 'content')).toEqual({
+    expect(parseRevisionRef({ id: 'song-4', revision: 5 }, 'content')).toEqual({
       ok: true,
-      value: { id: 'song-4', revision: 'rev-5' },
+      value: { id: 'song-4', revision: 5 },
     });
   });
+
+  it.each(['1', 'rev-5', 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'refuses a revision that is not a positive integer: %s',
+    (revision) => {
+      const parsed = parseRevisionRef({ id: 'song-4', revision }, 'content');
+      expect(parsed.ok).toBe(false);
+      expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toEqual(['content.revision']);
+    },
+  );
 
   it('refuses a reference to content without saying which revision', () => {
     expect(parseRevisionRef({ id: 'song-4' }, 'content')).toEqual({
@@ -167,7 +176,7 @@ describe('a reference to one immutable revision', () => {
   });
 
   it('refuses a hash that does not name the algorithm that produced it', () => {
-    const parsed = parseRevisionRef({ id: 'song-4', revision: 'rev-5', hash: 'deadbeef' }, 'content');
+    const parsed = parseRevisionRef({ id: 'song-4', revision: 5, hash: 'deadbeef' }, 'content');
     expect(parsed.ok).toBe(false);
     expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.code)).toEqual([FIELD_CODES.notAllowed]);
   });
@@ -233,7 +242,7 @@ describe('reading one service', () => {
   it('refuses a custom slide that pins reusable content it does not have', () => {
     expect(
       defective((value) => {
-        (value.sections[0]!.items[1] as { content?: unknown }).content = { id: 'song-4', revision: 'rev-5' };
+        (value.sections[0]!.items[1] as { content?: unknown }).content = { id: 'song-4', revision: 5 };
       }),
     ).toEqual([`service.sections.0.items.1.content=${FIELD_CODES.notAllowed}`]);
   });

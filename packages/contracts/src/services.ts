@@ -39,7 +39,7 @@ const AUTHORED_IN_PLACE: ItemKind = 'custom-slide';
 
 export type RevisionRef = {
   readonly id: string;
-  readonly revision: string;
+  readonly revision: number;
   readonly hash: string | undefined;
 };
 
@@ -94,7 +94,7 @@ export const parseRevisionRef: ParseFn<RevisionRef> = (value, path) =>
     if (hash !== undefined && !HASH.test(hash)) {
       reader.reject('hash', FIELD_CODES.notAllowed, 'must name the algorithm that produced it, such as fnv1a-6fe1d1e9');
     }
-    return { id: reader.text('id'), revision: reader.text('revision'), hash };
+    return { id: reader.text('id'), revision: reader.wholeNumber('revision', 1), hash };
   });
 
 const itemParser = (seenItems: Set<string>): ParseFn<ServiceItem> => (value, path) =>

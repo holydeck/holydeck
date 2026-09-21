@@ -1,3 +1,4 @@
+import { MAX_SAFE_AREA_PERCENT } from '@holydeck/contracts/snapshots';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -20,7 +21,7 @@ import {
 describe('the administrative defaults', () => {
   it('starts at the numbers the spec states', () => {
     expect(administrativeDefaults.aspectRatio).toEqual({ width: 16, height: 9 });
-    expect(administrativeDefaults.safeArea).toEqual({ top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 });
+    expect(administrativeDefaults.safeArea).toEqual({ unit: 'percent', top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 });
     expect(administrativeDefaults.minimumReadableHeightRatio).toBe(PROVISIONAL_MINIMUM_READABLE_HEIGHT_RATIO);
     expect(administrativeDefaults.maximumAudioVolume).toBe(DEFAULT_MAXIMUM_AUDIO_VOLUME);
     expect(Object.isFrozen(administrativeDefaults)).toBe(true);
@@ -147,10 +148,42 @@ describe('validating what an administrator or a service asked for', () => {
     expect(validateAspectRatio({ width: 9, height: 16 })).toEqual({ width: 9, height: 16 });
   });
 
-  it('refuses a margin that is negative or eats half the canvas', () => {
+  it('refuses a margin that is negative or exceeds the percent ceiling', () => {
     expect(() => validateSafeArea({ ...DEFAULT_SAFE_AREA, top: -0.01 })).toThrow(RenderConfigurationError);
-    expect(() => validateSafeArea({ ...DEFAULT_SAFE_AREA, left: 0.5 })).toThrow(/below half the canvas/u);
+    expect(() => validateSafeArea({ ...DEFAULT_SAFE_AREA, left: 0.5 })).toThrow(/49 percent/u);
     expect(validateSafeArea(safeAreaOf(0.1))).toEqual(safeAreaOf(0.1));
+  });
+
+  it.each(['top', 'right', 'bottom', 'left'] as const)('bounds the %s margin at 49 percent', (edge) => {
+    expect(validateSafeArea({ ...DEFAULT_SAFE_AREA, [edge]: 0 })).toEqual({ ...DEFAULT_SAFE_AREA, [edge]: 0 });
+    expect(validateSafeArea({ ...DEFAULT_SAFE_AREA, [edge]: MAX_SAFE_AREA_PERCENT / 100 })).toEqual({
+      ...DEFAULT_SAFE_AREA, [edge]: MAX_SAFE_AREA_PERCENT / 100,
+    });
+    for (const margin of [0.491, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => validateSafeArea({ ...DEFAULT_SAFE_AREA, [edge]: margin })).toThrow(RenderConfigurationError);
+    }
+  });
+
+  it('requires the percent unit at runtime', () => {
+    for (const unit of [undefined, 'pixels']) {
+      expect(() => validateSafeArea({ ...DEFAULT_SAFE_AREA, unit } as unknown as typeof DEFAULT_SAFE_AREA)).toThrow(
+        /unit/u,
+      );
+    }
+  });
+
+  it('enforces the margin ceiling at every output-profile resolution layer', () => {
+    const safeArea = safeAreaOf(0.491);
+    for (const request of [
+      { defaults: { ...administrativeDefaults, safeArea } },
+      { defaults: { ...administrativeDefaults, byOutputType: { main: { safeArea } } } },
+      { service: { safeArea } },
+    ]) {
+      expect(() => resolveOutputProfile({ outputType: 'main', ...request })).toThrow(/49 percent/u);
+    }
+    const profile = resolveOutputProfile({ outputType: 'main', service: { safeArea: safeAreaOf(0.49) } });
+    expect(profile.safeArea).toEqual({ unit: 'percent', top: 0.49, right: 0.49, bottom: 0.49, left: 0.49 });
+    expect(Object.isFrozen(profile.safeArea)).toBe(true);
   });
 
   it('refuses a readable floor that is not a fraction of the canvas height', () => {

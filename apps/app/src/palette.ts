@@ -425,7 +425,7 @@ function insertableContentOf(hit: PaletteHit): { readonly kind: ItemKind; readon
 }
 
 /** Builds the `ServiceItem` a hit becomes and appends it — the exact `RevisionRef` shape
- *  `services.ts`'s own `reviseItem` builds (`{ id, revision: String(revision), hash }`), sourced from
+ *  `services.ts`'s own `reviseItem` builds (`{ id, revision, hash }`), sourced from
  *  `revisions.current`, the latest revision, since a palette hit names content, not a pinned one. */
 async function insertHit(
   services: ReturnType<typeof servicesOn>,
@@ -441,7 +441,7 @@ async function insertHit(
   if (revision === undefined) {
     throw new PaletteError(hit.source, `${contentId} has no saved content to insert`);
   }
-  const content: RevisionRef = { id: contentId, revision: String(revision.revision), hash: revision.hash };
+  const content: RevisionRef = { id: contentId, revision: revision.revision, hash: revision.hash };
   const item: ServiceItem = { id: newId(), kind, title: hit.title, enabled: true, content };
   return services.addItem(context, serviceId, sectionId, item);
 }

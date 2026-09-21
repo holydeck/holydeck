@@ -63,13 +63,13 @@ const AUDIT = RECORDS.auditEvents.collection;
 const SECTIONS: readonly ServiceSection[] = [
   {
     id: 'section-1', name: 'Worship', items: [
-      { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song-4', revision: 'rev-5', hash: 'fnv1a-6fe1d1e9' } },
+      { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song-4', revision: 5, hash: 'fnv1a-6fe1d1e9' } },
       { id: 'item-2', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined },
     ],
   },
   {
     id: 'section-2', name: 'Word', items: [
-      { id: 'item-3', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 'rev-9', hash: undefined } },
+      { id: 'item-3', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 9, hash: undefined } },
     ],
   },
 ];

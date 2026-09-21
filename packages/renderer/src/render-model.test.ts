@@ -51,7 +51,7 @@ describe('aspect ratio and safe area are inputs, frozen at preparation', () => {
     expect(prepared.profile.aspectRatio).toEqual(DEFAULT_ASPECT_RATIO);
     expect(prepared.profile.aspectRatio).toEqual({ width: 16, height: 9 });
     expect(prepared.profile.safeArea).toEqual(DEFAULT_SAFE_AREA);
-    expect(prepared.profile.safeArea).toEqual({ top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 });
+    expect(prepared.profile.safeArea).toEqual({ unit: 'percent', top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 });
     expect(prepared.canvas).toEqual({ width: 1920, height: 1080 });
   });
 
@@ -59,7 +59,10 @@ describe('aspect ratio and safe area are inputs, frozen at preparation', () => {
     const prepared = await prepare({
       model: songModel(),
       measurer: stubMeasurer(),
-      service: { aspectRatio: { width: 4, height: 3 }, safeArea: { top: 0.1, right: 0.1, bottom: 0.1, left: 0.1 } },
+      service: {
+        aspectRatio: { width: 4, height: 3 },
+        safeArea: { unit: 'percent', top: 0.1, right: 0.1, bottom: 0.1, left: 0.1 },
+      },
     });
 
     expect(prepared.profile.aspectRatio).toEqual({ width: 4, height: 3 });

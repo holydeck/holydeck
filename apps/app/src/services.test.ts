@@ -32,14 +32,14 @@ const AUDIT = RECORDS.auditEvents.collection;
 const SECTIONS: readonly ServiceSection[] = [
   {
     id: 'section-2', name: 'Worship', items: [
-      { id: 'item-3', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song-4', revision: 'rev-5', hash: 'fnv1a-6fe1d1e9' } },
+      { id: 'item-3', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song-4', revision: 5, hash: 'fnv1a-6fe1d1e9' } },
       { id: 'item-1', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined },
     ],
   },
   {
     id: 'section-1', name: 'Word', items: [
-      { id: 'item-4', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 'rev-9', hash: undefined } },
-      { id: 'item-2', kind: 'reading', title: 'John 1', enabled: true, content: { id: 'reading-1', revision: 'rev-2', hash: 'fnv1a-12345678' } },
+      { id: 'item-4', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 9, hash: undefined } },
+      { id: 'item-2', kind: 'reading', title: 'John 1', enabled: true, content: { id: 'reading-1', revision: 2, hash: 'fnv1a-12345678' } },
     ],
   },
 ];
@@ -621,10 +621,10 @@ describe('revising an item onto a later content revision', () => {
     const sections: readonly ServiceSection[] = [
       {
         id: 'section-1', name: 'Worship', items: [
-          { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: song.stamp.id, revision: '1', hash: rev1.revision.hash } },
+          { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: song.stamp.id, revision: 1, hash: rev1.revision.hash } },
           { id: 'item-2', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined },
-          { id: 'item-3', kind: 'reading', title: 'John 1', enabled: true, content: { id: reading.stamp.id, revision: '1', hash: undefined } },
-          { id: 'item-4', kind: 'sermon', title: 'Ghost', enabled: true, content: { id: 'ghost-content', revision: '1', hash: undefined } },
+          { id: 'item-3', kind: 'reading', title: 'John 1', enabled: true, content: { id: reading.stamp.id, revision: 1, hash: undefined } },
+          { id: 'item-4', kind: 'sermon', title: 'Ghost', enabled: true, content: { id: 'ghost-content', revision: 1, hash: undefined } },
         ],
       },
     ];
@@ -643,7 +643,7 @@ describe('revising an item onto a later content revision', () => {
     const { services, revisions, REV, serviceId, songContentId, firstHash } = await setup();
     await revisions.save(REV, { contentId: songContentId, body: { verse: 3 }, origin: 'autosave' });
     const content = (await services.current(ADMIN, serviceId))?.sections[0]?.items[0]?.content;
-    expect(content).toEqual({ id: songContentId, revision: '1', hash: firstHash });
+    expect(content).toEqual({ id: songContentId, revision: 1, hash: firstHash });
   });
 
   it('surfaces drift without applying it, and excludes items with no content reference', async () => {
@@ -656,7 +656,7 @@ describe('revising an item onto a later content revision', () => {
       { itemId: 'item-4', contentId: 'ghost-content', pinnedRevision: 1, latestRevision: 1, drifted: false },
     ]);
     const content = (await services.current(ADMIN, serviceId))?.sections[0]?.items[0]?.content;
-    expect(content).toEqual({ id: songContentId, revision: '1', hash: firstHash });
+    expect(content).toEqual({ id: songContentId, revision: 1, hash: firstHash });
   });
 
   it('records actor and time when opting into a newer revision, and clears the drift', async () => {
@@ -664,7 +664,7 @@ describe('revising an item onto a later content revision', () => {
     const rev3 = await revisions.save(REV, { contentId: songContentId, body: { verse: 3 }, origin: 'autosave' });
     const stampsBefore = rows(db, STAMPS).length;
     const revised = await services.reviseItem(ADMIN, serviceId, 'item-1', 3);
-    expect(revised?.sections[0]?.items[0]?.content).toEqual({ id: songContentId, revision: '3', hash: rev3.revision.hash });
+    expect(revised?.sections[0]?.items[0]?.content).toEqual({ id: songContentId, revision: 3, hash: rev3.revision.hash });
     expect(await services.current(ADMIN, serviceId)).toEqual(revised);
     expect(rows(db, STAMPS)).toHaveLength(stampsBefore + 1);
     const auditRows = rows(db, AUDIT);
@@ -761,14 +761,14 @@ describe('content revisions adopt a new layout only by explicit opt-in (ADR 0005
     const sections: readonly ServiceSection[] = [
       {
         id: 'section-1', name: 'Worship',
-        items: [{ id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: song.stamp.id, revision: '1', hash: rev1.revision.hash } }],
+        items: [{ id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: song.stamp.id, revision: 1, hash: rev1.revision.hash } }],
       },
     ];
     const created = await services.create(serviceContext(ADMINISTRATOR, 'req-svc'), {
       title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections,
     });
     const serviceId = created.stamp.id;
-    const pinned = { id: song.stamp.id, revision: '1', hash: rev1.revision.hash };
+    const pinned = { id: song.stamp.id, revision: 1, hash: rev1.revision.hash };
     const contentOf = async (): Promise<unknown> =>
       (await services.current(ADMIN, serviceId))?.sections[0]?.items[0]?.content;
 
@@ -785,7 +785,7 @@ describe('content revisions adopt a new layout only by explicit opt-in (ADR 0005
     expect(await contentOf()).toEqual(pinned);
 
     const revised = await services.reviseItem(ADMIN, serviceId, 'item-1', 2);
-    expect(revised?.sections[0]?.items[0]?.content).toEqual({ id: song.stamp.id, revision: '2', hash: rev2.revision.hash });
+    expect(revised?.sections[0]?.items[0]?.content).toEqual({ id: song.stamp.id, revision: 2, hash: rev2.revision.hash });
     expect(await contentOf()).toEqual(revised?.sections[0]?.items[0]?.content);
   });
 });

@@ -149,14 +149,6 @@ const readable = (problem: { readonly path: string; readonly message: string }):
 const problems = (list: readonly { readonly path: string; readonly message: string }[]): string =>
   list.map(readable).join('; ');
 
-const revisionOrdinalOf = (ref: RevisionRef): number => {
-  const ordinal = Number(ref.revision);
-  if (!Number.isInteger(ordinal) || ordinal < 1) {
-    throw new ServiceError('corrupt', `${ref.id}@${ref.revision} is pinned to a revision this code cannot read`);
-  }
-  return ordinal;
-};
-
 interface ItemAddress {
   readonly sectionIndex: number;
   readonly itemIndex: number;
@@ -521,7 +513,7 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
         if (target === undefined) {
           throw new ServiceError('schema', `${current.id} has no revision ${revision}`);
         }
-        const ref: RevisionRef = { id: current.id, revision: String(revision), hash: target.hash };
+        const ref: RevisionRef = { id: current.id, revision, hash: target.hash };
         const draft = readDraft({
           title: row.title, date: row.date, site: row.site,
           sections: withChangedItem(row.sections, itemId, (item) => ({ ...item, content: ref })),
@@ -540,7 +532,7 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
         );
         return Promise.all(
           refs.map(async ({ itemId, content }) => {
-            const pinnedRevision = revisionOrdinalOf(content);
+            const pinnedRevision = content.revision;
             const latest = await revisions.current(context, content.id);
             const latestRevision = latest?.revision ?? pinnedRevision;
             return { itemId, contentId: content.id, pinnedRevision, latestRevision, drifted: latestRevision !== pinnedRevision };
