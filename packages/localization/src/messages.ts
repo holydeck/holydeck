@@ -56,6 +56,11 @@ const en = {
   'liveMedia.follower.silent': 'This view is not playing the media. Opt in to play it in step with {view}.',
   'liveMedia.follower.synchronized': 'Playing in step with {view}.',
   'liveMedia.follower.resynchronized': 'Caught back up with {view}.',
+  'audienceOffline.live': 'Following the live service.',
+  'audienceOffline.offline':
+    'The live connection was lost. Showing the last verified copy; other screens may no longer match this one.',
+  'audienceOffline.unavailable':
+    'The live connection was lost, and no verified copy is available to show.',
   'control.skipLinks.label': 'Skip links',
   'control.skip.order': 'Skip to Order',
   'control.skip.editorPreview': 'Skip to Editor and Preview',
@@ -137,6 +142,11 @@ const de: Catalog = {
     'Diese Ansicht spielt das Medium nicht ab. Aktivieren Sie die Wiedergabe, um es synchron zu {view} abzuspielen.',
   'liveMedia.follower.synchronized': 'Wiedergabe synchron zu {view}.',
   'liveMedia.follower.resynchronized': 'Wieder synchron zu {view}.',
+  'audienceOffline.live': 'Folgt dem Live-Gottesdienst.',
+  'audienceOffline.offline':
+    'Die Live-Verbindung wurde unterbrochen. Es wird die zuletzt geprüfte Kopie gezeigt; andere Bildschirme stimmen möglicherweise nicht mehr damit überein.',
+  'audienceOffline.unavailable':
+    'Die Live-Verbindung wurde unterbrochen, und es ist keine geprüfte Kopie zum Anzeigen vorhanden.',
   'control.skipLinks.label': 'Sprungmarken',
   'control.skip.order': 'Zum Ablauf springen',
   'control.skip.editorPreview': 'Zu Editor und Vorschau springen',
@@ -212,6 +222,11 @@ const ta: Catalog = {
   'liveMedia.follower.silent': 'இந்தக் காட்சி ஊடகத்தை இயக்கவில்லை. {view} உடன் ஒத்திசைவாக இயக்க இதைத் தேர்ந்தெடுக்கவும்.',
   'liveMedia.follower.synchronized': '{view} உடன் ஒத்திசைவாக இயக்கப்படுகிறது.',
   'liveMedia.follower.resynchronized': '{view} உடன் மீண்டும் ஒத்திசைக்கப்பட்டது.',
+  'audienceOffline.live': 'நேரடி வழிபாட்டைப் பின்தொடர்கிறது.',
+  'audienceOffline.offline':
+    'நேரடி இணைப்பு துண்டிக்கப்பட்டது. கடைசியாக சரிபார்க்கப்பட்ட நகல் காட்டப்படுகிறது; மற்ற திரைகள் இனி இதற்குப் பொருந்தாமல் இருக்கலாம்.',
+  'audienceOffline.unavailable':
+    'நேரடி இணைப்பு துண்டிக்கப்பட்டது, மேலும் காட்ட சரிபார்க்கப்பட்ட நகல் எதுவும் இல்லை.',
   'control.skipLinks.label': 'தாவல் இணைப்புகள்',
   'control.skip.order': 'வரிசைக்குச் செல்க',
   'control.skip.editorPreview': 'எடிட்டர் மற்றும் முன்னோட்டத்திற்குச் செல்க',
