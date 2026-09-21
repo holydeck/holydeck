@@ -185,7 +185,7 @@ export function buildApp({
 
   // The first route this server asks a permission of, and not merely a proved session: administering
   // another account is Admin's alone, by the roles this server enforces.
-  serveAccountRoutes(app, { identity });
+  serveAccountRoutes(app, { identity, sessions });
 
   // Behind the same permission as the account surface above: issuing a Guest's invitation or an output
   // window's capability is Control presentation's, not merely a proved session's.

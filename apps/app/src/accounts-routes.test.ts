@@ -117,7 +117,7 @@ beforeEach(async () => {
   withSafeErrors(app);
   guardMutations(app, { sessions });
   enforceAuthorization(app, { sessions, identity: undefined });
-  serveAccountRoutes(app, { identity });
+  serveAccountRoutes(app, { identity, sessions });
   await app.ready();
   admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [ACCOUNTS_MANAGE] });
 });
@@ -152,6 +152,17 @@ describe('granting and revoking Control presentation', () => {
     expect(response.statusCode).toBe(422);
     expect(response.json().error.code).toBe(VALIDATION_FAILED);
     expect(response.json().error.fields[0].path).toBe('grant.granted');
+  });
+
+  test('ends every session the account already holds, THR-01’s rotation on a privilege change', async () => {
+    const held = await sessions.start(sessionContext(CORRELATION), { actor: actorFor(ID), permissions: [] });
+    await asking(controlPath(ID), { granted: true });
+    await expect(sessions.read(sessionContext(CORRELATION), held.token)).rejects.toMatchObject({ kind: 'unknown' });
+  });
+
+  test('leaves the administrator’s own session open, granting Control to someone else', async () => {
+    await asking(controlPath(ID), { granted: true });
+    await expect(sessions.read(sessionContext(CORRELATION), admin.token)).resolves.toBeDefined();
   });
 });
 
@@ -189,7 +200,7 @@ describe('creating an account beyond the one the founder claims', () => {
     withSafeErrors(app);
     guardMutations(app, { sessions });
     enforceAuthorization(app, { sessions, identity: undefined });
-    serveAccountRoutes(app, { identity });
+    serveAccountRoutes(app, { identity, sessions });
     await app.ready();
     const response = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
     expect(response.statusCode).toBe(500);
@@ -225,6 +236,14 @@ describe('closing an account, and reopening it', () => {
     expect(response.statusCode).toBe(422);
     expect(response.json().error.fields[0].path).toBe('status.disabled');
   });
+
+  test('ends every session the account already holds, once it is disabled', async () => {
+    const created = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    const id = created.json().data.id as string;
+    const held = await sessions.start(sessionContext(CORRELATION), { actor: actorFor(id), permissions: [] });
+    await asking(statusPath(id), { disabled: true });
+    await expect(sessions.read(sessionContext(CORRELATION), held.token)).rejects.toMatchObject({ kind: 'unknown' });
+  });
 });
 
 describe('reassigning an account’s role', () => {
@@ -245,6 +264,14 @@ describe('reassigning an account’s role', () => {
     const response = await asking(rolePath(ID), { role: 'archbishop' });
     expect(response.statusCode).toBe(422);
     expect(response.json().error.fields[0].path).toBe('roleAssignment.role');
+  });
+
+  test('ends every session the account already holds, once its role changes', async () => {
+    const created = await posting(ACCOUNTS_PATH, NEW_ACCOUNT);
+    const id = created.json().data.id as string;
+    const held = await sessions.start(sessionContext(CORRELATION), { actor: actorFor(id), permissions: [] });
+    await asking(rolePath(id), { role: 'member' });
+    await expect(sessions.read(sessionContext(CORRELATION), held.token)).rejects.toMatchObject({ kind: 'unknown' });
   });
 });
 
@@ -327,7 +354,7 @@ describe('what this surface refuses to answer at all', () => {
     withSafeErrors(built);
     guardMutations(built, { sessions });
     enforceAuthorization(built, { sessions, identity: undefined });
-    serveAccountRoutes(built, { identity: bag });
+    serveAccountRoutes(built, { identity: bag, sessions });
     await built.ready();
     return built;
   };
@@ -344,6 +371,20 @@ describe('what this surface refuses to answer at all', () => {
   test('a trail that refuses an entry does not cost the account the grant', async () => {
     await app.close();
     app = await serving({ ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } });
+    const response = await asking(controlPath(ID), { granted: true });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ controlPresentation: true });
+  });
+
+  test('a deployment that keeps no sessions still grants Control, with nothing open left to end', async () => {
+    await app.close();
+    const built = Fastify({ logger: false });
+    withSafeErrors(built);
+    guardMutations(built, { sessions });
+    enforceAuthorization(built, { sessions, identity: undefined });
+    serveAccountRoutes(built, { identity, sessions: undefined });
+    await built.ready();
+    app = built;
     const response = await asking(controlPath(ID), { granted: true });
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toMatchObject({ controlPresentation: true });

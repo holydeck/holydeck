@@ -23,10 +23,12 @@ import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
 import { ACCOUNTS_MANAGE } from './roles.js';
+import { sessionContext } from './sessions.js';
 
 import type { AuditAction, AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
 import type { Identity } from './onboarding.js';
+import type { SessionStore } from './sessions.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 const ACCOUNT_PREFIX = 'account:';
@@ -53,9 +55,11 @@ const ROUTES = [
 export interface AccountRoutesOptions {
   /** Absent in a deployment that keeps no accounts, which has nothing here to administer. */
   readonly identity: Identity | undefined;
+  /** Absent in a deployment that keeps no sessions, which has none left open to end. */
+  readonly sessions: SessionStore | undefined;
 }
 
-export function serveAccountRoutes(app: FastifyInstance, { identity }: AccountRoutesOptions): void {
+export function serveAccountRoutes(app: FastifyInstance, { identity, sessions }: AccountRoutesOptions): void {
   // A deployment with nowhere to keep an account has nothing here to create or administer. Every path is
   // still served, so the guard's table remains the complete shape of the surface in every deployment.
   if (identity === undefined) {
@@ -94,6 +98,18 @@ export function serveAccountRoutes(app: FastifyInstance, { identity }: AccountRo
     }
   };
 
+  // THR-01: a privilege changed server-side is not one a session already open should keep acting on. This
+  // ends every session that account holds rather than reaching into one to hand it fresher permissions, so
+  // the next request under the old identifier finds no session at all instead of a silently patched one.
+  const revoked = async (request: FastifyRequest, id: string): Promise<void> => {
+    if (sessions === undefined) return;
+    try {
+      await sessions.revokeAllFor(sessionContext(correlationFor(ACCOUNT_PREFIX, request.id)), actorFor(id));
+    } catch (error: unknown) {
+      request.log.error({ err: error }, 'a privilege change could not end that account’s open sessions');
+    }
+  };
+
   app.patch(CONTROL_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const parsed = parseControlGrant(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
@@ -106,6 +122,7 @@ export function serveAccountRoutes(app: FastifyInstance, { identity }: AccountRo
     // Nothing an id nobody holds could have been granted or refused: this answers the lookup that failed,
     // not a decision about Control presentation, so it is not one the trail has anything to say about.
     if (updated === undefined) return reply.code(404).send(notFound(request));
+    await revoked(request, id);
     await note(request, 'account.control', provenSession(request).record.actor, actorFor(id), 'allowed');
     return reply.send(successEnvelope(updated, request.id, CLIENT_WINDOW.current));
   });
@@ -143,6 +160,9 @@ export function serveAccountRoutes(app: FastifyInstance, { identity }: AccountRo
       ? await identity.accounts.disable(call, id)
       : await identity.accounts.restore(call, id);
     if (updated === undefined) return reply.code(404).send(notFound(request));
+    // A closed account has nothing left to reopen a session with; a reopened one asks for a fresh sign-in
+    // rather than inheriting whatever slot happened to survive its closing.
+    if (parsed.value.disabled) await revoked(request, id);
     // Two distinct actions, not one, so a reader of the trail sees which direction happened without
     // reading a detail field.
     const action: AuditAction = parsed.value.disabled ? 'account.disable' : 'account.restore';
@@ -160,6 +180,7 @@ export function serveAccountRoutes(app: FastifyInstance, { identity }: AccountRo
       parsed.value.role,
     );
     if (updated === undefined) return reply.code(404).send(notFound(request));
+    await revoked(request, id);
     // The action name alone does not say which role was assigned, so the detail names it.
     await note(
       request,
