@@ -29,6 +29,7 @@ import {
 } from '@holydeck/contracts/sessions';
 
 import { contextProblems, requestContext } from './context.js';
+import { droppedIndex } from './repositories.js';
 
 import type { SessionRecord, SessionRotation, SlotSummary } from '@holydeck/contracts/sessions';
 import type { Db } from 'mongodb';
@@ -558,7 +559,7 @@ export async function createSessionIndexOn(db: IndexDb, index: SessionIndex): Pr
 
 export async function dropSessionIndexOn(db: IndexDb, name: string): Promise<void> {
   declaredIndex(name);
-  return db.collection(SESSIONS_COLLECTION).dropIndex(name);
+  return droppedIndex(() => db.collection(SESSIONS_COLLECTION).dropIndex(name));
 }
 
 /**

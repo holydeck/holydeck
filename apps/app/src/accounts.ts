@@ -12,6 +12,7 @@ import { ACCOUNT_ID_BYTES, actorFor, parseAccountRecord } from '@holydeck/contra
 import { randomBytes } from 'node:crypto';
 
 import { contextProblems, requestContext } from './context.js';
+import { droppedIndex } from './repositories.js';
 import { hashPassword, verifyPassword } from './credentials.js';
 
 import type { AccountRecord, AccountRole, CreateAccount, InstanceClaim, SignIn } from '@holydeck/contracts/accounts';
@@ -372,7 +373,7 @@ export async function createAccountIndexOn(db: IndexDb, index: AccountIndex): Pr
 
 export async function dropAccountIndexOn(db: IndexDb, name: string): Promise<void> {
   declaredIndex(name);
-  return db.collection(ACCOUNTS_COLLECTION).dropIndex(name);
+  return droppedIndex(() => db.collection(ACCOUNTS_COLLECTION).dropIndex(name));
 }
 
 /**

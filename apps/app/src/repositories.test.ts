@@ -292,6 +292,32 @@ describe('the indexes a schema needs', () => {
     expect(error.kind).toBe('filter');
     expect(error.message).toBe('runEvents: carries no field named scope');
   });
+
+  /** A database that refuses every drop for one reason, which is how each reason is told apart. */
+  const refusing = (reason: unknown): RepositoryDb => ({
+    collection: () =>
+      ({
+        dropIndex: async () => {
+          throw reason;
+        },
+      }) as unknown as RepositoryCollection,
+  });
+
+  it('counts an index that is already gone as dropped, so a half-built schema can still be undone', async () => {
+    const gone = Object.assign(new Error('index not found with name [run_order]'), {
+      code: 27,
+      codeName: 'IndexNotFound',
+    });
+    await expect(dropIndexOn(refusing(gone), 'runEvents', 'run_order')).resolves.toBeUndefined();
+  });
+
+  it('reports every other reason an index would not drop, because a rollback must not swallow them', async () => {
+    const denied = Object.assign(new Error('not authorized on this database'), { code: 13 });
+    await expect(dropIndexOn(refusing(denied), 'runEvents', 'run_order')).rejects.toThrow(/not authorized/u);
+    await expect(dropIndexOn(refusing(new Error('the connection went away')), 'runEvents', 'run_order')).rejects.toThrow(
+      /connection went away/u,
+    );
+  });
 });
 
 describe('filters that nest', () => {

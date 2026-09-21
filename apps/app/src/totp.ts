@@ -14,6 +14,7 @@
 import { isAccountId } from '@holydeck/contracts/accounts';
 
 import { contextProblems, requestContext } from './context.js';
+import { droppedIndex } from './repositories.js';
 import { drawnRecoveryCodes, drawnSecret, matchedStep, recoveryDigest } from './otp.js';
 
 import type { Db } from 'mongodb';
@@ -303,7 +304,7 @@ export async function createTotpIndexOn(db: IndexDb, index: TotpIndex): Promise<
 
 export async function dropTotpIndexOn(db: IndexDb, name: string): Promise<void> {
   declaredIndex(name);
-  return db.collection(TOTP_COLLECTION).dropIndex(name);
+  return droppedIndex(() => db.collection(TOTP_COLLECTION).dropIndex(name));
 }
 
 /**

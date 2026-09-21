@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 
 import { contextProblems, requestContext } from './context.js';
+import { droppedIndex } from './repositories.js';
 
 import type { Db } from 'mongodb';
 
@@ -281,7 +282,7 @@ export async function createAttemptIndexOn(db: IndexDb, index: AttemptIndex): Pr
 
 export async function dropAttemptIndexOn(db: IndexDb, name: string): Promise<void> {
   declaredIndex(name);
-  return db.collection(ATTEMPTS_COLLECTION).dropIndex(name);
+  return droppedIndex(() => db.collection(ATTEMPTS_COLLECTION).dropIndex(name));
 }
 
 /**

@@ -459,6 +459,49 @@ describe('rolling back', () => {
   });
 });
 
+describe('rolling back what an `up()` never finished building', () => {
+  /** What Mongo answers with when the index named in a drop is not there: code 27, `IndexNotFound`. */
+  const gone = Object.assign(new Error('index not found with name [an_index]'), {
+    code: 27,
+    codeName: 'IndexNotFound',
+  });
+
+  /** A database that refuses every drop for the given reason, which is the state a failed `up()` leaves. */
+  const refusing = (reason: unknown): FakeDb => {
+    const db = fakeDb();
+    return {
+      ...db,
+      collection: (name: string) => ({
+        ...db.collection(name),
+        dropIndex: async () => {
+          throw reason;
+        },
+      }),
+    };
+  };
+
+  test('every rollback this deployment ships finishes when the index it drops was never created', async () => {
+    for (const migration of MIGRATIONS) {
+      await expect(migration.down(migrationApi(refusing(gone)), CONTEXT)).resolves.toBeUndefined();
+    }
+  });
+
+  test('a rollback still fails on any other reason an index would not drop', async () => {
+    const denied = Object.assign(new Error('not authorized on this database'), { code: 13, codeName: 'Unauthorized' });
+    for (const migration of MIGRATIONS) {
+      await expect(migration.down(migrationApi(refusing(denied)), CONTEXT)).rejects.toThrow(/not authorized/u);
+    }
+  });
+
+  test('a rollback drives through to the end, rather than stopping at the first index already gone', async () => {
+    const db = fakeDb();
+    await MIGRATIONS[0]!.up(migrationApi(db), CONTEXT);
+    for (const [collection, named] of db.indexes) db.indexes.set(collection, named.slice(1));
+    await expect(MIGRATIONS[0]!.down(migrationApi(db), CONTEXT)).resolves.toBeUndefined();
+    expect([...db.indexes.values()].flat()).toEqual([]);
+  });
+});
+
 describe('what a migration is handed', () => {
   test('offers the repositories and the index calls, and nothing that could rewrite history', () => {
     expect(Object.keys(migrationApi(fakeDb())).sort()).toEqual([

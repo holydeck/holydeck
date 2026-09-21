@@ -22,6 +22,7 @@
 import { PRESENCE_KEY_SEPARATOR, parsePresenceEntry, presenceKey } from '@holydeck/contracts/presence';
 
 import { contextProblems, requestContext } from './context.js';
+import { droppedIndex } from './repositories.js';
 
 import type { PresenceEntry } from '@holydeck/contracts/presence';
 import type { Db } from 'mongodb';
@@ -186,7 +187,7 @@ export function createPresenceIndexOn(db: IndexDb, index: PresenceIndex): Promis
 
 export function dropPresenceIndexOn(db: IndexDb, name: string): Promise<void> {
   declaredIndex(name);
-  return db.collection(PRESENCE_COLLECTION).dropIndex(name);
+  return droppedIndex(() => db.collection(PRESENCE_COLLECTION).dropIndex(name));
 }
 
 const readable = (problems: readonly { readonly path: string; readonly message: string }[]): string =>

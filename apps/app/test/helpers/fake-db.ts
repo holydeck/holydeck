@@ -1,5 +1,3 @@
-import { RepositoryError } from '../../src/repositories.js';
-
 import type { Document, Filter, ReadOptions, RepositoryCollection, RepositoryDb } from '../../src/repositories.js';
 
 export interface FakeDb extends RepositoryDb {
@@ -55,7 +53,14 @@ export function fakeDb(): FakeDb {
         },
         async dropIndex(index: string) {
           const at = named.indexOf(index);
-          if (at < 0) throw new RepositoryError('schema', `${name}: has no index named ${index}`);
+          // Answered the way the driver answers it — code 27, `IndexNotFound` — rather than as a schema
+          // complaint of our own, so a caller that forgives this one code is exercised for what it forgives.
+          if (at < 0) {
+            throw Object.assign(new Error(`index not found with name [${index}]`), {
+              code: 27,
+              codeName: 'IndexNotFound',
+            });
+          }
           named.splice(at, 1);
         },
       };

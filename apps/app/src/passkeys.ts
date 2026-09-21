@@ -17,6 +17,7 @@ import { isAccountId } from '@holydeck/contracts/accounts';
 import { CHALLENGE_SECONDS, PASSKEY_LIMIT } from '@holydeck/contracts/webauthn';
 
 import { contextProblems, requestContext } from './context.js';
+import { droppedIndex } from './repositories.js';
 
 import type { PasskeyTransport } from '@holydeck/contracts/webauthn';
 import type { Db } from 'mongodb';
@@ -361,7 +362,7 @@ export async function createPasskeyIndexOn(db: IndexDb, index: PasskeyIndex): Pr
 
 export async function dropPasskeyIndexOn(db: IndexDb, name: string): Promise<void> {
   const declared = declaredIndex(name);
-  return db.collection(declared.collection).dropIndex(name);
+  return droppedIndex(() => db.collection(declared.collection).dropIndex(name));
 }
 
 /**

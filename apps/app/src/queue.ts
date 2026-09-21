@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { JOB_FIELDS, JOB_STATES, parseJobRecord } from '@holydeck/contracts/jobs';
 
 import { contextProblems, requestContext } from './context.js';
+import { droppedIndex } from './repositories.js';
 
 import type { JobPayload, JobRecord, JobState, LeasedJob } from '@holydeck/contracts/jobs';
 import type { Db } from 'mongodb';
@@ -269,7 +270,7 @@ export function createQueueIndexOn(db: IndexDb, index: QueueIndex): Promise<stri
 
 export function dropQueueIndexOn(db: IndexDb, name: string): Promise<void> {
   declaredIndex(name);
-  return db.collection(JOBS_COLLECTION).dropIndex(name);
+  return droppedIndex(() => db.collection(JOBS_COLLECTION).dropIndex(name));
 }
 
 export interface QueueOptions {

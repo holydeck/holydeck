@@ -11,6 +11,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 import { contextProblems, requestContext } from './context.js';
+import { droppedIndex } from './repositories.js';
 
 import type { RequestContext } from './context.js';
 import type { Db } from 'mongodb';
@@ -247,7 +248,7 @@ export async function createCapabilityIndexOn(db: IndexDb, index: CapabilityInde
 
 export async function dropCapabilityIndexOn(db: IndexDb, name: string): Promise<void> {
   declaredIndex(name);
-  return db.collection(CAPABILITIES_COLLECTION).dropIndex(name);
+  return droppedIndex(() => db.collection(CAPABILITIES_COLLECTION).dropIndex(name));
 }
 
 /**

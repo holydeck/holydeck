@@ -197,7 +197,25 @@ export function repositoryDb(db: Db): RepositoryDb {
 }
 
 export function dropIndexOn(db: RepositoryDb, name: string, index: string): Promise<void> {
-  return db.collection(resolve(name).collection).dropIndex(index);
+  return droppedIndex(() => db.collection(resolve(name).collection).dropIndex(index));
+}
+
+/** Mongo's code for a drop that named an index the collection does not have. */
+const INDEX_NOT_FOUND = 27;
+
+/**
+ * Drops an index, counting "it was never there" as done. Every `down()` drops unconditionally, and an
+ * `up()` that failed partway leaves behind only the indexes it got as far as creating — so a rollback
+ * that insisted on finding every one of them could not undo a partial migration, which is the single
+ * case a rollback exists for. This one code is forgiven and no other: a drop refused for any other
+ * reason is still a failure, because a rollback that swallows those leaves a schema nobody can describe.
+ */
+export async function droppedIndex(drop: () => Promise<unknown>): Promise<void> {
+  try {
+    await drop();
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== INDEX_NOT_FOUND) throw error;
+  }
 }
 
 function resolve(name: string): RecordClass {
