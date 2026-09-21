@@ -12,7 +12,12 @@ import { pathToFileURL } from 'node:url';
 
 import { fromRepoRoot } from './pipeline.mjs';
 
-export const BROWSER_SAFE_WORKSPACES = ['packages/contracts', 'packages/localization', 'apps/web'];
+export const BROWSER_SAFE_WORKSPACES = [
+  'packages/contracts',
+  'packages/localization',
+  'packages/renderer',
+  'apps/web',
+];
 
 // Node's own builtin list, in the bare spelling that predates the `node:` prefix. The prefixed form
 // needs no list at all, which is why it is handled separately.
@@ -155,7 +160,7 @@ export function readRepo() {
   const manifests = {};
   for (const dir of BROWSER_SAFE_WORKSPACES) {
     sources[dir] = {};
-    let entries = [];
+    let entries;
     try {
       entries = readdirSync(fromRepoRoot(`${dir}/src`), { recursive: true });
     } catch {
