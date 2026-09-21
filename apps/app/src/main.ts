@@ -39,6 +39,7 @@ import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
+import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { ServiceStore } from './services.js';
 import type { SettingsAdmin } from './settings-admin.js';
@@ -85,6 +86,9 @@ let settingsAdmin: SettingsAdmin | undefined;
 // Slide Layouts are durable records too, and administered by the same Admin: a deployment with nowhere to
 // keep one has none to create, version or archive, and its routes answer not-found the same way.
 let slideLayouts: SlideLayoutStore | undefined;
+// The media library is kept the same way and administered by the same Admin: a deployment with nowhere to
+// keep one has nothing here to upload to, and its route answers not-found the same way.
+let media: MediaLibrary | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
@@ -114,9 +118,7 @@ if (settings.values.mongoUrl !== '') {
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
   // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
   await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
-  // The media library is a durable record too, kept the same way — but no route serves it yet, so unlike
-  // its neighbors above, nothing here holds onto what it returns. T54 builds the store, not its HTTP surface.
-  mediaLibraryOn(repositoryDb(store.db()), {
+  media = mediaLibraryOn(repositoryDb(store.db()), {
     now,
     queue: queueOn(queueDb(store.db()), { now }),
     mediaRoot: settings.values.mediaRoot,
@@ -164,6 +166,7 @@ const app = buildApp({
   capabilities,
   settingsAdmin,
   slideLayouts,
+  media,
   translationOffsets,
   shownReferences,
 });

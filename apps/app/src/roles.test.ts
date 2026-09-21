@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { ACCOUNTS_MANAGE, LAYOUTS_MANAGE, PRESENTATION_CONTROL, SETTINGS_MANAGE, permissionsFor } from './roles.js';
+import {
+  ACCOUNTS_MANAGE,
+  LAYOUTS_MANAGE,
+  MEDIA_MANAGE,
+  PRESENTATION_CONTROL,
+  SETTINGS_MANAGE,
+  permissionsFor,
+} from './roles.js';
 
 import type { AccountRecord } from '@holydeck/contracts/accounts';
 
@@ -17,8 +24,13 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin the accounts, the settings and the Layouts a deployment is administered through', () => {
-    expect(permissionsFor(accountOf('admin', false))).toEqual([ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE]);
+  it('grants an admin the accounts, the settings, the Layouts and the media library a deployment is administered through', () => {
+    expect(permissionsFor(accountOf('admin', false))).toEqual([
+      ACCOUNTS_MANAGE,
+      SETTINGS_MANAGE,
+      LAYOUTS_MANAGE,
+      MEDIA_MANAGE,
+    ]);
   });
 
   it('grants an editor and a member nothing by role alone', () => {
@@ -44,6 +56,7 @@ describe('what Control presentation is', () => {
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
       LAYOUTS_MANAGE,
+      MEDIA_MANAGE,
       PRESENTATION_CONTROL,
     ]);
   });

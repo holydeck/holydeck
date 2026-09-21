@@ -71,6 +71,7 @@ describe('the released message codes', () => {
       ['corpus.unavailable', 503],
       ['corpus.upstream.unavailable', 502],
       ['corpus.unexpected_error', 500],
+      ['media.too_large', 413],
       ['server.unexpected_error', 500],
     ]);
     expect([VALIDATION_FAILED, UPDATE_REQUIRED, STALE_STATE_REVISION, ENTITY_CONFLICT]).toEqual([

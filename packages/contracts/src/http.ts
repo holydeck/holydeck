@@ -73,6 +73,9 @@ export const MESSAGE_CODES: readonly MessageCode[] = [
   { code: 'corpus.unavailable', status: 503, stable: true, since: 1 },
   { code: 'corpus.upstream.unavailable', status: 502, stable: true, since: 1 },
   { code: 'corpus.unexpected_error', status: 500, stable: true, since: 1 },
+  // A request whose body would have gone past the size ceiling this deployment enforces, refused while
+  // it was still being read rather than after. 413 carries HTTP semantics 422 does not, so its own code.
+  { code: 'media.too_large', status: 413, stable: true, since: 1 },
   { code: UNEXPECTED_ERROR, status: 500, stable: true, since: 1 },
 ];
 

@@ -78,4 +78,19 @@ describe('the ffmpeg-backed poster generator', () => {
 
     await expect(generating).rejects.toThrow('ffmpeg exited with code 137');
   });
+
+  it('kills the ffmpeg process on its own timeout, even when the caller signal never aborts', async () => {
+    const child = new FakeChild();
+    spawned.mockReturnValue(child);
+    const generator = ffmpegPosterGenerator({ timeoutMs: 20 });
+    const controller = new AbortController();
+
+    const generating = generator.generate(new Uint8Array([1, 2, 3]), controller.signal);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalled());
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledOnce());
+    child.emit('close', 137);
+
+    await expect(generating).rejects.toThrow('ffmpeg exited with code 137');
+    expect(controller.signal.aborted).toBe(false);
+  });
 });

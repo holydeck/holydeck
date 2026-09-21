@@ -22,8 +22,16 @@ export const SETTINGS_MANAGE = 'settings.manage';
  */
 export const LAYOUTS_MANAGE = 'layouts.manage';
 
+/**
+ * Uploads to and administers the media library MEDI-01 describes. Spelled `media.` rather than borrowing
+ * `media.ts`'s own store-permission vocabulary, for the same reason `layouts.` was spelled apart from
+ * `slideLayouts.`: an operator-facing permission and a repository's internal one are never the same word.
+ * Admin's alone, by role — the same as accounts, settings and Layouts.
+ */
+export const MEDIA_MANAGE = 'media.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
-  admin: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE],
+  admin: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE],
   editor: [],
   member: [],
 };

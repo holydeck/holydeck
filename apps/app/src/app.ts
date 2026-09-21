@@ -1,5 +1,6 @@
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, decideClient, supportedClientVersions } from '@holydeck/contracts/clients';
 import { MESSAGE_CODES, errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
+import multipart from '@fastify/multipart';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 
 import { serveAccountRoutes } from './accounts-routes.js';
@@ -9,6 +10,7 @@ import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } fro
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
+import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
@@ -22,6 +24,7 @@ import { serveWebClient, withSecurityHeaders } from './static.js';
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
+import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
@@ -51,6 +54,8 @@ export interface AppOptions {
   settingsAdmin?: SettingsAdmin;
   /** Where Slide Layouts are kept. Without it, there is none to create, version or archive. */
   slideLayouts?: SlideLayoutStore;
+  /** Where an uploaded file becomes a media asset. Without it, there is nowhere for one to be uploaded to. */
+  media?: MediaLibrary;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
   translationOffsets?: TranslationOffsetStore;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
@@ -74,6 +79,7 @@ export function buildApp({
   capabilities,
   settingsAdmin,
   slideLayouts,
+  media,
   translationOffsets,
   shownReferences,
 }: AppOptions): FastifyInstance {
@@ -81,6 +87,10 @@ export function buildApp({
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
 
   withSecurityHeaders(app);
+  // A real, enforced ceiling on the request body itself (THR-07): an oversized upload is refused while
+  // its body is still streaming in, never buffered whole before `media-routes.ts` ever sees it. Fastify
+  // defers every registration below to boot, so this needs no `await` to take effect before a route does.
+  app.register(multipart, { limits: { fileSize: MEDIA_SIZE_CEILING_BYTES } });
   // Before every route, so a fault in one of them answers with a code and not with what it threw. The
   // one exception is a deployment that set `developmentDiagnostics` in its own environment, which the
   // settings file cannot do and an administrator's request therefore cannot either.
@@ -198,6 +208,10 @@ export function buildApp({
   // Behind the same permission again, by a vocabulary of its own: a Slide Layout is Admin's to create,
   // to save forward and to stop offering, and nobody else's to change.
   serveSlideLayoutRoutes(app, { slideLayouts, identity });
+
+  // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
+  // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
+  serveMediaRoutes(app, { media, identity });
 
   // Reading is public, the same as the corpus routes above: BIBL-02 calls an offset inspectable, and
   // there is nothing in one worth a session. Setting one is behind the same permission once again.

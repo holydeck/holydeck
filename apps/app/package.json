@@ -68,6 +68,7 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
+    "@fastify/multipart": "^10.1.1",
     "@fastify/websocket": "^11.3.0",
     "@holydeck/contracts": "workspace:*",
     "@holydeck/core": "workspace:*",

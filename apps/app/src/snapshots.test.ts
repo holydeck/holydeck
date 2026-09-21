@@ -616,7 +616,12 @@ describe('the Operator override', () => {
     }
     expect(rows(db, RUN_EVENTS)).toHaveLength(0);
     expect(sessions.every(([, session]) => !session.permissions.includes(PRESENTATION_CONTROL))).toBe(true);
-    expect(permissionsFor(accountOf('admin'))).toEqual([ACCOUNTS_MANAGE, 'settings.manage', 'layouts.manage']);
+    expect(permissionsFor(accountOf('admin'))).toEqual([
+      ACCOUNTS_MANAGE,
+      'settings.manage',
+      'layouts.manage',
+      'media.manage',
+    ]);
   });
 
   // The other half of the same rule: the Operator is whoever was granted Control presentation, and the

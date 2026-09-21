@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
+import { MEDIA_PATH } from './media-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
@@ -109,6 +110,9 @@ describe('every route that changes something', () => {
       { method: 'PUT', url: LAYOUT_BOXES_PATH },
       { method: 'POST', url: `${LAYOUT_REVISIONS_PATH}/:revision` },
       { method: 'PATCH', url: `${SLIDE_LAYOUTS_PATH}/:id/status` },
+      // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
+      // Admin's, the same as a Slide Layout's own surface above is.
+      { method: 'POST', url: MEDIA_PATH },
       // Behind the same permission once more: configuring a translation's offset is Admin's alone,
       // reading every one configured is not, which is why only this one route is on this list at all.
       { method: 'PUT', url: `${TRANSLATION_OFFSETS_PATH}/:abbr` },
