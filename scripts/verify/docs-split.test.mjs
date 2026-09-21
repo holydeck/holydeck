@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-import { authorshipClaimsIn, pathProblemsIn, readRepo, verifyDocsSplit } from './docs-split.mjs';
+import { authorshipClaimsIn, commitMessageProblemsIn, pathProblemsIn, readRepo, verifyDocsSplit } from './docs-split.mjs';
+
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 const cleanPaths = ['README.md', 'apps/app/src/audit.ts', 'apps/cli/src/prompt.ts', 'tests/harness/e2e/shell.spec.ts'];
 
@@ -156,6 +160,71 @@ test('a forbidden path and a content credit are both reported together', () => {
     "CLAUDE.md: an AI coding assistant's own instruction file has no place in this public repository",
     'README.md:1:1: credits "Written with ChatGPT" as this work\'s author, which this public repository must never do',
   ]);
+});
+
+test('reads content beyond exposure-scan.mjs\'s own sweep: .github/, scripts/, tests/harness/ and root-level files', () => {
+  const { sources } = readRepo();
+  for (const path of ['.github/workflows/release.yml', 'scripts/verify/gate.mjs', 'tests/harness/build.mjs', 'package.json']) {
+    assert.ok(path in sources, `expected ${path} to be read`);
+  }
+});
+
+test('excludes its own test file from that additional sweep, the same way exposure-scan.mjs excludes tests', () => {
+  const { sources } = readRepo();
+  assert.equal('scripts/verify/docs-split.test.mjs' in sources, false);
+});
+
+test('flags a commit message that credits an AI coding assistant, by commit and where', () => {
+  const problems = commitMessageProblemsIn({
+    aaaa1111bbbb2222cccc3333dddd4444eeee5555: 'Add feature\nCo-Authored-By: Claude <noreply@anthropic.com>\n',
+  });
+  assert.deepEqual(problems, [
+    'commit aaaa1111bbbb:2:1: credits "Co-Authored-By: C" as this work\'s author, which this public repository must never do',
+  ]);
+});
+
+test('finds a credit in every commit, not only the first, in sorted sha order', () => {
+  const problems = commitMessageProblemsIn({
+    bbbb2222cccc3333dddd4444eeee5555aaaa1111: 'Generated with Claude Code.\n',
+    aaaa1111bbbb2222cccc3333dddd4444eeee5555: 'written by ChatGPT\n',
+  });
+  assert.deepEqual(problems, [
+    'commit aaaa1111bbbb:1:1: credits "written by ChatGPT" as this work\'s author, which this public repository must never do',
+    'commit bbbb2222cccc:1:1: credits "Generated with Claude Code" as this work\'s author, which this public repository must never do',
+    'commit bbbb2222cccc:1:16: credits "Claude Code" as this work\'s author, which this public repository must never do',
+  ]);
+});
+
+test('an ordinary commit message has nothing to report', () => {
+  assert.deepEqual(
+    commitMessageProblemsIn({ aaaa1111bbbb2222cccc3333dddd4444eeee5555: 'fix(app): keep the notification watermark once every page is full\n' }),
+    [],
+  );
+});
+
+test('verifyDocsSplit includes commit-message problems alongside path and content problems', () => {
+  const input = {
+    paths: cleanPaths,
+    documents: {},
+    sources: {},
+    commitMessages: { aaaa1111bbbb2222cccc3333dddd4444eeee5555: 'Claude-Session: https://claude.ai/code/session_01\n' },
+  };
+  assert.deepEqual(verifyDocsSplit(input), [
+    'commit aaaa1111bbbb:1:1: credits "Claude-Session: h" as this work\'s author, which this public repository must never do',
+    'commit aaaa1111bbbb:1:25: credits "claude.ai/code" as this work\'s author, which this public repository must never do',
+  ]);
+});
+
+test('verifyDocsSplit defaults to no commit messages when none are given', () => {
+  assert.deepEqual(verifyDocsSplit({ paths: cleanPaths, documents: {}, sources: {} }), []);
+});
+
+test('readRepo reads every commit message this repository\'s history holds, keyed by full sha', () => {
+  const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+  const headSubject = execFileSync('git', ['log', '-1', '--format=%s', headSha], { cwd: repoRoot, encoding: 'utf8' }).trim();
+  const { commitMessages } = readRepo();
+  assert.ok(headSha in commitMessages, 'expected the current HEAD commit to be present');
+  assert.ok(commitMessages[headSha].startsWith(headSubject), 'expected the stored message to start with its own subject line');
 });
 
 test('this repository has no forbidden artifact and credits no AI coding assistant', () => {
