@@ -108,6 +108,16 @@ describe('redacting a value', () => {
     expect(secretsIn({ ...DEFAULT_SETTINGS, mongoUrl: 'mongodb://db.example.invalid/holydeck' })).toEqual([]);
     expect(secretsIn({ ...DEFAULT_SETTINGS, mongoUrl: 'not a URL at all' })).toEqual([]);
   });
+
+  // The repository password reaches Restic through a child process's environment, and a child process
+  // that fails prints its environment into whatever the worker logs. So it is read off the settings the
+  // same as the other two, rather than being the one secret a crash report is allowed to carry.
+  test('the password the backup repository is encrypted under is one of them', () => {
+    const password = 'r'.repeat(32);
+    expect(secretsIn({ ...DEFAULT_SETTINGS, resticPassword: password })).toEqual([password]);
+    expect(redactorFor(secretsIn({ ...DEFAULT_SETTINGS, resticPassword: password }))(`restic said ${password}`))
+      .toBe(`restic said ${REDACTED}`);
+  });
 });
 
 // The maintenance procedure this exercises: an operator rotates a secret by redeploying with a new

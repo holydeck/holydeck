@@ -64,7 +64,7 @@ test('an entry point supplying its dependencies replaces every placeholder with 
     context: undefined,
     archive: {} as BackupProducerOptions['archive'],
     db: {} as BackupProducerOptions['db'],
-    restic: { repository: '/data/holydeck/restic' },
+    restic: { repository: '/data/holydeck/restic', password: 'p'.repeat(64) },
     settingsPath: '/data/holydeck/config/settings.yaml',
     mediaRoot: '/media',
     schemaVersion: 1,
@@ -76,7 +76,7 @@ test('an entry point supplying its dependencies replaces every placeholder with 
     target: {} as RestoreRehearsalOptions['target'],
     sessions: {} as RestoreRehearsalOptions['sessions'],
     capabilities: {} as RestoreRehearsalOptions['capabilities'],
-    restic: { repository: '/data/holydeck/restic' },
+    restic: { repository: '/data/holydeck/restic', password: 'p'.repeat(64) },
     schemaVersion: 1,
     now: () => '2026-09-21T00:00:00.000Z',
   };

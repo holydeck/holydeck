@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { CONSISTENCY_METHOD, EXCLUDED_SECRETS, archiveEntryOf } from './backups.js';
+import { CONSISTENCY_METHOD, EXCLUDED_SECRETS, MONGO_CONTENTS, archiveEntryOf } from './backups.js';
 import { requestContext } from './context.js';
 import { RECORDS, permissionsFor } from './records.js';
 import { RestoreApplyError, applyRestore, fileRestoreTarget } from './restore-apply.js';
@@ -23,13 +23,18 @@ const RESTIC_MONGO: BackupContent = { class: 'mongo', count: 1, bytes: 4096, has
 const RESTIC_SETTINGS: BackupContent = { class: 'settings', count: 1, bytes: 512, hash: 'restic:9f2c1b' };
 const RESTIC_MEDIA: BackupContent = { class: 'media', count: 1, bytes: 2048, hash: 'restic:aa11bb' };
 
-/** One document per Mongo-held class, including an empty one — a class with nothing is still a class. */
-const ARCHIVED: Readonly<Record<string, readonly Document[]>> = {
+/** The classes worth seeding with something; every other class is archived empty, which is still a class. */
+const SEEDED: Readonly<Record<string, readonly Document[]>> = {
   services: [{ _id: 'service:1', title: 'Sunday morning' }],
   'content-revisions': [{ _id: 'revision:1', body: 'a verse' }],
   'prepared-snapshots': [],
   'run-events': [{ _id: 'event:1' }],
 };
+
+/** Every Mongo-held class an archive carries, taken from the census so a new class is covered by adding it. */
+const ARCHIVED: Readonly<Record<string, readonly Document[]>> = Object.fromEntries(
+  MONGO_CONTENTS.map((content) => [content.class, SEEDED[content.class] ?? []]),
+);
 
 /** Writes the Mongo dump exactly as a backup run would have, so `verifyMongoArchive` can read it back. */
 const archiveIn = async (dir: string): Promise<readonly BackupContent[]> => {

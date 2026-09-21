@@ -102,6 +102,9 @@ export function redactorFor(secrets: readonly string[]): Redactor {
 /** The secrets a deployment holds, read off its settings rather than listed a second time by hand. */
 export function secretsIn(settings: Settings): readonly string[] {
   const secrets: string[] = [];
+  // Handed to Restic through a child process's environment, and a child process that dies prints its
+  // environment into whatever the worker logs — so this one is read off the settings like the rest.
+  if (settings.resticPassword !== '') secrets.push(settings.resticPassword);
   if (settings.corpusToken !== '') secrets.push(settings.corpusToken);
   const stored = passwordIn(settings.mongoUrl);
   if (stored !== undefined) secrets.push(stored);

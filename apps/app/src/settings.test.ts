@@ -39,6 +39,7 @@ describe('precedence', () => {
       dataDir: 'default',
       mediaRoot: 'default',
       resticRepository: 'default',
+      resticPassword: 'default',
       locale: 'default',
       corpusUrl: 'default',
       corpusToken: 'default',
@@ -59,6 +60,7 @@ describe('precedence', () => {
       dataDir: 'default',
       mediaRoot: 'default',
       resticRepository: 'default',
+      resticPassword: 'default',
       locale: 'file',
       corpusUrl: 'default',
       corpusToken: 'default',
@@ -82,6 +84,7 @@ describe('precedence', () => {
       HOLYDECK_DATA_DIR: '/srv/holydeck',
       HOLYDECK_MEDIA_ROOT: '/srv/media',
       HOLYDECK_RESTIC_REPOSITORY: '/srv/restic',
+      HOLYDECK_RESTIC_PASSWORD: 'r'.repeat(24),
       HOLYDECK_LOCALE: 'ta',
       HOLYDECK_CORPUS_URL: 'http://corpus:8080',
       HOLYDECK_CORPUS_TOKEN: 'c'.repeat(24),
@@ -94,6 +97,7 @@ describe('precedence', () => {
       dataDir: '/srv/holydeck',
       mediaRoot: '/srv/media',
       resticRepository: '/srv/restic',
+      resticPassword: 'r'.repeat(24),
       locale: 'ta',
       corpusUrl: 'http://corpus:8080',
       corpusToken: 'c'.repeat(24),
@@ -101,7 +105,7 @@ describe('precedence', () => {
       timezone: 'Asia/Tokyo',
       developmentDiagnostics: true,
     });
-    expect(Object.values(loaded.sources)).toEqual(Array(10).fill('env'));
+    expect(Object.values(loaded.sources)).toEqual(Array(11).fill('env'));
   });
 });
 
@@ -209,8 +213,8 @@ describe('the Restic repository, configured separately from the media root', () 
 describe('the media root and the Restic repository accept a filesystem path only', () => {
   it('has no backend-selection field: the settings schema names nothing an object-storage address could fill', () => {
     expect(Object.keys(DEFAULT_SETTINGS)).toEqual([
-      'port', 'dataDir', 'mediaRoot', 'resticRepository', 'locale', 'corpusUrl', 'corpusToken', 'mongoUrl', 'timezone',
-      'developmentDiagnostics',
+      'port', 'dataDir', 'mediaRoot', 'resticRepository', 'resticPassword', 'locale', 'corpusUrl', 'corpusToken',
+      'mongoUrl', 'timezone', 'developmentDiagnostics',
     ]);
   });
 
@@ -442,11 +446,57 @@ describe('the durable store address', () => {
   });
 });
 
+describe('the password the backup repository is encrypted under', () => {
+  const password = 'r'.repeat(24);
+
+  it('is empty until a deployment has one, which is what a first boot generates one into', () => {
+    expect(load().values.resticPassword).toBe('');
+    expect(DEFAULT_SETTINGS.resticPassword).toBe('');
+  });
+
+  it('is read from the settings file, which is where a generated one is kept', () => {
+    const loaded = load(`resticPassword: ${password}\n`);
+    expect(loaded.values.resticPassword).toBe(password);
+    expect(loaded.sources.resticPassword).toBe('file');
+  });
+
+  // An operator who would rather hold this secret themselves — in a password manager, out of the
+  // deployment entirely — sets it here, and a generated one is never written over the top of it.
+  it('is read from the environment, which overrides whatever the file kept', () => {
+    const loaded = load(`resticPassword: ${password}\n`, { HOLYDECK_RESTIC_PASSWORD: 'e'.repeat(32) });
+    expect(loaded.values.resticPassword).toBe('e'.repeat(32));
+    expect(loaded.sources.resticPassword).toBe('env');
+  });
+
+  it('refuses one too short to be a password, without ever repeating it', () => {
+    const problems = problemsOf(undefined, { HOLYDECK_RESTIC_PASSWORD: 'hunter2' });
+    expect(problems).toEqual(['HOLYDECK_RESTIC_PASSWORD: expected a credential of at least 24 characters']);
+    expect(problems.join(' ')).not.toContain('hunter2');
+  });
+
+  it('refuses a setting that is not text at all', () => {
+    expect(problemsOf('resticPassword: 12345678901234567890123456\n')).toEqual([
+      'resticPassword: expected a credential of at least 24 characters',
+    ]);
+  });
+});
+
 // A backup keeps the settings file verbatim through Restic, so this is the one place that file is ever
-// written back out somewhere new — and the one place its two credential-bearing fields must not survive.
+// written back out somewhere new — and the one place its credential-bearing fields must not survive.
 describe('redacting the settings file for a backup', () => {
-  it('names exactly the two fields this file holds a credential in', () => {
-    expect(SETTINGS_SECRET_FIELDS).toEqual(['corpusToken', 'mongoUrl']);
+  it('names exactly the fields this file holds a credential in', () => {
+    expect(SETTINGS_SECRET_FIELDS).toEqual(['resticPassword', 'corpusToken', 'mongoUrl']);
+  });
+
+  // The one secret that is redacted out of the very archive it unlocks. Keeping it would put the key
+  // inside the box: anyone holding the backup disk could read everything on it, which is precisely the
+  // exposure encrypting the repository exists to close.
+  it('strips the repository password out of the copy that goes into the repository', () => {
+    const password = 'r'.repeat(24);
+    const redacted = redactSettingsText(`resticPassword: ${password}\nport: 4100\n`);
+    expect(redacted).not.toContain(password);
+    expect(load(redacted).values.port).toBe(4100);
+    expect(load(redacted).values.resticPassword).toBe('');
   });
 
   it('strips the corpus token and the store address, leaving every other field untouched', () => {

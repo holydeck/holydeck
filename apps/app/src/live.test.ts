@@ -40,6 +40,7 @@ const settings: LoadedSettings = {
     dataDir: 'default',
     mediaRoot: 'default',
     resticRepository: 'default',
+    resticPassword: 'default',
     locale: 'default',
     corpusUrl: 'default',
     corpusToken: 'default',

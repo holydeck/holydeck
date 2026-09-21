@@ -20,6 +20,12 @@ export interface Settings {
   mediaRoot: string;
   /** Where `restic` keeps its backup repository. Configured separately from mediaRoot, on purpose. */
   resticRepository: string;
+  /**
+   * The password that repository is encrypted under. Empty means this deployment has not been given one
+   * and has not yet generated one; see `ensureResticPassword` in `settings-admin.ts`, which does that on
+   * the worker's first boot so an installation never has to invent a secret before its first backup.
+   */
+  resticPassword: string;
   locale: Locale;
   /** Where the corpus service answers. Empty means this deployment has no scripture library. */
   corpusUrl: string;
@@ -43,6 +49,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dataDir: '/data/holydeck',
   mediaRoot: '/data/holydeck/media',
   resticRepository: '/data/holydeck/restic',
+  resticPassword: '',
   locale: 'en',
   corpusUrl: '',
   corpusToken: '',
@@ -97,6 +104,7 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   dataDir: 'HOLYDECK_DATA_DIR',
   mediaRoot: 'HOLYDECK_MEDIA_ROOT',
   resticRepository: 'HOLYDECK_RESTIC_REPOSITORY',
+  resticPassword: 'HOLYDECK_RESTIC_PASSWORD',
   locale: 'HOLYDECK_LOCALE',
   corpusUrl: 'HOLYDECK_CORPUS_URL',
   corpusToken: 'HOLYDECK_CORPUS_TOKEN',
@@ -187,6 +195,24 @@ const parseCorpusToken = (raw: unknown): Parsed<string> => {
   if (typeof raw === 'string' && value === '') return { ok: true, value: '' };
   if (typeof raw !== 'string' || value.length < MINIMUM_CORPUS_TOKEN_LENGTH) {
     return { ok: false, problem: `expected a credential of at least ${MINIMUM_CORPUS_TOKEN_LENGTH} characters` };
+  }
+  return { ok: true, value };
+};
+
+/**
+ * Long enough that a stolen backup disk is not worth grinding at: Restic derives its repository key from
+ * this with scrypt, which is slow per guess, but slow per guess is only worth anything against a secret
+ * that was not guessable in the first place. The same floor the corpus credential uses, for the same
+ * reason, and stated separately because the two are free to move apart.
+ */
+const MINIMUM_RESTIC_PASSWORD_LENGTH = 24;
+
+// The problem never carries the value, as above: this one unlocks every backup this deployment holds.
+const parseResticPassword = (raw: unknown): Parsed<string> => {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (typeof raw === 'string' && value === '') return { ok: true, value: '' };
+  if (typeof raw !== 'string' || value.length < MINIMUM_RESTIC_PASSWORD_LENGTH) {
+    return { ok: false, problem: `expected a credential of at least ${MINIMUM_RESTIC_PASSWORD_LENGTH} characters` };
   }
   return { ok: true, value };
 };
@@ -297,6 +323,7 @@ export function loadSettings(input: {
   const dataDir = resolve('dataDir', DEFAULT_SETTINGS.dataDir, parseAbsolutePath, layers);
   const mediaRoot = resolve('mediaRoot', DEFAULT_SETTINGS.mediaRoot, parseAbsolutePath, layers);
   const resticRepository = resolve('resticRepository', DEFAULT_SETTINGS.resticRepository, parseAbsolutePath, layers);
+  const resticPassword = resolve('resticPassword', DEFAULT_SETTINGS.resticPassword, parseResticPassword, layers);
   const locale = resolve('locale', DEFAULT_SETTINGS.locale, parseLocale, layers);
   const corpusProblems = problems.length;
   const corpusUrl = resolve('corpusUrl', DEFAULT_SETTINGS.corpusUrl, parseCorpusUrl, layers);
@@ -324,6 +351,7 @@ export function loadSettings(input: {
       dataDir: dataDir.value,
       mediaRoot: mediaRoot.value,
       resticRepository: resticRepository.value,
+      resticPassword: resticPassword.value,
       locale: locale.value,
       corpusUrl: corpusUrl.value,
       corpusToken: corpusToken.value,
@@ -336,6 +364,7 @@ export function loadSettings(input: {
       dataDir: dataDir.source,
       mediaRoot: mediaRoot.source,
       resticRepository: resticRepository.source,
+      resticPassword: resticPassword.source,
       locale: locale.source,
       corpusUrl: corpusUrl.source,
       corpusToken: corpusToken.source,
@@ -347,8 +376,14 @@ export function loadSettings(input: {
   };
 }
 
-/** The fields this file holds a credential in — see `parseCorpusToken` and `parseMongoUrl` above. */
-export const SETTINGS_SECRET_FIELDS: readonly (keyof Settings)[] = ['corpusToken', 'mongoUrl'];
+/**
+ * The fields this file holds a credential in — see `parseResticPassword`, `parseCorpusToken` and
+ * `parseMongoUrl` above. `resticPassword` is the odd one: it is redacted out of the very archive it
+ * unlocks, which is the point. A repository password kept inside the repository protects nothing, and an
+ * operator therefore has to hold a copy of it somewhere this deployment is not — MAINTENANCE.md says so
+ * in the one place an operator is already reading about rotating secrets.
+ */
+export const SETTINGS_SECRET_FIELDS: readonly (keyof Settings)[] = ['resticPassword', 'corpusToken', 'mongoUrl'];
 
 const UNREADABLE_SETTINGS_PLACEHOLDER = '# settings file was not valid YAML; omitted from the backup\n';
 

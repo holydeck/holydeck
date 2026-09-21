@@ -13,7 +13,17 @@ class FakeChild extends EventEmitter {
 const spawned = vi.fn<(...args: unknown[]) => FakeChild>();
 vi.mock('node:child_process', () => ({ spawn: (...args: unknown[]) => spawned(...args) }));
 
-const OPTIONS = { repository: '/data/holydeck/restic' };
+const OPTIONS = { repository: '/data/holydeck/restic', password: 'p'.repeat(64) };
+
+/**
+ * What every invocation is expected to be launched with. The password reaches restic through the child's
+ * environment rather than its arguments: a command line is readable by every other process on the host,
+ * and an environment is not.
+ */
+const LAUNCHED = {
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: expect.objectContaining({ RESTIC_PASSWORD: OPTIONS.password }) as unknown,
+};
 
 const summaryLine = (fields: Record<string, unknown>): string =>
   `${JSON.stringify({ message_type: 'summary', ...fields })}\n`;
@@ -30,8 +40,8 @@ describe('initializing the restic repository', () => {
     await expect(initializing).resolves.toBeUndefined();
     expect(spawned).toHaveBeenCalledWith(
       'restic',
-      ['init', '--repo', OPTIONS.repository, '--insecure-no-password', '--json'],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['init', '--repo', OPTIONS.repository, '--json'],
+      LAUNCHED,
     );
   });
 
@@ -96,8 +106,8 @@ describe('backing up a path with restic', () => {
     await expect(backing).resolves.toEqual({ class: 'media', count: 6, bytes: 4096, hash: 'restic:a1b2c3d4' });
     expect(spawned).toHaveBeenCalledWith(
       'restic',
-      ['backup', '--repo', OPTIONS.repository, '--insecure-no-password', '--json', '--tag', 'media', '/data/holydeck/media'],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['backup', '--repo', OPTIONS.repository, '--json', '--tag', 'media', '/data/holydeck/media'],
+      LAUNCHED,
     );
   });
 
@@ -164,17 +174,8 @@ describe('restoring a snapshot with restic', () => {
     await expect(restoring).resolves.toBeUndefined();
     expect(spawned).toHaveBeenCalledWith(
       'restic',
-      [
-        'restore',
-        'a1b2c3d4',
-        '--repo',
-        OPTIONS.repository,
-        '--insecure-no-password',
-        '--json',
-        '--target',
-        '/tmp/rehearsal',
-      ],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['restore', 'a1b2c3d4', '--repo', OPTIONS.repository, '--json', '--target', '/tmp/rehearsal'],
+      LAUNCHED,
     );
   });
 
@@ -206,8 +207,8 @@ describe('checking the restic repository', () => {
     await expect(checking).resolves.toBeUndefined();
     expect(spawned).toHaveBeenCalledWith(
       'restic',
-      ['check', '--repo', OPTIONS.repository, '--insecure-no-password', '--read-data-subset=5%'],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['check', '--repo', OPTIONS.repository, '--read-data-subset=5%'],
+      LAUNCHED,
     );
   });
 
@@ -236,8 +237,8 @@ describe('forgetting snapshots retention no longer keeps', () => {
     await expect(forgetting).resolves.toBe(2);
     expect(spawned).toHaveBeenCalledWith(
       'restic',
-      ['forget', '--repo', OPTIONS.repository, '--insecure-no-password', '--json', '--prune', 'aaa111', 'bbb222'],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['forget', '--repo', OPTIONS.repository, '--json', '--prune', 'aaa111', 'bbb222'],
+      LAUNCHED,
     );
   });
 
@@ -259,5 +260,48 @@ describe('forgetting snapshots retention no longer keeps', () => {
     child.emit('close', 1);
 
     await expect(forgetting).rejects.toThrow('no matching ID found');
+  });
+});
+
+// A backup is a second copy of everything this deployment holds, sitting on a disk that leaves the
+// building — and an unencrypted repository is that copy readable by whoever ends up with the disk. So
+// the repository has a password, every command carries it, and there is no command here that can be
+// talked into working without one.
+describe('the repository password', () => {
+  /** Every call this module can make, so a rule about all of them is asserted against all of them. */
+  const invocations: ReadonlyArray<[string, (options: typeof OPTIONS) => Promise<unknown>]> = [
+    ['init', (options) => initRepository(options, new AbortController().signal)],
+    ['backup', (options) => backupPath(options, 'media', 'media', '/data/holydeck/media', new AbortController().signal)],
+    ['restore', (options) => restoreSnapshot(options, 'a1b2c3d4', '/tmp/rehearsal', new AbortController().signal)],
+    ['check', (options) => checkRepository(options, new AbortController().signal)],
+    ['forget', (options) => forgetSnapshots(options, ['aaa111'], new AbortController().signal)],
+  ];
+
+  it.each(invocations)('never asks restic to skip encryption on %s', async (_name, invoke) => {
+    const child = new FakeChild();
+    spawned.mockClear();
+    spawned.mockReturnValue(child);
+
+    const running = invoke(OPTIONS);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalled());
+    child.stdout.emit('data', Buffer.from(summaryLine({ snapshot_id: 'a1b2c3d4' })));
+    child.emit('close', 0);
+    await running.catch(() => undefined);
+
+    const args = spawned.mock.calls[0]?.[1] as readonly string[];
+    expect(args).not.toContain('--insecure-no-password');
+    // And the password is not smuggled into the argument list either: `ps` on the host reads that.
+    expect(args).not.toContain(OPTIONS.password);
+    expect(args.join(' ')).not.toContain(OPTIONS.password);
+  });
+
+  it.each(invocations)('refuses to touch the repository at all with no password to open it: %s', async (_name, invoke) => {
+    spawned.mockClear();
+
+    await expect(invoke({ ...OPTIONS, password: '' })).rejects.toThrow('no repository password');
+
+    // Refused here rather than by restic, which with nothing on stdin fails on a prompt nobody can answer
+    // — a message about a terminal, for what is really a deployment that never had its secret written.
+    expect(spawned).not.toHaveBeenCalled();
   });
 });

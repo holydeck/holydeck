@@ -29,13 +29,18 @@ const FINISHED_AT = '2026-09-19T02:33:00.000Z';
 
 const CONTEXT = restoreContext('operator', 'rehearsal-1');
 
-/** One document per class, including an empty one: a class with nothing in it is still a class to put back. */
-const ARCHIVED: Readonly<Record<string, readonly Document[]>> = {
+/** The classes worth seeding with something; every other class is archived empty, and is still a class. */
+const SEEDED: Readonly<Record<string, readonly Document[]>> = {
   services: [{ _id: 'service:1', title: 'Sunday morning' }],
   'content-revisions': [{ _id: 'revision:1', body: 'a verse' }],
   'prepared-snapshots': [],
   'run-events': [{ _id: 'event:1' }, { _id: 'event:2' }],
 };
+
+/** Every class an archive has to put back, taken from the census so a new class is covered by adding it. */
+const ARCHIVED: Readonly<Record<string, readonly Document[]>> = Object.fromEntries(
+  MONGO_CONTENTS.map((content) => [content.class, SEEDED[content.class] ?? []]),
+);
 
 /** A content class Restic addresses by snapshot rather than by digest — never rehashed, deliberately. */
 const RESTIC_CONTENT: BackupContent = { class: 'settings', count: 1, bytes: 512, hash: 'restic:9f2c1b' };

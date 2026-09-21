@@ -9,18 +9,22 @@ import {
   BACKUP_INDEXES,
   BackupError,
   CONSISTENCY_METHOD,
+  EXCLUDED_RECORDS,
   EXCLUDED_SECRETS,
+  MONGO_CONTENTS,
   backupContext,
+  censusProblems,
   finalizeBackup,
   readMongoArchive,
   recordedBackups,
 } from './backups.js';
 import { requestContext } from './context.js';
-import { RECORDS } from './records.js';
+import { RECORDS, RECORD_NAMES } from './records.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { BackupContent, BackupConsistency } from '@holydeck/contracts/backups';
-import type { BackupCollection, BackupDb, BackupSession } from './backups.js';
+import type { BackupCollection, BackupDb, BackupSession, ExcludedRecord, MongoContent } from './backups.js';
+import type { RecordName } from './records.js';
 import type { Document } from './repositories.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 
@@ -121,12 +125,7 @@ describe('reading the Mongo archive', () => {
     });
     const archive = await readMongoArchive(db, CONTEXT, { dumpDir });
     expect(archive.consistency).toEqual({ pointInTime: true, method: CONSISTENCY_METHOD });
-    expect(archive.contents.map((content) => content.class)).toEqual([
-      'services',
-      'content-revisions',
-      'prepared-snapshots',
-      'run-events',
-    ]);
+    expect(archive.contents.map((content) => content.class)).toEqual(MONGO_CONTENTS.map((content) => content.class));
     const services = archive.contents.find((content) => content.class === 'services') as BackupContent;
     expect(services.count).toBe(1);
     expect(services.hash).toMatch(/^sha256:[0-9a-f]{64}$/u);
@@ -192,7 +191,82 @@ describe('reading the Mongo archive', () => {
         seen.push(className);
       },
     });
-    expect(seen).toEqual(['services', 'content-revisions', 'prepared-snapshots', 'run-events']);
+    expect(seen).toEqual(MONGO_CONTENTS.map((content) => content.class));
+  });
+});
+
+describe('the census of what a backup carries', () => {
+  const problemsAmong = (
+    records: readonly RecordName[],
+    contents: readonly MongoContent[],
+    excluded: readonly ExcludedRecord[],
+  ): readonly string[] => censusProblems({ records, contents, excluded });
+
+  it('accounts for every record class this deployment ships, one way or the other', () => {
+    expect(censusProblems()).toEqual([]);
+  });
+
+  it('carries the schema ledger, without which a restored archive says nothing about its own shape', () => {
+    expect(MONGO_CONTENTS.map((content) => content.record)).toContain('schemaMigrations');
+  });
+
+  it('carries every class by default, which is why nothing is excluded today', () => {
+    expect(EXCLUDED_RECORDS).toEqual([]);
+    expect(MONGO_CONTENTS).toHaveLength(RECORD_NAMES.length);
+  });
+
+  it('inventories each class under its own name, so a dump file can be matched back to a collection', () => {
+    for (const { record, class: className } of MONGO_CONTENTS) {
+      expect(RECORDS[record]).toBeDefined();
+      expect(className).toMatch(/^[a-z]+(-[a-z]+)*$/u);
+    }
+  });
+
+  it('reports a class that is carried by nothing and excused by nothing, which is how one stops being lost', () => {
+    const forgotten = MONGO_CONTENTS.filter((content) => content.record !== 'slideLayouts');
+    expect(problemsAmong(RECORD_NAMES, forgotten, [])).toEqual([
+      'slideLayouts: no backup carries it and nothing says why — inventory it or exclude it with a reason',
+    ]);
+  });
+
+  it('reports a class that is carried and excused at once, because only one of the two can be acted on', () => {
+    expect(
+      problemsAmong(RECORD_NAMES, MONGO_CONTENTS, [{ record: 'runEvents', because: 'they are noisy' }]),
+    ).toEqual(['runEvents: is inventoried and excluded at once, which cannot both be true']);
+  });
+
+  it('reports an exclusion that gives no reason, which is the whole of what an exclusion has to give', () => {
+    const kept = MONGO_CONTENTS.filter((content) => content.record !== 'runEvents');
+    expect(problemsAmong(RECORD_NAMES, kept, [{ record: 'runEvents', because: '  ' }])).toEqual([
+      'runEvents: is excluded without saying why',
+    ]);
+  });
+
+  it('reports a class inventoried twice, and two classes sharing one manifest name', () => {
+    const doubled = [...MONGO_CONTENTS, { record: 'services', class: 'services' } as const];
+    expect(problemsAmong(RECORD_NAMES, doubled, [])).toEqual([
+      'one record class is inventoried more than once',
+      'two classes are inventoried under one manifest name',
+    ]);
+  });
+
+  it('reports a class inventoried under a name that is not its own, which a restore could not read back', () => {
+    const renamed = MONGO_CONTENTS.map((content) =>
+      content.record === 'runEvents' ? { record: content.record, class: 'events' } : content,
+    );
+    expect(problemsAmong(RECORD_NAMES, renamed, [])).toEqual([
+      'runEvents: is inventoried as events rather than run-events, which a restore reads by',
+    ]);
+  });
+
+  it('reports a class named for something the file half or a withheld secret already answers to', () => {
+    const clashing = MONGO_CONTENTS.map((content) =>
+      content.record === 'mediaAssets' ? { record: content.record, class: 'media' } : content,
+    );
+    expect(problemsAmong(RECORD_NAMES, clashing, [])).toEqual([
+      'mediaAssets: is inventoried as media rather than media-assets, which a restore reads by',
+      'media: is inventoried under a name the file half already uses',
+    ]);
   });
 });
 

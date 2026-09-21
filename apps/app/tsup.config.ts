@@ -6,6 +6,7 @@ export default defineConfig({
     'src/migrate.ts',
     'src/deploy-preflight-cli.ts',
     'src/settings.ts',
+    'src/settings-admin.ts',
     'src/boot.ts',
     'src/media.ts',
     'src/queue.ts',
@@ -24,6 +25,7 @@ export default defineConfig({
   dts: {
     entry: [
       'src/settings.ts',
+      'src/settings-admin.ts',
       'src/boot.ts',
       'src/media.ts',
       'src/queue.ts',

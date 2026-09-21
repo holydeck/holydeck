@@ -17,6 +17,10 @@
       "types": "./dist/settings.d.ts",
       "import": "./dist/settings.js"
     },
+    "./settings-admin": {
+      "types": "./dist/settings-admin.d.ts",
+      "import": "./dist/settings-admin.js"
+    },
     "./queue": {
       "types": "./dist/queue.d.ts",
       "import": "./dist/queue.js"

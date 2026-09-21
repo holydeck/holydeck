@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { backupContext } from '@holydeck/app/backups';
+import { MONGO_CONTENTS, backupContext } from '@holydeck/app/backups';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SETTINGS_STAGING_DIR, backupProducerOn } from './backup-producer.js';
@@ -59,9 +59,17 @@ const fakeArchiveDb = (seed: Readonly<Record<string, readonly Record<string, unk
 const summaryLine = (fields: Record<string, unknown>): string =>
   `${JSON.stringify({ message_type: 'summary', ...fields })}\n`;
 
+const RESTIC = { repository: '/data/holydeck/restic', password: 'p'.repeat(64) };
+
+/** How every restic call is launched: the repository password travels in the environment, never in argv. */
+const LAUNCHED = {
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: expect.objectContaining({ RESTIC_PASSWORD: RESTIC.password }) as unknown,
+};
+
 const OPTIONS = {
   context: CONTEXT,
-  restic: { repository: '/data/holydeck/restic' },
+  restic: RESTIC,
   // Left pointing at nothing on disk: most of these tests do not care what the "settings" class holds,
   // and `stageRedactedSettings` treats a missing file as "nothing configured yet" rather than a failure.
   settingsPath: '/data/holydeck/config/settings.yaml',
@@ -160,7 +168,7 @@ describe('producing a backup', () => {
     expect(backups).toHaveLength(1);
     const manifest = (backups[0] as { manifest: { contents: Array<{ class: string; hash: string }> } }).manifest;
     expect(manifest.contents.map((content) => content.class).sort()).toEqual(
-      ['content-revisions', 'media', 'mongo', 'prepared-snapshots', 'run-events', 'services', 'settings'].sort(),
+      [...MONGO_CONTENTS.map((content) => content.class), 'media', 'mongo', 'settings'].sort(),
     );
     const services = manifest.contents.find((content) => content.class === 'services');
     expect(services?.hash).toBe(rehashedServices);
@@ -174,26 +182,26 @@ describe('producing a backup', () => {
     expect(spawned).toHaveBeenNthCalledWith(
       1,
       'restic',
-      ['init', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json'],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['init', '--repo', OPTIONS.restic.repository, '--json'],
+      LAUNCHED,
     );
     expect(spawned).toHaveBeenNthCalledWith(
       2,
       'restic',
-      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'mongo', dumpDir],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['backup', '--repo', OPTIONS.restic.repository, '--json', '--tag', 'mongo', dumpDir],
+      LAUNCHED,
     );
     expect(spawned).toHaveBeenNthCalledWith(
       3,
       'restic',
-      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'settings', SETTINGS_STAGING_DIR],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['backup', '--repo', OPTIONS.restic.repository, '--json', '--tag', 'settings', SETTINGS_STAGING_DIR],
+      LAUNCHED,
     );
     expect(spawned).toHaveBeenNthCalledWith(
       4,
       'restic',
-      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'media', OPTIONS.mediaRoot],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['backup', '--repo', OPTIONS.restic.repository, '--json', '--tag', 'media', OPTIONS.mediaRoot],
+      LAUNCHED,
     );
   });
 
@@ -356,16 +364,8 @@ describe('forgetting what retention no longer keeps', () => {
     expect(spawned).toHaveBeenNthCalledWith(
       5,
       'restic',
-      [
-        'forget',
-        '--repo',
-        OPTIONS.restic.repository,
-        '--insecure-no-password',
-        '--json',
-        '--prune',
-        'snap-2026-09-14',
-      ],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['forget', '--repo', OPTIONS.restic.repository, '--json', '--prune', 'snap-2026-09-14'],
+      LAUNCHED,
     );
   });
 

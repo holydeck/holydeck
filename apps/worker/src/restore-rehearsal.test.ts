@@ -61,6 +61,14 @@ const manifestOf = (contents: readonly unknown[]): Record<string, unknown> => ({
   excludedSecrets: ['session-keys', 'credential-hashes', 'api-tokens', 'signing-keys'],
 });
 
+const RESTIC = { repository: '/data/holydeck/restic', password: 'p'.repeat(64) };
+
+/** How every restic call is launched: the repository password travels in the environment, never in argv. */
+const LAUNCHED = {
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: expect.objectContaining({ RESTIC_PASSWORD: RESTIC.password }) as unknown,
+};
+
 const RESTIC_CONTENTS = [
   { class: 'mongo', count: 4, bytes: 128, hash: 'restic:mongo-snap' },
   { class: 'settings', count: 3, bytes: 512, hash: 'restic:settings-snap' },
@@ -107,7 +115,7 @@ const options = (over: Partial<Parameters<typeof restoreRehearsalOn>[0]> = {}): 
   target: fakeTarget(),
   sessions: { revokeEvery: async () => 3 },
   capabilities: { revokeEvery: async () => 6 },
-  restic: { repository: '/data/holydeck/restic' },
+  restic: RESTIC,
   schemaVersion: 19,
   now: () => NOW,
   newId: () => 'restore-fixed',
@@ -152,14 +160,14 @@ describe('rehearsing a restore', () => {
     expect(spawned).toHaveBeenNthCalledWith(
       1,
       'restic',
-      ['check', '--repo', '/data/holydeck/restic', '--insecure-no-password', '--read-data-subset=5%'],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['check', '--repo', '/data/holydeck/restic', '--read-data-subset=5%'],
+      LAUNCHED,
     );
     expect(spawned).toHaveBeenNthCalledWith(
       2,
       'restic',
-      ['restore', 'mongo-snap', '--repo', '/data/holydeck/restic', '--insecure-no-password', '--json', '--target', restored],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      ['restore', 'mongo-snap', '--repo', '/data/holydeck/restic', '--json', '--target', restored],
+      LAUNCHED,
     );
 
     expect(revokeEvery).toHaveBeenCalledOnce();

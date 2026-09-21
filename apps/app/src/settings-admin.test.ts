@@ -3,7 +3,7 @@ import { basename, dirname } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-import { settingsAdminOn } from './settings-admin.js';
+import { ensureResticPassword, settingsAdminOn } from './settings-admin.js';
 import { CANONICAL_SETTINGS_PATH, SettingsError, loadSettings } from './settings.js';
 import { fakeSettingsIO } from '../test/helpers/settings-io.js';
 
@@ -292,5 +292,72 @@ describe('hot reload from an external edit', () => {
     admin.watch().close();
 
     expect(io.closed).toBe(true);
+  });
+});
+
+// The repository the worker backs this deployment up into is encrypted, which means it has a password,
+// which means a deployment that was never told one has nowhere to back up to. Rather than making every
+// installation invent a secret by hand before its first backup can run, one is generated the first time
+// it is needed and kept in the settings file with the rest — see MAINTENANCE.md for what that costs.
+describe('the backup repository password a deployment starts with', () => {
+  it('generates one into the settings file when the deployment has none', async () => {
+    const io = fakeSettingsIO({ [PATH]: 'port: 4100\n' });
+
+    const ensured = await ensureResticPassword(seeded('port: 4100\n'), { ...io, env: {} });
+
+    expect(ensured.values.resticPassword).not.toBe('');
+    expect(ensured.values.port).toBe(4100);
+    expect(parse(io.files.get(PATH) ?? '')).toMatchObject({
+      port: 4100,
+      resticPassword: ensured.values.resticPassword,
+    });
+    // Written the same way every other settings change is: a temp file, then a rename onto the path.
+    expect(io.renames).toEqual([{ from: io.writes[0]?.path, to: PATH }]);
+  });
+
+  it('generates one long enough and random enough that the loader itself accepts it', async () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    const other = fakeSettingsIO({ [PATH]: '' });
+
+    const first = (await ensureResticPassword(seeded(''), { ...io, env: {} })).values.resticPassword;
+    const second = (await ensureResticPassword(seeded(''), { ...other, env: {} })).values.resticPassword;
+
+    expect(first).toMatch(/^[0-9a-f]{64}$/u);
+    expect(first).not.toBe(second);
+    expect(loadSettings({ fileText: io.files.get(PATH), env: {}, path: PATH }).values.resticPassword).toBe(first);
+  });
+
+  // Generated once and then left alone: a second one would be a repository nothing can open, since every
+  // snapshot already in it is encrypted under the first.
+  it('leaves an existing password exactly as it found it, and writes nothing at all', async () => {
+    const held = 'r'.repeat(32);
+    const io = fakeSettingsIO({ [PATH]: `resticPassword: ${held}\n` });
+
+    const ensured = await ensureResticPassword(seeded(`resticPassword: ${held}\n`), { ...io, env: {} });
+
+    expect(ensured.values.resticPassword).toBe(held);
+    expect(io.writes).toHaveLength(0);
+    expect(io.renames).toHaveLength(0);
+  });
+
+  // An operator holding the secret outside the deployment is the safer arrangement, not a mistake to
+  // correct: generating over the top of it would encrypt the next snapshot under a password nobody kept.
+  it('never writes over one the environment supplies, which is an operator holding it themselves', async () => {
+    const env = { HOLYDECK_RESTIC_PASSWORD: 'e'.repeat(32) };
+    const io = fakeSettingsIO({ [PATH]: '' });
+
+    const ensured = await ensureResticPassword(seeded('', env), { ...io, env });
+
+    expect(ensured.values.resticPassword).toBe('e'.repeat(32));
+    expect(io.writes).toHaveLength(0);
+  });
+
+  it('leaves a corrupted settings file as corrupted as it found it rather than writing over it', async () => {
+    const io = fakeSettingsIO({ [PATH]: 'port: [\n' });
+
+    await expect(ensureResticPassword(seeded(''), { ...io, env: {} })).rejects.toThrow(SettingsError);
+
+    expect(io.files.get(PATH)).toBe('port: [\n');
+    expect(io.writes).toHaveLength(0);
   });
 });

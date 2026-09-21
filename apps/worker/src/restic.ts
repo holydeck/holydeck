@@ -10,6 +10,12 @@ import type { BackupContent } from '@holydeck/contracts/backups';
 
 export interface ResticOptions {
   readonly repository: string;
+  /**
+   * The password the repository is encrypted under. A backup is a second copy of everything a deployment
+   * holds, on a disk that by design leaves the building, so there is no invocation here that will run
+   * without one — see `run` below for why it is refused here rather than left to Restic.
+   */
+  readonly password: string;
 }
 
 const ALREADY_INITIALIZED = /already initialized/iu;
@@ -23,9 +29,21 @@ interface ResticSummary {
   readonly snapshot_id?: string;
 }
 
-const run = (args: readonly string[], signal: AbortSignal): Promise<string> =>
+const run = (options: ResticOptions, args: readonly string[], signal: AbortSignal): Promise<string> =>
   new Promise((resolve, reject) => {
-    const child = spawn('restic', [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // Refused before anything is launched. Restic with no password and nothing on stdin fails on a
+    // prompt nobody can answer, which reads as a problem with the terminal rather than what it is: a
+    // deployment whose repository secret was never written. Said plainly instead, once, for every command.
+    if (options.password === '') {
+      reject(new Error('restic was given no repository password; this deployment has none set'));
+      return;
+    }
+    // Through the environment, never the argument list: a command line is readable by every other process
+    // on the host, and this one password opens every backup this deployment has ever taken.
+    const child = spawn('restic', [...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, RESTIC_PASSWORD: options.password },
+    });
     let stdout = '';
     let stderr = '';
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -53,7 +71,7 @@ const run = (args: readonly string[], signal: AbortSignal): Promise<string> =>
  */
 export async function initRepository(options: ResticOptions, signal: AbortSignal): Promise<void> {
   try {
-    await run(['init', '--repo', options.repository, '--insecure-no-password', '--json'], signal);
+    await run(options, ['init', '--repo', options.repository, '--json'], signal);
   } catch (error) {
     if (ALREADY_INITIALIZED.test((error as Error).message)) return;
     throw error;
@@ -82,10 +100,7 @@ export async function backupPath(
   path: string,
   signal: AbortSignal,
 ): Promise<BackupContent> {
-  const stdout = await run(
-    ['backup', '--repo', options.repository, '--insecure-no-password', '--json', '--tag', tag, path],
-    signal,
-  );
+  const stdout = await run(options, ['backup', '--repo', options.repository, '--json', '--tag', tag, path], signal);
   const summary = summaryOf(stdout);
   if (summary.snapshot_id === undefined || summary.snapshot_id === '') {
     throw new Error('restic backup summary named no snapshot');
@@ -105,10 +120,7 @@ export async function restoreSnapshot(
   target: string,
   signal: AbortSignal,
 ): Promise<void> {
-  await run(
-    ['restore', snapshot, '--repo', options.repository, '--insecure-no-password', '--json', '--target', target],
-    signal,
-  );
+  await run(options, ['restore', snapshot, '--repo', options.repository, '--json', '--target', target], signal);
 }
 
 /**
@@ -126,7 +138,7 @@ const READ_DATA_SAMPLE = '--read-data-subset=5%';
  * so a sample of that data is read back as well.
  */
 export async function checkRepository(options: ResticOptions, signal: AbortSignal): Promise<void> {
-  await run(['check', '--repo', options.repository, '--insecure-no-password', READ_DATA_SAMPLE], signal);
+  await run(options, ['check', '--repo', options.repository, READ_DATA_SAMPLE], signal);
 }
 
 /**
@@ -139,9 +151,6 @@ export async function forgetSnapshots(
   signal: AbortSignal,
 ): Promise<number> {
   if (snapshots.length === 0) return 0;
-  await run(
-    ['forget', '--repo', options.repository, '--insecure-no-password', '--json', '--prune', ...snapshots],
-    signal,
-  );
+  await run(options, ['forget', '--repo', options.repository, '--json', '--prune', ...snapshots], signal);
   return snapshots.length;
 }

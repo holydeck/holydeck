@@ -25,11 +25,19 @@ import type { LoadedSettings, Settings } from './settings.js';
 /** Every setting `update()` probes for real filesystem write access before adopting a change to it. */
 const WRITABILITY_CHECKED: ReadonlySet<keyof Settings> = new Set<keyof Settings>(['mediaRoot', 'resticRepository']);
 
-/** The filesystem operations this module needs, injected so no test here ever touches a real disk. */
-export interface SettingsAdminIO {
+/**
+ * Everything it takes to replace the settings file without a reader ever seeing a half-written one. Named
+ * on its own because the worker needs exactly this much and none of the rest: it writes the generated
+ * repository password once at boot and never watches, updates, or probes anything.
+ */
+export interface SettingsWriteIO {
   readFile(path: string): Promise<string>;
   writeFile(path: string, text: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
+}
+
+/** The filesystem operations this module needs, injected so no test here ever touches a real disk. */
+export interface SettingsAdminIO extends SettingsWriteIO {
   watch(dir: string, listener: (eventType: string, filename: string | Buffer | null) => void): { close(): void };
   /** Whether this process can write into the given path. Probed for a changed media root or Restic
    * repository before the change is adopted, so a deployment-mounted path that turns out to be
@@ -55,7 +63,7 @@ export interface SettingsAdmin {
 const isEnoent = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
 
 /** A fresh install, and a file an external edit just deleted, both read as "nothing here yet". */
-async function readTextOrEmpty(io: SettingsAdminIO, path: string): Promise<string> {
+async function readTextOrEmpty(io: SettingsWriteIO, path: string): Promise<string> {
   try {
     return await io.readFile(path);
   } catch (error) {
@@ -80,6 +88,50 @@ function mappingIn(text: string, path: string): Record<string, unknown> {
     throw new SettingsError([`${path}: expected a mapping of settings`]);
   }
   return { ...(raw as Record<string, unknown>) };
+}
+
+/** A temp file in the same directory, then a rename onto the path — see this module's opening note. */
+async function writeAtomically(io: SettingsWriteIO, path: string, text: string): Promise<void> {
+  const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`);
+  await io.writeFile(tmp, text);
+  await io.rename(tmp, path);
+}
+
+/** Bytes of randomness behind a generated repository password, written out as hex — so 64 characters. */
+const RESTIC_PASSWORD_BYTES = 32;
+
+/**
+ * A repository password no human chose, and therefore one no human has to. Hex rather than base64 so the
+ * value survives every YAML quoting rule, every shell, and every copy-paste out of an operator's terminal
+ * unchanged: this is the one secret here that somebody has to be able to write down and type back in.
+ */
+export const newResticPassword = (): string => randomBytes(RESTIC_PASSWORD_BYTES).toString('hex');
+
+/**
+ * Makes sure this deployment has a password to encrypt its backup repository under, generating one into
+ * the settings file the first time and leaving it alone ever after. Generated rather than demanded,
+ * because the alternative is an installation that silently cannot back up until somebody reads far enough
+ * into the documentation — and an unencrypted repository was the failure this replaced.
+ *
+ * Never written over anything: a password already in the file, or one the environment supplies because an
+ * operator would rather hold it themselves, is returned exactly as found. A second password would be a
+ * repository nothing can open, since every snapshot already in it is encrypted under the first.
+ *
+ * The write goes through the same merge-and-validate path `update()` does, for the same reason: this
+ * carries no second idea of what the settings file is allowed to contain.
+ */
+export async function ensureResticPassword(
+  loaded: LoadedSettings,
+  io: SettingsWriteIO & { readonly env: Record<string, string | undefined> },
+  generate: () => string = newResticPassword,
+): Promise<LoadedSettings> {
+  if (loaded.values.resticPassword !== '') return loaded;
+  const mapping = mappingIn(await readTextOrEmpty(io, loaded.path), loaded.path);
+  mapping['resticPassword'] = generate();
+  const merged = stringify(mapping);
+  const next = loadSettings({ fileText: merged, env: io.env, path: loaded.path });
+  await writeAtomically(io, loaded.path, merged);
+  return next;
 }
 
 export function settingsAdminOn(seed: LoadedSettings, io: SettingsAdminOptions): SettingsAdmin {
@@ -126,9 +178,7 @@ export function settingsAdminOn(seed: LoadedSettings, io: SettingsAdminOptions):
       }
       if (unwritable.length > 0) throw new SettingsError(unwritable, 'unwritable');
 
-      const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`);
-      await io.writeFile(tmp, merged);
-      await io.rename(tmp, path);
+      await writeAtomically(io, path, merged);
 
       snapshot = loaded;
       reloadError = undefined;

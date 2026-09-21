@@ -1,5 +1,5 @@
 import { accessSync, constants, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { checkOwnSettingsMount, readSettingsText } from '@holydeck/app/boot';
@@ -11,6 +11,7 @@ import { queueDb, queueOn, workerContext } from '@holydeck/app/queue';
 import { repositoryDb } from '@holydeck/app/repositories';
 import { rehearsalDatabaseName, restoreContext, restoreDb } from '@holydeck/app/restores';
 import { sessionDb, sessionsOn } from '@holydeck/app/sessions';
+import { ensureResticPassword } from '@holydeck/app/settings-admin';
 import { loadSettings, settingsPath } from '@holydeck/app/settings';
 import { MongoClient } from 'mongodb';
 
@@ -103,9 +104,23 @@ if (work.runs === 'nothing') {
     },
   };
   const queue = queueOn(queueDb(store.db()), { now });
+  // The repository is encrypted, so it has a password, and a deployment that was never given one gets one
+  // generated into its settings file here rather than being asked to invent a secret before its first
+  // backup can run. A deployment that mounts no settings directory at all — the development stack, by
+  // design — has nowhere to keep one: that is said out loud and then left, and every Restic command
+  // refuses for want of a password rather than quietly writing a repository anyone could read.
+  const configured = await ensureResticPassword(settings, {
+    readFile: (file) => readFile(file, 'utf8'),
+    writeFile: (file, text) => writeFile(file, text),
+    rename,
+    env: process.env,
+  }).catch((error: unknown) => {
+    process.stdout.write(`worker could not settle a backup repository password: ${(error as Error).message}\n`);
+    return settings;
+  });
   // Restic itself is only touched once a backup job actually claims and runs: a build that never claims
   // `backup-run` never needs the binary present, the same way `ffmpeg` is only ever reached per poster job.
-  const restic = { repository: settings.values.resticRepository };
+  const restic = { repository: configured.values.resticRepository, password: configured.values.resticPassword };
   // A rehearsal aims the whole of a real restore somewhere it cannot hurt anyone: not only the database
   // the archive is applied to, but the sessions it ends. Pointing the session store at the live
   // deployment would prove the same thing at the price of signing a congregation out mid-service, which

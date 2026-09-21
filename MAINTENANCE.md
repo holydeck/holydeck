@@ -50,13 +50,26 @@ node dist/migrate.js --rollback   # undoes the newest applied schema version
 ```
 
 Exercised by `apps/app/src/migrations.test.ts` and `apps/app/src/migrations.integration.test.ts`,
-and guarded going forward by the deployment preflight's migration check, which refuses to let a
-pending migration ship without a working rollback in the first place.
+which run every shipped `down()` — including against a database where the indexes it drops were
+never created, which is what a migration that failed partway leaves behind.
+
+The deployment preflight's migration check helps, but know what it actually checks: it refuses to
+start a deployment whose database has a pending migration this build declares no `down()` for. That
+is a check that a rollback *exists*, made against the database a deploy is about to touch. It is not
+a proof that the rollback works, and it runs at deploy time, so it cannot stop a migration from
+being written or shipped in the first place. What says a rollback works is the test suite above.
 
 ## Rotating a secret
 
-The corpus token and the MongoDB credential (`HOLYDECK_CORPUS_TOKEN`, and the password embedded
-in `HOLYDECK_MONGO_URL`) are the two secrets a deployment holds. To rotate either:
+A supported deployment holds two secrets: the corpus token (`HOLYDECK_CORPUS_TOKEN`) and the
+backup repository password (`resticPassword` / `HOLYDECK_RESTIC_PASSWORD`). `HOLYDECK_MONGO_URL`
+can carry a third — a URL of the form `mongodb://user:password@host/db` — and is redacted from
+every log line and settings response when it does, but `compose.yaml` runs MongoDB without
+authentication and reaches it over the deployment's private network only, so by default there is
+no credential in it to rotate.
+
+The corpus token rotates the plain way. To rotate it (or a MongoDB credential, if this deployment
+has given itself one):
 
 1. Generate a new value and update it wherever the deployment reads its settings from — the
    `HOLYDECK_*` environment, or `config/settings.yaml` (see `compose.yaml`'s comment on where
@@ -74,6 +87,38 @@ real secret harder to find in a log.
 
 A restart is required for a rotation to take effect — settings are read once at boot, not
 watched for changes while running.
+
+### The backup repository password
+
+The `restic` repository every backup is written into is encrypted, and `resticPassword` is what
+opens it. Nothing asks an operator to invent one: the first time the worker boots without a
+password it generates a 64-character random value and writes it into `config/settings.yaml`
+alongside every other setting, atomically, the same way any settings change is written. An
+operator who would rather hold the secret outside the deployment sets `HOLYDECK_RESTIC_PASSWORD`
+instead, and a generated value is never written over the top of one that is already set.
+
+**Keep a copy of this value somewhere the deployment is not.** It is deliberately redacted out of
+the settings file the backup itself carries (`redactSettingsText` in `apps/app/src/settings.ts`) —
+a repository password stored inside the repository protects nothing. The consequence is the part
+worth planning for: if the host is lost and the only copy of `config/settings.yaml` went with it,
+the backups on the surviving disk cannot be opened. Write the value down when the deployment is
+first brought up, and store it wherever this deployment's other recovery material lives.
+
+Rotating it is not a settings change on its own. Every snapshot already in the repository is
+encrypted under the current password, so the repository has to be re-keyed first, from inside the
+worker container, with the current password in hand:
+
+```sh
+docker compose exec -e RESTIC_PASSWORD="$CURRENT" worker \
+  restic -r /data/holydeck/restic key passwd
+```
+
+Then put the new value in `config/settings.yaml` (or `HOLYDECK_RESTIC_PASSWORD`), restart the
+worker, and record the new value wherever the old one was kept. Changing the setting without
+re-keying first leaves a repository nothing can open and backup runs that fail on every attempt —
+`apps/worker/src/restic.ts` refuses to run any command at all without a password rather than
+quietly writing an unencrypted repository, so the failure is loud, but the snapshots already taken
+are only recoverable with the password they were written under.
 
 ## Node baseline checkpoint (DEPL-03)
 

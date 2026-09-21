@@ -13,7 +13,7 @@ import { parseBackupProduction } from '@holydeck/contracts/backups';
 import { auditOn } from './audit.js';
 import { contextProblems, requestContext } from './context.js';
 import { permissionsFor } from './records.js';
-import { RECORDS } from './records.js';
+import { RECORDS, RECORD_NAMES } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 
 import type { MongoClient, Db as MongoDb } from 'mongodb';
@@ -34,13 +34,113 @@ export interface MongoContent {
  * Every Mongo-held durable record class the archive inventories, and the manifest name each reads as.
  * Exported because a restore has to put back exactly this list, under exactly these names: an archive
  * missing one of them is an archive that cannot be restored whole, and only this list can say so.
+ *
+ * Held in the order `records.ts` names its classes, and complete by census rather than by memory — see
+ * `censusProblems`, which is what stops a class being added to this deployment and quietly left out of
+ * every backup it ever takes.
  */
 export const MONGO_CONTENTS: readonly MongoContent[] = Object.freeze([
-  { record: 'services', class: 'services' },
+  { record: 'auditEvents', class: 'audit-events' },
+  { record: 'backups', class: 'backups' },
+  { record: 'conflictShelf', class: 'conflict-shelf' },
+  { record: 'contentLanguages', class: 'content-languages' },
+  { record: 'contentLibrary', class: 'content-library' },
   { record: 'contentRevisions', class: 'content-revisions' },
+  { record: 'mediaAssets', class: 'media-assets' },
+  { record: 'midServiceAdditions', class: 'mid-service-additions' },
   { record: 'preparedSnapshots', class: 'prepared-snapshots' },
+  { record: 'presentationRuns', class: 'presentation-runs' },
+  { record: 'restores', class: 'restores' },
   { record: 'runEvents', class: 'run-events' },
+  { record: 'schemaMigrations', class: 'schema-migrations' },
+  { record: 'serviceTemplates', class: 'service-templates' },
+  { record: 'services', class: 'services' },
+  { record: 'slideLabels', class: 'slide-labels' },
+  { record: 'slideLayouts', class: 'slide-layouts' },
 ]);
+
+export interface ExcludedRecord {
+  readonly record: RecordName;
+  /** One line, in plain words, saying why no archive carries this class. */
+  readonly because: string;
+}
+
+/**
+ * Record classes a backup deliberately leaves out, each with the reason it is left out. Empty today, and
+ * that is the answer the census wants by default: everything this deployment holds of its own accord is
+ * something a restore has to be able to put back. A class belongs here only when carrying it would be
+ * actively wrong — state that is meaningless in another deployment, or a secret nobody should archive —
+ * and never because carrying it was inconvenient. Whatever lands here also has to be reasoned about on
+ * the restore side, which puts back exactly `MONGO_CONTENTS` and nothing else.
+ */
+export const EXCLUDED_RECORDS: readonly ExcludedRecord[] = Object.freeze([]);
+
+/** A census to grade: the classes this deployment ships, against what a backup says about each. */
+export interface BackupCensus {
+  readonly records: readonly RecordName[];
+  readonly contents: readonly MongoContent[];
+  readonly excluded: readonly ExcludedRecord[];
+}
+
+const SHIPPED_CENSUS: BackupCensus = {
+  get records() {
+    return RECORD_NAMES;
+  },
+  get contents() {
+    return MONGO_CONTENTS;
+  },
+  get excluded() {
+    return EXCLUDED_RECORDS;
+  },
+};
+
+/**
+ * Names every way the census of Mongo-held classes could be wrong, and answers nothing when it is right.
+ * Run from a test rather than at boot, because what it checks is a property of the source this build
+ * ships: a class added to `records.ts` that is neither inventoried nor excluded would be dropped by
+ * every restore this deployment ever ran, silently, and a build failure is the only place that is cheap
+ * to find out. Takes the census to grade so a test can hand it the mistakes nobody has made yet.
+ */
+export function censusProblems(census: BackupCensus = SHIPPED_CENSUS): readonly string[] {
+  const problems: string[] = [];
+  const included = new Map(census.contents.map((content) => [content.record, content.class]));
+  const excluded = new Map(census.excluded.map((entry) => [entry.record, entry.because]));
+
+  for (const record of census.records) {
+    const decided = (included.has(record) ? 1 : 0) + (excluded.has(record) ? 1 : 0);
+    if (decided === 0) {
+      problems.push(`${record}: no backup carries it and nothing says why — inventory it or exclude it with a reason`);
+    }
+    if (decided === 2) problems.push(`${record}: is inventoried and excluded at once, which cannot both be true`);
+  }
+  for (const [record, because] of excluded) {
+    if (because.trim() === '') problems.push(`${record}: is excluded without saying why`);
+  }
+  if (included.size !== census.contents.length) problems.push('one record class is inventoried more than once');
+
+  const names = census.contents.map((content) => content.class);
+  if (new Set(names).size !== names.length) problems.push('two classes are inventoried under one manifest name');
+  for (const { record, class: className } of census.contents) {
+    if (className !== kebab(record)) {
+      problems.push(`${record}: is inventoried as ${className} rather than ${kebab(record)}, which a restore reads by`);
+    }
+  }
+  for (const className of names) {
+    if (EXCLUDED_SECRETS.includes(className)) problems.push(`${className}: is inventoried and named a withheld secret at once`);
+    if (RESTIC_CLASSES.includes(className)) problems.push(`${className}: is inventoried under a name the file half already uses`);
+  }
+  return problems;
+}
+
+/** The manifest name a record class is inventoried under: its own name, in the archive's spelling. */
+const kebab = (record: string): string => record.replace(/[A-Z]/gu, (letter) => `-${letter.toLowerCase()}`);
+
+/**
+ * The content classes the file half of a backup contributes — Restic's, not Mongo's. Named here only so
+ * the census can prove no record class is inventoried under one of them, which would make a manifest
+ * ambiguous about which half of the backup a class came from.
+ */
+const RESTIC_CLASSES: readonly string[] = Object.freeze(['mongo', 'settings', 'media']);
 
 /** What a backup deliberately never carries, named once so a class here can never also appear in `contents`. */
 export const EXCLUDED_SECRETS: readonly string[] = Object.freeze([
