@@ -1,6 +1,8 @@
 # Example deployment: the HolyDeck corpus + MongoDB, from the published image.
 # For hacking on the corpus itself use compose.dev.yaml in the repo root, which builds
-# the image from the working tree instead of pulling it.
+# the image from the working tree instead of pulling it. For the supported self-hosting
+# deployment — the application and worker alongside this corpus — see compose.yaml in the
+# repo root instead, which this file's server and mongo services are a minimal excerpt of.
 #
 # The corpus is an internal service. It is not published here, so it is reachable only from
 # this network, and it requires a credential on every API request so that reaching the port is

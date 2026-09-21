@@ -1,7 +1,17 @@
 import { MESSAGE_CODES, REMOVED_CODES } from '@holydeck/contracts/http';
 import { describe, expect, it } from 'vitest';
 
-import { checkCorpusBoundary, checkCorpusIsClosed, checkReleasedContracts, checkSchema, readSettingsText } from './boot.js';
+import {
+  SettingsMountError,
+  checkCorpusBoundary,
+  checkCorpusIsClosed,
+  checkReleasedContracts,
+  checkSchema,
+  checkSettingsMount,
+  mountedPaths,
+  readMountInfo,
+  readSettingsText,
+} from './boot.js';
 
 import type { SchemaStatus } from './migrations.js';
 
@@ -104,5 +114,81 @@ describe('grading the schema before serving', () => {
   it('refuses to serve a database a failed run left half migrated', () => {
     const blocked = { version: 1, direction: 'up', attempt: 1, phase: 'failed' } as const;
     expect(() => checkSchema(status({ recorded: 0, pending: [], blocked }))).toThrow(/roll/u);
+  });
+});
+
+describe('reading /proc/self/mountinfo for the mount points this process actually has', () => {
+  const enoentMountinfo = (path: string): never => {
+    throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+      code: 'ENOENT',
+    });
+  };
+
+  it('returns the table text when there is one', () => {
+    expect(readMountInfo(() => 'a mount line\n')).toBe('a mount line\n');
+  });
+
+  it('treats a missing table as no table, because a platform without one has nothing to check', () => {
+    expect(readMountInfo(enoentMountinfo)).toBeUndefined();
+  });
+
+  it('refuses to guess when the table is there but unreadable', () => {
+    const denied = (): never => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    };
+    expect(() => readMountInfo(denied)).toThrow(/EACCES/u);
+  });
+
+  it('reads /proc/self/mountinfo by default, which is the only table this process has to consult', () => {
+    let seen: string | undefined;
+    readMountInfo((path) => {
+      seen = path;
+      return '';
+    });
+    expect(seen).toBe('/proc/self/mountinfo');
+  });
+});
+
+describe('parsing a mount table into the paths this process sees mounted directly', () => {
+  it('reads the mount point out of every line, in the field order mountinfo uses', () => {
+    const text = [
+      '36 35 98:0 / /data/holydeck rw,relatime master:1 - ext4 /dev/sda1 rw',
+      '37 36 98:1 / /data/holydeck/config rw,relatime master:2 - ext4 /dev/sda2 rw',
+    ].join('\n');
+    expect(mountedPaths(text)).toEqual(new Set(['/data/holydeck', '/data/holydeck/config']));
+  });
+
+  it('un-escapes the octal sequences mountinfo uses for characters a path cannot hold literally', () => {
+    const text = '38 36 98:2 / /mnt/my\\040folder rw,relatime master:3 - ext4 /dev/sda3 rw';
+    expect(mountedPaths(text)).toEqual(new Set(['/mnt/my folder']));
+  });
+
+  it('reads nothing out of an empty table', () => {
+    expect(mountedPaths('')).toEqual(new Set());
+    expect(mountedPaths('\n')).toEqual(new Set());
+  });
+});
+
+describe('refusing a settings path that is itself a mount point', () => {
+  const path = '/data/holydeck/config/settings.yaml';
+
+  it('starts when the mount is on the parent directory, which is the arrangement this needs', () => {
+    expect(() => checkSettingsMount(path, new Set(['/data/holydeck/config']))).not.toThrow();
+  });
+
+  it('starts when nothing at all is mounted, because there is nothing here to catch the mistake on', () => {
+    expect(() => checkSettingsMount(path, new Set())).not.toThrow();
+  });
+
+  it('refuses a settings path mounted directly, naming the path in a SettingsMountError', () => {
+    let caught: unknown;
+    try {
+      checkSettingsMount(path, new Set([path]));
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(SettingsMountError);
+    expect((caught as Error).name).toBe('SettingsMountError');
+    expect((caught as Error).message).toContain(path);
   });
 });

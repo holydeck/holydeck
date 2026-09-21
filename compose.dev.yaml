@@ -1,8 +1,8 @@
 # Development stack: the corpus server, the application, the web development flow, the worker, the
 # migration that has to run before any of them serves, and the MongoDB they store into — all built from
 # this checkout.
-# This is for testing and development only — apps/corpus/compose.example.yaml is the
-# deployment example, and it pulls the published image instead of building one.
+# This is for testing and development only — compose.yaml in the repo root is the supported
+# deployment, and it pulls the published corpus image instead of building one.
 #
 #   pnpm dev:server        # or: docker compose -f compose.dev.yaml up --build --wait
 #   pnpm dev:server:down   # or: docker compose -f compose.dev.yaml down -v

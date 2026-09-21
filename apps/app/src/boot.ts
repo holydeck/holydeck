@@ -80,3 +80,65 @@ export function checkSchema(status: SchemaStatus): void {
 export function checkCorpusIsClosed(probe: CorpusProbe): void {
   refuseToStart('the corpus is open', corpusProbeProblems(probe));
 }
+
+/** Refused because the settings path names a mount point rather than living inside one. */
+export class SettingsMountError extends Error {
+  constructor(path: string) {
+    super(
+      `${path} is itself a mount point; mount its parent directory instead. Settings are replaced ` +
+        'atomically — a new file written and renamed over the old one — which changes the inode, and ' +
+        'a bind mount of the file keeps following the inode it was given at container start.',
+    );
+    this.name = 'SettingsMountError';
+  }
+}
+
+const MOUNTINFO_PATH = '/proc/self/mountinfo';
+
+/**
+ * Reads this process's own mount table, or undefined where there is none to read — a development
+ * machine, most obviously, since this file is Linux-only and that is what the built image runs on.
+ */
+export function readMountInfo(read: (path: string) => string, path: string = MOUNTINFO_PATH): string | undefined {
+  try {
+    return read(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    // A table that exists but cannot be read is the same deployment fault readSettingsText refuses to
+    // guess through: starting anyway would mean starting without knowing whether the mount is sound.
+    throw error;
+  }
+}
+
+// The fifth whitespace-separated field of an /proc/self/mountinfo line is the mount point, whatever
+// optional fields precede the "-" separator later in the line; the fields before it never move.
+const MOUNT_POINT_FIELD = 4;
+
+// mountinfo escapes space, tab, newline and backslash as their octal code, the same way /proc/mounts
+// does, so a path that happens to contain one of those characters is still one line.
+const OCTAL_ESCAPE = /\\([0-7]{3})/gu;
+
+const unescapeMountPath = (raw: string): string =>
+  raw.replace(OCTAL_ESCAPE, (_, octal: string) => String.fromCharCode(Number.parseInt(octal, 8)));
+
+/** Every path this process sees mounted directly, read out of an /proc/self/mountinfo listing. */
+export function mountedPaths(mountinfoText: string): Set<string> {
+  const paths = new Set<string>();
+  for (const line of mountinfoText.split('\n')) {
+    if (line.trim() === '') continue;
+    const field = line.split(' ')[MOUNT_POINT_FIELD];
+    if (field !== undefined) paths.add(unescapeMountPath(field));
+  }
+  return paths;
+}
+
+/**
+ * Refuses a settings path that is itself the target of a mount, rather than its parent directory being
+ * one — the mistake settings.ts's own header already warns against, caught here for the one place that
+ * warning cannot reach: a deployment's own Compose override, which nothing in this repository reads.
+ * A deployment with no mount table to consult is not refused, because there is nothing here to catch it
+ * on; the static check over the Compose files this repository ships is what covers that case instead.
+ */
+export function checkSettingsMount(path: string, mounts: ReadonlySet<string>): void {
+  if (mounts.has(path)) throw new SettingsMountError(path);
+}

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  DEPLOY_SERVICES,
   ONE_SHOT_SERVICES,
   PERSISTED_PATHS,
   REQUIRED_SERVICES,
@@ -83,6 +84,46 @@ const ephemeral = () => {
     volumes: { 'web-dist': null },
   };
 };
+
+const deploy = () => ({
+  file: 'compose.yaml',
+  project: undefined,
+  persistence: 'named-volumes',
+  requiredServices: DEPLOY_SERVICES,
+  services: {
+    mongo: {
+      image: 'mongo:8',
+      healthcheck: CHECK,
+      volumes: ['mongo-data:/data/db'],
+    },
+    server: {
+      image: 'ghcr.io/holydeck/server:latest',
+      depends_on: { mongo: { condition: 'service_healthy' } },
+    },
+    migrate: {
+      build: { dockerfile: 'apps/app/Dockerfile' },
+      volumes: ['holydeck-data:/data/holydeck', './config:/data/holydeck/config'],
+      depends_on: { mongo: { condition: 'service_healthy' } },
+    },
+    app: {
+      build: { dockerfile: 'apps/app/Dockerfile' },
+      healthcheck: CHECK,
+      ports: ['3100:3100'],
+      volumes: ['holydeck-data:/data/holydeck', './config:/data/holydeck/config'],
+      depends_on: {
+        migrate: { condition: 'service_completed_successfully' },
+        server: { condition: 'service_healthy' },
+      },
+    },
+    worker: {
+      build: { dockerfile: 'apps/app/Dockerfile' },
+      healthcheck: CHECK,
+      volumes: ['holydeck-data:/data/holydeck', './config:/data/holydeck/config'],
+      depends_on: { migrate: { condition: 'service_completed_successfully' } },
+    },
+  },
+  volumes: { 'mongo-data': null, 'holydeck-data': null },
+});
 
 const only = (stack) => verifyStack(stack, DOCKERFILES);
 
@@ -262,6 +303,48 @@ test('refuses a test stack that publishes a port to the network', () => {
   stack.services.app.ports = ['3100:3100'];
   assert.deepEqual(only(stack), [
     'compose.test.yaml: app publishes 3100:3100 on every interface; a test stack answers this machine only',
+  ]);
+});
+
+test('the contract names the services the supported deployment has to start', () => {
+  assert.deepEqual([...DEPLOY_SERVICES], ['app', 'migrate', 'mongo', 'server', 'worker']);
+});
+
+test('a deployment stack that keeps every rule has nothing to report', () => {
+  assert.deepEqual(only(deploy()), []);
+});
+
+test('refuses the deployment stack missing one of its own required services', () => {
+  const stack = deploy();
+  delete stack.services.worker;
+  assert.deepEqual(only(stack), ['compose.yaml: starts no worker']);
+});
+
+test('accepts a pulled first-party image whose own Dockerfile declares the healthcheck', () => {
+  assert.deepEqual(only(deploy()).filter((problem) => problem.includes('server')), []);
+});
+
+test('refuses a pulled image nothing here can trace back to a Dockerfile', () => {
+  const stack = deploy();
+  stack.services.server.image = 'ghcr.io/example/unknown:1.0';
+  assert.deepEqual(only(stack), [
+    'compose.yaml: server declares no healthcheck, and its image is not built here to declare one',
+  ]);
+});
+
+test('refuses an unpinned third-party image even where a first-party one is exempted', () => {
+  const stack = deploy();
+  stack.services.mongo.image = 'mongo:latest';
+  assert.deepEqual(only(stack), [
+    'compose.yaml: mongo runs mongo:latest, which is whatever it was pulled on the day',
+  ]);
+});
+
+test('refuses the deployment stack mounting the settings file itself', () => {
+  const stack = deploy();
+  stack.services.app.volumes.push('./config/settings.yaml:/data/holydeck/config/settings.yaml:ro');
+  assert.deepEqual(only(stack), [
+    'compose.yaml: app mounts settings.yaml itself; mount the directory holding it, because replacing the file changes its inode',
   ]);
 });
 

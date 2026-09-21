@@ -1,0 +1,123 @@
+# Supported deployment (DEPL-01): the same-origin application, the internal corpus, the worker, MongoDB,
+# and the data paths every one of them needs. The application image already has the web client baked in
+# (see apps/app/Dockerfile), so there is no separate service building or serving it. For hacking on the
+# code itself, use compose.dev.yaml instead, which builds every image from the working tree rather than
+# pulling the published corpus.
+#
+#   docker compose up --build --wait   # first start: builds the application image, pulls the rest
+#   docker compose down                # stop, keeping the data volumes
+#   docker compose down -v             # stop and discard everything, including local settings
+#
+# Settings live at ./config/settings.yaml on the host, read from /data/holydeck/config/settings.yaml in
+# every container that needs them. That directory is mounted, never the file itself: settings are saved
+# by writing a new file and renaming it over the old one, which changes the inode, and a bind mount of the
+# file keeps following the inode it had at container start rather than the one the rename left behind.
+# Mount the file anyway and the application refuses to start rather than silently ignore every save.
+#
+# Everything else the application and worker write — media, restic's repository — lives in the
+# holydeck-data named volume, under the same /data/holydeck root the settings mount sits in. MongoDB's own
+# records live in mongo-data. Both survive `down`; only `down -v` discards them.
+#
+# The corpus is internal: nothing here publishes its port, and the application is the only client that
+# reaches it, over the token below. Generate one long, random value per deployment with
+# `openssl rand -hex 32`; do not reuse the example in compose.dev.yaml.
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  server:
+    image: ghcr.io/holydeck/server:latest
+    restart: unless-stopped
+    environment:
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017
+      HOLYDECK_MONGO_DB: holydeck
+      # Long and random, kept out of this file. Generate one with: openssl rand -hex 32
+      HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:?set a long random value before starting}
+      # bible.com answers plain HTTP clients with a JavaScript challenge. Set this to fetch
+      # through the Chromium the image ships, which runs that challenge once per sync.
+      HOLYDECK_BROWSER_FETCH: "true"
+    # No ports: nothing outside this deployment talks to the corpus.
+    depends_on:
+      mongo:
+        condition: service_healthy
+    # Health is declared in apps/corpus/Dockerfile, the same image this pulls, so nothing here repeats it.
+
+  # Runs once, before anything serves: T19 made the application refuse a database whose schema version is
+  # not the one it was built for, and this is what moves it there. Re-running it is a no-op, so every
+  # `up` goes through it and every `up` records that it did.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    command: ["node", "/srv/app/dist/migrate.js"]
+    environment:
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+    volumes:
+      - holydeck-data:/data/holydeck
+      - ./config:/data/holydeck/config
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  # The application and the worker are the same image with different commands, the same as
+  # compose.dev.yaml. Reachable on every interface, because the devices it serves are not this host.
+  app:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    restart: unless-stopped
+    environment:
+      HOLYDECK_PORT: "3100"
+      # The application reads the corpus over this network and never publishes it onwards.
+      HOLYDECK_CORPUS_URL: http://server:3000
+      HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:?set a long random value before starting}
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+    ports:
+      - "3100:3100"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+    volumes:
+      - holydeck-data:/data/holydeck
+      - ./config:/data/holydeck/config
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/app/Dockerfile
+    command: ["node", "/srv/worker/dist/main.js"]
+    restart: unless-stopped
+    environment:
+      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+    volumes:
+      - holydeck-data:/data/holydeck
+      - ./config:/data/holydeck/config
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # The worker serves no HTTP, so its health is the heartbeat it writes: it stops writing when the
+    # data directory it needs goes away, which is the failure that would otherwise look like silence.
+    healthcheck:
+      test: ["CMD", "node", "/srv/worker/dist/health.js"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  holydeck-data:
+  mongo-data:

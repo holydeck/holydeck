@@ -6,15 +6,18 @@
 // Both of those are statements about the Compose files, so they are read here rather than discovered by
 // bringing the stack up and watching it hang.
 //
-// Two stacks, two different promises. The development stack keeps its data across a `down` and an `up`,
-// because an operator who restarts it expects yesterday's work to still be there. The test stack keeps
-// nothing a second run could find, because a test that sees the previous run's records is not a test.
-// Both promises are about the same two paths, so they are named once, in PERSISTED_PATHS, and each stack
-// is read against its own reading of them.
+// Three stacks, three different promises. The development stack keeps its data across a `down` and an
+// `up`, because an operator who restarts it expects yesterday's work to still be there. The test stack
+// keeps nothing a second run could find, because a test that sees the previous run's records is not a
+// test. The deployment stack keeps its data the same way the development one does, but starts from a
+// published image rather than a build, because DEPL-01 is what an operator who is not this repository's
+// own developer actually runs. All three promises about persistence are about the same two paths, so they
+// are named once, in PERSISTED_PATHS, and each stack is read against its own reading of them.
 //
-// Ports are the one place where the two stacks differ on purpose. The development stack publishes the
-// application to the network, because the devices it has to be tried on are not this machine. The corpus
-// is never published past loopback in either, because it is reachable from inside the deployment only.
+// Ports are the one place where the stacks differ on purpose. The development and deployment stacks
+// publish the application to the network, because the devices it has to be reached from are not the host
+// running it. The corpus is never published past loopback in any of them, because it is reachable from
+// inside the deployment only.
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -27,13 +30,21 @@ export const DEV_FILE = 'compose.dev.yaml';
 
 export const TEST_FILE = 'compose.test.yaml';
 
+export const DEPLOY_FILE = 'compose.yaml';
+
 /** What a development stack has to start for the environment to be the whole environment. */
 export const REQUIRED_SERVICES = Object.freeze(['app', 'migrate', 'mongo', 'server', 'web', 'worker']);
+
+// The deployment stack starts nothing to serve the web client with: the application image already has it
+// baked in, the same way apps/app/Dockerfile builds it for every stack, so there is no separate service
+// here to require.
+/** What the supported deployment has to start for DEPL-01 to be met. */
+export const DEPLOY_SERVICES = Object.freeze(['app', 'migrate', 'mongo', 'server', 'worker']);
 
 /** The services that run once and exit, which is the opposite of what a healthcheck waits for. */
 export const ONE_SHOT_SERVICES = Object.freeze(['migrate']);
 
-/** The paths that hold records: durable in the development stack, and nowhere in the test stack. */
+/** The paths that hold records: durable in the development and deployment stacks, and nowhere in the test stack. */
 export const PERSISTED_PATHS = Object.freeze(['/data/db', '/data/holydeck']);
 
 /** What may never be published past this machine, and the reason each one may not be. */
@@ -41,6 +52,17 @@ export const LOOPBACK_ONLY = Object.freeze({
   mongo: 'the records it holds answer from inside the deployment only',
   server: 'the corpus is reachable from inside the deployment only',
 });
+
+// The deployment stack pulls this image rather than building it, so no service here names a `build:`
+// whose Dockerfile a healthcheck or an image-pin check could read; this is where each such image's own
+// Dockerfile is found instead, the same Dockerfile docker-build.yml publishes it from.
+const FIRST_PARTY_DOCKERFILES = Object.freeze({ 'ghcr.io/holydeck/server': 'apps/corpus/Dockerfile' });
+
+// A pulled image's tag is stripped before it is looked up above, the same way the unpinned-tag check
+// below strips :latest before deciding whether anything follows it.
+const imageRepository = (image) => image.replace(/:[^:@/]*$/u, '');
+
+const dockerfileFor = (service) => service.build?.dockerfile ?? FIRST_PARTY_DOCKERFILES[imageRepository(service.image ?? '')];
 
 const LOOPBACK = /^(?:127\.0\.0\.1|\[::1\]):/u;
 
@@ -73,6 +95,7 @@ export function parseCompose(file, text) {
     file,
     project: document.name,
     persistence: file === TEST_FILE ? 'ephemeral' : 'named-volumes',
+    requiredServices: file === DEPLOY_FILE ? DEPLOY_SERVICES : REQUIRED_SERVICES,
     services: document.services,
     volumes: document.volumes ?? {},
   };
@@ -80,19 +103,19 @@ export function parseCompose(file, text) {
 
 /** Everything wrong with one stack, in one list, each finding naming the file it is in. */
 export function verifyStack(stack, dockerfiles) {
-  const { file, services, volumes, persistence } = stack;
+  const { file, services, volumes, persistence, requiredServices = REQUIRED_SERVICES } = stack;
   const ephemeral = persistence === 'ephemeral';
   const findings = [];
   const say = (problem) => findings.push(`${file}: ${problem}`);
 
-  for (const name of REQUIRED_SERVICES) if (services[name] === undefined) say(`starts no ${name}`);
+  for (const name of requiredServices) if (services[name] === undefined) say(`starts no ${name}`);
   if (ephemeral && stack.project === undefined) {
     say('names no project of its own, so a test run would take over the development stack');
   }
 
   const mounted = new Set();
   for (const [name, service] of Object.entries(services).sort(([a], [b]) => a.localeCompare(b))) {
-    const dockerfile = service.build?.dockerfile;
+    const dockerfile = dockerfileFor(service);
     if (oneShot(name)) {
       if (service.healthcheck !== undefined) {
         say(`${name} runs once and exits, so a healthcheck on it can only fail`);
@@ -108,7 +131,15 @@ export function verifyStack(stack, dockerfiles) {
       }
     }
 
-    if (service.image !== undefined && !/@sha256:|:[^:@/]+$/u.test(service.image.replace(/:latest$/u, ''))) {
+    // A first-party image is exempted from the pin check below: this repository's own release process is
+    // what moves its :latest tag, the same guard docker-build.yml applies before it will move it, which is
+    // not true of a third-party image pulled from wherever its maintainer chose to push it.
+    const firstParty = service.image !== undefined && FIRST_PARTY_DOCKERFILES[imageRepository(service.image)] !== undefined;
+    if (
+      service.image !== undefined &&
+      !firstParty &&
+      !/@sha256:|:[^:@/]+$/u.test(service.image.replace(/:latest$/u, ''))
+    ) {
       say(`${name} runs ${service.image}, which is whatever it was pulled on the day`);
     }
 
@@ -197,7 +228,7 @@ export function verifyCompose({ stacks, dockerfiles }) {
 }
 
 /** Reads what `docker compose ps --format json` said, and names whatever is not up. */
-export function healthVerdicts(text) {
+export function healthVerdicts(text, requiredServices = REQUIRED_SERVICES) {
   const trimmed = text.trim();
   let rows;
   try {
@@ -213,7 +244,7 @@ export function healthVerdicts(text) {
 
   const found = new Map(rows.map((row) => [row.Service, row]));
   const problems = [];
-  for (const name of REQUIRED_SERVICES) {
+  for (const name of requiredServices) {
     const row = found.get(name);
     if (row === undefined) {
       problems.push(`${name} is not in the stack at all`);
@@ -232,15 +263,15 @@ export function healthVerdicts(text) {
   return problems;
 }
 
-/** The stacks and the Dockerfiles they build, as the repository has them now. */
+/** The stacks and the Dockerfiles they build or pull, as the repository has them now. */
 export function readRepo() {
-  const stacks = [DEV_FILE, TEST_FILE].map((file) =>
+  const stacks = [DEV_FILE, TEST_FILE, DEPLOY_FILE].map((file) =>
     parseCompose(file, readFileSync(fromRepoRoot(file), 'utf8')),
   );
   const dockerfiles = {};
   for (const stack of stacks) {
     for (const service of Object.values(stack.services)) {
-      const file = service.build?.dockerfile;
+      const file = dockerfileFor(service);
       if (file === undefined || dockerfiles[file] !== undefined) continue;
       dockerfiles[file] = readFileSync(fromRepoRoot(file), 'utf8');
     }
