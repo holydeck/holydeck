@@ -15,7 +15,7 @@ import { MONGO_DUMP_CLASS } from './backup-producer.js';
 import { checkRepository, restoreSnapshot } from './restic.js';
 
 import type { RepositoryDb } from '@holydeck/app/repositories';
-import type { RecoveryTargets, RestoreDb, RestoreSessions } from '@holydeck/app/restores';
+import type { RecoveryTargets, RestoreCapabilities, RestoreDb, RestoreSessions } from '@holydeck/app/restores';
 import type { ResticOptions } from './restic.js';
 import type { Handler } from './runner.js';
 
@@ -26,6 +26,7 @@ export interface RestoreRehearsalOptions {
   /** The isolated database the archive is applied to — see `rehearsalDatabaseName`, never production. */
   readonly target: RestoreDb;
   readonly sessions: RestoreSessions;
+  readonly capabilities: RestoreCapabilities;
   readonly restic: ResticOptions;
   readonly schemaVersion: number;
   readonly now: () => string;
@@ -66,6 +67,7 @@ export function restoreRehearsalOn(options: RestoreRehearsalOptions): Handler {
         restoredRoot,
         target: options.target,
         sessions: options.sessions,
+        capabilities: options.capabilities,
         now: options.now,
         newId: options.newId,
         schemaVersion: options.schemaVersion,

@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 
 import { backupContext, backupDb, finalizeBackup, readMongoArchive } from './backups.js';
+import { CapabilityError, capabilityContext, capabilityDb, capabilitiesOn } from './capabilities.js';
 import { SCHEMA_VERSION } from './migrations.js';
 import { RECORDS } from './records.js';
 import { repositoryDb } from './repositories.js';
@@ -26,6 +27,7 @@ import { startTestMongoReplicaSet } from '../test/helpers/mongo.js';
 import type { BackupContent, BackupProduction } from '@holydeck/contracts/backups';
 import type { Db, MongoClient } from 'mongodb';
 import type { ReplicaSetMongo } from '../test/helpers/mongo.js';
+import type { CapabilityStore } from './capabilities.js';
 import type { SessionStore } from './sessions.js';
 
 const BACKED_UP_AT = '2026-09-19T02:00:00.000Z';
@@ -57,6 +59,7 @@ let rehearsal: Db;
 let client: MongoClient;
 let dumpDir: string;
 let store: SessionStore;
+let capabilities: CapabilityStore;
 
 beforeAll(async () => {
   mongo = await startTestMongoReplicaSet();
@@ -78,7 +81,9 @@ beforeEach(async () => {
     await live.collection(collection).deleteMany({});
   }
   await live.collection('sessions').deleteMany({});
+  await live.collection('capabilities').deleteMany({});
   store = sessionsOn(sessionDb(live), { now: () => STARTED_AT });
+  capabilities = capabilitiesOn(capabilityDb(live), { now: () => STARTED_AT });
   dumpDir = await mkdtemp(join(tmpdir(), 'holydeck-rehearsal-integration-'));
 });
 
@@ -107,6 +112,7 @@ const rehearse = async (production: BackupProduction, afterRestore?: () => Promi
     restoredRoot: dumpDir,
     target: restoreDb(rehearsal),
     sessions: store,
+    capabilities,
     now: clockOf(STARTED_AT, FINISHED_AT),
     schemaVersion: SCHEMA_VERSION,
     ...(afterRestore === undefined ? {} : { afterRestore }),
@@ -122,11 +128,19 @@ describe('rehearsing a restore against a real database', () => {
     const session = await store.start(GATEKEEPER, { actor: 'account:1', permissions: ['services.read'] });
     await expect(store.read(GATEKEEPER, session.token)).resolves.toMatchObject({ actor: 'account:1' });
 
+    // Issued across the restore too — a capability outlives no restore any more than a session does.
+    const { token: capabilityToken } = await capabilities.issue(capabilityContext('req-issue'), 'account:1', {
+      kind: 'guest',
+      service: 'sunday-gathering',
+      view: 'audience',
+      expiresAt: '2026-09-19T04:00:00.000Z',
+    });
+
     // Something else entirely in the rehearsal database, so a restore that did nothing would be visible.
     await rehearsal.collection<ContentDoc>(RECORDS.services.collection).insertOne({ _id: 'svc-9', name: 'Left Over' });
 
-    let observed: { services: number; production: number; rejected: string } | undefined;
-    const { manifest, sessionsEnded } = await rehearse(production, async () => {
+    let observed: { services: number; production: number; rejected: string; capabilityRejected: string } | undefined;
+    const { manifest, sessionsEnded, capabilitiesRevoked } = await rehearse(production, async () => {
       observed = {
         services: await rehearsal.collection<ContentDoc>(RECORDS.services.collection).countDocuments({ _id: 'svc-1' }),
         production: await live.collection(RECORDS.services.collection).countDocuments({}),
@@ -134,12 +148,18 @@ describe('rehearsing a restore against a real database', () => {
           .read(GATEKEEPER, session.token)
           .then(() => 'still valid')
           .catch((error: unknown) => (error instanceof SessionError ? error.kind : 'other')),
+        capabilityRejected: await capabilities
+          .redeem(capabilityContext('req-redeem'), capabilityToken, { service: 'sunday-gathering', view: 'audience' })
+          .then(() => 'still valid')
+          .catch((error: unknown) => (error instanceof CapabilityError ? error.kind : 'other')),
       };
     });
 
-    expect(observed).toEqual({ services: 1, production: 1, rejected: 'unknown' });
+    expect(observed).toEqual({ services: 1, production: 1, rejected: 'unknown', capabilityRejected: 'unknown' });
     expect(sessionsEnded).toBe(1);
+    expect(capabilitiesRevoked).toBe(1);
     expect(manifest.restore.sessionsInvalidatedCount).toBe(1);
+    expect(manifest.restore.capabilitiesInvalidatedCount).toBe(1);
     expect(manifest.objectives.measured).toEqual({ rpoMinutes: 10, rtoMinutes: 2 });
     expect(manifest.restore.rollback.verified).toBe(true);
 
@@ -160,6 +180,12 @@ describe('rehearsing a restore against a real database', () => {
 
     await writeFile(join(dumpDir, 'services.json'), '[{"_id":"svc-1","name":"Tampered With"}]', 'utf8');
     const session = await store.start(GATEKEEPER, { actor: 'account:1', permissions: ['services.read'] });
+    const { token: capabilityToken } = await capabilities.issue(capabilityContext('req-issue'), 'account:1', {
+      kind: 'guest',
+      service: 'sunday-gathering',
+      view: 'audience',
+      expiresAt: '2026-09-19T04:00:00.000Z',
+    });
 
     await expect(rehearse(production)).rejects.toMatchObject({ name: 'RestoreError', kind: 'integrity' });
 
@@ -167,6 +193,10 @@ describe('rehearsing a restore against a real database', () => {
     expect(left.map((row) => row['name'])).toEqual(['Left Over']);
     // The session survives a rehearsal that never happened — ending one is part of a restore, not of trying.
     await expect(store.read(GATEKEEPER, session.token)).resolves.toMatchObject({ actor: 'account:1' });
+    // Same for a capability: nothing here is revoked until every class has already verified.
+    await expect(
+      capabilities.redeem(capabilityContext('req-redeem'), capabilityToken, { service: 'sunday-gathering', view: 'audience' }),
+    ).resolves.toMatchObject({ kind: 'guest' });
     await expect(live.collection(RECORDS.restores.collection).countDocuments({})).resolves.toBe(0);
   });
 

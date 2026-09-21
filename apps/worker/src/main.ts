@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 
 import { checkOwnSettingsMount, readSettingsText } from '@holydeck/app/boot';
 import { backupContext, backupDb } from '@holydeck/app/backups';
+import { capabilityDb, capabilitiesOn } from '@holydeck/app/capabilities';
 import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
 import { SCHEMA_VERSION } from '@holydeck/app/migrations';
 import { queueDb, queueOn, workerContext } from '@holydeck/app/queue';
@@ -134,6 +135,7 @@ if (work.runs === 'nothing') {
       db: repositoryDb(store.db()),
       target: restoreDb(rehearsal),
       sessions: sessionsOn(sessionDb(rehearsal), { now }),
+      capabilities: capabilitiesOn(capabilityDb(rehearsal), { now }),
       restic,
       schemaVersion: SCHEMA_VERSION,
       now,

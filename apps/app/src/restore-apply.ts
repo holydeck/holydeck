@@ -32,7 +32,7 @@ import { RESTORE_RECORD, RestoreError, replaceCollection, verifyMongoArchive } f
 import type { BackupProduction, RestoreClass, RestoreSelection } from '@holydeck/contracts/backups';
 import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
-import type { RestoreDb, RestoreSessions } from './restores.js';
+import type { RestoreCapabilities, RestoreDb, RestoreSessions } from './restores.js';
 
 export type RestoreApplyRefusal = 'context' | 'permission' | 'mode' | 'archive' | 'target';
 
@@ -95,6 +95,8 @@ export interface RestoreApplyOptions {
   readonly targets: RestoreApplyTargets;
   /** Ended only when `mongo` is part of the selection — see this module's header. */
   readonly sessions: RestoreSessions;
+  /** Revoked only when `mongo` is part of the selection, the same as `sessions`. */
+  readonly capabilities: RestoreCapabilities;
   readonly now: () => string;
 }
 
@@ -102,6 +104,8 @@ export interface RestoreApplication {
   readonly classes: readonly RestoreClass[];
   /** How many sessions were ended, when `mongo` was restored. Absent when it was not. */
   readonly sessionsEnded?: number;
+  /** How many capabilities were revoked, when `mongo` was restored. Absent when it was not. */
+  readonly capabilitiesRevoked?: number;
 }
 
 function permit(context: unknown): RequestContext {
@@ -192,6 +196,7 @@ async function run(
   // written.
   const applied: RestoreClass[] = [];
   let sessionsEnded: number | undefined;
+  let capabilitiesRevoked: number | undefined;
   try {
     if (mongoTarget !== undefined) {
       // Reproved against the manifest's digest, exactly as a rehearsal proves it, before a document moves.
@@ -210,6 +215,8 @@ async function run(
     // The archive carries no session, so putting Mongo back leaves every open one holding authority over a
     // world that has just been replaced underneath it — the same reasoning `rehearseRestore` acts on.
     sessionsEnded = mongoTarget === undefined ? undefined : await options.sessions.revokeEvery(checked);
+    // A capability outlives no restore either, for the same reason a session does not.
+    capabilitiesRevoked = mongoTarget === undefined ? undefined : await options.capabilities.revokeEvery(checked);
   } catch (error) {
     if (applied.length > 0) {
       await auditOn(db, { now: options.now }).record(checked, {
@@ -226,8 +233,10 @@ async function run(
     action: 'restore.run',
     subject: backupId,
     outcome: 'allowed',
-    detail: `restored ${classes.join(', ')}${sessionsEnded === undefined ? '' : `, ${sessionsEnded} sessions ended`}`,
+    detail:
+      `restored ${classes.join(', ')}` +
+      (sessionsEnded === undefined ? '' : `, ${sessionsEnded} sessions ended, ${capabilitiesRevoked} capabilities revoked`),
   });
 
-  return { classes, sessionsEnded };
+  return { classes, sessionsEnded, capabilitiesRevoked };
 }

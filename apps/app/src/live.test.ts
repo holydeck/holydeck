@@ -649,6 +649,7 @@ describe('a Guest joining the Audience view on a shared capability', () => {
       issue: () => Promise.reject(defect),
       redeem: () => Promise.reject(defect),
       revoke: () => Promise.reject(defect),
+      revokeEvery: () => Promise.reject(defect),
     };
     const base = await listening(undefined, { capabilities: broken, services });
     const query = `channel=audience&${SERVICE_QUERY}=service-1&${CAPABILITY_QUERY}=x&${CURRENT}`;

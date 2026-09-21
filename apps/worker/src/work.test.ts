@@ -75,6 +75,7 @@ test('an entry point supplying its dependencies replaces every placeholder with 
     db: {} as RestoreRehearsalOptions['db'],
     target: {} as RestoreRehearsalOptions['target'],
     sessions: {} as RestoreRehearsalOptions['sessions'],
+    capabilities: {} as RestoreRehearsalOptions['capabilities'],
     restic: { repository: '/data/holydeck/restic' },
     schemaVersion: 1,
     now: () => '2026-09-21T00:00:00.000Z',

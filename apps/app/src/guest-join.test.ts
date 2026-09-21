@@ -118,6 +118,7 @@ describe('a Guest joining the Audience view', () => {
       issue: () => Promise.reject(defect),
       redeem: () => Promise.reject(defect),
       revoke: () => Promise.reject(defect),
+      revokeEvery: () => Promise.reject(defect),
     };
     await expect(
       admitGuest(broken, services, CORRELATION, { token: 'x', service: 'service-1', view: 'audience' }),

@@ -81,6 +81,7 @@ export interface CapabilityCollection {
   insertOne(document: Document): Promise<{ insertedId: unknown }>;
   findOne(filter: Filter): Promise<Document | null>;
   deleteOne(filter: Filter): Promise<{ deletedCount: number }>;
+  deleteMany(filter: Filter): Promise<{ deletedCount: number }>;
   createIndex(keys: Readonly<Record<string, 1 | -1>>, options?: Readonly<Record<string, unknown>>): Promise<string>;
   dropIndex(index: string): Promise<void>;
 }
@@ -147,6 +148,13 @@ export interface CapabilityStore {
   ): Promise<RedeemedCapability>;
   /** Idempotent: revoking a capability that is not there, or not there any longer, is not a defect. */
   revoke(context: unknown, capabilityId: string): Promise<void>;
+  /**
+   * Restoring a backup puts data back that every issued capability predates. Nothing in the archive can
+   * revoke them — capabilities are never in it — so the store has to be able to revoke all of them at
+   * once, without needing to be told which were issued, the same reasoning `sessions.ts`'s own
+   * `revokeEvery` acts on.
+   */
+  revokeEvery(context: unknown): Promise<number>;
 }
 
 const TOKEN_BYTES = 32;
@@ -210,6 +218,12 @@ export function capabilitiesOn(db: CapabilityDb, options: CapabilityOptions): Ca
     async revoke(context, capabilityId) {
       permit(context, 'revoke');
       await rows().deleteOne({ _id: capabilityId });
+    },
+
+    async revokeEvery(context) {
+      permit(context, 'revoke');
+      const { deletedCount } = await rows().deleteMany({});
+      return deletedCount;
     },
   };
   return Object.freeze(store);

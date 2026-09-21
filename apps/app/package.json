@@ -49,6 +49,10 @@
       "types": "./dist/sessions.d.ts",
       "import": "./dist/sessions.js"
     },
+    "./capabilities": {
+      "types": "./dist/capabilities.d.ts",
+      "import": "./dist/capabilities.js"
+    },
     "./migrations": {
       "types": "./dist/migrations.d.ts",
       "import": "./dist/migrations.js"

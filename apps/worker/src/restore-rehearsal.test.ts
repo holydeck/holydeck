@@ -106,6 +106,7 @@ const options = (over: Partial<Parameters<typeof restoreRehearsalOn>[0]> = {}): 
   db: fakeDb(),
   target: fakeTarget(),
   sessions: { revokeEvery: async () => 3 },
+  capabilities: { revokeEvery: async () => 6 },
   restic: { repository: '/data/holydeck/restic' },
   schemaVersion: 19,
   now: () => NOW,
@@ -132,7 +133,10 @@ describe('rehearsing a restore', () => {
     db.rows.set('backups', [recordedBackup([...dumps.map((dump) => dump.content), ...RESTIC_CONTENTS])]);
     const target = fakeTarget();
     const revokeEvery = vi.fn(async () => 3);
-    const handler = restoreRehearsalOn(options({ db, target, sessions: { revokeEvery } }));
+    const revokeEveryCapability = vi.fn(async () => 6);
+    const handler = restoreRehearsalOn(
+      options({ db, target, sessions: { revokeEvery }, capabilities: { revokeEvery: revokeEveryCapability } }),
+    );
 
     const running = handler(job(), new AbortController().signal);
 
@@ -159,13 +163,20 @@ describe('rehearsing a restore', () => {
     );
 
     expect(revokeEvery).toHaveBeenCalledOnce();
+    expect(revokeEveryCapability).toHaveBeenCalledOnce();
     const rehearsals = db.rows.get('restores') ?? [];
     expect(rehearsals).toHaveLength(1);
     expect(rehearsals[0]).toMatchObject({
       restoreId: 'restore-fixed',
       backupId: 'backup-fixed',
       integrity: { verifiedBeforeRestore: true, mismatchAborts: true },
-      restore: { sessionsInvalidated: true, sessionsInvalidatedCount: 3, rollback: { verified: true } },
+      restore: {
+        sessionsInvalidated: true,
+        sessionsInvalidatedCount: 3,
+        capabilitiesInvalidated: true,
+        capabilitiesInvalidatedCount: 6,
+        rollback: { verified: true },
+      },
     });
     // Rolled back: the rehearsal target is left holding what it held before, which was nothing.
     expect(target.rows.get('services') ?? []).toEqual([]);

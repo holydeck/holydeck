@@ -129,6 +129,9 @@ export interface BackupRestore {
    * malformed — but a count is the only thing that tells "ended forty" apart from "found none to end".
    */
   readonly sessionsInvalidatedCount?: number;
+  /** A capability outlives no restore either: an issued guest or output token predates it the same way a session does. */
+  readonly capabilitiesInvalidated: true;
+  readonly capabilitiesInvalidatedCount?: number;
   readonly rollback: BackupRollback;
 }
 
@@ -203,9 +206,15 @@ const parseRestore: ParseFn<BackupRestore> = (value, path) =>
       reader.reject('sessionsInvalidated', FIELD_CODES.notAllowed, 'left sessions valid across a restore');
     }
     const sessionsInvalidatedCount = reader.optionalWholeNumber('sessionsInvalidatedCount');
+    if (!reader.flag('capabilitiesInvalidated')) {
+      reader.reject('capabilitiesInvalidated', FIELD_CODES.notAllowed, 'left capabilities valid across a restore');
+    }
+    const capabilitiesInvalidatedCount = reader.optionalWholeNumber('capabilitiesInvalidatedCount');
     return {
       sessionsInvalidated: true,
       sessionsInvalidatedCount,
+      capabilitiesInvalidated: true,
+      capabilitiesInvalidatedCount,
       rollback: reader.parsed('rollback', parseRollback, EMPTY_ROLLBACK),
     };
   });
@@ -214,7 +223,7 @@ const EMPTY_INTEGRITY: BackupIntegrity = { verifiedBeforeRestore: true, algorith
 
 const EMPTY_OBJECTIVES: BackupObjectives = { rpoMinutes: 0, rtoMinutes: 0, measured: EMPTY_MEASUREMENT };
 
-const EMPTY_RESTORE: BackupRestore = { sessionsInvalidated: true, rollback: EMPTY_ROLLBACK };
+const EMPTY_RESTORE: BackupRestore = { sessionsInvalidated: true, capabilitiesInvalidated: true, rollback: EMPTY_ROLLBACK };
 
 /**
  * Grades the whole manifest, which only a restore can fill in: everything a backup run had to get right,

@@ -20,6 +20,11 @@ export const memoryCapabilities = (): {
     },
     findOne: async (filter) => rows.get(idOf(filter)) ?? null,
     deleteOne: async (filter) => ({ deletedCount: rows.delete(idOf(filter)) ? 1 : 0 }),
+    deleteMany: async () => {
+      const count = rows.size;
+      rows.clear();
+      return { deletedCount: count };
+    },
     createIndex: async () => 'created',
     dropIndex: async () => undefined,
   };

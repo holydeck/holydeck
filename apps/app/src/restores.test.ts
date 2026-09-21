@@ -21,7 +21,7 @@ import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { BackupContent, BackupProduction } from '@holydeck/contracts/backups';
 import type { Document } from './repositories.js';
-import type { RehearsalOptions, RestoreCollection, RestoreDb, RestoreSessions } from './restores.js';
+import type { RehearsalOptions, RestoreCapabilities, RestoreCollection, RestoreDb, RestoreSessions } from './restores.js';
 
 const CREATED_AT = '2026-09-19T02:00:00.000Z';
 const STARTED_AT = '2026-09-19T02:30:00.000Z';
@@ -110,6 +110,13 @@ const fakeSessions = (log: string[] = []): RestoreSessions => ({
   },
 });
 
+const fakeCapabilities = (log: string[] = []): RestoreCapabilities => ({
+  async revokeEvery() {
+    log.push('revoke every capability');
+    return 6;
+  },
+});
+
 /** Hands out each instant in turn and then repeats the last, so a test names only the ones it cares about. */
 const clockOf = (...instants: readonly string[]) => {
   let at = 0;
@@ -130,6 +137,7 @@ const optionsFor = (over: Partial<RehearsalOptions> = {}): RehearsalOptions => (
   restoredRoot: root,
   target: fakeTarget(),
   sessions: fakeSessions(),
+  capabilities: fakeCapabilities(),
   now: clockOf(STARTED_AT, FINISHED_AT),
   schemaVersion: 19,
   ...over,
@@ -219,7 +227,7 @@ describe('a timed restore rehearsal', () => {
     expect(target.rows.get('services')).toEqual([]);
   });
 
-  test('lets an observer see the restored world, with every session already ended', async () => {
+  test('lets an observer see the restored world, with every session already ended and every capability revoked', async () => {
     const production = productionOf(await archiveIn(root));
     const target = fakeTarget({ services: [{ _id: 'service:9', title: 'whatever was there' }] });
     const log: string[] = [];
@@ -231,6 +239,7 @@ describe('a timed restore rehearsal', () => {
       optionsFor({
         target,
         sessions: fakeSessions(log),
+        capabilities: fakeCapabilities(log),
         afterRestore: async () => {
           seen.push(await target.collection('services').find({}).toArray());
           log.push('observed');
@@ -238,20 +247,22 @@ describe('a timed restore rehearsal', () => {
       }),
     );
     expect(seen[0]).toEqual([{ _id: 'service:1', title: 'Sunday morning' }]);
-    expect(log).toEqual(['end every session', 'observed']);
+    expect(log).toEqual(['end every session', 'revoke every capability', 'observed']);
   });
 
-  test('ends every session before anything observes the restored world', async () => {
+  test('ends every session and revokes every capability before anything observes the restored world', async () => {
     const production = productionOf(await archiveIn(root));
     const log: string[] = [];
     await rehearseRestore(
       fakeDb(),
       CONTEXT,
       production,
-      optionsFor({ target: fakeTarget({}, log), sessions: fakeSessions(log) }),
+      optionsFor({ target: fakeTarget({}, log), sessions: fakeSessions(log), capabilities: fakeCapabilities(log) }),
     );
     expect(log.indexOf('end every session')).toBeGreaterThan(log.indexOf('write services'));
+    expect(log.indexOf('revoke every capability')).toBeGreaterThan(log.indexOf('end every session'));
     expect(log.filter((step) => step === 'end every session')).toHaveLength(1);
+    expect(log.filter((step) => step === 'revoke every capability')).toHaveLength(1);
   });
 
   test('records what the recovery cost, measured rather than assumed', async () => {
@@ -270,6 +281,8 @@ describe('a timed restore rehearsal', () => {
     // The count, not only the fact: a rehearsal that ended four sessions and one that found none to end
     // are different things to have proved, and the flag alone reads the same for both.
     expect(manifest.restore.sessionsInvalidatedCount).toBe(4);
+    expect(manifest.restore.capabilitiesInvalidated).toBe(true);
+    expect(manifest.restore.capabilitiesInvalidatedCount).toBe(6);
     expect(manifest.restore.rollback.verified).toBe(true);
     expect(manifest.restore.rollback.verifiedOn).toBe('2026-09-19');
     expect(manifest.manifest.id).toBe(production.manifest.id);
@@ -305,7 +318,12 @@ describe('a timed restore rehearsal', () => {
     const log: string[] = [];
 
     const error = await refusal(() =>
-      rehearseRestore(fakeDb(), CONTEXT, production, optionsFor({ target, sessions: fakeSessions(log) })),
+      rehearseRestore(
+        fakeDb(),
+        CONTEXT,
+        production,
+        optionsFor({ target, sessions: fakeSessions(log), capabilities: fakeCapabilities(log) }),
+      ),
     );
     expect(error.kind).toBe('integrity');
     expect(target.rows.get('services')).toEqual([{ _id: 'service:9', title: 'still here' }]);
@@ -360,7 +378,7 @@ describe('what a rehearsal leaves behind', () => {
       objectives: manifest.objectives,
       restore: manifest.restore,
     });
-    expect(rows[0]).toMatchObject({ restore: { sessionsInvalidatedCount: 4 } });
+    expect(rows[0]).toMatchObject({ restore: { sessionsInvalidatedCount: 4, capabilitiesInvalidatedCount: 6 } });
   });
 
   test('audits the rehearsal with the figures it measured', async () => {
@@ -370,6 +388,7 @@ describe('what a rehearsal leaves behind', () => {
     expect(audited).toHaveLength(1);
     expect(audited[0]).toMatchObject({ action: 'restore.run', outcome: 'allowed' });
     expect(String(audited[0]?.['detail'])).toContain('30');
+    expect(String(audited[0]?.['detail'])).toContain('capabilities revoked');
   });
 
   test('audits a refusal too, because a rehearsal that failed is the one worth finding later', async () => {

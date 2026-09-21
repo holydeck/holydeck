@@ -26,9 +26,9 @@
 // the target, so a mismatch anywhere means nothing was written anywhere. That is what makes
 // `mismatchAborts` true rather than aspirational.
 //
-// *Sessions* are invalidated explicitly, because a restore cannot do it implicitly: the archive
-// deliberately excludes them, so putting it back leaves every open session exactly as it was — holding
-// authority over a world that has just been replaced underneath it.
+// *Sessions and capabilities* are invalidated explicitly, because a restore cannot do it implicitly: the
+// archive deliberately excludes both, so putting it back leaves every open session and issued capability
+// exactly as it was — holding authority over a world that has just been replaced underneath it.
 
 import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
@@ -39,6 +39,7 @@ import { parseBackupManifest } from '@holydeck/contracts/backups';
 import { auditOn } from './audit.js';
 import { BACKUP_RECORD, MONGO_CONTENTS, archiveEntryOf } from './backups.js';
 import { contextProblems, requestContext } from './context.js';
+import { CAPABILITY_PERMISSIONS } from './capabilities.js';
 import { RECORDS, permissionsFor } from './records.js';
 import { repositoriesOn } from './repositories.js';
 import { SESSION_PERMISSIONS } from './sessions.js';
@@ -142,7 +143,13 @@ export interface RestoreSessions {
   revokeEvery(context: unknown): Promise<number>;
 }
 
-/** The context a rehearsal runs under: record itself, read the backup it is restoring, end every session. */
+/** Exactly what a rehearsal needs of the capability store, so nothing here can reach the rest of it. */
+export interface RestoreCapabilities {
+  revokeEvery(context: unknown): Promise<number>;
+}
+
+/** The context a rehearsal runs under: record itself, read the backup it is restoring, end every session
+ *  and revoke every capability. */
 export function restoreContext(actor: string, correlationId: string): RequestContext {
   return requestContext({
     actor,
@@ -152,6 +159,7 @@ export function restoreContext(actor: string, correlationId: string): RequestCon
       permissionsFor(BACKUP_RECORD).read,
       permissionsFor('auditEvents').append,
       SESSION_PERMISSIONS.end,
+      CAPABILITY_PERMISSIONS.revoke,
     ],
     correlationId,
   });
@@ -270,6 +278,7 @@ export interface RehearsalOptions {
   /** Where the archive is applied. Never production — see `rehearsalDatabaseName`. */
   readonly target: RestoreDb;
   readonly sessions: RestoreSessions;
+  readonly capabilities: RestoreCapabilities;
   /** Injected, so every figure this records comes from one clock and a test does not have to wait. */
   readonly now: () => string;
   readonly newId?: () => string;
@@ -288,6 +297,7 @@ export interface Rehearsal {
   /** The whole manifest, graded — what the backup held, and what restoring it proved. */
   readonly manifest: BackupManifest;
   readonly sessionsEnded: number;
+  readonly capabilitiesRevoked: number;
 }
 
 /**
@@ -347,6 +357,9 @@ async function run(
   // The archive carries no session, so putting it back leaves every open one holding authority over a
   // world that has just been replaced underneath it. Ending them is part of the restore, not after it.
   const sessionsEnded = await options.sessions.revokeEvery(checked);
+  // A capability outlives no restore either: an issued guest or output token is authority over the same
+  // replaced world, and the archive carries no capability any more than it carries a session.
+  const capabilitiesRevoked = await options.capabilities.revokeEvery(checked);
 
   const finishedAt = options.now();
   const measured: RecoveryMeasurement = {
@@ -389,6 +402,8 @@ async function run(
       // The count as well as the fact: a rehearsal that ended none because there were none to end is a
       // different thing to have proved than one that ended every session a congregation was holding.
       sessionsInvalidatedCount: sessionsEnded,
+      capabilitiesInvalidated: true,
+      capabilitiesInvalidatedCount: capabilitiesRevoked,
       // A date, not the instant: what is being recorded is the day the plan was last carried out.
       rollback: { plan: ROLLBACK_PLAN, verified: true, verifiedOn: finishedAt.slice(0, 10) },
     },
@@ -418,8 +433,10 @@ async function run(
     action: 'restore.run',
     subject: backupId,
     outcome: 'allowed',
-    detail: `recovery point ${measured.rpoMinutes} minutes, recovery time ${measured.rtoMinutes} minutes, ${sessionsEnded} sessions ended`,
+    detail:
+      `recovery point ${measured.rpoMinutes} minutes, recovery time ${measured.rtoMinutes} minutes, ` +
+      `${sessionsEnded} sessions ended, ${capabilitiesRevoked} capabilities revoked`,
   });
 
-  return { restoreId, manifest: graded.value, sessionsEnded };
+  return { restoreId, manifest: graded.value, sessionsEnded, capabilitiesRevoked };
 }

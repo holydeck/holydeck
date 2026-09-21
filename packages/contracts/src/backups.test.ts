@@ -99,6 +99,7 @@ const restored = () => ({
   objectives: { rpoMinutes: 60, rtoMinutes: 240, measured: { rpoMinutes: 15, rtoMinutes: 96 } },
   restore: {
     sessionsInvalidated: true,
+    capabilitiesInvalidated: true,
     rollback: {
       plan: 'Keep the pre-restore volume for 14 days and re-point at it; no restored write is destructive.',
       verified: true,
@@ -131,6 +132,19 @@ describe('what a verified restore proves about a backup', () => {
     });
     expect(parsed.ok).toBe(true);
     expect(parsed.ok ? parsed.value.restore.sessionsInvalidatedCount : undefined).toBe(40);
+    expect(parseBackupManifest(input).ok).toBe(true);
+  });
+
+  // A capability outlives no restore either: it is invalidated for the same reason a session is, and
+  // counted the same way — "revoked six" and "found none to revoke" are different things to have proved.
+  it('records how many capabilities the restore revoked, when the rehearsal counted them', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({
+      ...input,
+      restore: { ...input.restore, capabilitiesInvalidatedCount: 6 },
+    });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.restore.capabilitiesInvalidatedCount : undefined).toBe(6);
     expect(parseBackupManifest(input).ok).toBe(true);
   });
 
@@ -212,6 +226,13 @@ describe('what a verified restore proves about a backup', () => {
     expect(messagesOf(parsed)).toContain('left sessions valid across a restore');
   });
 
+  it('refuses a restore that left existing capabilities valid', () => {
+    const input = restored();
+    const parsed = parseBackupManifest({ ...input, restore: { ...input.restore, capabilitiesInvalidated: false } });
+    expect(parsed.ok).toBe(false);
+    expect(messagesOf(parsed)).toContain('left capabilities valid across a restore');
+  });
+
   it('refuses a restore with no rollback plan', () => {
     const input = restored();
     const parsed = parseBackupManifest({
@@ -245,7 +266,7 @@ describe('what a verified restore proves about a backup', () => {
       ...restored(),
       integrity: { verifiedBeforeRestore: false, algorithm: '', mismatchAborts: false },
       objectives: { rpoMinutes: 60, rtoMinutes: 240, measured: { rpoMinutes: 900, rtoMinutes: 900 } },
-      restore: { sessionsInvalidated: false, rollback: { plan: '', verified: false } },
+      restore: { sessionsInvalidated: false, capabilitiesInvalidated: false, rollback: { plan: '', verified: false } },
     });
     expect(parsed.ok).toBe(false);
     expect(pathsOf(parsed)).toEqual(
@@ -255,6 +276,7 @@ describe('what a verified restore proves about a backup', () => {
         'backup.integrity.algorithm',
         'backup.objectives.measured.rtoMinutes',
         'backup.restore.sessionsInvalidated',
+        'backup.restore.capabilitiesInvalidated',
         'backup.restore.rollback.plan',
         'backup.restore.rollback.verified',
       ]),

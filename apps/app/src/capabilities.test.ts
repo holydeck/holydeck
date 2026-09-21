@@ -277,6 +277,38 @@ describe('revoking a capability', () => {
       kind: 'unknown',
     });
   });
+
+  // Restoring a backup puts data back that every issued capability predates. Nothing in the archive can
+  // revoke them — capabilities are never in it — so the store has to be able to revoke all of them at
+  // once, without needing to be told which service or view each was issued for.
+  test('a restore revokes every capability at once, whatever it was issued for', async () => {
+    const guest = await store.issue(context(), OPERATOR, {
+      kind: 'guest',
+      service: SERVICE,
+      view: 'audience',
+      expiresAt: soon(),
+    });
+    const output = await store.issue(context(), OPERATOR, { kind: 'output', service: SERVICE, view: 'stage', expiresAt: soon() });
+    await expect(store.revokeEvery(context())).resolves.toBe(2);
+    expect(rows.size).toBe(0);
+    await expect(store.redeem(context(), guest.token, { service: SERVICE, view: 'audience' })).rejects.toMatchObject({
+      kind: 'unknown',
+    });
+    await expect(store.redeem(context(), output.token, { service: SERVICE, view: 'stage' })).rejects.toMatchObject({
+      kind: 'unknown',
+    });
+  });
+
+  test('revoking every capability needs the permission to revoke one', async () => {
+    await store.issue(context(), OPERATOR, { kind: 'guest', service: SERVICE, view: 'audience', expiresAt: soon() });
+    const redeemOnly = requestContext({
+      actor: 'system',
+      permissions: [CAPABILITY_PERMISSIONS.redeem],
+      correlationId: CORRELATION,
+    });
+    await expect(store.revokeEvery(redeemOnly)).rejects.toMatchObject({ kind: 'permission' });
+    expect(rows.size).toBe(1);
+  });
 });
 
 describe('a capability is not a session', () => {
