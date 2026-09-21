@@ -12,13 +12,18 @@ on:
         type: string
         default: ""
 
-# No job-level permissions block: a called workflow cannot exceed its
-# caller's grant, so this job inherits them. ci.yml grants contents: read
-# (enough for a build check); release.yml's caller job grants
-# contents: read + packages: write (needed for the ghcr.io push).
+# A called workflow's own permissions cap what its caller's grant can hand down, so the build job
+# below asks for exactly what it can use. ci.yml's caller grants only contents: read (enough for a
+# build check), which caps packages: write and id-token: write away there — harmless, since the
+# push- and sign-only steps stay inert (inputs.push is false). release.yml's caller grants the
+# full set for a real push and signature.
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -78,6 +83,7 @@ jobs:
             echo "$newest is newer than v$VERSION, leaving :latest where it is"
           fi
       - name: Build the server image
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
@@ -90,6 +96,21 @@ jobs:
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.version=${{ inputs.version }}
             org.opencontainers.image.revision=${{ steps.commit.outputs.sha }}
+      - name: Install cosign
+        if: inputs.push
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      # Keyless signing: cosign exchanges this job's OIDC identity (id-token: write, above) with
+      # Fulcio for a short-lived signing certificate, signs the pushed digest, and records the
+      # signature in Rekor's public transparency log — no private key exists anywhere for this to
+      # leak. Signs the digest rather than a tag, because a tag can move and a digest cannot,
+      # which is what makes every tag above verify against this one signature. A signing failure
+      # fails this step, and github-release (which needs this job) never runs — see RELEASING.md
+      # for how a consumer verifies this independently.
+      - name: Sign the image with cosign (keyless)
+        if: inputs.push
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "ghcr.io/holydeck/server@${DIGEST}"
       - name: Record the pushed image tags
         if: inputs.push
         env:

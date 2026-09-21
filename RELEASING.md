@@ -64,17 +64,56 @@ machine, and you are on a clean, up-to-date `main`.
    - **verify** re-runs the full pipeline, checks that the tagged commit is
      reachable from `main`, and checks the tag, every manifest, the CLI
      constant, and the changelog all agree — a stray tag publishes nothing.
+     It also fails closed if any T11 legal decision is not recorded and
+     accepted (`scripts/release/legal-gate.mjs`), or if the repository split
+     has slipped (an AI-tooling planning artifact, or an AI coding assistant
+     credited as author, checked into this tree —
+     `scripts/verify/docs-split.mjs`).
    - **publish-npm** publishes the CLI directly to npmjs via OIDC trusted
      publishing — no npm token exists anywhere in CI. npm scans the upload
-     before making it available.
+     before making it available, and attaches provenance automatically.
    - **mirror-github-packages** and **docker** run next: the GitHub Packages
      mirror and the `ghcr.io/holydeck/server` image push. The image gets the
      `:latest` tag only when this release is the newest `v*` tag, so
-     re-running an old release's job cannot point `:latest` backwards.
+     re-running an old release's job cannot point `:latest` backwards. Once
+     pushed, the image is signed keylessly with cosign; a signing failure
+     fails the job and no later job runs. See "Verifying a release" below.
    - **github-release** creates the GitHub Release with the changelog notes.
 
    GitHub Packages, GHCR and the GitHub Release continue after npm accepts the
    upload; npmjs visibility may follow shortly after its registry scan.
+
+## Verifying a release
+
+Both published artifacts can be verified independently of this repository,
+with no access to CI or its logs.
+
+**The container image** is signed keylessly (Sigstore/cosign, via the
+`docker` job's GitHub Actions OIDC identity — no private key exists anywhere
+for this to leak). Verify a tag's signature with:
+
+```sh
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/holydeck/holydeck/\.github/workflows/docker-build\.yml@refs/tags/.*$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/holydeck/server:<version>
+```
+
+A successful verification prints the signing certificate and its Rekor
+transparency-log entry. `cosign verify` resolves the tag to the digest it
+points at, so this also confirms the tag has not been moved to point at an
+unsigned image since release.
+
+**The CLI package** carries npm provenance from `publish-npm`'s OIDC
+publish. Check it with either:
+
+```sh
+npm view @holydeck/cli@<version> dist.attestations --registry https://registry.npmjs.org
+```
+
+or the "Provenance" badge on the package's npmjs.com page, which links the
+published tarball back to this repository and the exact workflow run that
+built it.
 
 ## When something fails
 

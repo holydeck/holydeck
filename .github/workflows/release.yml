@@ -54,6 +54,16 @@ jobs:
         run: pnpm run test:release
       - name: Check the tag agrees with the manifests
         run: node scripts/release/verify-release-state.mjs "$GITHUB_REF_NAME"
+      # Every T11 legal decision must be recorded and accepted before artifacts publish — see
+      # legal-gate.mjs. It fails closed: no record at all blocks a release exactly as an
+      # unaccepted decision would, so this step is expected to fail until a maintainer records
+      # and accepts every decision.
+      - name: Check every legal decision is accepted
+        run: node scripts/release/legal-gate.mjs
+      # No planning, prompt, audit, task-brief, task-report or review artifact, and no credit to
+      # an AI coding assistant as this work's author — see docs-split.mjs.
+      - name: Check the repository split holds
+        run: node scripts/verify/docs-split.mjs
       - name: Lint, typecheck, test, build
         run: pnpm turbo lint typecheck test build
       - name: Extract the version from the tag
@@ -187,6 +197,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Cosign keyless signing exchanges this job's OIDC identity for a Fulcio certificate — see
+      # docker-build.yml.
+      id-token: write
     uses: ./.github/workflows/docker-build.yml
     with:
       push: true
