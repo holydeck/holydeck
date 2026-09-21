@@ -125,6 +125,33 @@ function blipShapeXml(id: number, relId: string): string {
   );
 }
 
+/** A `<p:sp>` title-placeholder shape: same text-body shape as `shapeXml`, but its `<p:nvPr>` carries a
+ *  `<p:ph type="…">` naming which OOXML placeholder kind it is — `"title"`, `"ctrTitle"`, or omitted for
+ *  an ordinary body placeholder. */
+function titlePlaceholderXml(paragraphs: string[][], id: number, phType?: string): string {
+  const body = paragraphs
+    .map((runs) => `<a:p>${runs.map((t) => `<a:r><a:t>${escapeXml(t)}</a:t></a:r>`).join('')}</a:p>`)
+    .join('');
+  const ph = phType === undefined ? '<p:ph/>' : `<p:ph type="${phType}"/>`;
+  return (
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Title ${id}"/><p:cNvSpPr/><p:nvPr>${ph}</p:nvPr></p:nvSpPr>` +
+    `<p:spPr/><p:txBody><a:bodyPr/>${body}</p:txBody></p:sp>`
+  );
+}
+
+/** OOXML's `docProps/core.xml` core-properties part, carrying only the two Dublin Core fields
+ *  `extractProvenance` reads. Either field left `undefined` is simply omitted from the part, the same as
+ *  a real file that never set it. */
+function corePropsXml(fields: { title?: string; creator?: string }): Uint8Array {
+  const title = fields.title === undefined ? '' : `<dc:title>${escapeXml(fields.title)}</dc:title>`;
+  const creator = fields.creator === undefined ? '' : `<dc:creator>${escapeXml(fields.creator)}</dc:creator>`;
+  return strToU8(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ' +
+      `xmlns:dc="http://purl.org/dc/elements/1.1/">${title}${creator}</cp:coreProperties>`,
+  );
+}
+
 /** A minimal valid 1x1 PNG's signature bytes plus a filler byte — enough for magic-byte sniffing, not a
  *  decodable image, per the task's "tiny synthetic images you construct yourself" constraint. */
 function pngBytes(): Uint8Array {
@@ -373,5 +400,77 @@ describe('extractPptx embedded media', () => {
     const result = extractPptx(bytes);
     expect(result.slides[0]?.media).toEqual([]);
     expect(result.slides[1]?.media).toEqual([{ bytes: pngBytes(), type: 'image/png' }]);
+  });
+});
+
+describe('extractPptx provenance', () => {
+  it('reports no title or source when neither docProps/core.xml nor a title placeholder is present', () => {
+    const bytes = buildPptx([shapeXml([['Just a plain slide']], 2)]);
+    expect(extractPptx(bytes).provenance).toEqual({});
+  });
+
+  it('extracts a declared title and source from docProps/core.xml', () => {
+    const bytes = buildPptxWithSlideFiles([shapeXml([['Slide text']], 2)], {
+      'docProps/core.xml': corePropsXml({ title: 'Amazing Grace', creator: 'Traditional' }),
+    });
+    expect(extractPptx(bytes).provenance).toEqual({ title: 'Amazing Grace', source: 'Traditional' });
+  });
+
+  it('leaves title and source absent when docProps/core.xml declares them blank', () => {
+    const bytes = buildPptxWithSlideFiles([shapeXml([['Slide text']], 2)], {
+      'docProps/core.xml': corePropsXml({ title: '   ', creator: '' }),
+    });
+    expect(extractPptx(bytes).provenance).toEqual({});
+  });
+
+  it("falls back to the first slide's own title placeholder when core.xml has no title", () => {
+    const bytes = buildPptxWithSlideFiles([titlePlaceholderXml([['Fallback Title']], 2, 'title')], {});
+    expect(extractPptx(bytes).provenance).toEqual({ title: 'Fallback Title' });
+  });
+
+  it('recognizes a ctrTitle placeholder the same way as a title placeholder', () => {
+    const bytes = buildPptxWithSlideFiles([titlePlaceholderXml([['Centered Title']], 2, 'ctrTitle')], {});
+    expect(extractPptx(bytes).provenance).toEqual({ title: 'Centered Title' });
+  });
+
+  it('treats a body placeholder with no type as not a title', () => {
+    // An omitted `type` defaults to a body placeholder, not a title one, per the OOXML schema.
+    const bytes = buildPptxWithSlideFiles([titlePlaceholderXml([['Not a title']], 2)], {});
+    expect(extractPptx(bytes).provenance).toEqual({});
+  });
+
+  it('treats a whitespace-only title placeholder as no title at all', () => {
+    const bytes = buildPptxWithSlideFiles([titlePlaceholderXml([['   ']], 2, 'title')], {});
+    expect(extractPptx(bytes).provenance).toEqual({});
+  });
+
+  it('prefers a declared core.xml title over the first slide\'s placeholder fallback', () => {
+    const bytes = buildPptxWithSlideFiles([titlePlaceholderXml([['Placeholder Title']], 2, 'title')], {
+      'docProps/core.xml': corePropsXml({ title: 'Declared Title' }),
+    });
+    expect(extractPptx(bytes).provenance).toEqual({ title: 'Declared Title' });
+  });
+
+  it('uses the first title placeholder when a slide somehow carries more than one', () => {
+    const bytes = buildPptxWithSlideFiles(
+      [titlePlaceholderXml([['First Title']], 2, 'title') + titlePlaceholderXml([['Second Title']], 3, 'ctrTitle')],
+      {},
+    );
+    expect(extractPptx(bytes).provenance).toEqual({ title: 'First Title' });
+  });
+
+  it('ignores a title placeholder on any slide but the first', () => {
+    const bytes = buildPptxWithSlideFiles(
+      [shapeXml([['Slide 1, no title placeholder']], 2), titlePlaceholderXml([['Slide 2 title']], 2, 'title')],
+      {},
+    );
+    expect(extractPptx(bytes).provenance).toEqual({});
+  });
+
+  it('reads a declared source independently of where the title came from', () => {
+    const bytes = buildPptxWithSlideFiles([titlePlaceholderXml([['Fallback Title']], 2, 'title')], {
+      'docProps/core.xml': corePropsXml({ creator: 'Someone' }),
+    });
+    expect(extractPptx(bytes).provenance).toEqual({ title: 'Fallback Title', source: 'Someone' });
   });
 });

@@ -112,3 +112,15 @@ export function detectRepeatMarker(text: string): PptxRepeatMarker | undefined {
   if (!Number.isSafeInteger(count) || count < SMALLEST_REPEAT) return undefined;
   return { count };
 }
+
+/**
+ * Normalizes a title for PPTX-04's duplicate-candidate comparison: trims, collapses every run of
+ * whitespace to one plain space, and case-folds. Nothing fancier — no punctuation stripping, no
+ * transliteration, no fuzzy matching — the same "documented limitation, not a bug to fix by guessing"
+ * precedent `detectRepeatMarker` already sets for repeat phrasing, applied here to title comparison
+ * instead. Two titles differing only in incidental spacing or letter case read as the same title; two
+ * titles differing in punctuation, word order, or script do not, and are left for a person to notice.
+ */
+export function normalizePptxTitle(text: string): string {
+  return text.trim().replace(/\s+/gu, ' ').toLocaleLowerCase();
+}

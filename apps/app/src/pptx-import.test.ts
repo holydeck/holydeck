@@ -3,11 +3,12 @@ import { describe, expect, it } from 'vitest';
 
 import { HolyDeckError } from '@holydeck/core/messages';
 
-import { mediaContext } from './media.js';
-import { pptxImportOn } from './pptx-import.js';
+import { libraryContext, libraryOn } from './library.js';
+import { pptxImportContext, pptxImportOn } from './pptx-import.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 import { fakeMediaStorageIO } from '../test/helpers/media-storage-io.js';
 
+import type { LibraryStore } from './library.js';
 import type { PptxImport } from './pptx-import.js';
 import type { Queue } from './queue.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
@@ -28,6 +29,27 @@ function textShapeXml(text: string, id: number): string {
   return (
     `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="TextBox ${id}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>` +
     `<p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`
+  );
+}
+
+/** A `<p:sp>` title-placeholder shape, for provenance-fallback tests — see `packages/core/src/pptx.ts`'s
+ *  `extractTitlePlaceholder`. */
+function titlePlaceholderXml(text: string, id: number): string {
+  return (
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="Title ${id}"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>` +
+    `<p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`
+  );
+}
+
+/** OOXML's `docProps/core.xml` core-properties part, for provenance tests — see `packages/core/src/pptx.ts`'s
+ *  `extractProvenance`. */
+function corePropsXml(fields: { title?: string; creator?: string }): Uint8Array {
+  const title = fields.title === undefined ? '' : `<dc:title>${fields.title}</dc:title>`;
+  const creator = fields.creator === undefined ? '' : `<dc:creator>${fields.creator}</dc:creator>`;
+  return strToU8(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ' +
+      `xmlns:dc="http://purl.org/dc/elements/1.1/">${title}${creator}</cp:coreProperties>`,
   );
 }
 
@@ -86,17 +108,22 @@ const pngBytes = (): Uint8Array => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d,
 /** Bytes that match no v1 media signature — a stand-in for an embedded chart/SmartArt/OLE object. */
 const unknownBytes = (): Uint8Array => new Uint8Array([0x01, 0x02, 0x03, 0x04]);
 
-const ADMIN = mediaContext(`account:${'D'.repeat(22)}`, 'req-pptx');
+const ADMIN = pptxImportContext(`account:${'D'.repeat(22)}`, 'req-pptx');
+// A separate, fuller-permission context, only for seeding a library row a test wants an import to
+// collide with — pptxImportContext's own permissions stay narrow, per its own doc comment.
+const LIBRARIAN = libraryContext(`account:${'D'.repeat(22)}`, 'req-library-seed');
 
-const setup = (): { db: FakeDb; io: FakeMediaStorageIO; importer: PptxImport } => {
+const setup = (): { db: FakeDb; io: FakeMediaStorageIO; importer: PptxImport; catalogue: LibraryStore } => {
   const db = fakeDb();
   const io = fakeMediaStorageIO();
   let tick = 0;
   let serial = 0;
   const jobs: Array<Parameters<Queue['enqueue']>[1]> = [];
+  const now = () => new Date(Date.parse('2026-09-17T09:30:00.000Z') + (tick += 1) * 1000).toISOString();
+  const newId = () => `media-${(serial += 1)}`;
   const importer = pptxImportOn(db, {
-    now: () => new Date(Date.parse('2026-09-17T09:30:00.000Z') + (tick += 1) * 1000).toISOString(),
-    newId: () => `media-${(serial += 1)}`,
+    now,
+    newId,
     mediaRoot: '/media',
     write: io.write,
     read: io.read,
@@ -107,7 +134,9 @@ const setup = (): { db: FakeDb; io: FakeMediaStorageIO; importer: PptxImport } =
       },
     },
   });
-  return { db, io, importer };
+  // The same store `pptxImportOn` composes internally, so tests can seed a song to collide with.
+  const catalogue = libraryOn(db, { now, newId });
+  return { db, io, importer, catalogue };
 };
 
 describe('pptxImportOn', () => {
@@ -177,5 +206,68 @@ describe('pptxImportOn', () => {
     await expect(importer.import(ADMIN, bytes)).rejects.toBeInstanceOf(HolyDeckError);
     expect(io.writes).toEqual([]);
     expect(db.rows.size).toBe(0);
+  });
+
+  it('passes the extracted title/source provenance through unchanged', async () => {
+    const { importer } = setup();
+    const bytes = buildPptx([textShapeXml('Amazing Grace', 2)], {
+      'docProps/core.xml': corePropsXml({ title: 'Amazing Grace', creator: 'Traditional' }),
+    });
+
+    const result = await importer.import(ADMIN, bytes);
+
+    expect(result.provenance).toEqual({ title: 'Amazing Grace', source: 'Traditional' });
+  });
+
+  it('leaves provenance empty when the package declares no discoverable title or source', async () => {
+    const { importer } = setup();
+    const bytes = buildPptx([textShapeXml('How sweet the sound', 2)]);
+
+    const result = await importer.import(ADMIN, bytes);
+
+    expect(result.provenance).toEqual({});
+  });
+
+  it('warns of a possible duplicate when an existing song title normalizes the same as the discovered title', async () => {
+    const { importer, catalogue } = setup();
+    const existing = await catalogue.create(LIBRARIAN, { kind: 'song', title: 'Amazing Grace' });
+    const bytes = buildPptx([titlePlaceholderXml('  amazing   GRACE  ', 2)]);
+
+    const result = await importer.import(ADMIN, bytes);
+
+    expect(result.duplicate).toEqual({ id: existing.stamp.id, title: 'Amazing Grace' });
+    // The warning is data, never a refusal: the import itself still succeeds with its slides intact.
+    expect(result.slides).toHaveLength(1);
+  });
+
+  it('does not warn when no existing song title matches the discovered title', async () => {
+    const { importer, catalogue } = setup();
+    await catalogue.create(LIBRARIAN, { kind: 'song', title: 'How Great Thou Art' });
+    const bytes = buildPptx([titlePlaceholderXml('Amazing Grace', 2)]);
+
+    const result = await importer.import(ADMIN, bytes);
+
+    expect(result.duplicate).toBeUndefined();
+  });
+
+  it('does not warn when no title was discovered at all, even with a same-shaped song on file', async () => {
+    const { importer, catalogue } = setup();
+    await catalogue.create(LIBRARIAN, { kind: 'song', title: 'Amazing Grace' });
+    const bytes = buildPptx([textShapeXml('no title placeholder here', 2)]);
+
+    const result = await importer.import(ADMIN, bytes);
+
+    expect(result.provenance.title).toBeUndefined();
+    expect(result.duplicate).toBeUndefined();
+  });
+
+  it('does not warn against a non-song library item sharing the same title', async () => {
+    const { importer, catalogue } = setup();
+    await catalogue.create(LIBRARIAN, { kind: 'reading', title: 'Amazing Grace' });
+    const bytes = buildPptx([titlePlaceholderXml('Amazing Grace', 2)]);
+
+    const result = await importer.import(ADMIN, bytes);
+
+    expect(result.duplicate).toBeUndefined();
   });
 });

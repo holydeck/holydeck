@@ -7,18 +7,27 @@
 //
 // Nothing here interprets what it finds. A slide's text blocks are one raw string per text-bearing
 // shape — its paragraphs joined by "\n", its runs concatenated with no separator, exactly as authored —
-// in the shape's document order. No language detection, no repeat-marker parsing, no title or source
-// extraction, no duplicate detection, no classification: that reading is PPTX-04's job, done on top of
-// this deterministic list rather than folded into it (script separation and repeat-marker detection live
-// in the sibling `pptx-content.ts`, as pure functions over one raw text block). And as with
-// `sermon-ai.ts`, nothing reaches the filesystem — `extractPptx` either returns the full result or
-// throws before building any of it; there is no partial result for a caller to receive.
+// in the shape's document order. No language detection, no repeat-marker parsing, no duplicate detection,
+// no classification: that reading is PPTX-04's job, done on top of this deterministic list rather than
+// folded into it (script separation and repeat-marker detection live in the sibling `pptx-content.ts`,
+// as pure functions over one raw text block). And as with `sermon-ai.ts`, nothing reaches the filesystem —
+// `extractPptx` either returns the full result or throws before building any of it; there is no partial
+// result for a caller to receive.
 //
 // T69 adds one more list to each slide: its embedded media, discovered the same non-interpretive way as
 // its text — following the `<a:blip r:embed>` references a slide's shapes make, through that slide's own
 // `_rels` part, to the `ppt/media/…` bytes they name and the media type those bytes sniff as. Still just
 // discovery, not judgment: registering that media anywhere durable is `apps/app`'s job (`pptx-import.ts`),
 // since this package stays free of any `@holydeck/*` dependency and of the filesystem and database alike.
+//
+// T117 (PPTX-04's remaining "extracts available title/source provenance" clause) adds one more reading of
+// the same kind: whatever the package's own `docProps/core.xml` core-properties part states about itself
+// — its declared `<dc:title>` and `<dc:creator>` — read as-is, the same "the package claims it, we report
+// it" discovery this file already does for media, never guessed at when the part is absent or says
+// nothing. A title also falls back to the first slide's own title placeholder when the core-properties
+// part has none (see `PptxProvenance`). Duplicate detection itself — comparing a discovered title against
+// a HolyDeck song already on file — needs a live content library to compare against, so, like media
+// registration, it stays `apps/app`'s job (`pptx-import.ts`), not this dependency-free package's.
 
 import { load } from 'cheerio';
 import { unzipSync } from 'fflate';
@@ -59,11 +68,25 @@ export interface PptxSlide {
   media: PptxSlideMedia[];
 }
 
-/** A presentation's slides, in the order the show would present them, and every embedded media reference
- *  found across all of them that could not be typed (see `PptxSkippedMedia`). */
+/** What the package itself states about its own title and where it came from — read, never guessed: each
+ *  field is present only when the package actually declares it (T117, PPTX-04's "extracts available
+ *  title/source provenance" clause). `title` prefers the core-properties `<dc:title>` and falls back to
+ *  the first slide's own title-placeholder text when that part has none or says nothing. `source` reads
+ *  the core-properties `<dc:creator>` only — Dublin Core's own "who produced this" field, and the closest
+ *  single core-properties field to "where this came from"; `<dc:subject>` names a topic, not an origin,
+ *  so it is deliberately not used here (a disclosed ruling, not an oversight). */
+export interface PptxProvenance {
+  title?: string;
+  source?: string;
+}
+
+/** A presentation's slides, in the order the show would present them, every embedded media reference
+ *  found across all of them that could not be typed (see `PptxSkippedMedia`), and whatever title/source
+ *  the package itself declares (see `PptxProvenance`). */
 export interface ExtractedPptx {
   slides: PptxSlide[];
   skippedMedia: PptxSkippedMedia[];
+  provenance: PptxProvenance;
 }
 
 const PRESENTATION_PART = 'ppt/presentation.xml';
@@ -85,13 +108,16 @@ export function extractPptx(bytes: Uint8Array): ExtractedPptx {
   const slideParts = resolveSlideOrder(presentation, entries);
   if (slideParts.length === 0) throw new HolyDeckError('pptx_empty');
   const skippedMedia: PptxSkippedMedia[] = [];
+  let titlePlaceholder: string | undefined;
   const slides = slideParts.map((path, slideIndex) => {
     const $slide = readXmlPart(entries, path);
     const { media, skipped } = extractSlideMedia(entries, path, $slide, slideIndex);
     skippedMedia.push(...skipped);
+    // Only the first slide is checked (see `extractTitlePlaceholder`'s own doc comment for why).
+    if (slideIndex === 0) titlePlaceholder = extractTitlePlaceholder($slide);
     return { textBlocks: extractTextBlocks($slide), media };
   });
-  return { slides, skippedMedia };
+  return { slides, skippedMedia, provenance: extractProvenance(entries, titlePlaceholder) };
 }
 
 function openArchive(bytes: Uint8Array): Record<string, Uint8Array> {
@@ -281,6 +307,70 @@ function extractTextBlocks($slide: CheerioAPI): string[] {
     if (text.length > 0) blocks.push(text);
   });
   return blocks;
+}
+
+const TITLE_PLACEHOLDER_TYPES = new Set(['title', 'ctrTitle']);
+
+/**
+ * The first slide's own title-placeholder text, when it has one: a `<p:sp>` shape whose `<p:ph>` names
+ * `type="title"` or `type="ctrTitle"` (OOXML's two standard title-placeholder types — an omitted `type`
+ * defaults to a body placeholder, not a title one, per the OOXML schema), read the same way
+ * `extractTextBlocks` reads any other shape's text: paragraphs joined by "\n", runs concatenated with no
+ * separator. Only the first slide is checked, deliberately: a later slide's own title placeholder names
+ * that slide's own heading, not the presentation's, and `PptxProvenance.title` asks for the
+ * presentation's title, not whichever slide happens to have one. A slide with no title placeholder at
+ * all, or one that is empty once trimmed, contributes nothing — a disclosed fallback source, used only
+ * when `docProps/core.xml` names no title of its own (see `extractProvenance`).
+ */
+function extractTitlePlaceholder($slide: CheerioAPI): string | undefined {
+  let found: string | undefined;
+  $slide('p\\:sp').each((_, shape) => {
+    if (found !== undefined) return;
+    const type = $slide(shape).find('p\\:ph').attr('type');
+    if (type === undefined || !TITLE_PLACEHOLDER_TYPES.has(type)) return;
+    const paragraphs: string[] = [];
+    $slide(shape)
+      .find('a\\:p')
+      .each((_, paragraph) => {
+        let line = '';
+        $slide(paragraph)
+          .find('a\\:t')
+          .each((_, run) => {
+            line += $slide(run).text();
+          });
+        paragraphs.push(line);
+      });
+    const text = paragraphs.join('\n').trim();
+    if (text.length > 0) found = text;
+  });
+  return found;
+}
+
+const CORE_PROPERTIES_PART = 'docProps/core.xml';
+
+const nonEmpty = (text: string): string | undefined => {
+  const trimmed = text.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+/**
+ * The package's own declared title and source, read the same non-interpretive way as everything else in
+ * this file (see the module header). `docProps/core.xml` — OOXML's standard core-properties part — may
+ * or may not be present in the archive at all; its absence is "no discoverable title/source", not
+ * corruption, since not every authoring tool writes it and PowerPoint itself allows it to be left blank.
+ * `title` prefers the core-properties `<dc:title>`, falling back to the first slide's own title
+ * placeholder (`extractTitlePlaceholder`) only when the core-properties part has none or names an empty
+ * title. `source` reads only the core-properties `<dc:creator>` — see `PptxProvenance`'s own doc comment
+ * for why `<dc:subject>` is not used. Neither field is ever guessed at: a blank or absent value stays
+ * absent rather than falling back to something invented.
+ */
+function extractProvenance(entries: Record<string, Uint8Array>, titlePlaceholder: string | undefined): PptxProvenance {
+  const raw = entries[CORE_PROPERTIES_PART];
+  const core = raw === undefined ? undefined : parseXmlPart(raw);
+  const declaredTitle = core === undefined ? undefined : nonEmpty(core('dc\\:title').first().text());
+  const source = core === undefined ? undefined : nonEmpty(core('dc\\:creator').first().text());
+  const title = declaredTitle ?? titlePlaceholder;
+  return { ...(title === undefined ? {} : { title }), ...(source === undefined ? {} : { source }) };
 }
 
 function reasonOf(error: unknown): string {

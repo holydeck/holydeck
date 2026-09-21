@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectRepeatMarker, splitScriptRuns } from './pptx-content.js';
+import { detectRepeatMarker, normalizePptxTitle, splitScriptRuns } from './pptx-content.js';
 
 describe('splitScriptRuns', () => {
   it('leaves a pure Latin-script block as one ta-Latn run', () => {
@@ -99,5 +99,33 @@ describe('detectRepeatMarker', () => {
 
   it('never throws on an empty block', () => {
     expect(detectRepeatMarker('')).toBeUndefined();
+  });
+});
+
+describe('normalizePptxTitle', () => {
+  it('trims leading and trailing whitespace', () => {
+    expect(normalizePptxTitle('  Amazing Grace  ')).toBe('amazing grace');
+  });
+
+  it('collapses every run of internal whitespace to one space', () => {
+    expect(normalizePptxTitle('Amazing   \t\n Grace')).toBe('amazing grace');
+  });
+
+  it('case-folds', () => {
+    expect(normalizePptxTitle('AMAZING GRACE')).toBe('amazing grace');
+  });
+
+  it('treats two titles differing only in spacing and case as the same normalized title', () => {
+    expect(normalizePptxTitle('Amazing Grace')).toBe(normalizePptxTitle('  amazing   grace '));
+  });
+
+  it('leaves punctuation and word order alone, as a documented v1 limitation', () => {
+    expect(normalizePptxTitle('Amazing Grace!')).not.toBe(normalizePptxTitle('Amazing Grace'));
+    expect(normalizePptxTitle('Grace, Amazing')).not.toBe(normalizePptxTitle('Amazing Grace'));
+  });
+
+  it('never throws on an empty title', () => {
+    expect(normalizePptxTitle('')).toBe('');
+    expect(normalizePptxTitle('   ')).toBe('');
   });
 });
