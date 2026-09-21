@@ -3,7 +3,12 @@
 // alike — not merely absent from the collection it happened to land in. A fake session cannot prove this;
 // only a real transaction, on a real replica set, against a write a separate connection actually commits.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 
 import { backupContext, backupDb, readMongoArchive } from './backups.js';
 import { RECORDS } from './records.js';
@@ -29,6 +34,7 @@ const CONTENT_COLLECTIONS = [
 let mongo: ReplicaSetMongo;
 let live: Db;
 let client: MongoClient;
+let dumpDir: string;
 
 beforeAll(async () => {
   mongo = await startTestMongoReplicaSet();
@@ -42,6 +48,11 @@ afterAll(async () => {
 
 beforeEach(async () => {
   for (const collection of CONTENT_COLLECTIONS) await live.collection(collection).deleteMany({});
+  dumpDir = await mkdtemp(join(tmpdir(), 'holydeck-backups-integration-'));
+});
+
+afterEach(async () => {
+  await rm(dumpDir, { recursive: true, force: true });
 });
 
 describe('reading the Mongo archive inside a real snapshot transaction', () => {
@@ -51,6 +62,7 @@ describe('reading the Mongo archive inside a real snapshot transaction', () => {
 
     const db = backupDb(client, live);
     const archive = await readMongoArchive(db, CONTEXT, {
+      dumpDir,
       afterRead: async (className) => {
         if (className !== 'services') return;
         // Lands after the snapshot has already read `services`, and before the same transaction ever
@@ -75,25 +87,31 @@ describe('reading the Mongo archive inside a real snapshot transaction', () => {
     await live.collection<ContentDoc>(RECORDS.services.collection).insertOne({ _id: 'svc-1', name: 'Sunday Gathering' });
     const db = backupDb(client, live);
     await readMongoArchive(db, CONTEXT, {
+      dumpDir,
       afterRead: async (className) => {
         if (className === 'services') await live.collection<ContentDoc>(RECORDS.services.collection).insertOne({ _id: 'svc-2', name: 'Later' });
       },
     });
-    const next = await readMongoArchive(db, CONTEXT);
+    const next = await readMongoArchive(db, CONTEXT, { dumpDir });
     const services = next.contents.find((content) => content.class === 'services');
     expect(services?.count).toBe(2);
   });
 
-  test('hashes what a real snapshot actually read, addressably', async () => {
+  test('hashes what a real snapshot actually read, addressably, and dumps the same bytes to disk', async () => {
     await live.collection<ContentDoc>(RECORDS.services.collection).insertMany([
       { _id: 'svc-1', name: 'Sunday Gathering' },
       { _id: 'svc-2', name: 'Wednesday Study' },
     ]);
     const db = backupDb(client, live);
-    const archive = await readMongoArchive(db, CONTEXT);
+    const archive = await readMongoArchive(db, CONTEXT, { dumpDir });
     const services = archive.contents.find((content) => content.class === 'services');
     expect(services?.count).toBe(2);
     expect(services?.hash).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(archive.consistency).toEqual({ pointInTime: true, method: expect.any(String) });
+
+    // Against a real snapshot read, not just a fake: the dump file this archive wrote for `services`
+    // rehashes to the exact hash the manifest recorded for it.
+    const dumped = await readFile(join(dumpDir, 'services.json'), 'utf8');
+    expect(`sha256:${createHash('sha256').update(dumped).digest('hex')}`).toBe(services?.hash);
   });
 });

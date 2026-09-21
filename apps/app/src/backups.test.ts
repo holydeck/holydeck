@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   BACKUP_INDEXES,
@@ -86,24 +91,34 @@ describe('the context a backup run needs', () => {
 });
 
 describe('reading the Mongo archive', () => {
+  let dumpDir: string;
+
+  beforeEach(async () => {
+    dumpDir = await mkdtemp(join(tmpdir(), 'holydeck-backups-test-'));
+  });
+
+  afterEach(async () => {
+    await rm(dumpDir, { recursive: true, force: true });
+  });
+
   it('refuses an actor without the permission to produce a backup', async () => {
     const db = fakeMongoDb({});
-    await expect(readMongoArchive(db, NO_PERMISSION)).rejects.toThrow(BackupError);
+    await expect(readMongoArchive(db, NO_PERMISSION, { dumpDir })).rejects.toThrow(BackupError);
   });
 
   it('refuses a value that is not a request context at all', async () => {
     const db = fakeMongoDb({});
-    await expect(readMongoArchive(db, undefined)).rejects.toThrow(BackupError);
+    await expect(readMongoArchive(db, undefined, { dumpDir })).rejects.toThrow(BackupError);
   });
 
-  it('reads every Mongo content class inside one snapshot transaction', async () => {
+  it('reads every Mongo content class inside one snapshot transaction, and dumps each class to disk exactly as hashed', async () => {
     const db = fakeMongoDb({
       [RECORDS.services.collection]: [{ _id: 's1' }],
       [RECORDS.contentRevisions.collection]: [{ _id: 'r1' }, { _id: 'r2' }],
       [RECORDS.preparedSnapshots.collection]: [],
       [RECORDS.runEvents.collection]: [{ _id: 'e1' }],
     });
-    const archive = await readMongoArchive(db, CONTEXT);
+    const archive = await readMongoArchive(db, CONTEXT, { dumpDir });
     expect(archive.consistency).toEqual({ pointInTime: true, method: CONSISTENCY_METHOD });
     expect(archive.contents.map((content) => content.class)).toEqual([
       'services',
@@ -118,6 +133,16 @@ describe('reading the Mongo archive', () => {
     expect(snapshots.count).toBe(0);
     expect(db.transactions).toBe(1);
     expect(db.sessionsEnded).toBe(1);
+
+    // Every dump file holds exactly the bytes its class's hash was computed over: rehashing what actually
+    // landed on disk reproduces the manifest's recorded hash, not merely a value that happens to agree
+    // because both sides were computed the same way.
+    for (const content of archive.contents) {
+      const text = await readFile(join(dumpDir, `${content.class}.json`), 'utf8');
+      expect(`sha256:${createHash('sha256').update(text).digest('hex')}`).toBe(content.hash);
+    }
+    const dumpedServices = await readFile(join(dumpDir, 'services.json'), 'utf8');
+    expect(dumpedServices).toBe(JSON.stringify([{ _id: 's1' }]));
   });
 
   it('ends the session even when the read fails partway through', async () => {
@@ -128,17 +153,28 @@ describe('reading the Mongo archive', () => {
         throw new Error('the archive collection is unreachable');
       },
     };
-    await expect(readMongoArchive(failing, CONTEXT)).rejects.toThrow('unreachable');
+    await expect(readMongoArchive(failing, CONTEXT, { dumpDir })).rejects.toThrow('unreachable');
     expect(db.sessionsEnded).toBe(1);
   });
 
   it('hashes the same documents to the same value however they were ordered on the wire', async () => {
     const first = fakeMongoDb({ [RECORDS.services.collection]: [{ _id: 's1', name: 'Sunday', kind: 'weekly' }] });
     const second = fakeMongoDb({ [RECORDS.services.collection]: [{ kind: 'weekly', _id: 's1', name: 'Sunday' }] });
-    const [archiveA, archiveB] = await Promise.all([readMongoArchive(first, CONTEXT), readMongoArchive(second, CONTEXT)]);
-    const hashA = archiveA.contents.find((content) => content.class === 'services')?.hash;
-    const hashB = archiveB.contents.find((content) => content.class === 'services')?.hash;
-    expect(hashA).toBe(hashB);
+    const [dumpA, dumpB] = await Promise.all([
+      mkdtemp(join(tmpdir(), 'holydeck-backups-test-a-')),
+      mkdtemp(join(tmpdir(), 'holydeck-backups-test-b-')),
+    ]);
+    try {
+      const [archiveA, archiveB] = await Promise.all([
+        readMongoArchive(first, CONTEXT, { dumpDir: dumpA }),
+        readMongoArchive(second, CONTEXT, { dumpDir: dumpB }),
+      ]);
+      const hashA = archiveA.contents.find((content) => content.class === 'services')?.hash;
+      const hashB = archiveB.contents.find((content) => content.class === 'services')?.hash;
+      expect(hashA).toBe(hashB);
+    } finally {
+      await Promise.all([rm(dumpA, { recursive: true, force: true }), rm(dumpB, { recursive: true, force: true })]);
+    }
   });
 
   it('calls back between reads, which is what lets a caller prove point-in-time isolation', async () => {
@@ -150,6 +186,7 @@ describe('reading the Mongo archive', () => {
     });
     const seen: string[] = [];
     await readMongoArchive(db, CONTEXT, {
+      dumpDir,
       afterRead: (className) => {
         seen.push(className);
       },

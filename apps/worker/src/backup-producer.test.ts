@@ -1,4 +1,8 @@
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { backupContext } from '@holydeck/app/backups';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -44,8 +48,8 @@ const job = (fields: Partial<LeasedJob> = {}): LeasedJob => ({
   ...fields,
 });
 
-const fakeArchiveDb = (): BackupDb => ({
-  collection: (): BackupCollection => ({ find: () => ({ toArray: async () => [] }) }),
+const fakeArchiveDb = (seed: Readonly<Record<string, readonly Record<string, unknown>[]>> = {}): BackupDb => ({
+  collection: (name): BackupCollection => ({ find: () => ({ toArray: async () => [...(seed[name] ?? [])] }) }),
   startSession: (): BackupSession => ({
     withTransaction: async (fn) => fn(),
     endSession: async () => undefined,
@@ -71,36 +75,60 @@ describe('producing a backup', () => {
     spawned.mockClear();
   });
 
-  it('reads the Mongo archive, backs up settings and media, and finalizes one manifest', async () => {
+  it('reads the Mongo archive, dumps it, backs up mongo, settings and media, and finalizes one manifest', async () => {
     const db = fakeDb();
-    const handler = backupProducerOn({ ...OPTIONS, archive: fakeArchiveDb(), db });
+    const seededService = { _id: 'svc-1', name: 'Sunday' };
+    const handler = backupProducerOn({ ...OPTIONS, archive: fakeArchiveDb({ services: [seededService] }), db });
 
     const running = handler(job(), new AbortController().signal);
     await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(1));
     children[0]?.emit('close', 0);
 
+    // Every dump file `readMongoArchive` writes exists on disk by now — it ran to completion before the
+    // first restic call was even made. Read it back here, before the run's cleanup ever gets a chance to
+    // delete it, and independently rehash it: this is the byte-for-byte proof that what gets persisted is
+    // what the manifest's hash was computed over, not two independently-computed values that merely agree
+    // by construction.
     await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(2));
+    const mongoArgs = spawned.mock.calls[1]?.[1] as string[];
+    const dumpDir = mongoArgs.at(-1) as string;
+    expect(dumpDir).toContain(join(tmpdir(), 'holydeck-backup-mongo-'));
+    const dumpedServices = await readFile(join(dumpDir, 'services.json'), 'utf8');
+    expect(dumpedServices).toBe(JSON.stringify([seededService]));
+    const rehashedServices = `sha256:${createHash('sha256').update(dumpedServices).digest('hex')}`;
+
     children[1]?.stdout.emit(
       'data',
-      Buffer.from(summaryLine({ files_new: 3, total_bytes_processed: 512, snapshot_id: 'settings-snap' })),
+      Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 128, snapshot_id: 'mongo-snap' })),
     );
     children[1]?.emit('close', 0);
 
     await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(3));
     children[2]?.stdout.emit(
       'data',
-      Buffer.from(summaryLine({ files_new: 5, total_bytes_processed: 2048, snapshot_id: 'media-snap' })),
+      Buffer.from(summaryLine({ files_new: 3, total_bytes_processed: 512, snapshot_id: 'settings-snap' })),
     );
     children[2]?.emit('close', 0);
+
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(4));
+    children[3]?.stdout.emit(
+      'data',
+      Buffer.from(summaryLine({ files_new: 5, total_bytes_processed: 2048, snapshot_id: 'media-snap' })),
+    );
+    children[3]?.emit('close', 0);
 
     await expect(running).resolves.toBeUndefined();
 
     const backups = db.rows.get('backups') ?? [];
     expect(backups).toHaveLength(1);
-    const manifest = (backups[0] as { manifest: { contents: Array<{ class: string }> } }).manifest;
+    const manifest = (backups[0] as { manifest: { contents: Array<{ class: string; hash: string }> } }).manifest;
     expect(manifest.contents.map((content) => content.class).sort()).toEqual(
-      ['content-revisions', 'media', 'prepared-snapshots', 'run-events', 'services', 'settings'].sort(),
+      ['content-revisions', 'media', 'mongo', 'prepared-snapshots', 'run-events', 'services', 'settings'].sort(),
     );
+    const services = manifest.contents.find((content) => content.class === 'services');
+    expect(services?.hash).toBe(rehashedServices);
+    const mongo = manifest.contents.find((content) => content.class === 'mongo');
+    expect(mongo?.hash).toBe('restic:mongo-snap');
 
     const audits = db.rows.get('audit_events') ?? [];
     expect(audits).toHaveLength(1);
@@ -115,11 +143,17 @@ describe('producing a backup', () => {
     expect(spawned).toHaveBeenNthCalledWith(
       2,
       'restic',
-      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'settings', OPTIONS.settingsDir],
+      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'mongo', dumpDir],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
     expect(spawned).toHaveBeenNthCalledWith(
       3,
+      'restic',
+      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'settings', OPTIONS.settingsDir],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    expect(spawned).toHaveBeenNthCalledWith(
+      4,
       'restic',
       ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'media', OPTIONS.mediaRoot],
       { stdio: ['ignore', 'pipe', 'pipe'] },
@@ -172,7 +206,7 @@ describe('producing a backup', () => {
     beat();
     children[1]?.stdout.emit(
       'data',
-      Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 1, snapshot_id: 'settings-snap' })),
+      Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 1, snapshot_id: 'mongo-snap' })),
     );
     children[1]?.emit('close', 0);
 

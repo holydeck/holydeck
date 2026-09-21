@@ -5,6 +5,8 @@
 // classes in beside what this module reads; `finalizeBackup` is where the two halves become one manifest.
 
 import { createHash } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { parseBackupProduction } from '@holydeck/contracts/backups';
 
@@ -107,9 +109,16 @@ function canonical(value: unknown): unknown {
   return value;
 }
 
-function contentOf(className: string, documents: readonly Document[]): BackupContent {
+interface MongoArchiveEntry {
+  readonly content: BackupContent;
+  /** The exact bytes `content.hash` was computed over — what a dump file must hold, verbatim, for the two
+   * to provably agree. */
+  readonly text: string;
+}
+
+function archiveEntryOf(className: string, documents: readonly Document[]): MongoArchiveEntry {
   const text = JSON.stringify(documents.map((document) => canonical(document)));
-  return { class: className, count: documents.length, bytes: Buffer.byteLength(text, 'utf8'), hash: HASH(text) };
+  return { content: { class: className, count: documents.length, bytes: Buffer.byteLength(text, 'utf8'), hash: HASH(text) }, text };
 }
 
 /** The context a backup run needs: to append the record it produces, read its own history, and audit itself. */
@@ -137,6 +146,14 @@ function permit(context: unknown): RequestContext {
 }
 
 export interface MongoArchiveOptions {
+  /**
+   * Where this archive's per-class dump files are written — one `<class>.json` per `MONGO_CONTENTS` entry,
+   * holding exactly the bytes that class's `BackupContent.hash` was computed over. This is what makes the
+   * archive actually restorable rather than a fingerprint of data nothing durable ever holds: the caller
+   * (`apps/worker`) hands this same directory to Restic right after, so the dump and the hash can never
+   * drift apart.
+   */
+  readonly dumpDir: string;
   /** Runs once a class has been read and before the next is, so a test can prove point-in-time isolation. */
   readonly afterRead?: (className: string) => Promise<void> | void;
 }
@@ -153,8 +170,9 @@ export interface MongoArchive {
  * consistent" asks of the Mongo half of a backup, and it is what makes it provable rather than assumed:
  * a concurrent write during the read cannot appear in what gets recorded, by construction of the read.
  */
-export async function readMongoArchive(db: BackupDb, context: unknown, options: MongoArchiveOptions = {}): Promise<MongoArchive> {
+export async function readMongoArchive(db: BackupDb, context: unknown, options: MongoArchiveOptions): Promise<MongoArchive> {
   permit(context);
+  await mkdir(options.dumpDir, { recursive: true });
   const session = db.startSession();
   try {
     const contents = await session.withTransaction(
@@ -162,7 +180,12 @@ export async function readMongoArchive(db: BackupDb, context: unknown, options: 
         const found: BackupContent[] = [];
         for (const { record, class: className } of MONGO_CONTENTS) {
           const documents = await db.collection(RECORDS[record].collection).find({}, { session }).toArray();
-          found.push(contentOf(className, documents));
+          const { content, text } = archiveEntryOf(className, documents);
+          // Written inside the same read that computed `content.hash`, over the same `text`, so a restore
+          // that later reads this file back and rehashes it is provably checking the bytes the manifest
+          // actually recorded — not a hash computed from data that was, by then, already discarded.
+          await writeFile(join(options.dumpDir, `${className}.json`), text, 'utf8');
+          found.push(content);
           await options.afterRead?.(className);
         }
         return found;
