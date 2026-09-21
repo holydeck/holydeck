@@ -1,7 +1,6 @@
 // Route-level integration coverage, censused the way pipeline.mjs censuses workspace structure: every
-// route file the application ships is classified as either harness-tested or a named gap, and a route
-// file in neither list — new, renamed, or simply forgotten — fails the census rather than passing by
-// default.
+// route module and direct registration in app.ts/live.ts is classified as harness-tested or a named
+// gap. An identity in neither list — new, renamed, or forgotten — fails the census.
 //
 // This is a different layer from the `*.integration.test.ts` files colocated in apps/app/src: those
 // prove a store or a domain module works against a real MongoDB, called directly, never through a route.
@@ -11,20 +10,29 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 
+import ts from 'typescript';
+
 import { fromRepoRoot } from './pipeline.mjs';
 
 export const ROUTES_DIR = 'apps/app/src';
 
-// Every route file with harness-level HTTP coverage, and the file that test lives in — checked to exist,
-// so a deleted or renamed test file is a census failure rather than a claim nobody rechecks.
+// Every route identity with harness-level HTTP or WebSocket coverage, and its test file — checked to
+// exist, so a deleted or renamed test file is a census failure rather than a claim nobody rechecks.
 export const ROUTE_INTEGRATION_TESTS = {
   'session-routes.ts': 'tests/harness/integration/surfaces.test.ts',
+  'app.ts GET /health': 'tests/harness/integration/surfaces.test.ts',
+  'app.ts GET /api/v1/translations': 'tests/harness/integration/surfaces.test.ts',
+  'live.ts GET LIVE_PATH': 'tests/harness/integration/surfaces.test.ts',
 };
 
-// A route file with no harness-level test yet. Closing a gap means deleting its line here and adding one
+// A route identity with no harness-level test yet. Closing a gap means deleting its line here and adding one
 // to ROUTE_INTEGRATION_TESTS above, which is a diff a reviewer sees, not a rule someone quietly stopped
 // enforcing.
 export const KNOWN_INTEGRATION_GAPS = {
+  'app.ts GET /api/contracts': 'no harness test reads the released contract registry over HTTP',
+  'app.ts GET /api/v1/translations/:abbr/canon': "no harness test reads a translation's canon over HTTP",
+  'app.ts GET /api/v1/translations/:abbr/verses': 'no harness test reads verses over HTTP',
+  'live.ts GET LIVE_CONNECTIONS_PATH': 'no harness test reads live connection counts over HTTP',
   'accounts-routes.ts': 'no harness test drives the admin account lifecycle over HTTP',
   'capability-routes.ts': 'no harness test issues or revokes a guest or output capability over HTTP',
   'media-routes.ts': 'no harness test uploads a file over HTTP',
@@ -40,7 +48,7 @@ export const KNOWN_INTEGRATION_GAPS = {
 
 /**
  * Grades the route census against what the repository actually holds. `routeFiles` is every `*-routes.ts`
- * file on disk; `fileExists` answers whether a path claimed as a test is really there, so this reads a
+ * file plus direct registrations in app.ts/live.ts; `fileExists` checks claimed test paths, so this reads a
  * repository in a test as easily as on disk.
  */
 export function verifyRouteCoverage({ routeFiles, fileExists }) {
@@ -52,7 +60,7 @@ export function verifyRouteCoverage({ routeFiles, fileExists }) {
     const isCovered = covered.has(route);
     const isGap = gapped.has(route);
     if (!isCovered && !isGap) {
-      problems.push(`${route} is a route file this census does not classify as tested or as a known gap`);
+      problems.push(`${route} is a route identity this census does not classify as tested or as a known gap`);
     }
     if (isCovered && isGap) {
       problems.push(`${route} is listed as both tested and a known gap`);
@@ -61,7 +69,7 @@ export function verifyRouteCoverage({ routeFiles, fileExists }) {
 
   for (const [route, testPath] of Object.entries(ROUTE_INTEGRATION_TESTS)) {
     if (!routeFiles.includes(route)) {
-      problems.push(`${route} is claimed as tested but is not a route file on disk`);
+      problems.push(`${route} is claimed as tested but is not a route identity on disk`);
     } else if (!fileExists(testPath)) {
       problems.push(`${route} is claimed as tested by ${testPath}, which does not exist`);
     }
@@ -69,18 +77,42 @@ export function verifyRouteCoverage({ routeFiles, fileExists }) {
 
   for (const gap of Object.keys(KNOWN_INTEGRATION_GAPS)) {
     if (!routeFiles.includes(gap)) {
-      problems.push(`${gap} is a known integration gap that is not a route file on disk`);
+      problems.push(`${gap} is a known integration gap that is not a route identity on disk`);
     }
   }
 
   return problems;
 }
 
+export function directRoutesIn(file, source) {
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  if (tree.parseDiagnostics.length > 0) throw new Error(`${file} cannot be parsed for direct routes`);
+  const routes = [];
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const call = node.expression;
+      if (call.expression.getText(tree) === 'app' &&
+          ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'all'].includes(call.name.text)) {
+        const path = node.arguments[0];
+        const identity = path === undefined ? '<missing path>'
+          : ts.isStringLiteral(path) ? path.text : path.getText(tree);
+        routes.push(`${file} ${call.name.text.toUpperCase()} ${identity}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
+  return [...new Set(routes)];
+}
+
 export function readRoutes() {
   const routeFiles = readdirSync(fromRepoRoot(ROUTES_DIR), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('-routes.ts'))
-    .map((entry) => entry.name)
-    .sort();
+    .map((entry) => entry.name);
+  for (const file of ['app.ts', 'live.ts']) {
+    routeFiles.push(...directRoutesIn(file, readFileSync(fromRepoRoot(`${ROUTES_DIR}/${file}`), 'utf8')));
+  }
+  routeFiles.sort();
   const fileExists = (path) => {
     try {
       readFileSync(fromRepoRoot(path));
