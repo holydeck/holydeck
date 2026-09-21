@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_SETTINGS_PATH,
   DEFAULT_SETTINGS,
+  PROTECTED_SETTINGS,
   SETTINGS_SECRET_FIELDS,
   SettingsError,
   loadSettings,
@@ -41,6 +42,7 @@ describe('precedence', () => {
       corpusToken: 'default',
       mongoUrl: 'default',
       timezone: 'default',
+      developmentDiagnostics: 'default',
     });
     expect(loaded.path).toBe(CANONICAL_SETTINGS_PATH);
   });
@@ -60,6 +62,7 @@ describe('precedence', () => {
       corpusToken: 'default',
       mongoUrl: 'default',
       timezone: 'default',
+      developmentDiagnostics: 'default',
     });
   });
 
@@ -82,6 +85,7 @@ describe('precedence', () => {
       HOLYDECK_CORPUS_TOKEN: 'c'.repeat(24),
       HOLYDECK_MONGO_URL: 'mongodb://mongo:27017/holydeck',
       HOLYDECK_TIMEZONE: 'Asia/Tokyo',
+      HOLYDECK_DEVELOPMENT_DIAGNOSTICS: 'true',
     });
     expect(loaded.values).toEqual({
       port: 8080,
@@ -93,8 +97,9 @@ describe('precedence', () => {
       corpusToken: 'c'.repeat(24),
       mongoUrl: 'mongodb://mongo:27017/holydeck',
       timezone: 'Asia/Tokyo',
+      developmentDiagnostics: true,
     });
-    expect(Object.values(loaded.sources)).toEqual(Array(9).fill('env'));
+    expect(Object.values(loaded.sources)).toEqual(Array(10).fill('env'));
   });
 });
 
@@ -197,6 +202,7 @@ describe('the media root and the Restic repository accept a filesystem path only
   it('has no backend-selection field: the settings schema names nothing an object-storage address could fill', () => {
     expect(Object.keys(DEFAULT_SETTINGS)).toEqual([
       'port', 'dataDir', 'mediaRoot', 'resticRepository', 'locale', 'corpusUrl', 'corpusToken', 'mongoUrl', 'timezone',
+      'developmentDiagnostics',
     ]);
   });
 
@@ -236,6 +242,71 @@ describe('the installation’s time zone', () => {
     expect(problemsOf(undefined, { HOLYDECK_TIMEZONE: 'not/a-zone' })).toEqual([
       'HOLYDECK_TIMEZONE: expected an IANA time zone, got "not/a-zone"',
     ]);
+  });
+});
+
+describe('developer diagnostics are off unless the deployment itself turns them on', () => {
+  it('is off by default, which is what every installation that never touches it gets', () => {
+    const loaded = load();
+    expect(loaded.values.developmentDiagnostics).toBe(false);
+    expect(loaded.sources.developmentDiagnostics).toBe('default');
+    expect(DEFAULT_SETTINGS.developmentDiagnostics).toBe(false);
+  });
+
+  it('is named among the protected settings, so what is refused below is declared rather than incidental', () => {
+    expect([...PROTECTED_SETTINGS]).toEqual(['developmentDiagnostics']);
+  });
+
+  // The protection. Every other setting is administrable: the settings file is what an administrator's
+  // own PATCH writes into, so a setting the file accepts is a setting a signed-in account can turn on.
+  // This one is refused there and readable only from the environment, which means turning it on requires
+  // reaching the deployment — the compose file, the unit, the container's own definition — and not
+  // merely holding the permission that manages settings.
+  it('is refused from the settings file, which is the same door an administrator’s request writes through', () => {
+    expect(problemsOf('developmentDiagnostics: true\n')).toEqual([
+      'developmentDiagnostics: is set by this deployment only, not by the settings file',
+    ]);
+  });
+
+  it('is refused from the file even when it is being set to off, so the file is never the place it lives', () => {
+    expect(problemsOf('developmentDiagnostics: false\n')).toEqual([
+      'developmentDiagnostics: is set by this deployment only, not by the settings file',
+    ]);
+  });
+
+  it('is refused once, not twice, and does not take the rest of the file down with a second complaint', () => {
+    expect(problemsOf('developmentDiagnostics: true\nport: 70000\n')).toEqual([
+      'developmentDiagnostics: is set by this deployment only, not by the settings file',
+      'port: expected a whole number between 1 and 65535, got 70000',
+    ]);
+  });
+
+  it('is read from the environment, where only the deployment can write', () => {
+    const loaded = load(undefined, { HOLYDECK_DEVELOPMENT_DIAGNOSTICS: 'true' });
+    expect(loaded.values.developmentDiagnostics).toBe(true);
+    expect(loaded.sources.developmentDiagnostics).toBe('env');
+  });
+
+  it('reads an explicit off the same way, so a deployment can say no as deliberately as it says yes', () => {
+    const loaded = load(undefined, { HOLYDECK_DEVELOPMENT_DIAGNOSTICS: 'false' });
+    expect(loaded.values.developmentDiagnostics).toBe(false);
+    expect(loaded.sources.developmentDiagnostics).toBe('env');
+  });
+
+  // Anything approximate is refused rather than read as on. A variable set to "no", "0" or an empty
+  // string is somebody trying to turn this off, and a loader that read any of those as truthy would turn
+  // stack traces on in the one deployment that explicitly asked for them to be off.
+  it('refuses a value that is neither, rather than guessing which of the two was meant', () => {
+    for (const raw of ['yes', 'no', '1', '0', 'TRUE', '']) {
+      expect(problemsOf(undefined, { HOLYDECK_DEVELOPMENT_DIAGNOSTICS: raw })).toEqual([
+        `HOLYDECK_DEVELOPMENT_DIAGNOSTICS: expected true or false, got ${JSON.stringify(raw)}`,
+      ]);
+    }
+  });
+
+  it('is not a secret, so a backup carries it unredacted and an operator can see what a deployment set', () => {
+    expect(SETTINGS_SECRET_FIELDS).not.toContain('developmentDiagnostics');
+    expect(redactSettingsText('developmentDiagnostics: true\n')).toBe('developmentDiagnostics: true\n');
   });
 });
 
@@ -394,5 +465,16 @@ describe('redacting the settings file for a backup', () => {
   it('does not fail a backup over a file it cannot parse, and holds nothing of it back either', () => {
     expect(() => redactSettingsText('port: [\n')).not.toThrow();
     expect(redactSettingsText('port: [\n')).not.toContain('[');
+  });
+
+  // A file that parses but is not a mapping has nothing to single a secret field out from, so the whole
+  // of it is withheld. Each of the three ways a document fails to be one is its own case here, because
+  // a backup that exported any of them verbatim would be exporting a file nobody had looked at.
+  it('withholds a whole document that is not a mapping, whichever way it fails to be one', () => {
+    for (const text of ['4100\n', 'null\n', '- corpusToken: hunter2\n']) {
+      const redacted = redactSettingsText(text);
+      expect(redacted).not.toContain('hunter2');
+      expect(redacted).toContain('omitted from the backup');
+    }
   });
 });

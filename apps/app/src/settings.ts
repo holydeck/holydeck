@@ -27,6 +27,13 @@ export interface Settings {
   mongoUrl: string;
   /** The installation's IANA time zone. Round-trips through this loader; no scheduling reads it yet. */
   timezone: string;
+  /**
+   * Whether a fault of this server's own may answer with what was actually thrown.
+   *
+   * Off everywhere but a machine somebody is developing on, and protected rather than merely defaulted:
+   * see `PROTECTED_SETTINGS` below for what that means and why this one is in it.
+   */
+  developmentDiagnostics: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -39,7 +46,23 @@ export const DEFAULT_SETTINGS: Settings = {
   corpusToken: '',
   mongoUrl: '',
   timezone: 'Europe/Zurich',
+  developmentDiagnostics: false,
 };
+
+/**
+ * The settings this loader refuses to read out of the settings file, whatever the file says.
+ *
+ * Everything else here is administrable: `settings-admin.ts` merges an administrator's change into the
+ * file and validates the result through this loader, so "the file accepts it" and "a signed-in account
+ * holding SETTINGS_MANAGE can set it" are the same sentence. A protected setting is one where that would
+ * be the wrong trade — where the value decides how much this server tells a stranger about itself, and
+ * the answer should therefore need access to the deployment rather than to an account. The environment
+ * is the layer only whoever runs the container can write, so it is the only layer these are read from.
+ *
+ * Refused loudly rather than ignored, for the reason `readFileLayer` already refuses an unknown setting:
+ * a setting that looks applied and is not is worse than one that was rejected.
+ */
+export const PROTECTED_SETTINGS: readonly (keyof Settings)[] = ['developmentDiagnostics'];
 
 export type SettingsSource = 'default' | 'file' | 'env';
 
@@ -77,6 +100,7 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   corpusToken: 'HOLYDECK_CORPUS_TOKEN',
   mongoUrl: 'HOLYDECK_MONGO_URL',
   timezone: 'HOLYDECK_TIMEZONE',
+  developmentDiagnostics: 'HOLYDECK_DEVELOPMENT_DIAGNOSTICS',
 };
 
 export function settingsPath(env: Record<string, string | undefined>): string {
@@ -91,6 +115,19 @@ const parsePort = (raw: unknown): Parsed<number> => {
     return { ok: false, problem: `expected a whole number between 1 and 65535, got ${JSON.stringify(raw)}` };
   }
   return { ok: true, value };
+};
+
+// Exactly the two words, and nothing that resembles either. A loader that read anything truthy as on
+// would turn this on for a deployment whose variable says "no" — and the one setting parsed this way is
+// the one deciding whether a stranger is shown a stack trace.
+//
+// Strings only, with no boolean arm, because every setting parsed here is a protected one and a
+// protected setting is read from the environment alone, where a value is always text. A YAML `true` is
+// refused a layer earlier, by name, rather than quietly parsed here.
+const parseFlag = (raw: unknown): Parsed<boolean> => {
+  if (raw === 'true') return { ok: true, value: true };
+  if (raw === 'false') return { ok: true, value: false };
+  return { ok: false, problem: `expected true or false, got ${JSON.stringify(raw)}` };
 };
 
 const parseAbsolutePath = (raw: unknown): Parsed<string> => {
@@ -203,6 +240,13 @@ function readFileLayer(
     // A setting nobody reads is worse than a rejected one: it looks applied and is not.
     if (!(key in DEFAULT_SETTINGS)) problems.push(`${key}: unknown setting`);
   }
+  for (const key of PROTECTED_SETTINGS) {
+    if (!(key in mapping)) continue;
+    problems.push(`${key}: is set by this deployment only, not by the settings file`);
+    // Removed as well as reported, so the layer below never sees it: the load throws on this problem
+    // anyway, and one refusal reads better than a refusal plus whatever the value itself would provoke.
+    delete mapping[key];
+  }
   return mapping;
 }
 
@@ -259,6 +303,12 @@ export function loadSettings(input: {
 
   const mongoUrl = resolve('mongoUrl', DEFAULT_SETTINGS.mongoUrl, parseMongoUrl, layers);
   const timezone = resolve('timezone', DEFAULT_SETTINGS.timezone, parseTimezone, layers);
+  const developmentDiagnostics = resolve(
+    'developmentDiagnostics',
+    DEFAULT_SETTINGS.developmentDiagnostics,
+    parseFlag,
+    layers,
+  );
 
   if (problems.length > 0) throw new SettingsError(problems);
 
@@ -273,6 +323,7 @@ export function loadSettings(input: {
       corpusToken: corpusToken.value,
       mongoUrl: mongoUrl.value,
       timezone: timezone.value,
+      developmentDiagnostics: developmentDiagnostics.value,
     },
     sources: {
       port: port.source,
@@ -284,6 +335,7 @@ export function loadSettings(input: {
       corpusToken: corpusToken.source,
       mongoUrl: mongoUrl.source,
       timezone: timezone.source,
+      developmentDiagnostics: developmentDiagnostics.source,
     },
     path,
   };

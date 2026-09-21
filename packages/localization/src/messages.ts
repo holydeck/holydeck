@@ -56,6 +56,12 @@ const en = {
   'liveMedia.follower.silent': 'This view is not playing the media. Opt in to play it in step with {view}.',
   'liveMedia.follower.synchronized': 'Playing in step with {view}.',
   'liveMedia.follower.resynchronized': 'Caught back up with {view}.',
+  // The words the two assertive connection announcements are said in (`apps/web/src/announcements.ts`),
+  // and the polite confirmation that takes them back. Punctuated as the UI contract's own scenarios
+  // record them, without a closing full stop: a live region reads a status, not a sentence of prose.
+  'announce.connection.reconnecting': 'Reconnecting; last public frame remains visible',
+  'announce.connection.lost': 'Connection lost; editing is paused and typed text is safe',
+  'announce.connection.restored': 'Back online. Checking for newer changes…',
   'audienceOffline.live': 'Following the live service.',
   'audienceOffline.offline':
     'The live connection was lost. Showing the last verified copy; other screens may no longer match this one.',
@@ -142,6 +148,9 @@ const de: Catalog = {
     'Diese Ansicht spielt das Medium nicht ab. Aktivieren Sie die Wiedergabe, um es synchron zu {view} abzuspielen.',
   'liveMedia.follower.synchronized': 'Wiedergabe synchron zu {view}.',
   'liveMedia.follower.resynchronized': 'Wieder synchron zu {view}.',
+  'announce.connection.reconnecting': 'Verbindung wird wiederhergestellt; das letzte öffentliche Bild bleibt sichtbar',
+  'announce.connection.lost': 'Verbindung unterbrochen; die Bearbeitung ist angehalten und Eingegebenes ist gesichert',
+  'announce.connection.restored': 'Wieder online. Es wird nach neueren Änderungen gesucht…',
   'audienceOffline.live': 'Folgt dem Live-Gottesdienst.',
   'audienceOffline.offline':
     'Die Live-Verbindung wurde unterbrochen. Es wird die zuletzt geprüfte Kopie gezeigt; andere Bildschirme stimmen möglicherweise nicht mehr damit überein.',
@@ -222,6 +231,9 @@ const ta: Catalog = {
   'liveMedia.follower.silent': 'இந்தக் காட்சி ஊடகத்தை இயக்கவில்லை. {view} உடன் ஒத்திசைவாக இயக்க இதைத் தேர்ந்தெடுக்கவும்.',
   'liveMedia.follower.synchronized': '{view} உடன் ஒத்திசைவாக இயக்கப்படுகிறது.',
   'liveMedia.follower.resynchronized': '{view} உடன் மீண்டும் ஒத்திசைக்கப்பட்டது.',
+  'announce.connection.reconnecting': 'மீண்டும் இணைக்கப்படுகிறது; கடைசியாகக் காட்டப்பட்ட பொதுச் சட்டகம் தொடர்ந்து தெரியும்',
+  'announce.connection.lost': 'இணைப்பு துண்டிக்கப்பட்டது; திருத்தம் நிறுத்தப்பட்டுள்ளது, தட்டச்சு செய்த உரை பாதுகாப்பாக உள்ளது',
+  'announce.connection.restored': 'மீண்டும் இணைப்பில். புதிய மாற்றங்கள் சரிபார்க்கப்படுகின்றன…',
   'audienceOffline.live': 'நேரடி வழிபாட்டைப் பின்தொடர்கிறது.',
   'audienceOffline.offline':
     'நேரடி இணைப்பு துண்டிக்கப்பட்டது. கடைசியாக சரிபார்க்கப்பட்ட நகல் காட்டப்படுகிறது; மற்ற திரைகள் இனி இதற்குப் பொருந்தாமல் இருக்கலாம்.',

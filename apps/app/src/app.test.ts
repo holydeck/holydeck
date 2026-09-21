@@ -36,6 +36,7 @@ const sources: LoadedSettings['sources'] = {
   corpusToken: 'default',
   mongoUrl: 'default',
   timezone: 'default',
+  developmentDiagnostics: 'default',
 };
 
 const settings: LoadedSettings = {

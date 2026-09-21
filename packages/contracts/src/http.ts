@@ -92,12 +92,30 @@ export type SuccessEnvelope<T> = {
   readonly meta: { readonly requestId: string; readonly version?: number };
 };
 
+/**
+ * What a fault actually was, for a developer running this deployment themselves.
+ *
+ * Never part of an ordinary answer. The sentence a thrown error carries is written for whoever reads the
+ * log — it has been known to hold a connection string, a path on the host, a credential — and this shape
+ * exists so that a deployment which has deliberately turned diagnostics on gets it in a documented field
+ * rather than in the `message` a client is meant to be able to show somebody.
+ *
+ * Optional rather than nulled out when absent, so an envelope from an installation that does not have
+ * diagnostics enabled is byte-for-byte the envelope of one that has never heard of them.
+ */
+export type ErrorDiagnostics = {
+  readonly message: string;
+  readonly stack?: string;
+};
+
 export type ErrorEnvelope = {
   readonly error: {
     readonly code: string;
     readonly message: string;
     readonly requestId: string;
     readonly fields?: readonly FieldProblem[];
+    /** Present only where the deployment itself turned developer diagnostics on. See above. */
+    readonly diagnostics?: ErrorDiagnostics;
   };
 };
 

@@ -81,8 +81,10 @@ export function buildApp({
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
 
   withSecurityHeaders(app);
-  // Before every route, so a fault in one of them answers with a code and not with what it threw.
-  withSafeErrors(app);
+  // Before every route, so a fault in one of them answers with a code and not with what it threw. The
+  // one exception is a deployment that set `developmentDiagnostics` in its own environment, which the
+  // settings file cannot do and an administrator's request therefore cannot either.
+  withSafeErrors(app, { diagnostics: settings.values.developmentDiagnostics });
 
   // Decided before routing, so a client this build cannot serve is told to update rather than being
   // handed a not-found for a route it was asking for in an older shape.

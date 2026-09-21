@@ -21,6 +21,13 @@
       <p id="status">Preparing the service view.</p>
       <noscript>This client needs JavaScript to prepare and present a service.</noscript>
 
+      <!-- The two regions every contracted announcement is said in (AX-F3): polite for save, toast and
+           collaborator events, assertive for connection loss, an expired invitation and a newly
+           introduced readiness blocker. Served rather than created on demand, because a live region a
+           script inserts and writes to in the same task is frequently never announced at all. -->
+      <p id="announce-polite" class="visually-hidden" aria-live="polite"></p>
+      <p id="announce-assertive" class="visually-hidden" aria-live="assertive"></p>
+
       <!-- Each link below focuses a distinct region, not a shared landmark (AX-F2). -->
       <nav class="skip-links" aria-labelledby="skip-links-heading">
         <h2 id="skip-links-heading" class="visually-hidden">Skip links</h2>

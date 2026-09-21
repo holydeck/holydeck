@@ -151,6 +151,24 @@ describe('changing a setting', () => {
     expect((await reading()).json().data.values).toMatchObject({ locale: 'en', port: 3000 });
   });
 
+  // The protected setting, from the only direction that matters: this request holds SETTINGS_MANAGE,
+  // the highest thing this surface asks for, and still cannot turn developer diagnostics on. It is
+  // refused because `update()` validates the whole merged file through the loader, and the loader will
+  // not read this setting out of a file at all — so turning it on means reaching the deployment itself.
+  test('cannot turn developer diagnostics on, even holding the permission that manages settings', async () => {
+    const response = await patching({ developmentDiagnostics: true });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+    expect(response.json().error.fields[0]).toMatchObject({ path: 'settings', code: 'field.not_allowed' });
+    expect((await reading()).json().data.values).toMatchObject({ developmentDiagnostics: false });
+  });
+
+  test('cannot turn them on alongside a change that would otherwise be applied', async () => {
+    const response = await patching({ locale: 'de', developmentDiagnostics: true });
+    expect(response.statusCode).toBe(422);
+    expect((await reading()).json().data.values).toMatchObject({ locale: 'en', developmentDiagnostics: false });
+  });
+
   test('an unexpected failure while writing is not turned into a validation refusal', async () => {
     const io = fakeSettingsIO({ [PATH]: `corpusUrl: http://corpus:8080\ncorpusToken: ${TOKEN}\n` });
     io.failNextRename('the disk is full');
