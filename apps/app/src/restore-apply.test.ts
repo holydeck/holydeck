@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { CONSISTENCY_METHOD, EXCLUDED_SECRETS, archiveEntryOf } from './backups.js';
 import { requestContext } from './context.js';
 import { RECORDS, permissionsFor } from './records.js';
-import { RestoreApplyError, applyRestore } from './restore-apply.js';
+import { RestoreApplyError, applyRestore, fileRestoreTarget } from './restore-apply.js';
 import { RESTORE_RECORD, RestoreError, restoreContext } from './restores.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
@@ -98,12 +98,6 @@ const fakeTarget = (log: string[] = []): FakeTarget => {
   };
 };
 
-const fakeFileTarget = (name: string, log: string[]): RestoreFileTarget => ({
-  async replace() {
-    log.push(`replace ${name}`);
-  },
-});
-
 const fakeSessions = (log: string[] = []): RestoreSessions => ({
   async revokeEvery() {
     log.push('end every session');
@@ -135,16 +129,29 @@ interface Rig {
   readonly log: string[];
   readonly mongoTarget: FakeTarget;
   readonly targets: RestoreApplyTargets;
+  readonly settingsLivePath: string;
+  readonly mediaLivePath: string;
 }
 
-const rigFor = (root: string, log: string[] = []): Rig => {
+/** What "already restored to disk" looks like for settings and media: real files, staged the way a
+ * worker's Restic restore would have, so `fileRestoreTarget` is proved against real file state rather
+ * than a mock standing in for one. */
+const rigFor = async (root: string, log: string[] = []): Promise<Rig> => {
   const mongoTarget = fakeTarget(log);
+  const settingsRestoredPath = join(root, 'restored-settings.yaml');
+  const settingsLivePath = join(root, 'live-settings.yaml');
+  await writeFile(settingsRestoredPath, 'port: 4100\n', 'utf8');
+  const mediaRestoredPath = join(root, 'restored-media');
+  const mediaLivePath = join(root, 'live-media');
+  await mkdir(mediaRestoredPath, { recursive: true });
+  await writeFile(join(mediaRestoredPath, 'hymn.mp3'), 'restored media bytes', 'utf8');
+
   const targets: RestoreApplyTargets = {
     mongo: { restoredRoot: root, target: mongoTarget } satisfies MongoRestoreTarget,
-    settings: fakeFileTarget('settings', log),
-    media: fakeFileTarget('media', log),
+    settings: fileRestoreTarget({ restoredPath: settingsRestoredPath, livePath: settingsLivePath }),
+    media: fileRestoreTarget({ restoredPath: mediaRestoredPath, livePath: mediaLivePath }),
   };
-  return { log, mongoTarget, targets };
+  return { log, mongoTarget, targets, settingsLivePath, mediaLivePath };
 };
 
 const ALL_CLASSES: readonly RestoreClass[] = ['mongo', 'settings', 'media'];
@@ -160,7 +167,7 @@ const nonEmptySubsets = (items: readonly RestoreClass[]): RestoreClass[][] => {
 describe('selecting which classes a restore replaces', () => {
   test.each(nonEmptySubsets(ALL_CLASSES))('replaces exactly %s, and touches nothing else', async (...classes) => {
     const production = productionOf(await archiveIn(root));
-    const { log, mongoTarget, targets } = rigFor(root);
+    const { log, mongoTarget, targets, settingsLivePath, mediaLivePath } = await rigFor(root);
     const applied = await applyRestore(fakeDb(), CONTEXT, production, {
       selection: selectionOf(classes),
       targets,
@@ -170,8 +177,20 @@ describe('selecting which classes a restore replaces', () => {
 
     expect(applied.classes).toEqual(classes);
     expect(mongoTarget.rows.get('services')).toEqual(classes.includes('mongo') ? ARCHIVED.services : undefined);
-    expect(log.includes('replace settings')).toBe(classes.includes('settings'));
-    expect(log.includes('replace media')).toBe(classes.includes('media'));
+
+    const settingsReplaced = await readFile(settingsLivePath, 'utf8').then(
+      () => true,
+      () => false,
+    );
+    expect(settingsReplaced).toBe(classes.includes('settings'));
+    if (classes.includes('settings')) expect(await readFile(settingsLivePath, 'utf8')).toBe('port: 4100\n');
+
+    const mediaReplaced = await readFile(join(mediaLivePath, 'hymn.mp3'), 'utf8').then(
+      () => true,
+      () => false,
+    );
+    expect(mediaReplaced).toBe(classes.includes('media'));
+
     expect(log.includes('end every session')).toBe(classes.includes('mongo'));
     expect(applied.sessionsEnded).toBe(classes.includes('mongo') ? 4 : undefined);
   });
@@ -180,7 +199,7 @@ describe('selecting which classes a restore replaces', () => {
 describe('what a production restore refuses before writing anything', () => {
   test('refuses a class the manifest never inventoried, before any target is touched', async () => {
     const production = productionOf(await archiveIn(root), ['mongo', 'settings']);
-    const { log, targets } = rigFor(root);
+    const { log, targets } = await rigFor(root);
     const error = await refusal(() =>
       applyRestore(fakeDb(), CONTEXT, production, {
         selection: selectionOf(['settings', 'media']),
@@ -196,7 +215,7 @@ describe('what a production restore refuses before writing anything', () => {
 
   test('refuses a selected class with no target wired to receive it, before any target is touched', async () => {
     const production = productionOf(await archiveIn(root));
-    const { log, targets } = rigFor(root);
+    const { log, targets } = await rigFor(root);
     const withoutSettings: RestoreApplyTargets = { mongo: targets.mongo, media: targets.media };
     const error = await refusal(() =>
       applyRestore(fakeDb(), CONTEXT, production, {
@@ -213,7 +232,7 @@ describe('what a production restore refuses before writing anything', () => {
 
   test('refuses a merge attempt outright, rather than applying part of it', async () => {
     const production = productionOf(await archiveIn(root));
-    const { log, mongoTarget, targets } = rigFor(root);
+    const { log, mongoTarget, targets } = await rigFor(root);
     const merge = { mode: 'merge', classes: ['mongo'] } as unknown as RestoreSelection;
     const error = await refusal(() =>
       applyRestore(fakeDb(), CONTEXT, production, { selection: merge, targets, sessions: fakeSessions(log), now: () => NOW }),
@@ -226,7 +245,7 @@ describe('what a production restore refuses before writing anything', () => {
   test('refuses an archive whose restored Mongo bytes do not match the manifest, before any target is touched', async () => {
     const production = productionOf(await archiveIn(root));
     await writeFile(join(root, 'services.json'), '[]', 'utf8');
-    const { log, targets } = rigFor(root);
+    const { log, targets } = await rigFor(root);
     const error = await refusal(() =>
       applyRestore(fakeDb(), CONTEXT, production, {
         selection: selectionOf(['mongo']),
@@ -241,7 +260,7 @@ describe('what a production restore refuses before writing anything', () => {
 
   test('refuses an actor who may not apply one', async () => {
     const production = productionOf(await archiveIn(root));
-    const { log, targets } = rigFor(root);
+    const { log, targets } = await rigFor(root);
     const reader = requestContext({
       actor: 'operator',
       permissions: [permissionsFor(RESTORE_RECORD).read],
@@ -260,7 +279,7 @@ describe('what a production restore refuses before writing anything', () => {
 
   test('refuses a context that is not one', async () => {
     const production = productionOf(await archiveIn(root));
-    const { log, targets } = rigFor(root);
+    const { log, targets } = await rigFor(root);
     const error = await refusal(() =>
       applyRestore(fakeDb(), { actor: '' }, production, {
         selection: selectionOf(['settings']),
@@ -277,7 +296,7 @@ describe('what a production restore leaves behind', () => {
   test('audits a completed restore with the classes it replaced', async () => {
     const db = fakeDb();
     const production = productionOf(await archiveIn(root));
-    const { log, targets } = rigFor(root);
+    const { log, targets } = await rigFor(root);
     await applyRestore(db, CONTEXT, production, {
       selection: selectionOf(['mongo', 'settings']),
       targets,
@@ -294,12 +313,76 @@ describe('what a production restore leaves behind', () => {
   test('audits a refusal too, whether this module raised it or the archive verifier did', async () => {
     const db = fakeDb();
     const production = productionOf(await archiveIn(root));
-    const { log, targets } = rigFor(root);
+    const { log, targets } = await rigFor(root);
     const merge = { mode: 'merge', classes: ['mongo'] } as unknown as RestoreSelection;
     await refusal(() =>
       applyRestore(db, CONTEXT, production, { selection: merge, targets, sessions: fakeSessions(log), now: () => NOW }),
     );
     const audited = db.rows.get(RECORDS.auditEvents.collection) ?? [];
     expect(audited[0]).toMatchObject({ action: 'restore.run', outcome: 'refused' });
+  });
+
+  test('audits a refusal from a well-formed but under-permissioned actor', async () => {
+    const db = fakeDb();
+    const production = productionOf(await archiveIn(root));
+    const { log, targets } = await rigFor(root);
+    const reader = requestContext({
+      actor: 'operator',
+      permissions: [permissionsFor(RESTORE_RECORD).read],
+      correlationId: 'restore-apply-1',
+    });
+    await refusal(() =>
+      applyRestore(db, reader, production, {
+        selection: selectionOf(['settings']),
+        targets,
+        sessions: fakeSessions(log),
+        now: () => NOW,
+      }),
+    );
+    const audited = db.rows.get(RECORDS.auditEvents.collection) ?? [];
+    expect(audited).toHaveLength(1);
+    expect(audited[0]).toMatchObject({ action: 'restore.run', outcome: 'refused', actor: 'operator' });
+  });
+
+  test('writes no audit row for a context too malformed to name an actor', async () => {
+    const db = fakeDb();
+    const production = productionOf(await archiveIn(root));
+    const { log, targets } = await rigFor(root);
+    await refusal(() =>
+      applyRestore(db, { actor: '' }, production, {
+        selection: selectionOf(['settings']),
+        targets,
+        sessions: fakeSessions(log),
+        now: () => NOW,
+      }),
+    );
+    expect(db.rows.get(RECORDS.auditEvents.collection) ?? []).toEqual([]);
+  });
+
+  test('audits a restore that fails after mongo already replaced, naming what got through', async () => {
+    const db = fakeDb();
+    const production = productionOf(await archiveIn(root));
+    const { log, mongoTarget, targets } = await rigFor(root);
+    const failingSettings: RestoreFileTarget = {
+      async replace() {
+        throw new Error('disk is full');
+      },
+    };
+
+    await expect(
+      applyRestore(db, CONTEXT, production, {
+        selection: selectionOf(['mongo', 'settings']),
+        targets: { ...targets, settings: failingSettings },
+        sessions: fakeSessions(log),
+        now: () => NOW,
+      }),
+    ).rejects.toThrow('disk is full');
+
+    expect(mongoTarget.rows.get('services')).toEqual(ARCHIVED.services);
+    const audited = db.rows.get(RECORDS.auditEvents.collection) ?? [];
+    expect(audited).toHaveLength(1);
+    expect(audited[0]).toMatchObject({ action: 'restore.run', outcome: 'refused' });
+    expect(String(audited[0]?.['detail'])).toContain('mongo');
+    expect(String(audited[0]?.['detail'])).toContain('disk is full');
   });
 });

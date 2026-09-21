@@ -41,6 +41,10 @@
       "types": "./dist/restores.d.ts",
       "import": "./dist/restores.js"
     },
+    "./restore-apply": {
+      "types": "./dist/restore-apply.d.ts",
+      "import": "./dist/restore-apply.js"
+    },
     "./sessions": {
       "types": "./dist/sessions.d.ts",
       "import": "./dist/sessions.js"

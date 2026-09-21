@@ -22,7 +22,9 @@
 // instead, so the worker that actually owns the disk decides how "replace" happens and this module stays
 // provable with a fake standing in for it.
 
-import { auditOn } from './audit.js';
+import { cp, rm } from 'node:fs/promises';
+
+import { auditContext, auditOn } from './audit.js';
 import { contextProblems } from './context.js';
 import { permissionsFor } from './records.js';
 import { RESTORE_RECORD, RestoreError, replaceCollection, verifyMongoArchive } from './restores.js';
@@ -58,6 +60,28 @@ export interface MongoRestoreTarget {
  */
 export interface RestoreFileTarget {
   replace(): Promise<void>;
+}
+
+/** Where a class was already restored to on disk — a file for settings, a directory for media — and the
+ * live path it replaces. */
+export interface FileRestoreTarget {
+  readonly restoredPath: string;
+  readonly livePath: string;
+}
+
+/**
+ * The ordinary `RestoreFileTarget`: replaces the live path outright with what a caller already restored
+ * onto disk, exactly as `MongoRestoreTarget` restores into an already-materialized `restoredRoot` rather
+ * than reaching into Restic itself. `cp` rather than `rename`, because the restored path and the live path
+ * are not guaranteed to share a filesystem.
+ */
+export function fileRestoreTarget(target: FileRestoreTarget): RestoreFileTarget {
+  return {
+    async replace() {
+      await rm(target.livePath, { recursive: true, force: true });
+      await cp(target.restoredPath, target.livePath, { recursive: true });
+    },
+  };
 }
 
 export interface RestoreApplyTargets {
@@ -109,17 +133,21 @@ export async function applyRestore(
   production: BackupProduction,
   options: RestoreApplyOptions,
 ): Promise<RestoreApplication> {
-  const checked = permit(context);
   const trail = auditOn(db, { now: options.now });
   const backupId = production.manifest.id;
   try {
+    const checked = permit(context);
     return await run(db, checked, production, options);
   } catch (error) {
     // `verifyMongoArchive` is `restores.ts`'s own, and raises `RestoreError` rather than this module's
     // own kind — audited the same way regardless, because a caller looking for why a restore was refused
-    // should not have to know which of the two modules noticed.
-    if (error instanceof RestoreApplyError || error instanceof RestoreError) {
-      await trail.record(context, {
+    // should not have to know which of the two modules noticed. Recorded under a minimally-scoped
+    // `auditContext` rather than the refused context itself: the context `permit` just refused may lack
+    // `auditEvents.append`, and writing under it would only fail the append too. A context too malformed
+    // to name an actor is the one refusal nothing here can audit — there is no identity to attribute it to.
+    if ((error instanceof RestoreApplyError || error instanceof RestoreError) && contextProblems(context).length === 0) {
+      const { actor, correlationId } = context as RequestContext;
+      await trail.record(auditContext(actor, correlationId), {
         action: 'restore.run',
         subject: backupId,
         outcome: 'refused',
@@ -158,17 +186,41 @@ async function run(
     : undefined;
   const mediaTarget = classes.includes('media') ? requireTarget('media', options.targets.media, backupId) : undefined;
 
-  if (mongoTarget !== undefined) {
-    // Reproved against the manifest's digest, exactly as a rehearsal proves it, before a document moves.
-    const verified = await verifyMongoArchive(mongoTarget.restoredRoot, production);
-    for (const entry of verified) await replaceCollection(mongoTarget.target, entry.collection, entry.documents);
+  // Once a write starts, a failure partway through must still leave a trace of what already happened —
+  // Mongo replaced but settings not, say — even when the failure is an ordinary I/O error rather than one
+  // of this module's own kinds, which `applyRestore`'s own catch only recognizes before anything is
+  // written.
+  const applied: RestoreClass[] = [];
+  let sessionsEnded: number | undefined;
+  try {
+    if (mongoTarget !== undefined) {
+      // Reproved against the manifest's digest, exactly as a rehearsal proves it, before a document moves.
+      const verified = await verifyMongoArchive(mongoTarget.restoredRoot, production);
+      for (const entry of verified) await replaceCollection(mongoTarget.target, entry.collection, entry.documents);
+      applied.push('mongo');
+    }
+    if (settingsTarget !== undefined) {
+      await settingsTarget.replace();
+      applied.push('settings');
+    }
+    if (mediaTarget !== undefined) {
+      await mediaTarget.replace();
+      applied.push('media');
+    }
+    // The archive carries no session, so putting Mongo back leaves every open one holding authority over a
+    // world that has just been replaced underneath it — the same reasoning `rehearseRestore` acts on.
+    sessionsEnded = mongoTarget === undefined ? undefined : await options.sessions.revokeEvery(checked);
+  } catch (error) {
+    if (applied.length > 0) {
+      await auditOn(db, { now: options.now }).record(checked, {
+        action: 'restore.run',
+        subject: backupId,
+        outcome: 'refused',
+        detail: `restore ${backupId}: replaced ${applied.join(', ')} before failing: ${(error as Error).message}`,
+      });
+    }
+    throw error;
   }
-  if (settingsTarget !== undefined) await settingsTarget.replace();
-  if (mediaTarget !== undefined) await mediaTarget.replace();
-
-  // The archive carries no session, so putting Mongo back leaves every open one holding authority over a
-  // world that has just been replaced underneath it — the same reasoning `rehearseRestore` acts on.
-  const sessionsEnded = mongoTarget === undefined ? undefined : await options.sessions.revokeEvery(checked);
 
   await auditOn(db, { now: options.now }).record(checked, {
     action: 'restore.run',

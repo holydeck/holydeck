@@ -4,7 +4,7 @@
 // "complete" means; both are `apps/app`'s and Restic's to answer, and this module is only their meeting
 // point.
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -44,12 +44,24 @@ const stopped = (signal: AbortSignal): void => {
 const isEnoent = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
 
 /**
+ * Fixed rather than a fresh `mkdtemp` per run: Restic records the path it was given as part of the
+ * snapshot, so a random directory here means every "settings" snapshot remembers a different, one-off
+ * path — nothing a restore could predict without the same search-based recovery the Mongo dump needs.
+ * One stable path keeps every "settings" snapshot's recorded path identical, which is what lets a restore
+ * target find the file without that machinery. Cleared before every use, so no run ever reads a file a
+ * previous one left behind.
+ */
+export const SETTINGS_STAGING_DIR = join(tmpdir(), 'holydeck-backup-settings');
+
+/**
  * Stages a redacted copy of the settings file into an otherwise-empty directory, so the "settings" class
  * Restic backs up never carries `corpusToken` or `mongoUrl` verbatim. A deployment with no settings file
  * yet — everything at defaults or in the environment — stages nothing at all, and Restic backs up an
  * empty directory rather than this step failing the run.
  */
 async function stageRedactedSettings(settingsPath: string, stagingDir: string): Promise<void> {
+  await rm(stagingDir, { recursive: true, force: true });
+  await mkdir(stagingDir, { recursive: true });
   let fileText: string;
   try {
     fileText = await readFile(settingsPath, 'utf8');
@@ -71,12 +83,11 @@ export const MONGO_DUMP_CLASS = 'mongo';
 export function backupProducerOn(options: BackupProducerOptions): Handler {
   return async (_job, signal) => {
     const dumpDir = await mkdtemp(join(tmpdir(), 'holydeck-backup-mongo-'));
-    const settingsStagingDir = await mkdtemp(join(tmpdir(), 'holydeck-backup-settings-'));
     try {
       const archive = await readMongoArchive(options.archive, options.context, { dumpDir });
       stopped(signal);
 
-      await stageRedactedSettings(options.settingsPath, settingsStagingDir);
+      await stageRedactedSettings(options.settingsPath, SETTINGS_STAGING_DIR);
       stopped(signal);
 
       // Deferred to here rather than done once at worker start-up: a build that never claims a `backup-run`
@@ -86,7 +97,7 @@ export function backupProducerOn(options: BackupProducerOptions): Handler {
 
       const mongo = await backupPath(options.restic, MONGO_DUMP_CLASS, MONGO_DUMP_CLASS, dumpDir, signal);
       stopped(signal);
-      const settings = await backupPath(options.restic, 'settings', 'settings', settingsStagingDir, signal);
+      const settings = await backupPath(options.restic, 'settings', 'settings', SETTINGS_STAGING_DIR, signal);
       stopped(signal);
       const media = await backupPath(options.restic, 'media', 'media', options.mediaRoot, signal);
       stopped(signal);
@@ -116,7 +127,6 @@ export function backupProducerOn(options: BackupProducerOptions): Handler {
       }
     } finally {
       await rm(dumpDir, { recursive: true, force: true });
-      await rm(settingsStagingDir, { recursive: true, force: true });
     }
   };
 }

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { backupContext } from '@holydeck/app/backups';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { backupProducerOn } from './backup-producer.js';
+import { SETTINGS_STAGING_DIR, backupProducerOn } from './backup-producer.js';
 import { runnerOn } from './runner.js';
 import { fakeDb } from '../../app/test/helpers/fake-db.js';
 
@@ -183,13 +183,10 @@ describe('producing a backup', () => {
       ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'mongo', dumpDir],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
-    const settingsArgs = spawned.mock.calls[2]?.[1] as string[];
-    const settingsStagingDir = settingsArgs.at(-1) as string;
-    expect(settingsStagingDir).toContain(join(tmpdir(), 'holydeck-backup-settings-'));
     expect(spawned).toHaveBeenNthCalledWith(
       3,
       'restic',
-      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'settings', settingsStagingDir],
+      ['backup', '--repo', OPTIONS.restic.repository, '--insecure-no-password', '--json', '--tag', 'settings', SETTINGS_STAGING_DIR],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
     expect(spawned).toHaveBeenNthCalledWith(
@@ -224,9 +221,7 @@ describe('producing a backup', () => {
     children[1]?.emit('close', 0);
 
     await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(3));
-    const settingsArgs = spawned.mock.calls[2]?.[1] as string[];
-    const settingsStagingDir = settingsArgs.at(-1) as string;
-    const staged = await readFile(join(settingsStagingDir, 'settings.yaml'), 'utf8');
+    const staged = await readFile(join(SETTINGS_STAGING_DIR, 'settings.yaml'), 'utf8');
     expect(staged).not.toContain(secretToken);
     expect(staged).not.toContain('hunter2');
     expect(staged).toContain('port: 4100');
@@ -245,6 +240,37 @@ describe('producing a backup', () => {
     children[3]?.emit('close', 0);
 
     await expect(running).resolves.toBeUndefined();
+  });
+
+  it('stages settings at one stable path across runs, clearing what a later run has none of', async () => {
+    const configDir = await mkdtemp(join(tmpdir(), 'holydeck-backup-producer-settings-'));
+    const settingsPath = join(configDir, 'settings.yaml');
+    await writeFile(settingsPath, 'port: 4100\n');
+
+    const firstDb = fakeDb();
+    const first = backupProducerOn({ ...OPTIONS, settingsPath, archive: fakeArchiveDb(), db: firstDb });
+    const firstRun = first(job(), new AbortController().signal);
+    await completeBackupCalls();
+    await expect(firstRun).resolves.toBeUndefined();
+    const firstArgs = spawned.mock.calls[2]?.[1] as string[];
+    expect(firstArgs.at(-1)).toBe(SETTINGS_STAGING_DIR);
+    await expect(readFile(join(SETTINGS_STAGING_DIR, 'settings.yaml'), 'utf8')).resolves.toContain('port: 4100');
+
+    spawned.mockClear();
+    children.length = 0;
+    const secondDb = fakeDb();
+    const second = backupProducerOn({
+      ...OPTIONS,
+      settingsPath: join(configDir, 'missing.yaml'),
+      archive: fakeArchiveDb(),
+      db: secondDb,
+    });
+    const secondRun = second(job(), new AbortController().signal);
+    await completeBackupCalls();
+    await expect(secondRun).resolves.toBeUndefined();
+    const secondArgs = spawned.mock.calls[2]?.[1] as string[];
+    expect(secondArgs.at(-1)).toBe(SETTINGS_STAGING_DIR);
+    await expect(readFile(join(SETTINGS_STAGING_DIR, 'settings.yaml'), 'utf8')).rejects.toThrow();
   });
 
   it('kills an in-flight restic process and writes nothing when the lease is lost mid-run', async () => {
