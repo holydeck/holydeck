@@ -314,6 +314,14 @@ test('a deployment stack that keeps every rule has nothing to report', () => {
   assert.deepEqual(only(deploy()), []);
 });
 
+test('refuses a worker published past this machine, closing the same hole mongo and the corpus are held to', () => {
+  const stack = deploy();
+  stack.services.worker.ports = ['3200:3200'];
+  assert.deepEqual(only(stack), [
+    'compose.yaml: worker publishes 3200:3200 on every interface; nothing outside the deployment has any business calling the worker directly',
+  ]);
+});
+
 test('refuses the deployment stack missing one of its own required services', () => {
   const stack = deploy();
   delete stack.services.worker;

@@ -51,6 +51,7 @@ export const PERSISTED_PATHS = Object.freeze(['/data/db', '/data/holydeck']);
 export const LOOPBACK_ONLY = Object.freeze({
   mongo: 'the records it holds answer from inside the deployment only',
   server: 'the corpus is reachable from inside the deployment only',
+  worker: 'nothing outside the deployment has any business calling the worker directly',
 });
 
 // The deployment stack pulls this image rather than building it, so no service here names a `build:`

@@ -13,6 +13,7 @@
 // the stack did on the machine it was run on.
 
 import { execFileSync } from 'node:child_process';
+import { connect } from 'node:net';
 
 import { DEPLOY_FILE, DEPLOY_SERVICES, DEV_FILE, TEST_FILE, healthVerdicts } from '../workspace/compose.mjs';
 import { fromRepoRoot } from '../workspace/pipeline.mjs';
@@ -35,6 +36,18 @@ const ENV_FOR = Object.freeze({ [DEPLOY_FILE]: { HOLYDECK_CORPUS_TOKEN: DEPLOY_T
 // is not checked here — the default Standby screen is built on the generic revisions shape, not its own
 // top-level collection.
 const SEEDED_COLLECTIONS = ['content_languages', 'service_templates', 'slide_labels', 'slide_layouts'];
+
+// DEPL-02's reference posture: only the application is exposed. compose.yaml publishes nothing for these
+// three, so nothing outside the deployment can even name a host port to try — checked here against what
+// Docker actually did, which is the only place a stack's real exposure can be read from.
+const UNPUBLISHED_SERVICES = ['mongo', 'server', 'worker'];
+
+// The port each service would answer on if it were published, so a dial from this host is asking the same
+// question an outside caller would ask. worker has no port of its own — it serves no HTTP at all — so its
+// exposure is checked only through UNPUBLISHED_SERVICES above.
+const WELL_KNOWN_PORT = { mongo: 27017, server: 3000 };
+
+const DIAL_TIMEOUT_MS = 2000;
 
 const root = fromRepoRoot('.');
 const failures = [];
@@ -104,6 +117,63 @@ const seeded = (file) => {
   );
 };
 
+/** Whether a TCP connection to this host's port succeeds within a short timeout — the same question an
+ *  outside caller is asking when it tries to reach a service this stack did not publish. */
+const reaches = (port, host = '127.0.0.1') =>
+  new Promise((resolve) => {
+    const socket = connect({ host, port });
+    const settle = (value) => {
+      socket.destroy();
+      resolve(value);
+    };
+    socket.setTimeout(DIAL_TIMEOUT_MS);
+    socket.once('connect', () => settle(true));
+    socket.once('timeout', () => settle(false));
+    socket.once('error', () => settle(false));
+  });
+
+/** What Docker actually published for one service, read the way `docker compose ps` reports it — a
+ *  stack is exposed by what it started, not by what compose.yaml merely declares. Docker lists a
+ *  Publishers entry for every port the image's Dockerfile EXPOSEs, too, even when compose.yaml never
+ *  binds it to the host — that entry carries PublishedPort 0 and an empty URL, and is not an exposure;
+ *  apps/app/Dockerfile's own EXPOSE is what makes worker (built from that same image) show one. Only a
+ *  nonzero PublishedPort means a caller outside the deployment has a host port to try. */
+const publishersOf = (file, service) => {
+  const text = compose(file, ['ps', '--all', '--format', 'json'], true).trim();
+  const rows = text.startsWith('[')
+    ? JSON.parse(text)
+    : text
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .map((line) => JSON.parse(line));
+  const publishers = rows.find((row) => row.Service === service)?.Publishers ?? [];
+  return publishers.filter((entry) => entry.PublishedPort > 0);
+};
+
+// The one live check this file exists to add on top of DEPL-01's: not just that the stack came up, but
+// that the only door left open once it did is the application's.
+const reachability = async (file) => {
+  for (const service of UNPUBLISHED_SERVICES) {
+    const published = publishersOf(file, service);
+    check(
+      `${file}: ${service} publishes no port a caller outside the deployment could reach`,
+      published.length === 0,
+      published.map((entry) => `${entry.URL}:${entry.PublishedPort}`).join(', '),
+    );
+  }
+  for (const [service, port] of Object.entries(WELL_KNOWN_PORT)) {
+    check(
+      `${file}: ${service}'s own port ${port} refuses a connection made from outside the deployment`,
+      !(await reaches(port)),
+    );
+  }
+  const applicationAnswers = await fetch('http://127.0.0.1:3100/health').then(
+    (response) => response.ok,
+    () => false,
+  );
+  check(`${file}: the application answers its own health route from outside the deployment`, applicationAnswers);
+};
+
 try {
   say(`\n=== ${DEV_FILE}: first bring-up ===`);
   up(DEV_FILE);
@@ -158,6 +228,9 @@ try {
   // What "ran against an empty database and recorded it" needs is that something was written at all.
   check(`${DEPLOY_FILE}: the migration ran against an empty database and recorded it`, deployed.rows > 0 && deployed.applied !== 'none', `${deployed.rows} ledger rows, applied at ${deployed.applied}`);
   seeded(DEPLOY_FILE);
+
+  say(`\n=== ${DEPLOY_FILE}: only the application is reachable from outside the deployment ===`);
+  await reachability(DEPLOY_FILE);
 } finally {
   say('\n=== taking every stack down with its volumes ===');
   for (const file of [DEV_FILE, TEST_FILE, DEPLOY_FILE]) {
