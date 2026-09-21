@@ -27,7 +27,11 @@ More at [holydeck.faith](https://holydeck.faith).
 
 Development, CI, releases, and the server image use Node 24.20.0. Run `nvm use` to select the
 version pinned in `.nvmrc`. The published CLI supports Node >= 24.20.0 and < 25; revisit this
-when Node 26 (the next LTS) enters the support window.
+when Node 26 (the next LTS) enters the support window — see `MAINTENANCE.md` for the latest
+checkpoint.
+
+Running, restarting, rolling back a migration, and rotating a secret on a deployed instance are
+covered in `MAINTENANCE.md`, not here — this section is about developing HolyDeck itself.
 
 `main` is protected by a ruleset: no direct pushes, no force-push, no branch deletion, commits
 must be signed, and `verify`, `docker / build`, `analyze`, `dependency-review` and `CodeQL` must

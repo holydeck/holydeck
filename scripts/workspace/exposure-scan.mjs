@@ -25,6 +25,7 @@ export const SHIPPED_FILES = [
   'README.md',
   'RELEASING.md',
   'SECURITY.md',
+  'MAINTENANCE.md',
   'CHANGELOG.md',
   'compose.yaml',
   'compose.dev.yaml',

@@ -59,6 +59,7 @@
     "test": "vitest run --coverage",
     "lint": "eslint src test",
     "migrate": "node dist/migrate.js",
+    "deploy-preflight": "node dist/deploy-preflight-cli.js",
     "typecheck": "tsc --noEmit",
     "start": "node dist/main.js"
   },

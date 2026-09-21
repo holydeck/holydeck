@@ -1,0 +1,103 @@
+// The one test in this package that proves `resume()` survives more than a fresh JS closure over a
+// shared fake: a genuine reconnect. runs.ts's own header explains why resume() reports the same thing
+// after a restart — nothing about a run is held outside the repository — and runs.test.ts proves that at
+// the unit level over one `fakeDb` never actually reopened. This is the deployment-relevant half (T108,
+// DEPL-03): a run started over one real MongoClient resumes correctly through a second MongoClient opened
+// fresh against the same database, the same reconnect a restarted application process makes.
+
+import { MongoClient } from 'mongodb';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { PRESENTATION_CONTROL, permissionsFor } from './roles.js';
+import { repositoryDb } from './repositories.js';
+import { runContext, runsOn } from './runs.js';
+import { serviceContext, servicesOn } from './services.js';
+import { preparationContext, preparationOn } from './snapshots.js';
+import { DATABASE, startTestMongo } from '../test/helpers/mongo.js';
+
+import type { AccountRecord } from '@holydeck/contracts/accounts';
+import type { ServiceDraft, ServiceSection } from '@holydeck/contracts/services';
+import type { OperatorSession, PreparationInputs, ReadinessObservation } from './snapshots.js';
+import type { TestMongo } from '../test/helpers/mongo.js';
+
+const START = Date.parse('2026-09-20T09:30:00.000Z');
+const OPERATOR = `account:${'E'.repeat(22)}`;
+const CORRELATION = 'req-3c9f10ba';
+const EDITOR = serviceContext(OPERATOR, CORRELATION);
+const PREPARE_CONTEXT = preparationContext(OPERATOR, CORRELATION);
+const READ_CONTEXT = runContext(OPERATOR, CORRELATION);
+
+const SECTIONS: readonly ServiceSection[] = [
+  { id: 'section-1', name: 'Worship', items: [{ id: 'item-1', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined }] },
+];
+const DRAFT: ServiceDraft = { title: 'Sunday Morning', date: '2026-09-20', site: 'Main Hall', sections: SECTIONS };
+
+const INPUTS: PreparationInputs = {
+  slideLayout: { id: 'layout-1', revision: 1 },
+  serviceTemplate: 'template-1@1',
+  settings: 'settings@1',
+  media: 'media@2026-09-12',
+  corpus: 'corpus@2026-08-01',
+  aspectRatio: '16:9',
+};
+
+const READY: ReadinessObservation = { slideLayoutRevision: 1, checks: [] };
+
+const account: AccountRecord = {
+  id: 'A'.repeat(22),
+  name: 'lucia',
+  displayName: 'Lucia Brandt',
+  role: 'member',
+  createdAt: '2026-09-20T09:30:00.000Z',
+  controlPresentation: true,
+  disabled: false,
+};
+
+const OPERATOR_SESSION: OperatorSession = {
+  actor: OPERATOR,
+  permissions: permissionsFor(account),
+  correlationId: CORRELATION,
+};
+
+let mongo: TestMongo;
+
+beforeAll(async () => {
+  mongo = await startTestMongo();
+});
+
+afterAll(async () => {
+  await mongo.stop();
+});
+
+describe('resuming a run after a real restart', () => {
+  it('reports the same run through a freshly opened connection, the way a restarted process reconnects', async () => {
+    expect(OPERATOR_SESSION.permissions).toContain(PRESENTATION_CONTROL);
+
+    const db = repositoryDb(mongo.db);
+    let tick = 0;
+    const now = (): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString();
+    const services = servicesOn(db, { now, newId: () => 'service-1' });
+    const service = await services.create(EDITOR, DRAFT);
+    await preparationOn(db, { now: () => new Date(START).toISOString() }).prepare(PREPARE_CONTEXT, service.stamp.id, INPUTS);
+
+    const runs = runsOn(db, { now, newId: () => 'run-1', observe: () => READY });
+    const started = await runs.start(OPERATOR_SESSION, { serviceId: service.stamp.id, mode: 'live' });
+
+    // A brand new MongoClient, opened against the same connection string, that never saw `start()`
+    // called — exactly what a restarted process holds instead of the closure the first store was
+    // built over.
+    const restarted = new MongoClient(mongo.uri, { ignoreUndefined: true });
+    await restarted.connect();
+    try {
+      const restartedRuns = runsOn(repositoryDb(restarted.db(DATABASE)), { now });
+      const resumed = await restartedRuns.resume(READ_CONTEXT, started.runId);
+
+      expect(resumed?.runId).toBe(started.runId);
+      expect(resumed?.mode).toBe(started.mode);
+      expect(resumed?.phase).toBe('active');
+      expect(resumed?.position).toBe(started.position);
+    } finally {
+      await restarted.close();
+    }
+  });
+});

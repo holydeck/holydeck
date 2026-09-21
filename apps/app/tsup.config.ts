@@ -4,6 +4,7 @@ export default defineConfig({
   entry: [
     'src/main.ts',
     'src/migrate.ts',
+    'src/deploy-preflight-cli.ts',
     'src/settings.ts',
     'src/boot.ts',
     'src/media.ts',

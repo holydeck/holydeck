@@ -11,7 +11,7 @@ import {
   redactorFor,
   secretsIn,
 } from './redaction.js';
-import { DEFAULT_SETTINGS } from './settings.js';
+import { DEFAULT_SETTINGS, loadSettings } from './settings.js';
 
 const CORPUS_TOKEN = 'corpus-token-0123456789abcdef';
 const MONGO_PASSWORD = 'mongo-password-fedcba9876543210';
@@ -107,6 +107,28 @@ describe('redacting a value', () => {
     // An address with no credential in it carries no secret to remove, and is not made into one.
     expect(secretsIn({ ...DEFAULT_SETTINGS, mongoUrl: 'mongodb://db.example.invalid/holydeck' })).toEqual([]);
     expect(secretsIn({ ...DEFAULT_SETTINGS, mongoUrl: 'not a URL at all' })).toEqual([]);
+  });
+});
+
+// The maintenance procedure this exercises: an operator rotates a secret by redeploying with a new
+// value and restarting, which is a fresh `loadSettings` read the same way a restart's is (main.ts calls
+// both the same way, in the same order, at boot). This proves a rotation actually reaches the redactor a
+// fresh boot builds from it — not just that `secretsIn` can read a single settings snapshot.
+describe('rotating a secret', () => {
+  test('reloading settings after an operator rotates a secret protects the new value, not the stale one', () => {
+    const before = loadSettings({ env: { HOLYDECK_MONGO_URL: `mongodb://app:${MONGO_PASSWORD}@mongo:27017/holydeck` } });
+    const redactBefore = redactorFor(secretsIn(before.values));
+    expect(redactBefore(`connect failed for ${MONGO_PASSWORD}`)).toBe(`connect failed for ${REDACTED}`);
+
+    const ROTATED_PASSWORD = 'rotated-password-0123456789abcdef';
+    const after = loadSettings({ env: { HOLYDECK_MONGO_URL: `mongodb://app:${ROTATED_PASSWORD}@mongo:27017/holydeck` } });
+    const redactAfter = redactorFor(secretsIn(after.values));
+
+    expect(redactAfter(`connect failed for ${ROTATED_PASSWORD}`)).toBe(`connect failed for ${REDACTED}`);
+    // The rotated-away value is no longer this deployment's secret to protect, so a line naming it reads
+    // as ordinary text after rotation — which is exactly why a rotation is complete only once the old
+    // value has stopped appearing anywhere new gets logged.
+    expect(redactAfter(`connect failed for ${MONGO_PASSWORD}`)).toBe(`connect failed for ${MONGO_PASSWORD}`);
   });
 });
 

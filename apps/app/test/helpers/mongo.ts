@@ -8,6 +8,9 @@ export const DATABASE = 'holydeck-test';
 
 export interface TestMongo {
   db: Db;
+  /** The connection string this database answers on, so a test can open a second, independent
+   *  MongoClient against the same database — the same reconnect a restarted process makes. */
+  uri: string;
   stop: () => Promise<void>;
 }
 
@@ -52,6 +55,7 @@ export async function startRestrictedMongo(privileges: {
   let stopped = false;
   return {
     db: client.db(DATABASE),
+    uri: mongod.getUri(),
     root: database,
     stop: async () => {
       if (stopped) return;
@@ -70,6 +74,7 @@ export async function startTestMongo(): Promise<TestMongo> {
   let stopped = false;
   return {
     db: client.db(DATABASE),
+    uri: mongod.getUri(),
     stop: async () => {
       if (stopped) return;
       stopped = true;
@@ -95,6 +100,7 @@ export async function startTestMongoReplicaSet(): Promise<ReplicaSetMongo> {
   let stopped = false;
   return {
     db: client.db(DATABASE),
+    uri: replSet.getUri(),
     client,
     stop: async () => {
       if (stopped) return;
