@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 import { LOCALES } from '@holydeck/localization/locales';
 import { describe, expect, it } from 'vitest';
 
@@ -162,6 +164,12 @@ describe('the settings path', () => {
     expect(CANONICAL_SETTINGS_PATH).toBe('/data/holydeck/config/settings.yaml');
     expect(settingsPath({ HOLYDECK_SETTINGS_PATH: '/etc/holydeck/settings.yaml' })).toBe(
       '/etc/holydeck/settings.yaml',
+    );
+  });
+
+  it('normalizes a relative override, so the exact-string mount check in boot.ts still recognizes it', () => {
+    expect(settingsPath({ HOLYDECK_SETTINGS_PATH: 'config/settings.yaml' })).toBe(
+      resolve('config/settings.yaml'),
     );
   });
 });

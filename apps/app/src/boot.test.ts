@@ -5,6 +5,7 @@ import {
   SettingsMountError,
   checkCorpusBoundary,
   checkCorpusIsClosed,
+  checkOwnSettingsMount,
   checkReleasedContracts,
   checkSchema,
   checkSettingsMount,
@@ -190,5 +191,31 @@ describe('refusing a settings path that is itself a mount point', () => {
     expect(caught).toBeInstanceOf(SettingsMountError);
     expect((caught as Error).name).toBe('SettingsMountError');
     expect((caught as Error).message).toContain(path);
+  });
+});
+
+describe('running the whole settings-mount preflight the same way every process that reads settings does', () => {
+  const path = '/data/holydeck/config/settings.yaml';
+
+  it('starts when the injected mount table has no entry for the settings path', () => {
+    expect(() => checkOwnSettingsMount(path, () => 'irrelevant line\n')).not.toThrow();
+  });
+
+  it('starts when there is no mount table at all to read', () => {
+    expect(() => checkOwnSettingsMount(path, enoent)).not.toThrow();
+  });
+
+  it('refuses when the injected mount table names the settings path itself', () => {
+    const line = `36 35 98:0 / ${path} rw,relatime master:1 - ext4 /dev/sda1 rw`;
+    expect(() => checkOwnSettingsMount(path, () => line)).toThrow(SettingsMountError);
+  });
+
+  it('reads /proc/self/mountinfo when no reader is supplied, the same default readMountInfo uses', () => {
+    let seen: string | undefined;
+    checkOwnSettingsMount(path, (file) => {
+      seen = file;
+      return '';
+    });
+    expect(seen).toBe('/proc/self/mountinfo');
   });
 });

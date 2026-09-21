@@ -6,14 +6,14 @@ import { readFileSync } from 'node:fs';
 
 import { MongoClient } from 'mongodb';
 
-import { checkSettingsMount, mountedPaths, readMountInfo, readSettingsText } from './boot.js';
+import { checkOwnSettingsMount, readSettingsText } from './boot.js';
 import { systemContext } from './context.js';
 import { SCHEMA_VERSION, migrate, rollback, schemaStatus } from './migrations.js';
 import { repositoryDb } from './repositories.js';
 import { loadSettings, settingsPath } from './settings.js';
 
 const path = settingsPath(process.env);
-checkSettingsMount(path, mountedPaths(readMountInfo((file) => readFileSync(file, 'utf8')) ?? ''));
+checkOwnSettingsMount(path);
 const settings = loadSettings({
   fileText: readSettingsText((file) => readFileSync(file, 'utf8'), path),
   env: process.env,

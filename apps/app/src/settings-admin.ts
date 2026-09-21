@@ -138,10 +138,18 @@ export function settingsAdminOn(seed: LoadedSettings, io: SettingsAdminOptions):
     watch() {
       const path = snapshot.path;
       const base = basename(path);
-      return io.watch(dirname(path), async (eventType, filename) => {
-        if (filename !== null && String(filename) !== base) return;
-        await reload(path);
-      });
+      try {
+        return io.watch(dirname(path), async (eventType, filename) => {
+          if (filename !== null && String(filename) !== base) return;
+          await reload(path);
+        });
+      } catch (error) {
+        // A deployment that mounts no settings directory at all — the development stack, by design —
+        // has nowhere for an external edit to land, so there is nothing to watch. That is one door
+        // further along the same hall as readTextOrEmpty's "nothing here yet", not a boot failure.
+        if (!isEnoent(error)) throw error;
+        return { close() {} };
+      }
     },
   };
 }

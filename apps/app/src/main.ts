@@ -13,11 +13,9 @@ import { capabilityDb, capabilitiesOn } from './capabilities.js';
 import {
   checkCorpusBoundary,
   checkCorpusIsClosed,
+  checkOwnSettingsMount,
   checkReleasedContracts,
   checkSchema,
-  checkSettingsMount,
-  mountedPaths,
-  readMountInfo,
   readSettingsText,
 } from './boot.js';
 import { systemContext } from './context.js';
@@ -52,7 +50,7 @@ import type { TranslationOffsetStore } from './translation-offsets.js';
 checkReleasedContracts();
 
 const path = settingsPath(process.env);
-checkSettingsMount(path, mountedPaths(readMountInfo((file) => readFileSync(file, 'utf8')) ?? ''));
+checkOwnSettingsMount(path);
 const settings = loadSettings({
   fileText: readSettingsText((file) => readFileSync(file, 'utf8'), path),
   env: process.env,

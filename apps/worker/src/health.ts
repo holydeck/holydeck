@@ -5,13 +5,14 @@
 
 import { readFileSync } from 'node:fs';
 
-import { readSettingsText } from '@holydeck/app/boot';
+import { checkOwnSettingsMount, readSettingsText } from '@holydeck/app/boot';
 import { loadSettings, settingsPath } from '@holydeck/app/settings';
 
 import { heartbeatPath, heartbeatProblem } from './heartbeat.js';
 import { workerPaths } from './runtime.js';
 
 const path = settingsPath(process.env);
+checkOwnSettingsMount(path);
 const settings = loadSettings({
   fileText: readSettingsText((file) => readFileSync(file, 'utf8'), path),
   env: process.env,

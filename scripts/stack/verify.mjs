@@ -1,23 +1,40 @@
-// Brings both Compose stacks up for real and reads what they actually did. The file checks in
+// Brings all three Compose stacks up for real and reads what they actually did. The file checks in
 // scripts/workspace/compose.mjs say the stacks are arranged correctly; this says they work, which is a
 // different claim and the one FND-06 asks for: every service health-checked and up, the development
-// stack keeping its records across a down and an up, and the test stack keeping nothing a second run
-// could find.
+// stack keeping its records across a down and an up, the test stack keeping nothing a second run could
+// find, and the supported deployment reaching a usable seeded instance from an empty volume set.
 //
 //   node scripts/stack/verify.mjs          # or: pnpm verify:stack
 //
-// It builds images, so the first run is slow and the rest are cache. It ends by taking both stacks down
-// with their volumes, including when a check fails, so a failed run leaves nothing running.
+// It builds images, so the first run is slow and the rest are cache. It ends by taking every stack down
+// with its volumes, including when a check fails, so a failed run leaves nothing running.
 //
 // Every phase is printed as it happens, because this script is also the evidence: what it wrote is what
 // the stack did on the machine it was run on.
 
 import { execFileSync } from 'node:child_process';
 
-import { DEV_FILE, TEST_FILE, healthVerdicts } from '../workspace/compose.mjs';
+import { DEPLOY_FILE, DEPLOY_SERVICES, DEV_FILE, TEST_FILE, healthVerdicts } from '../workspace/compose.mjs';
 import { fromRepoRoot } from '../workspace/pipeline.mjs';
 
-const SERVICES = ['app', 'server', 'web', 'worker'];
+const DEV_TOP_SERVICES = ['app', 'server', 'web', 'worker'];
+
+// No web: the deployment image already has the client baked in, so there is no separate service to wait
+// on. No migrate or mongo either, the same as the development list — both start as dependencies of the
+// services named here, and --wait follows their depends_on conditions rather than needing them spelled out.
+const DEPLOY_TOP_SERVICES = ['app', 'server', 'worker'];
+
+// compose.yaml requires this and has no dev-token fallback; nothing this script does is a real deployment,
+// so a fixed placeholder is enough to bring it up for verification.
+const DEPLOY_TOKEN = 'stack-verify-corpus-token-not-a-secret';
+
+const ENV_FOR = Object.freeze({ [DEPLOY_FILE]: { HOLYDECK_CORPUS_TOKEN: DEPLOY_TOKEN } });
+
+// What "a usable seeded instance" (T59, SEED-01) means: the content-language registry, the slide-label
+// catalogue, the built-in slide layouts and the default service template are all non-empty. slide_groups
+// is not checked here — the default Standby screen is built on the generic revisions shape, not its own
+// top-level collection.
+const SEEDED_COLLECTIONS = ['content_languages', 'service_templates', 'slide_labels', 'slide_layouts'];
 
 const root = fromRepoRoot('.');
 const failures = [];
@@ -30,11 +47,14 @@ const compose = (file, args, capture = false) =>
     encoding: 'utf8',
     stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
     maxBuffer: 64 * 1024 * 1024,
+    env: { ...process.env, ...ENV_FOR[file] },
   });
+
+const topServices = (file) => (file === DEPLOY_FILE ? DEPLOY_TOP_SERVICES : DEV_TOP_SERVICES);
 
 // The migration exits when it is done, so the services are named rather than the stack: Compose waits for
 // each named service to be healthy and for what they depend on to have finished successfully.
-const up = (file) => compose(file, ['up', '--build', '--wait', '--wait-timeout', '900', ...SERVICES]);
+const up = (file) => compose(file, ['up', '--build', '--wait', '--wait-timeout', '900', ...topServices(file)]);
 
 const down = (file, { volumes }) =>
   compose(file, ['down', '--remove-orphans', ...(volumes ? ['--volumes'] : [])]);
@@ -48,8 +68,12 @@ const check = (claim, ok, detail) => {
 };
 
 // --all, because the migration has exited by the time the stack is up and `ps` lists only what runs.
+// The deployment stack starts no web service, so it is checked against its own required-service list.
 const healthy = (file) => {
-  const problems = healthVerdicts(compose(file, ['ps', '--all', '--format', 'json'], true));
+  const problems = healthVerdicts(
+    compose(file, ['ps', '--all', '--format', 'json'], true),
+    file === DEPLOY_FILE ? DEPLOY_SERVICES : undefined,
+  );
   check(`${file}: every service is up, health-checked and the migration finished`, problems.length === 0, problems.join('; '));
 };
 
@@ -61,6 +85,24 @@ const ledger = (file) => ({
 const probes = (file) => Number(mongo(file, 'db.stack_probe.countDocuments()'));
 
 const markProbe = (file, id) => mongo(file, `db.stack_probe.insertOne({ _id: "${id}" }).acknowledged`);
+
+const seeded = (file) => {
+  const counts = Object.fromEntries(
+    SEEDED_COLLECTIONS.map((collection) => [collection, Number(mongo(file, `db.${collection}.countDocuments()`))]),
+  );
+  const empty = Object.entries(counts)
+    .filter(([, count]) => count === 0)
+    .map(([collection]) => collection);
+  check(
+    `${file}: a cold start reaches a usable seeded instance`,
+    empty.length === 0,
+    empty.length === 0
+      ? Object.entries(counts)
+          .map(([collection, count]) => `${collection}=${count}`)
+          .join(', ')
+      : `empty: ${empty.join(', ')}`,
+  );
+};
 
 try {
   say(`\n=== ${DEV_FILE}: first bring-up ===`);
@@ -102,9 +144,23 @@ try {
   check(`${TEST_FILE}: the second run does not see what the first run wrote`, probes(TEST_FILE) === 0);
   const testSecond = ledger(TEST_FILE);
   check(`${TEST_FILE}: the second run migrated an empty database of its own`, testSecond.rows === 2 && testSecond.applied !== testFirst.applied, `applied at ${testSecond.applied}, was ${testFirst.applied}`);
+
+  say(`\n=== ${DEPLOY_FILE}: cold start on an empty volume set ===`);
+  // The development stack is still up from the section above, and its app service publishes the same
+  // host port 3100 the deployment stack's app service does — a real cold start has nothing else running.
+  down(DEV_FILE, { volumes: true });
+  down(DEPLOY_FILE, { volumes: true });
+  up(DEPLOY_FILE);
+  healthy(DEPLOY_FILE);
+  const deployed = ledger(DEPLOY_FILE);
+  // Not an exact row count: the migration set has grown since the DEV_FILE/TEST_FILE checks above were
+  // written for a single migration, and hardcoding today's count here would only go stale the same way.
+  // What "ran against an empty database and recorded it" needs is that something was written at all.
+  check(`${DEPLOY_FILE}: the migration ran against an empty database and recorded it`, deployed.rows > 0 && deployed.applied !== 'none', `${deployed.rows} ledger rows, applied at ${deployed.applied}`);
+  seeded(DEPLOY_FILE);
 } finally {
-  say('\n=== taking both stacks down with their volumes ===');
-  for (const file of [DEV_FILE, TEST_FILE]) {
+  say('\n=== taking every stack down with its volumes ===');
+  for (const file of [DEV_FILE, TEST_FILE, DEPLOY_FILE]) {
     try {
       down(file, { volumes: true });
     } catch (error) {
@@ -114,5 +170,5 @@ try {
   }
 }
 
-say(failures.length === 0 ? '\nboth stacks verified' : `\n${failures.length} claim(s) failed`);
+say(failures.length === 0 ? '\nall three stacks verified' : `\n${failures.length} claim(s) failed`);
 process.exit(failures.length === 0 ? 0 : 1);

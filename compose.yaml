@@ -2,11 +2,15 @@
 # and the data paths every one of them needs. The application image already has the web client baked in
 # (see apps/app/Dockerfile), so there is no separate service building or serving it. For hacking on the
 # code itself, use compose.dev.yaml instead, which builds every image from the working tree rather than
-# pulling the published corpus.
+# pulling the published corpus. Named explicitly below so it never shares a default project name — and so
+# the containers it starts — with compose.dev.yaml.
 #
+#   mkdir -p config && chown 1000:1000 config   # once: apps/app/Dockerfile runs as uid 1000, and
+#                                                # Docker would otherwise create this bind mount root:root
 #   docker compose up --build --wait   # first start: builds the application image, pulls the rest
 #   docker compose down                # stop, keeping the data volumes
-#   docker compose down -v             # stop and discard everything, including local settings
+#   docker compose down -v             # stop and discard the named volumes — ./config is a host bind,
+#                                       # not one, so settings.yaml and the corpus token inside it survive
 #
 # Settings live at ./config/settings.yaml on the host, read from /data/holydeck/config/settings.yaml in
 # every container that needs them. That directory is mounted, never the file itself: settings are saved
@@ -21,6 +25,8 @@
 # The corpus is internal: nothing here publishes its port, and the application is the only client that
 # reaches it, over the token below. Generate one long, random value per deployment with
 # `openssl rand -hex 32`; do not reuse the example in compose.dev.yaml.
+name: holydeck
+
 services:
   mongo:
     image: mongo:8

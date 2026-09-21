@@ -273,6 +273,18 @@ describe('hot reload from an external edit', () => {
     expect(admin.lastReloadError()).toContain('the disk is unavailable');
   });
 
+  it('does not crash boot when the settings directory does not exist at all, and hands back a working close', () => {
+    const io = fakeSettingsIO({ [PATH]: '' });
+    io.watch = () => {
+      throw Object.assign(new Error(`ENOENT: no such file or directory, watch '${dirname(PATH)}'`), { code: 'ENOENT' });
+    };
+    const admin = settingsAdminOn(seeded(''), { ...io, env: {} });
+
+    const watcher = admin.watch();
+
+    expect(() => watcher.close()).not.toThrow();
+  });
+
   it('closes the watch it was given', () => {
     const io = fakeSettingsIO({ [PATH]: '' });
     const admin = settingsAdminOn(seeded(''), { ...io, env: {} });

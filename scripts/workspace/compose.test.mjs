@@ -23,7 +23,7 @@ const DOCKERFILES = {
 
 const dev = () => ({
   file: 'compose.dev.yaml',
-  project: undefined,
+  project: 'holydeck-dev',
   persistence: 'named-volumes',
   services: {
     mongo: {
@@ -87,7 +87,7 @@ const ephemeral = () => {
 
 const deploy = () => ({
   file: 'compose.yaml',
-  project: undefined,
+  project: 'holydeck',
   persistence: 'named-volumes',
   requiredServices: DEPLOY_SERVICES,
   services: {
@@ -346,6 +346,51 @@ test('refuses the deployment stack mounting the settings file itself', () => {
   assert.deepEqual(only(stack), [
     'compose.yaml: app mounts settings.yaml itself; mount the directory holding it, because replacing the file changes its inode',
   ]);
+});
+
+test('finds the first-party Dockerfile behind a digest-pinned reference, not just a tag', () => {
+  const stack = deploy();
+  stack.services.server.image = `ghcr.io/holydeck/server@sha256:${'a'.repeat(64)}`;
+  assert.deepEqual(only(stack), []);
+});
+
+test('refuses a first-party image with no tag at all, not exempt merely by being first-party', () => {
+  const stack = deploy();
+  stack.services.server.image = 'ghcr.io/holydeck/server';
+  assert.deepEqual(only(stack), [
+    'compose.yaml: server runs ghcr.io/holydeck/server, which is whatever it was pulled on the day',
+  ]);
+});
+
+test('refuses two stacks that derive the same default project name', () => {
+  const first = deploy();
+  first.project = undefined;
+  const second = dev();
+  second.project = undefined;
+  const findings = verifyCompose({ stacks: [first, second], dockerfiles: DOCKERFILES });
+  assert.deepEqual(
+    findings.filter((problem) => problem.includes('project name')),
+    ['compose.dev.yaml: derives the same project name as compose.yaml — both default to the checkout directory; name them differently'],
+  );
+});
+
+test('refuses two stacks that declare the identical project name explicitly', () => {
+  const first = deploy();
+  const second = dev();
+  second.project = 'holydeck';
+  const findings = verifyCompose({ stacks: [first, second], dockerfiles: DOCKERFILES });
+  assert.deepEqual(
+    findings.filter((problem) => problem.includes('project name')),
+    ['compose.dev.yaml: derives the same project name as compose.yaml — both declare name: holydeck; name them differently'],
+  );
+});
+
+test('a repository whose stacks each keep their own project name reports no collision', () => {
+  const findings = verifyCompose({ stacks: [deploy(), dev(), ephemeral()], dockerfiles: DOCKERFILES });
+  assert.deepEqual(
+    findings.filter((problem) => problem.includes('project name')),
+    [],
+  );
 });
 
 test('reads a stack out of YAML, including the forms compose allows', () => {

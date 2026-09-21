@@ -21,6 +21,11 @@
 # refuse to read a library that anybody could read. Point the CLI at it with
 #   --server-url http://localhost:3000   and   HOLYDECK_SERVER_TOKEN=dev-corpus-token-not-a-secret
 # Set HOLYDECK_CORPUS_TOKEN in your shell to use a different one; both services read the same value.
+#
+# Named explicitly so it never shares a default project name — and so the containers it starts — with
+# compose.yaml, the supported deployment stack this same directory also holds.
+name: holydeck-dev
+
 services:
   server:
     build:

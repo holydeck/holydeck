@@ -58,9 +58,10 @@ export const LOOPBACK_ONLY = Object.freeze({
 // Dockerfile is found instead, the same Dockerfile docker-build.yml publishes it from.
 const FIRST_PARTY_DOCKERFILES = Object.freeze({ 'ghcr.io/holydeck/server': 'apps/corpus/Dockerfile' });
 
-// A pulled image's tag is stripped before it is looked up above, the same way the unpinned-tag check
-// below strips :latest before deciding whether anything follows it.
-const imageRepository = (image) => image.replace(/:[^:@/]*$/u, '');
+// A pulled image's digest or tag is stripped before it is looked up above: a digest comes after an
+// @, which the tag pattern below does not match, so it has to go first or a digest-pinned first-party
+// image is left with the digest still attached and never matches its own Dockerfile's key.
+const imageRepository = (image) => image.replace(/@.*$/u, '').replace(/:[^:@/]*$/u, '');
 
 const dockerfileFor = (service) => service.build?.dockerfile ?? FIRST_PARTY_DOCKERFILES[imageRepository(service.image ?? '')];
 
@@ -131,10 +132,14 @@ export function verifyStack(stack, dockerfiles) {
       }
     }
 
-    // A first-party image is exempted from the pin check below: this repository's own release process is
-    // what moves its :latest tag, the same guard docker-build.yml applies before it will move it, which is
-    // not true of a third-party image pulled from wherever its maintainer chose to push it.
-    const firstParty = service.image !== undefined && FIRST_PARTY_DOCKERFILES[imageRepository(service.image)] !== undefined;
+    // A first-party image is exempted from the pin check below, but only when it is the :latest tag this
+    // repository's own release process moves, the same guard docker-build.yml applies before it will move
+    // it — an unpinned first-party image with no tag at all is nobody's guarantee of anything, and a
+    // third-party image is never exempt no matter what it is tagged.
+    const firstParty =
+      service.image !== undefined &&
+      /:latest$/u.test(service.image) &&
+      FIRST_PARTY_DOCKERFILES[imageRepository(service.image)] !== undefined;
     if (
       service.image !== undefined &&
       !firstParty &&
@@ -222,9 +227,29 @@ export function verifyStack(stack, dockerfiles) {
   return findings;
 }
 
-/** Every stack read against its own promises, in one list. */
+// docker compose derives a project name from the name: key when a stack declares one, and otherwise from
+// the basename of the directory it is run from — so two stacks that both leave it unset collide on that
+// same default just as surely as two that declare the same name in writing. Either way, the second one
+// found does not get its own containers, network or volumes: it takes over the first one's.
+const NO_NAME_DECLARED = Symbol('no project name declared');
+
+/** Every stack read against its own promises, in one list, plus every pair that would collide on start. */
 export function verifyCompose({ stacks, dockerfiles }) {
-  return stacks.flatMap((stack) => verifyStack(stack, dockerfiles));
+  const findings = stacks.flatMap((stack) => verifyStack(stack, dockerfiles));
+
+  const seen = new Map();
+  for (const stack of stacks) {
+    const key = stack.project ?? NO_NAME_DECLARED;
+    const first = seen.get(key);
+    if (first === undefined) {
+      seen.set(key, stack);
+      continue;
+    }
+    const why = stack.project === undefined ? 'both default to the checkout directory' : `both declare name: ${stack.project}`;
+    findings.push(`${stack.file}: derives the same project name as ${first.file} — ${why}; name them differently`);
+  }
+
+  return findings;
 }
 
 /** Reads what `docker compose ps --format json` said, and names whatever is not up. */

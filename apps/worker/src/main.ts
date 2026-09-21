@@ -2,7 +2,7 @@ import { accessSync, constants, mkdirSync, readFileSync, writeFileSync } from 'n
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { readSettingsText } from '@holydeck/app/boot';
+import { checkOwnSettingsMount, readSettingsText } from '@holydeck/app/boot';
 import { backupContext, backupDb } from '@holydeck/app/backups';
 import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
 import { SCHEMA_VERSION } from '@holydeck/app/migrations';
@@ -20,6 +20,7 @@ import { assertUsablePaths, workerPaths } from './runtime.js';
 import { HANDLERS, handlersOn, workToDo } from './work.js';
 
 const path = settingsPath(process.env);
+checkOwnSettingsMount(path);
 const settings = loadSettings({
   fileText: readSettingsText((file) => readFileSync(file, 'utf8'), path),
   env: process.env,

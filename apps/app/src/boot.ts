@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { corpusBoundaryProblems } from '@holydeck/contracts/corpus';
 import { MESSAGE_CODES, REMOVED_CODES, messageCodeProblems } from '@holydeck/contracts/http';
 
@@ -110,8 +112,10 @@ export function readMountInfo(read: (path: string) => string, path: string = MOU
   }
 }
 
-// The fifth whitespace-separated field of an /proc/self/mountinfo line is the mount point, whatever
-// optional fields precede the "-" separator later in the line; the fields before it never move.
+// The fifth space-separated field of an /proc/self/mountinfo line is the mount point, whatever optional
+// fields precede the "-" separator later in the line; the fields before it never move. Real mountinfo
+// lines are single-space-separated, so split(' ') is exact here even though it would not be for
+// arbitrary whitespace.
 const MOUNT_POINT_FIELD = 4;
 
 // mountinfo escapes space, tab, newline and backslash as their octal code, the same way /proc/mounts
@@ -141,4 +145,16 @@ export function mountedPaths(mountinfoText: string): Set<string> {
  */
 export function checkSettingsMount(path: string, mounts: ReadonlySet<string>): void {
   if (mounts.has(path)) throw new SettingsMountError(path);
+}
+
+/**
+ * The whole preflight, run the same way by every process that opens the settings file: the application,
+ * the migration, the worker and the worker's own healthcheck. Each used to repeat the composition of
+ * readMountInfo and mountedPaths verbatim; this is that composition, written once.
+ */
+export function checkOwnSettingsMount(
+  path: string,
+  read: (path: string) => string = (file) => readFileSync(file, 'utf8'),
+): void {
+  checkSettingsMount(path, mountedPaths(readMountInfo(read) ?? ''));
 }

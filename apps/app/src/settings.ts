@@ -4,6 +4,8 @@
 // directory, never the file itself: settings are replaced atomically, which changes the inode, and a
 // file-level bind mount would keep serving the replaced one forever.
 
+import { resolve as resolvePath } from 'node:path';
+
 import { INTERNAL_BINDINGS, MINIMUM_CORPUS_TOKEN_LENGTH } from '@holydeck/contracts/corpus';
 import { LOCALES, type Locale } from '@holydeck/localization/locales';
 import { parse, stringify } from 'yaml';
@@ -103,8 +105,12 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   developmentDiagnostics: 'HOLYDECK_DEVELOPMENT_DIAGNOSTICS',
 };
 
+// Normalized so a relative or non-canonical override still matches, byte for byte, the mount table
+// boot.ts's checkOwnSettingsMount reads a path out of — a bare string comparison, so an override that is
+// merely equivalent rather than identical would otherwise pass unmounted.
 export function settingsPath(env: Record<string, string | undefined>): string {
-  return env.HOLYDECK_SETTINGS_PATH ?? CANONICAL_SETTINGS_PATH;
+  const override = env.HOLYDECK_SETTINGS_PATH;
+  return override === undefined ? CANONICAL_SETTINGS_PATH : resolvePath(override);
 }
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; problem: string };
