@@ -63,6 +63,17 @@ const prefers = (over: Partial<NotificationPreference> = {}): NotificationPrefer
 const readContext = () =>
   requestContext({ actor: 'system', permissions: [permissionsFor('auditEvents').read], correlationId: CORRELATION });
 
+/** One stored trail row, as a reader hands it over. */
+const trailRow = (id: string, when: string): Document => ({
+  _id: id,
+  actor: DEACON,
+  correlationId: CORRELATION,
+  at: when,
+  action: 'settings.update',
+  subject: 'settings',
+  outcome: 'allowed',
+});
+
 const codesOf = (notifications: readonly Notification[]): string[] =>
   notifications.map((one) => `${one.recipient}/${one.channel}/${one.action}`);
 
@@ -76,11 +87,17 @@ const readerOn = (db: FakeDb) => {
   return { reader, append };
 };
 
-const recordOne = async (db: FakeDb, id: string, entry: { action: AuditAction; outcome: AuditOutcome }, when: string) =>
+const recordOne = async (
+  db: FakeDb,
+  id: string,
+  entry: { action: AuditAction; outcome: AuditOutcome; detail?: string },
+  when: string,
+) =>
   auditOn(db, { now: () => when, newId: () => id }).record(auditContext(DEACON, CORRELATION), {
     action: entry.action,
     subject: 'settings',
     outcome: entry.outcome,
+    ...(entry.detail === undefined ? {} : { detail: entry.detail }),
   });
 
 describe('the vocabulary this module declares', () => {
@@ -124,11 +141,20 @@ describe('what a notification is derived from', () => {
     });
   });
 
-  it('never repeats the trail’s free prose, which is what keeps the trail the one place it is written', () => {
+  it('never repeats the trail’s free prose, which is what keeps the trail the one place it is written', async () => {
     const detail = 'restored from mongodb://root:hunter2@db.internal:27017';
-    const derived = notificationsFrom([event({ action: 'restore.run' })], [prefers()]);
-    expect(JSON.stringify(derived)).not.toContain(detail);
-    expect(derived[0]).not.toHaveProperty('detail');
+    const db = fakeDb();
+    await recordOne(db, 'e1', { action: 'restore.run', outcome: 'allowed', detail }, AT);
+    // The trail really is holding it, so what follows is a statement about the derivation rather than
+    // about a fixture that never carried the prose in the first place.
+    expect(db.rows.get('audit_events')?.[0]).toMatchObject({ detail });
+
+    const { reader } = readerOn(db);
+    const derived = await deriveNotifications(reader, readContext(), [prefers()]);
+    expect(derived.notifications).toHaveLength(1);
+    expect(JSON.stringify(derived.notifications)).not.toContain('hunter2');
+    expect(JSON.stringify(derived.notifications)).not.toContain(detail);
+    expect(derived.notifications[0]).not.toHaveProperty('detail');
   });
 
   it('derives nothing at all from no events, whatever anybody asked to be told about', () => {
@@ -300,7 +326,7 @@ describe('reading the trail the notifications come from', () => {
     expect(derived.watermark).toBe(AT);
   });
 
-  it('offers no watermark from a full page, because the events it did not reach are the older ones', async () => {
+  it('offers no watermark from a first run that filled its page, having nothing to have reached back to', async () => {
     const db = fakeDb();
     await recordOne(db, 'e1', { action: 'settings.update', outcome: 'allowed' }, AT);
     await recordOne(db, 'e2', { action: 'settings.update', outcome: 'allowed' }, at(5));
@@ -311,6 +337,30 @@ describe('reading the trail the notifications come from', () => {
     expect(derived.notifications).toHaveLength(1);
   });
 
+  // The trail is append-only and never shrinks, so within days of a deployment starting every page is a
+  // full one. Reading fullness alone as "there is more" would withhold the watermark from then on and
+  // leave a caller re-deriving — and a delivery surface re-delivering — the same page forever.
+  it('keeps the watermark when a full page reached back over the caller’s own, however full it was', async () => {
+    const rows = [trailRow('audit:new', at(10)), trailRow('audit:old', AT)];
+    const derived = await deriveNotifications({ read: async () => rows }, readContext(), [prefers()], {
+      since: AT,
+      limit: rows.length,
+    });
+    expect(derived.truncated).toBe(false);
+    expect(derived.watermark).toBe(at(10));
+    expect(derived.notifications.map((one) => one.sourceEventId)).toEqual(['audit:new']);
+  });
+
+  it('withholds the watermark from a full page of entries the caller has all still to hear about', async () => {
+    const rows = [trailRow('audit:newest', at(20)), trailRow('audit:newer', at(10))];
+    const derived = await deriveNotifications({ read: async () => rows }, readContext(), [prefers()], {
+      since: AT,
+      limit: rows.length,
+    });
+    expect(derived.truncated).toBe(true);
+    expect(derived.watermark).toBeUndefined();
+  });
+
   it('reads a bounded page by default rather than the whole trail', async () => {
     const read = vi.fn(async () => [] as Document[]);
     await deriveNotifications({ read }, readContext(), [prefers()]);
@@ -318,10 +368,7 @@ describe('reading the trail the notifications come from', () => {
   });
 
   it('takes the watermark from the newest entry on the page, whatever order the store answered in', async () => {
-    const rows: Document[] = [
-      { _id: 'audit:new', actor: DEACON, correlationId: CORRELATION, at: at(5), action: 'settings.update', subject: 's', outcome: 'allowed' },
-      { _id: 'audit:old', actor: DEACON, correlationId: CORRELATION, at: AT, action: 'settings.update', subject: 's', outcome: 'allowed' },
-    ];
+    const rows = [trailRow('audit:new', at(5)), trailRow('audit:old', AT)];
     const derived = await deriveNotifications({ read: async () => rows }, readContext(), [prefers()]);
     expect(derived.watermark).toBe(at(5));
     expect(derived.notifications.map((one) => one.sourceEventId)).toEqual(['audit:old', 'audit:new']);

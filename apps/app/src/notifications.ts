@@ -249,12 +249,18 @@ export interface NotificationDerivation {
   /**
    * What the caller carries into its next run as `since`, when there is one.
    *
-   * Absent from a truncated page on purpose. The page is read newest first, so a full one is missing the
-   * *oldest* entries since `since` — precisely the ones a caller advancing its cursor would skip forever.
-   * A caller that gets no watermark keeps the one it had and reads again with more room.
+   * Absent from a truncated page on purpose. The page is read newest first, so a truncated one is missing
+   * the *oldest* entries since `since` — precisely the ones a caller advancing its cursor would skip
+   * forever. A caller that gets no watermark keeps the one it had and reads again with more room.
    */
   readonly watermark?: string;
-  /** Whether the page filled, meaning there are entries since `since` this derivation did not reach. */
+  /**
+   * Whether there are entries since `since` this derivation did not reach.
+   *
+   * A full page is not by itself truncated: what settles it is whether the page reached back over the
+   * caller's watermark. It always does once a deployment derives more often than it fills a page, which is
+   * the ordinary case — and it cannot, by definition, on a first run with no watermark to reach back over.
+   */
   readonly truncated: boolean;
 }
 
@@ -271,17 +277,30 @@ export async function deriveNotifications(
   preferences: readonly NotificationPreference[],
   options: DerivationOptions = {},
 ): Promise<NotificationDerivation> {
+  const { since } = options;
   const limit = options.limit ?? NOTIFICATION_PAGE_LIMIT;
   const documents = await events.read(context, {}, { limit, sort: { at: -1 } });
-  const truncated = documents.length >= limit;
 
+  // Whether the page reached back over the caller's watermark. The page holds the newest entries there
+  // are, so one entry on it at or before `since` puts every entry *off* it older still — all of them
+  // already delivered — and the page therefore covers everything new however full it happens to be. This
+  // is the whole truncation question: a trail is append-only and never shrinks, so a full page is the
+  // ordinary case within days of a deployment starting, and reading fullness alone as "there is more"
+  // would withhold the watermark forever and leave a caller re-deriving the same page for good.
+  let reachedBack = false;
   const readable: NotifiableEvent[] = [];
   for (const document of documents) {
     const event = notifiableEventOf(document);
-    // A row this module cannot read is left where it is rather than skipped past: it never counts towards
-    // the watermark, so whatever can read it still sees it.
-    if (event !== undefined && (options.since === undefined || event.at > options.since)) readable.push(event);
+    // A row this module cannot read is left where it is rather than skipped past: it neither advances the
+    // watermark nor settles the question above, so whatever can read it still sees it.
+    if (event === undefined) continue;
+    if (since !== undefined && event.at <= since) {
+      reachedBack = true;
+      continue;
+    }
+    readable.push(event);
   }
+  const truncated = documents.length >= limit && !reachedBack;
 
   const newest = readable.reduce<string | undefined>(
     (latest, event) => (latest === undefined || event.at > latest ? event.at : latest),
