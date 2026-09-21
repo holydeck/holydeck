@@ -234,10 +234,20 @@ export interface ReadinessReading {
  * What the queue can say about itself: the whole-collection counts `Queue.summary` answers with, and a
  * page of recent jobs from `Queue.list`. The counts are authoritative and the page is a sample — which is
  * why a finding drawn from the page says how many jobs it looked at.
+ *
+ * `oldestQueuedAt` is the one thing the page cannot answer and the stall check most needs. `Queue.list`
+ * sorts newest-first over a page of at most 500, so the moment more than one page of jobs is queued the
+ * oldest waiting job — precisely the one a stall is made of — falls off the end of the sample, and a
+ * surface built only on the page would report a growing backlog as a healthy queue. Whoever wires this up
+ * must fill it from a dedicated ascending query for the oldest `queued` row (`sort: { queuedAt: 1 }`,
+ * limit 1) and never from `Queue.list`'s page. It is optional because a caller that cannot answer it
+ * should say so by leaving it out rather than by passing the page's best guess: every sentence below
+ * then names the sample it was drawn from instead of making a claim about the whole queue.
  */
 export interface QueueReading {
   readonly counts: Readonly<Record<JobState, number>>;
   readonly jobs: readonly JobRecord[];
+  readonly oldestQueuedAt?: string;
 }
 
 /** One recorded restore rehearsal, as the `restores` record class holds it (BACK-02). */
@@ -520,26 +530,38 @@ const queueFindings = (reading: Observed<QueueReading>, at: string, running: boo
     );
   }
 
+  // The longest wait, and whether that number is the whole queue's or only this page's. A dedicated
+  // oldest-queued answer settles it outright; failing that, the page settles it only when the page holds
+  // every queued job there is. Anything else and the real oldest is off-page, so each sentence below says
+  // what it actually looked at rather than claiming the queue is fine because the visible part of it is.
   const waiting = jobs.filter((one) => one.state === 'queued');
-  const waited = waiting.reduce<number | undefined>((longest, one) => {
+  const sampled = waiting.reduce<number | undefined>((longest, one) => {
     const age = minutesSince(at, one.queuedAt);
     if (age === undefined) return longest;
     return longest === undefined || age > longest ? age : longest;
   }, undefined);
+  const whole = reading.oldestQueuedAt === undefined ? undefined : minutesSince(at, reading.oldestQueuedAt);
+  const waited = whole ?? sampled;
+  const complete = whole !== undefined || waiting.length === counts.queued;
+  const sample: Record<string, number> = complete ? {} : { sampledCount: jobs.length };
+
   if (waited !== undefined && waited > QUEUE_WAIT_WARNING_MINUTES) {
+    const oldest = complete
+      ? `the oldest has waited ${waited} minutes`
+      : `one of the ${jobs.length} most recent has waited ${waited} minutes`;
     found.push(
       running
         ? finding(
             'queue.stalled',
             'degraded',
-            { waitMinutes: waited, queuedCount: counts.queued },
-            `Check the worker runs the kinds of job that are waiting: ${counts.queued} job(s) are queued and the oldest has waited ${waited} minutes with a worker alive.`,
+            { waitMinutes: waited, queuedCount: counts.queued, ...sample },
+            `Check the worker runs the kinds of job that are waiting: ${counts.queued} job(s) are queued and ${oldest} with a worker alive.`,
           )
         : finding(
             'queue.stalled',
             'failed',
-            { waitMinutes: waited, queuedCount: counts.queued },
-            `Start the worker: ${counts.queued} job(s) are queued, the oldest for ${waited} minutes, and nothing is claiming them.`,
+            { waitMinutes: waited, queuedCount: counts.queued, ...sample },
+            `Start the worker: ${counts.queued} job(s) are queued, ${oldest}, and nothing is claiming them.`,
           ),
     );
   }
@@ -553,8 +575,8 @@ const queueFindings = (reading: Observed<QueueReading>, at: string, running: boo
       finding(
         'queue.attemptsRunningOut',
         'degraded',
-        { jobCount: lastChance.length, retryLimit: limit },
-        `Fix what these jobs keep failing on before the next attempt: ${lastChance.length} job(s) are on their last of ${limit} attempts, and the next failure retires them.`,
+        { jobCount: lastChance.length, retryLimit: limit, sampledCount: jobs.length },
+        `Fix what these jobs keep failing on before the next attempt: ${lastChance.length} of the ${jobs.length} most recent job(s) are on their last of ${limit} attempts, and the next failure retires them.`,
       ),
     );
   }
@@ -564,8 +586,10 @@ const queueFindings = (reading: Observed<QueueReading>, at: string, running: boo
     finding(
       'queue.ok',
       'ok',
-      { queuedCount: counts.queued, leasedCount: counts.leased, succeededCount: counts.succeeded },
-      `Leave the queue as it is: ${counts.queued} waiting and ${counts.leased} running, none failed and none waiting longer than ${QUEUE_WAIT_WARNING_MINUTES} minutes.`,
+      { queuedCount: counts.queued, leasedCount: counts.leased, succeededCount: counts.succeeded, ...sample },
+      complete
+        ? `Leave the queue as it is: ${counts.queued} waiting and ${counts.leased} running, none failed and none waiting longer than ${QUEUE_WAIT_WARNING_MINUTES} minutes.`
+        : `Look at the jobs page before trusting this: ${counts.queued} waiting and ${counts.leased} running, none failed, and none of the ${jobs.length} most recent job(s) has waited longer than ${QUEUE_WAIT_WARNING_MINUTES} minutes — but the queue is longer than that page, so the oldest waiting job was not measured.`,
     ),
   ];
 };

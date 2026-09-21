@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import {
   OPERATIONAL_CODES,
   OPERATIONAL_DOMAINS,
+  QUEUE_WAIT_WARNING_MINUTES,
   REHEARSAL_INTERVAL_MINUTES,
   UNREADABLE,
   observeOperationalHealth,
@@ -17,6 +18,7 @@ import type {
   OperationalHealthReport,
   OperationalReadings,
   OperationalSources,
+  QueueReading,
   ReadinessReading,
   RecordedRehearsal,
   StorageReading,
@@ -285,13 +287,21 @@ describe('every status is actionable', () => {
     }
   });
 
-  test('a domain speaks with the voice of its worst finding', () => {
+  test('a domain speaks with the voice of its worst finding, not its first', () => {
+    // An overdue rehearsal (degraded) is found before a missed recovery time (failed), so the domain has
+    // to be upgraded by the later finding rather than settling for the one it saw first.
     const report = operationalHealthOf(
-      readings({ storage: { kind: 'blocked', blockers: [{ code: 'storage.estimateUnavailable' }] } }),
+      readings({ restore: [rehearsalRun(before(REHEARSAL_INTERVAL_MINUTES + 60), 300)] }),
     );
-    const storage = report.statuses.find((status) => status.domain === 'storage');
-    expect(storage?.state).toBe('failed');
-    expect(storage?.action).toBe(storage?.findings.find((found) => found.state === 'failed')?.action);
+    const restore = report.statuses.find((status) => status.domain === 'restore');
+    expect(restore?.findings.map((found) => found.code)).toEqual([
+      'restore.rehearsalOverdue',
+      'restore.recoveryTimeMissed',
+    ]);
+    expect(restore?.findings[0]?.state).toBe('degraded');
+    expect(restore?.state).toBe('failed');
+    expect(restore?.action).toBe(restore?.findings[1]?.action);
+    expect(restore?.action).not.toBe(restore?.findings[0]?.action);
   });
 });
 
@@ -497,6 +507,63 @@ describe('readings the surface cannot make sense of', () => {
       readings({ backup: [backupRun(before(5000)), backupRun(before(30)), backupRun(before(9000))] }),
     );
     expect(codesOf(report)).toContain('backup.ok');
+  });
+});
+
+// `Queue.list` answers newest-first, so the oldest queued job — the whole point of a stall check — is the
+// first thing to fall off the page. A surface that reported the visible part of a long queue as a healthy
+// queue would fail at exactly the moment it is most needed.
+describe('a page of jobs is a sample, and the queue says so', () => {
+  const page = (over: Partial<QueueReading>): OperationalReadings =>
+    readings({
+      queue: { counts: { queued: 120, leased: 0, succeeded: 4, failed: 0 }, jobs: [job({ state: 'queued' })], ...over },
+    });
+
+  test('a stall hiding beyond the page is found when the oldest queued job is answered for directly', () => {
+    const report = operationalHealthOf(page({ oldestQueuedAt: before(90) }));
+    const stalled = findingsOf(report).find((found) => found.code === 'queue.stalled');
+    expect(stalled?.facts['waitMinutes']).toBe(90);
+    expect(stalled?.action).toContain('the oldest has waited 90 minutes');
+    expect(stalled?.facts['sampledCount']).toBeUndefined();
+  });
+
+  test('and without that answer the same reading reports a healthy queue, which is why it is asked for', () => {
+    expect(codesOf(operationalHealthOf(page({})))).toContain('queue.ok');
+  });
+
+  test('but that ok says what it looked at instead of claiming the whole queue is fine', () => {
+    const partial = findingsOf(operationalHealthOf(page({}))).find((found) => found.code === 'queue.ok');
+    expect(partial?.facts['sampledCount']).toBe(1);
+    expect(partial?.action).toContain('the oldest waiting job was not measured');
+    expect(partial?.action).not.toContain('none waiting longer than');
+  });
+
+  test('while a queue that fits on the page keeps its whole-queue claim', () => {
+    const whole = findingsOf(operationalHealthOf(healthy())).find((found) => found.code === 'queue.ok');
+    expect(whole?.facts['sampledCount']).toBeUndefined();
+    expect(whole?.action).toContain(`none waiting longer than ${QUEUE_WAIT_WARNING_MINUTES} minutes`);
+  });
+
+  test('a page-derived stall names the sample it was drawn from', () => {
+    const stalled = findingsOf(operationalHealthOf(page({ jobs: [job({ state: 'queued', queuedAt: before(45) })] })))
+      .find((found) => found.code === 'queue.stalled');
+    expect(stalled?.facts['sampledCount']).toBe(1);
+    expect(stalled?.action).toContain('one of the 1 most recent has waited 45 minutes');
+  });
+
+  test('and so does a job on its last attempt, which can only ever be a page', () => {
+    const last = findingsOf(
+      operationalHealthOf(page({ jobs: [job({ state: 'queued', attempt: 5, retryLimit: 5 })] })),
+    ).find((found) => found.code === 'queue.attemptsRunningOut');
+    expect(last?.facts['sampledCount']).toBe(1);
+    expect(last?.action).toContain('of the 1 most recent job(s)');
+  });
+
+  test('an oldest-queued answer that is not an instant falls back to the page rather than to silence', () => {
+    const report = operationalHealthOf(page({ oldestQueuedAt: 'a while ago' }));
+    const ok = findingsOf(report).find((found) => found.code === 'queue.ok');
+    expect(ok?.facts['sampledCount']).toBe(1);
+    expect(ok?.action).toContain('the oldest waiting job was not measured');
   });
 });
 
