@@ -95,7 +95,7 @@ export type FrameKind = (typeof FRAME_KINDS)[number];
  * What became of a command. Four outcomes, each of which tells the client its next move without any
  * prose to read: `applied` moved the state, `duplicate` says this command had already moved it and was
  * not applied again, `stale` says the revision it was issued against is no longer the server's, and
- * `unauthorized` says this session may watch but not command.
+ * `unauthorized` says the session or command type is not permitted to publish.
  */
 export const ACK_OUTCOMES = ['applied', 'duplicate', 'stale', 'unauthorized'] as const;
 export type AckOutcome = (typeof ACK_OUTCOMES)[number];

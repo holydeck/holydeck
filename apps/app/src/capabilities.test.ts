@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import {
   CAPABILITIES_COLLECTION,
@@ -361,5 +361,55 @@ describe('the index a capability is forgotten by', () => {
     await expect(dropCapabilityIndexOn(memory.db, 'capability_everything')).rejects.toMatchObject({ kind: 'schema' });
     const wrongField = { name: 'capability_expiry', keys: { whenever: 1 }, options: {} } as const;
     await expect(createCapabilityIndexOn(memory.db, wrongField)).rejects.toMatchObject({ kind: 'schema' });
+  });
+});
+
+describe('capability lifetime ceiling', () => {
+  test.each(['guest', 'output'] as const)('refuses %s capabilities beyond one service day', async (kind) => {
+    for (const expiresAt of [new Date(clock + 12 * 60 * 60 * 1000 + 1).toISOString(), '9999-12-31T23:59:59.000Z']) {
+      await expect(store.issue(context(), OPERATOR, { kind, service: SERVICE, view: 'audience', expiresAt }))
+        .rejects.toMatchObject({ kind: 'schema' });
+    }
+    expect(rows.size).toBe(0);
+  });
+
+  test('accepts the exact twelve-hour boundary', async () => {
+    await expect(store.issue(context(), OPERATOR, {
+      kind: 'guest', service: SERVICE, view: 'audience',
+      expiresAt: new Date(clock + 12 * 60 * 60 * 1000).toISOString(),
+    })).resolves.toHaveProperty('capabilityId');
+  });
+});
+
+describe('capability revocation notifications', () => {
+  test('notifies after deletion, including an idempotent repeat, and supports unsubscribing', async () => {
+    const issued = await store.issue(context(), OPERATOR, {
+      kind: 'guest', service: SERVICE, view: 'audience', expiresAt: soon(),
+    });
+    const notified = vi.fn((id: string | undefined) => {
+      expect(id).toBe(issued.capabilityId);
+      expect(rows.has(issued.capabilityId)).toBe(false);
+    });
+    const unsubscribe = store.onRevoked(notified);
+    await store.revoke(context(), issued.capabilityId);
+    await store.revoke(context(), issued.capabilityId);
+    expect(notified).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    await store.revoke(context(), issued.capabilityId);
+    expect(notified).toHaveBeenCalledTimes(2);
+  });
+
+  test('does not notify when permission or persistence refuses the revocation', async () => {
+    const notified = vi.fn();
+    store.onRevoked(notified);
+    const readOnly = requestContext({ actor: 'system', permissions: [CAPABILITY_PERMISSIONS.redeem], correlationId: CORRELATION });
+    await expect(store.revoke(readOnly, 'id')).rejects.toMatchObject({ kind: 'permission' });
+    await expect(store.revokeEvery(readOnly)).rejects.toMatchObject({ kind: 'permission' });
+    const collection = memory.db.collection(CAPABILITIES_COLLECTION);
+    vi.spyOn(collection, 'deleteOne').mockRejectedValueOnce(new Error('unavailable'));
+    vi.spyOn(collection, 'deleteMany').mockRejectedValueOnce(new Error('unavailable'));
+    await expect(store.revoke(context(), 'id')).rejects.toThrow('unavailable');
+    await expect(store.revokeEvery(context())).rejects.toThrow('unavailable');
+    expect(notified).not.toHaveBeenCalled();
   });
 });

@@ -75,7 +75,7 @@ const command = (fields: Partial<Frame> = {}): string =>
     channel: 'live-control',
     id: 'command-1',
     idempotencyKey: 'key-1',
-    type: 'show-slide',
+    type: 'current-slide-changed',
     clientStateRevision: 0,
     ...fields,
   });
@@ -196,7 +196,7 @@ describe('a command', () => {
       channel: 'audience',
       sequence: 1,
       stateRevision: 1,
-      type: 'show-slide',
+      type: 'current-slide-changed',
       mutatesState: true,
       at: AT,
     });
@@ -305,14 +305,14 @@ describe('a change no client commanded', () => {
     const control = joined(hub, 'live-control', OPERATOR);
     const audience = joined(hub, 'audience');
 
-    control.connection?.receive(command({ id: 'c1', idempotencyKey: 'k1', type: 'show-slide', clientStateRevision: 0 }));
+    control.connection?.receive(command({ id: 'c1', idempotencyKey: 'k1', type: 'current-slide-changed', clientStateRevision: 0 }));
     hub.publish('standby-changed');
     control.connection?.receive(command({ id: 'c2', idempotencyKey: 'k2', type: 'current-slide-changed', clientStateRevision: 2 }));
     hub.publish('theme-changed');
 
     const events = audience.far.frames().filter((frame) => frame['kind'] === 'event');
     expect(events.map((frame) => frame['type'])).toEqual([
-      'show-slide',
+      'current-slide-changed',
       'standby-changed',
       'current-slide-changed',
       'theme-changed',
@@ -550,7 +550,7 @@ describe('a frame this protocol will not read', () => {
         outcome: 'applied',
         sequence: 1,
         stateRevision: 1,
-        type: 'show-slide',
+        type: 'current-slide-changed',
         mutatesState: true,
         at: AT,
       }),
@@ -746,5 +746,93 @@ describe('connection counts by view type', () => {
     const counts = hub.connectionCounts();
     expect(Object.keys(counts).sort()).toEqual(['audience', 'control', 'guest', 'singer', 'stage']);
     expect(Object.values(counts).every((value) => typeof value === 'number')).toBe(true);
+  });
+});
+
+describe('resume amplification budget', () => {
+  it('allows one replay per five seconds per member, without heartbeats resetting the budget', () => {
+    let clock = Date.parse(AT);
+    const hub = hubAt({ clock: () => new Date(clock).toISOString() });
+    for (let index = 0; index < 256; index += 1) hub.publish('current-slide-changed');
+    const first = joined(hub, 'audience');
+    const second = joined(hub, 'audience');
+    const resume = JSON.stringify({ kind: 'resume', channel: 'audience', fromSequence: 0 });
+    first.connection?.receive(resume);
+    expect(first.far.frames()).toHaveLength(258);
+    for (let index = 0; index < 20; index += 1) first.connection?.receive(resume);
+    first.connection?.receive(JSON.stringify({ kind: 'heartbeat', channel: 'audience', at: AT }));
+    clock += 4999;
+    first.connection?.receive(resume);
+    expect(first.far.frames()).toHaveLength(258);
+    second.connection?.receive(resume);
+    expect(second.far.frames()).toHaveLength(258);
+    clock += 1;
+    first.connection?.receive(resume);
+    expect(first.far.frames()).toHaveLength(515);
+    expect(first.far.ended()).toBeUndefined();
+  });
+
+  it('also limits resumes that fall outside the replay window', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    const resume = JSON.stringify({ kind: 'resume', channel: 'audience', fromSequence: 999 });
+    audience.connection?.receive(resume);
+    audience.connection?.receive(resume);
+    expect(audience.far.kinds()).toEqual(['snapshot', 'snapshot']);
+  });
+});
+
+describe('private control command isolation', () => {
+  it.each(['private-search', 'passage-preview', 'draft-edit', 'constructor'])('never publishes or replays %s to output views', (type) => {
+    const hub = hubAt();
+    const surfaces = OUTPUT_CHANNELS.map((channel) => joined(hub, channel));
+    const guest = joined(hub, 'audience', VIEW_GRANTS.audience, true);
+    const control = joined(hub, 'live-control', OPERATOR);
+    control.connection?.receive(command({ type }));
+    expect(control.far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'unauthorized' });
+    expect(hub.stateRevision()).toBe(0);
+    expect(hub.sequence()).toBe(0);
+    for (const surface of [...surfaces, guest]) expect(surface.far.kinds()).toEqual(['snapshot']);
+    guest.connection?.receive(JSON.stringify({ kind: 'resume', channel: 'audience', fromSequence: 0 }));
+    expect(guest.far.kinds()).toEqual(['snapshot', 'snapshot']);
+  });
+
+  it.each(['current-slide-changed', 'standby-changed', 'theme-changed', 'run-state-changed'])('allows the public change %s', (type) => {
+    const hub = hubAt();
+    const guest = joined(hub, 'audience', VIEW_GRANTS.audience, true);
+    const control = joined(hub, 'live-control', OPERATOR);
+    control.connection?.receive(command({ type }));
+    expect(guest.far.frames().at(-1)).toMatchObject({ kind: 'event', type });
+    expect(control.far.frames().at(-1)).toMatchObject({ outcome: 'applied' });
+  });
+});
+
+describe('revoked live members', () => {
+  it('ends only matching capabilities, discards queued access, and preserves ordinary sessions', () => {
+    const hub = hubAt({ highWaterBytes: 1 });
+    const grant = { ...VIEW_GRANTS.audience, capabilityId: 'revoked-id' };
+    const first = joined(hub, 'audience', grant, true);
+    const second = joined(hub, 'audience', grant, true);
+    const other = joined(hub, 'audience', { ...VIEW_GRANTS.audience, capabilityId: 'other-id' }, true);
+    const ordinary = joined(hub, 'audience');
+    first.far.hold(2);
+    hub.publish('theme-changed');
+    hub.revokeCapability('revoked-id');
+    hub.revokeCapability('revoked-id');
+    expect(first.far.ended()?.code).toBe(LIVE_CLOSE.refused);
+    expect(second.far.ended()?.code).toBe(LIVE_CLOSE.refused);
+    expect(other.far.ended()).toBeUndefined();
+    expect(ordinary.far.ended()).toBeUndefined();
+    expect(hub.connectionCounts()).toMatchObject({ guest: 1, audience: 1 });
+    first.far.hold(0);
+    first.connection?.receive(JSON.stringify({ kind: 'resume', channel: 'audience', fromSequence: 0 }));
+    hub.tick();
+    hub.publish('standby-changed');
+    expect(first.far.kinds()).toEqual(['snapshot']);
+    expect(second.far.kinds()).toEqual(['snapshot', 'event']);
+    hub.revokeCapability(undefined);
+    expect(other.far.ended()?.code).toBe(LIVE_CLOSE.refused);
+    expect(ordinary.far.ended()).toBeUndefined();
+    expect(hub.connectionCounts()).toMatchObject({ guest: 0, audience: 1 });
   });
 });

@@ -1,3 +1,4 @@
+import { once } from 'node:events';
 import { request } from 'node:http';
 
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, supportedClientVersions } from '@holydeck/contracts/clients';
@@ -353,7 +354,7 @@ describe('the live session', () => {
       channel: 'audience',
       id: 'command-1',
       outcome: 'applied',
-      type: 'show-slide',
+      type: 'current-slide-changed',
       sequence: 1,
       stateRevision: 0,
       mutatesState: true,
@@ -373,7 +374,7 @@ describe('the live session', () => {
       channel: 'audience',
       id: 'command-1',
       idempotencyKey: 'key-1',
-      type: 'show-slide',
+      type: 'current-slide-changed',
       clientStateRevision: 0,
     });
     expect(await live.frame()).toMatchObject({ kind: 'ack', id: 'command-1', outcome: 'unauthorized' });
@@ -423,10 +424,10 @@ describe('a session carrying Control presentation', () => {
       channel: 'live-control',
       id: 'command-1',
       idempotencyKey: 'key-1',
-      type: 'show-slide',
+      type: 'current-slide-changed',
       clientStateRevision: 0,
     });
-    expect(await control.frame()).toMatchObject({ kind: 'event', sequence: 1, stateRevision: 1, type: 'show-slide' });
+    expect(await control.frame()).toMatchObject({ kind: 'event', sequence: 1, stateRevision: 1, type: 'current-slide-changed' });
     expect(await control.frame()).toMatchObject({ kind: 'ack', id: 'command-1', outcome: 'applied', stateRevision: 1 });
   });
 
@@ -441,7 +442,7 @@ describe('a session carrying Control presentation', () => {
       channel: 'live-control',
       id: 'command-1',
       idempotencyKey: 'key-1',
-      type: 'show-slide',
+      type: 'current-slide-changed',
       clientStateRevision: 0,
     });
     expect(await audience.frame()).toMatchObject({ kind: 'event', channel: 'audience', sequence: 1 });
@@ -456,7 +457,7 @@ describe('a session carrying Control presentation', () => {
       channel: 'live-control',
       id,
       idempotencyKey: key,
-      type: 'show-slide',
+      type: 'current-slide-changed',
       clientStateRevision: 0,
     });
     control.send(command('command-1', 'key-1'));
@@ -486,7 +487,7 @@ describe('a session carrying Control presentation', () => {
       channel: 'live-control',
       id: `command-${at}`,
       idempotencyKey: `key-${at}`,
-      type: 'show-slide',
+      type: 'current-slide-changed',
       clientStateRevision: at,
     });
 
@@ -520,7 +521,7 @@ describe('a session carrying Control presentation', () => {
       channel: 'live-control',
       id: 'command-1',
       idempotencyKey: 'key-1',
-      type: 'show-slide',
+      type: 'current-slide-changed',
       clientStateRevision: 0,
     };
     first.send(command);
@@ -647,6 +648,7 @@ describe('a Guest joining the Audience view on a shared capability', () => {
     const services = servicesOn(fakeDb(), { now: () => AT });
     const defect = new TypeError('mongodb://holydeck:hunter2@records.invalid:27017 is not a function');
     const broken: CapabilityStore = {
+      onRevoked: () => () => {},
       issue: () => Promise.reject(defect),
       redeem: () => Promise.reject(defect),
       revoke: () => Promise.reject(defect),
@@ -757,5 +759,90 @@ describe('operator-visible connection counts by view type', () => {
     guest.socket.close();
     await guest.closed;
     expect((await counted(base, cookie)).body).toMatchObject({ data: { counts: { guest: 0 } } });
+  });
+});
+
+describe('live socket security without a listening port', () => {
+  const headers = { host: 'localhost', origin: 'http://localhost', 'x-forwarded-proto': 'http' };
+  const prepared = async (duringRead?: (capabilities: CapabilityStore, id: string) => Promise<void>) => {
+    const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => AT });
+    const services = servicesOn(fakeDb(), { now: () => AT });
+    const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
+    const created = await services.create(context, {
+      title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
+    });
+    await services.transition(context, created.stamp.id, 'presenting');
+    const issued = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
+      kind: 'guest', service: created.stamp.id, view: 'audience',
+      expiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
+    });
+    const app = buildApp({ settings, logger: false, fetching: refusing });
+    running = app;
+    await serveLive(app, {
+      clock: () => AT, capabilities,
+      services: duringRead === undefined ? services : {
+        ...services,
+        current: async (...args) => {
+          await duringRead(capabilities, issued.capabilityId);
+          return services.current(...args);
+        },
+      },
+    });
+    await app.ready();
+    const path = `${LIVE_PATH}?channel=audience&${CURRENT}&${SERVICE_QUERY}=${created.stamp.id}&${CAPABILITY_QUERY}=${issued.token}`;
+    return { app, capabilities, issued, path };
+  };
+
+  it('closes every socket admitted by a revoked capability immediately', async () => {
+    const { app, capabilities, issued, path } = await prepared();
+    const first = await app.injectWS(path, { headers });
+    const second = await app.injectWS(path, { headers });
+    const closed = [once(first, 'close'), once(second, 'close')];
+    await capabilities.revoke(capabilityContext(GUEST_CORRELATION), issued.capabilityId);
+    expect([...app.websocketServer.clients].every((socket) => socket.readyState !== socket.OPEN)).toBe(true);
+    for (const result of await Promise.all(closed)) expect(result[0]).toBe(LIVE_CLOSE.refused);
+  });
+
+  it('closes live guests when all capabilities are revoked', async () => {
+    const { app, capabilities, path } = await prepared();
+    const socket = await app.injectWS(path, { headers });
+    const closed = once(socket, 'close');
+    await capabilities.revokeEvery(capabilityContext(GUEST_CORRELATION));
+    expect([...app.websocketServer.clients].every((peer) => peer.readyState !== peer.OPEN)).toBe(true);
+    expect((await closed)[0]).toBe(LIVE_CLOSE.refused);
+  });
+
+  it('refuses a grant revoked while its service is being checked', async () => {
+    const { app, path } = await prepared((capabilities, id) => capabilities.revoke(capabilityContext(GUEST_CORRELATION), id));
+    const frames: unknown[] = [];
+    const socket = await app.injectWS(path, { headers }, {
+      onInit: (peer) => { peer.on('message', (frame: unknown) => frames.push(frame)); },
+    });
+    expect([...app.websocketServer.clients].every((peer) => peer.readyState !== peer.OPEN)).toBe(true);
+    expect(frames).toEqual([]);
+    socket.terminate();
+  });
+
+  it('sets an explicit eight-KiB payload ceiling', async () => {
+    const { app } = await prepared();
+    expect(app.websocketServer.options.maxPayload).toBe(8 * 1024);
+  });
+
+  it('accepts a resume at exactly the payload ceiling', async () => {
+    const { app, path } = await prepared();
+    const socket = await app.injectWS(path, { headers });
+    const resumed = once(socket, 'message');
+    const frame = JSON.stringify({ kind: 'resume', channel: 'audience', fromSequence: 0 });
+    socket.send(frame.padEnd(8 * 1024, ' '));
+    expect(JSON.parse(String((await resumed)[0]))).toMatchObject({ kind: 'snapshot', sequence: 0 });
+    socket.terminate();
+  });
+
+  it('closes an oversized frame with the standard message-too-big code', async () => {
+    const { app, path } = await prepared();
+    const socket = await app.injectWS(path, { headers });
+    const closed = once(socket, 'close');
+    socket.send(' '.repeat(8 * 1024 + 1));
+    expect((await closed)[0]).toBe(1009);
   });
 });

@@ -18,7 +18,7 @@
 
 import { joinAllowedFor } from '@holydeck/contracts/services';
 
-import { CapabilityError, capabilityContext } from './capabilities.js';
+import { CapabilityError, capabilityContext, tokenDigest } from './capabilities.js';
 import { requestContext } from './context.js';
 import { VIEW_GRANTS } from './live-protocol.js';
 import { SERVICE_PERMISSIONS } from './services.js';
@@ -83,5 +83,5 @@ export async function admitGuest(
       `${request.service} is not Presenting, and a Guest capability opens only while its Service is`,
     );
   }
-  return VIEW_GRANTS[redeemed.view];
+  return { ...VIEW_GRANTS[redeemed.view], capabilityId: tokenDigest(request.token) };
 }

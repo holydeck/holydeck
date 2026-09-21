@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { capabilityContext, capabilitiesOn } from './capabilities.js';
+import { capabilityContext, capabilitiesOn, tokenDigest } from './capabilities.js';
 import { GuestJoinError, admitGuest } from './guest-join.js';
 import { VIEW_GRANTS } from './live-protocol.js';
 import { serviceContext, servicesOn } from './services.js';
@@ -59,8 +59,8 @@ describe('a Guest joining the Audience view', () => {
     const service = await serviceAt(services, 'presenting');
     const token = await guestToken(capabilities, service, new Date(START + 60_000).toISOString());
     const grant = await admitGuest(capabilities, services, CORRELATION, { token, service, view: 'audience' });
-    expect(grant).toEqual(VIEW_GRANTS.audience);
-    expect(Object.keys(grant)).toEqual(['watch', 'command']);
+    expect(grant).toEqual({ ...VIEW_GRANTS.audience, capabilityId: tokenDigest(token) });
+    expect(Object.keys(grant)).toEqual(['watch', 'command', 'capabilityId']);
   });
 
   it('refuses a capability that has expired (time-scoped)', async () => {
@@ -115,6 +115,7 @@ describe('a Guest joining the Audience view', () => {
     const { services } = harness();
     const defect = new TypeError('mongodb://holydeck:hunter2@records.invalid:27017 is not a function');
     const broken: CapabilityStore = {
+      onRevoked: () => () => {},
       issue: () => Promise.reject(defect),
       redeem: () => Promise.reject(defect),
       revoke: () => Promise.reject(defect),

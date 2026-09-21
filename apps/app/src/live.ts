@@ -59,6 +59,7 @@ export { CAPABILITY_QUERY, CHANNEL_QUERY, CLIENT_VERSION_QUERY, LIVE_CONNECTIONS
 
 /** How often a session is asked whether it is still there, and whatever it fell behind on is drained. */
 export const HEARTBEAT_MS = 5_000;
+export const MAX_LIVE_PAYLOAD_BYTES = 8 * 1024;
 
 // Only the query string is read from it, and a relative URL needs some origin to be read against.
 const INTERNAL = 'http://application.invalid';
@@ -224,9 +225,15 @@ export async function serveLive(
     ...limits
   }: LiveOptions = {},
 ): Promise<void> {
-  await app.register(websocket);
+  await app.register(websocket, { options: { maxPayload: MAX_LIVE_PAYLOAD_BYTES } });
 
   const hub = liveHub({ clock, ...limits });
+  let revocationRevision = 0;
+  const admittedAt = new WeakMap<FastifyRequest, number>();
+  const unsubscribe = capabilities?.onRevoked((capabilityId) => {
+    revocationRevision += 1;
+    hub.revokeCapability(capabilityId);
+  });
 
   // Unreferenced on purpose: a heartbeat is something a running service does, never a reason for a
   // process with nothing else to do to keep running.
@@ -234,6 +241,7 @@ export async function serveLive(
   beat.unref();
   app.addHook('onClose', () => {
     clearInterval(beat);
+    unsubscribe?.();
   });
 
   // A deployment with neither sessions nor capabilities has nothing to prove a handshake against, and
@@ -243,7 +251,12 @@ export async function serveLive(
   const proving =
     sessions === undefined && capabilities === undefined
       ? {}
-      : { preValidation: proveHandshake(sessions, capabilities, services) };
+      : {
+          preValidation: async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+            admittedAt.set(request, revocationRevision);
+            await proveHandshake(sessions, capabilities, services)(request, reply);
+          },
+        };
 
   // Read-only, and behind Control presentation like every other operator-only surface: never a
   // per-connection row, only how many of each view type are open right now (spec 9.5, LIVE-06).
@@ -273,6 +286,11 @@ export async function serveLive(
     // A capability's grant, when this handshake redeemed one, is what tells `connectionCounts()` a
     // Guest apart from an ordinary Audience session — the grant's own shape does not (spec 9.5).
     const capabilityGrant = CAPABILITY_GRANT.get(request);
+    // Any revocation during admission requires a fresh handshake; no revoked-id history is retained.
+    if (capabilityGrant !== undefined && admittedAt.get(request) !== revocationRevision) {
+      socket.close(LIVE_CLOSE.refused, 'capability: revoked during admission');
+      return;
+    }
     const grant = capabilityGrant ?? grantFor(PROVEN.get(request)?.record.permissions ?? []);
     const connection = hub.join(transportOf(socket), channel, grant, capabilityGrant !== undefined);
     if (connection === undefined) return;

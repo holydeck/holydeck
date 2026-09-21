@@ -23,6 +23,7 @@ import {
   parseFrame,
 } from '@holydeck/contracts/live';
 
+import { LIVE_EVENT_TYPES } from './live-events.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 
 import type {
@@ -51,6 +52,7 @@ export interface LiveTransport {
 export interface LiveGrant {
   readonly watch: readonly LiveChannel[];
   readonly command: boolean;
+  readonly capabilityId?: string;
 }
 
 /**
@@ -147,9 +149,14 @@ export interface LiveHub {
    * publish through it. Every joined session, on every channel, is written the resulting event.
    */
   publish(type: string): Landed;
+  revokeCapability(capabilityId: string | undefined): void;
   /** One beat: drains whatever a transport had room for, then asks every session whether it is still there. */
   tick(): void;
 }
+
+export const RESUME_INTERVAL_MS = 5_000;
+
+const PUBLIC_COMMAND_TYPES = new Set<string>(Object.values(LIVE_EVENT_TYPES));
 
 const DEFAULTS = {
   backlogFrames: 256,
@@ -177,6 +184,7 @@ interface Member {
   readonly transport: LiveTransport;
   readonly channel: LiveChannel;
   readonly grant: LiveGrant;
+  readonly capabilityId: string | undefined;
   /** Fixed at join, from the channel and whether this connection was a capability's rather than a
    *  session's — what `connectionCounts()` groups by. */
   readonly viewType: ConnectionViewType;
@@ -184,6 +192,7 @@ interface Member {
   readonly pending: string[];
   /** Heartbeats sent since this session last said anything at all. */
   unanswered: number;
+  resumeAfter: number;
   open: boolean;
 }
 
@@ -317,7 +326,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
   };
 
   const command = (member: Member, frame: LiveFrame & { kind: 'command' }): void => {
-    if (!member.grant.command) {
+    if (!member.grant.command || !PUBLIC_COMMAND_TYPES.has(frame.type)) {
       // Answered rather than closed: a surface that mistakenly asks to command is still a surface an
       // audience is watching, and ending its session would take the service off a screen over a mistake.
       write(member, ackOf(member, frame.id, 'unauthorized', standing()));
@@ -341,6 +350,9 @@ export function liveHub(options: LiveHubOptions): LiveHub {
   };
 
   const resume = (member: Member, fromSequence: number): void => {
+    const now = Date.parse(clock());
+    if (now < member.resumeAfter) return;
+    member.resumeAfter = now + RESUME_INTERVAL_MS;
     const oldest = backlog[0]?.sequence;
     // Reachable only when everything after `fromSequence` is still held, and when that sequence is one
     // this server actually issued. Anything else is answered by moving the client to where the server
@@ -407,9 +419,11 @@ export function liveHub(options: LiveHubOptions): LiveHub {
         transport,
         channel,
         grant,
+        capabilityId: grant.capabilityId,
         viewType: viewTypeOf(channel, guest),
         pending: [],
         unanswered: 0,
+        resumeAfter: -Infinity,
         open: true,
       };
       members.add(member);
@@ -433,6 +447,14 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     },
 
     publish,
+
+    revokeCapability: (capabilityId: string | undefined): void => {
+      for (const member of [...members]) {
+        if (member.capabilityId !== undefined && (capabilityId === undefined || member.capabilityId === capabilityId)) {
+          end(member, LIVE_CLOSE.refused, 'capability: revoked');
+        }
+      }
+    },
 
     tick: (): void => {
       for (const member of [...members]) {

@@ -19,6 +19,8 @@ import type { Document, Filter } from './repositories.js';
 
 export const CAPABILITIES_COLLECTION = 'capabilities';
 
+export const MAX_CAPABILITY_LIFETIME = 12 * 60 * 60 * 1000;
+
 export type CapabilityKind = 'guest' | 'output';
 
 /** Never `'live-control'`: a capability presents a channel to watch, not the one an operator runs on. */
@@ -130,7 +132,9 @@ export interface CapabilityOptions {
 }
 
 export interface CapabilityStore {
-  /** Mints a capability good until `expiresAt`, which must not already have passed. */
+  /** Called after deletion; undefined means every capability was revoked. Returns an unsubscribe function. */
+  onRevoked(listener: (capabilityId: string | undefined) => void): () => void;
+  /** Mints a capability good until `expiresAt`, within MAX_CAPABILITY_LIFETIME of the current time. */
   issue(
     context: unknown,
     issuedBy: string,
@@ -177,7 +181,16 @@ export function capabilitiesOn(db: CapabilityDb, options: CapabilityOptions): Ca
     }
   };
 
+  const listeners = new Set<(capabilityId: string | undefined) => void>();
+  const notifyRevoked = (capabilityId: string | undefined): void => {
+    for (const listener of listeners) listener(capabilityId);
+  };
+
   const store: CapabilityStore = {
+    onRevoked(listener) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
     async issue(context, issuedBy, { kind, service, view, expiresAt }) {
       permit(context, 'issue');
       if (service.trim() === '') throw new CapabilityError('schema', 'capabilities: a capability is scoped to one service');
@@ -185,8 +198,12 @@ export function capabilitiesOn(db: CapabilityDb, options: CapabilityOptions): Ca
         throw new CapabilityError('schema', 'capabilities: a guest capability grants the audience view and no other');
       }
       const expiresOn = new Date(expiresAt);
-      if (Number.isNaN(expiresOn.getTime()) || expiresOn.getTime() <= Date.parse(options.now())) {
+      const now = Date.parse(options.now());
+      if (Number.isNaN(expiresOn.getTime()) || expiresOn.getTime() <= now) {
         throw new CapabilityError('schema', 'capabilities: a capability needs an expiry that has not already passed');
+      }
+      if (expiresOn.getTime() > now + MAX_CAPABILITY_LIFETIME) {
+        throw new CapabilityError('schema', 'capabilities: a capability may last at most twelve hours');
       }
       const token = newToken();
       const capabilityId = tokenDigest(token);
@@ -219,11 +236,13 @@ export function capabilitiesOn(db: CapabilityDb, options: CapabilityOptions): Ca
     async revoke(context, capabilityId) {
       permit(context, 'revoke');
       await rows().deleteOne({ _id: capabilityId });
+      notifyRevoked(capabilityId);
     },
 
     async revokeEvery(context) {
       permit(context, 'revoke');
       const { deletedCount } = await rows().deleteMany({});
+      notifyRevoked(undefined);
       return deletedCount;
     },
   };
