@@ -1,4 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import { relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, test } from 'vitest';
 
@@ -38,10 +40,44 @@ const everything: NotificationPreference = Object.freeze({
 
 const derived = (): readonly Notification[] => notificationsFrom([event()], [everything]);
 
-const sourcesUnder = (directory: string): readonly { name: string; text: string }[] =>
-  readdirSync(new URL(directory, import.meta.url))
-    .filter((name) => name.endsWith('.ts'))
-    .map((name) => ({ name, text: readFileSync(new URL(`${directory}${name}`, import.meta.url), 'utf8') }));
+const REPOSITORY = new URL('../../../', import.meta.url);
+
+/** Every source file under a directory, including the ones in directories under it — `cli/commands`,
+ *  `corpus/routes` and the two `internal` folders are as much of this repository as its flat trees. */
+const sourcesUnder = (directory: string): readonly { name: string; text: string }[] => {
+  const root = new URL(directory, import.meta.url);
+  const found: { name: string; text: string }[] = [];
+  const walk = (at: URL): void => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        walk(new URL(`${entry.name}/`, at));
+        continue;
+      }
+      if (!entry.name.endsWith('.ts')) continue;
+      const file = new URL(entry.name, at);
+      found.push({
+        name: relative(fileURLToPath(REPOSITORY), fileURLToPath(file)),
+        text: readFileSync(file, 'utf8'),
+      });
+    }
+  };
+  walk(root);
+  return found;
+};
+
+/** Every workspace in this repository, named rather than globbed: a glob would also walk the build and
+ *  coverage output beside them, and a policy that passes because it read `dist` proves nothing. */
+const WORKSPACES = [
+  '../',
+  '../../cli/',
+  '../../corpus/',
+  '../../web/',
+  '../../worker/',
+  '../../../packages/contracts/',
+  '../../../packages/core/',
+  '../../../packages/localization/',
+  '../../../packages/renderer/',
+];
 
 describe('notifications are in-app only in v1', () => {
   test('names exactly one deliverable channel, and it is the in-app one', () => {
@@ -109,12 +145,18 @@ describe('no outbound channel exists in v1', () => {
     'webhookSecret',
   ];
 
-  test('no module in either workspace carries a transport a notification could leave on', () => {
+  // Every workspace, not only the two that hold a notification today. The worker is where a delivery
+  // job would naturally be put — it is the one process in this repository already running work nobody
+  // is waiting on — so a scan that skipped it would be looking everywhere except the likely place.
+  test('no module in any workspace carries a transport a notification could leave on', () => {
     // This file excepted, since it is the one place the names below are written down on purpose.
-    const sources = [...sourcesUnder('./'), ...sourcesUnder('../../web/src/')].filter(
-      ({ name }) => name !== 'notification-delivery.test.ts',
+    const sources = WORKSPACES.flatMap((workspace) => sourcesUnder(`${workspace}src/`)).filter(
+      ({ name }) => !name.endsWith('notification-delivery.test.ts'),
     );
-    expect(sources.length).toBeGreaterThan(100);
+    // A glob that silently matched nothing would make everything below pass without reading a line.
+    expect(sources.length).toBeGreaterThan(300);
+    expect(sources.some(({ name }) => name.startsWith('apps/worker/src/'))).toBe(true);
+    expect(sources.some(({ name }) => name.startsWith('packages/'))).toBe(true);
     const found = sources.flatMap(({ name, text }) =>
       TRANSPORTS.filter((transport) => text.includes(transport)).map((transport) => `${name}: ${transport}`),
     );
@@ -122,13 +164,16 @@ describe('no outbound channel exists in v1', () => {
   });
 
   test('no workspace depends on one either, so none could be reached without being added first', () => {
-    const manifests = ['../package.json', '../../web/package.json', '../../../packages/contracts/package.json'];
-    for (const manifest of manifests) {
-      const packaged = JSON.parse(readFileSync(new URL(manifest, import.meta.url), 'utf8')) as {
+    for (const workspace of WORKSPACES) {
+      const manifest = new URL(`${workspace}package.json`, import.meta.url);
+      const packaged = JSON.parse(readFileSync(manifest, 'utf8')) as {
+        name?: string;
         dependencies?: Record<string, string>;
       };
       const names = Object.keys(packaged.dependencies ?? {}).join(' ').toLowerCase();
-      for (const transport of TRANSPORTS) expect(names).not.toContain(transport.toLowerCase());
+      for (const transport of TRANSPORTS) {
+        expect(names, `${String(packaged.name)} depends on ${transport}`).not.toContain(transport.toLowerCase());
+      }
     }
   });
 
@@ -136,11 +181,15 @@ describe('no outbound channel exists in v1', () => {
   // the whole of what knows the type exists, which is what makes the claim above hold by construction
   // rather than by a denylist that a new dependency could step around.
   test('nothing outside the derivation and this policy consumes a notification at all', () => {
-    const consumers = sourcesUnder('./')
-      .filter(({ text }) => text.includes("from './notifications.js'"))
+    const consumers = WORKSPACES.flatMap((workspace) => sourcesUnder(`${workspace}src/`))
+      .filter(({ text }) => text.includes("/notifications.js'"))
       .map(({ name }) => name)
       .sort();
-    expect(consumers).toEqual(['notification-delivery.test.ts', 'notification-delivery.ts', 'notifications.test.ts']);
+    expect(consumers).toEqual([
+      'apps/app/src/notification-delivery.test.ts',
+      'apps/app/src/notification-delivery.ts',
+      'apps/app/src/notifications.test.ts',
+    ]);
   });
 
   test('this policy itself names no transport and opens nothing', () => {

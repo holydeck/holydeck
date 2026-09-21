@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, test } from 'vitest';
+import { LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
+import { describe, expect, test, vi } from 'vitest';
 
 import {
   ANNOUNCEMENTS,
@@ -15,8 +16,16 @@ import {
   announceConnection,
   createAnnouncer,
 } from './announcements.js';
+import { createLiveClient } from './live-client.js';
 
-import type { LiveStatus } from './live-client.js';
+import type { LiveClient, LiveCredentials, LiveStatus, SocketEventLike, WebSocketLike } from './live-client.js';
+
+const AT = '2026-09-21T10:00:00.000Z';
+const ORIGIN = 'https://deployment.invalid';
+
+const RECONNECTING = 'Reconnecting; last public frame remains visible';
+const LOST = 'Connection lost. Your last typed text is safe. Editing is paused while we reconnect.';
+const RESTORED = 'Back online. Checking for newer changes…';
 
 /** One region, recording every write rather than only the last: a live region says nothing about a
  *  value that did not change, so what was written matters as much as what stands there now. */
@@ -72,6 +81,104 @@ const fakeLive = (): { onStatus: (listener: (status: LiveStatus) => void) => () 
     },
   };
 };
+
+// ---------------------------------------------------------------------------------------------------
+// A real client, over a socket a test holds the far end of
+//
+// The statuses this module acts on are not hand-authored above a certain point: which state a drop
+// lands in, whether it is recoverable, and whether a retry ever reaches `synchronised` again are
+// decisions `live-client.ts` makes from close codes and credentials. The transition this module has to
+// get right — a drop that was announced as recoverable turning out to be final — is one no hand-written
+// sequence would have thought to produce, so it is driven through the real client here, the way
+// `reconnect-reconciliation.test.ts` drives its own. Each test file keeps its own doubles rather than
+// importing another's, the precedent that file settled on.
+// ---------------------------------------------------------------------------------------------------
+
+interface FarSide {
+  readonly socket: WebSocketLike;
+  accept(): void;
+  deliver(frame: Record<string, unknown>): void;
+  end(code: number): void;
+}
+
+const far = (): FarSide => {
+  const listeners = new Map<string, ((event: SocketEventLike) => void)[]>();
+  const written: string[] = [];
+  let readyState = 0;
+
+  const fire = (type: string, event: SocketEventLike): void => {
+    for (const listener of [...(listeners.get(type) ?? [])]) listener(event);
+  };
+
+  const socket: WebSocketLike = {
+    get readyState(): number {
+      return readyState;
+    },
+    send(data: string): void {
+      written.push(data);
+    },
+    close(): void {
+      readyState = 3;
+    },
+    addEventListener(type: string, listener: (event: SocketEventLike) => void): void {
+      listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+    },
+  };
+
+  return {
+    socket,
+    accept: (): void => {
+      readyState = 1;
+      fire('open', {});
+    },
+    deliver: (frame: Record<string, unknown>): void => fire('message', { data: JSON.stringify(frame) }),
+    // 1006 is an abnormal closure: no code was sent, nothing refused this context, and the client
+    // treats it as a drop worth retrying — which is exactly the announcement this module makes first.
+    end: (code: number): void => {
+      readyState = 3;
+      fire('close', { code, reason: '' });
+    },
+  };
+};
+
+/**
+ * A real client whose every attempt to prove itself is scripted. `proofs` is spent one per connection
+ * attempt: a list of one means the first connection works and the reconnect after it cannot prove
+ * itself, which is how a browser reaches an unrecoverable close without ever passing back through
+ * `synchronised` — a session left open over a lunch break, whose ticket expired while it was dropped.
+ */
+const liveOn = (
+  proofs: LiveCredentials[],
+): { client: LiveClient; opened: FarSide[]; armed: (() => void)[] } => {
+  const opened: FarSide[] = [];
+  const armed: (() => void)[] = [];
+  const client = createLiveClient({
+    channel: LIVE_CONTROL_CHANNEL,
+    origin: ORIGIN,
+    credentials: async (): Promise<LiveCredentials | undefined> => proofs.shift(),
+    open: (): WebSocketLike => {
+      const side = far();
+      opened.push(side);
+      return side.socket;
+    },
+    clock: () => AT,
+    // Held rather than timed, so a reconnect happens where the test says it does.
+    retry: (_attempt, run) => {
+      armed.push(run);
+    },
+  });
+  return { client, opened, armed };
+};
+
+const ticket = (value: string): LiveCredentials => ({ kind: 'ticket', ticket: value });
+
+const snapshotAt = (sequence: number): Record<string, unknown> => ({
+  kind: 'snapshot',
+  channel: LIVE_CONTROL_CHANNEL,
+  stateRevision: sequence,
+  sequence,
+  at: AT,
+});
 
 describe('the announcements the UI contract names', () => {
   test('names six, and grades each of them polite or assertive exactly as the contract does', () => {
@@ -234,7 +341,7 @@ describe('the assertive connection announcement, driven by a real live context',
     // back to degraded when the attempt fails. None of that is a second thing to interrupt a room with.
     live.emit(statusOf({ state: 'connecting' }));
     live.emit(dropped);
-    expect(regions.assertive.writes).toEqual(['Reconnecting; last public frame remains visible']);
+    expect(regions.assertive.writes).toEqual([RECONNECTING]);
   });
 
   test('says a failure nothing will recover from is a loss, not a reconnection', () => {
@@ -247,7 +354,38 @@ describe('the assertive connection announcement, driven by a real live context',
         failure: { reason: 'unauthorized', message: 'could not prove itself', recoverable: false },
       }),
     );
-    expect(regions.assertive.writes).toEqual(['Connection lost; editing is paused and typed text is safe']);
+    // The UI contract's own Offline copy, word for word: AX-F3 was raised over announcements that had
+    // an expected wording and nowhere to say it, and saying different words would only half answer it.
+    expect(regions.assertive.writes).toEqual([LOST]);
+  });
+
+  test('says a loss nothing will recover from once, however often the client restates it', () => {
+    const { doc, regions } = shell();
+    const live = fakeLive();
+    announceConnection(live, createAnnouncer(doc), 'en');
+    const final = statusOf({
+      state: 'closed',
+      failure: { reason: 'unauthorized', message: 'could not prove itself', recoverable: false },
+    });
+    live.emit(final);
+    live.emit(final);
+    expect(regions.assertive.writes).toEqual([LOST]);
+  });
+
+  test('never walks a loss back to a reconnection, because that direction is not an escalation', () => {
+    const { doc, regions } = shell();
+    const live = fakeLive();
+    announceConnection(live, createAnnouncer(doc), 'en');
+    live.emit(
+      statusOf({
+        state: 'closed',
+        failure: { reason: 'unsupported', message: 'no WebSocket here', recoverable: false },
+      }),
+    );
+    live.emit(
+      statusOf({ state: 'degraded', failure: { reason: 'closed', message: 'gone', code: 1006, recoverable: true } }),
+    );
+    expect(regions.assertive.writes).toEqual([LOST]);
   });
 
   test('says it in the language the surface is running in', () => {
@@ -276,7 +414,7 @@ describe('the assertive connection announcement, driven by a real live context',
     live.emit(statusOf({ state: 'synchronised' }));
     expect(announcer.standing('connectionLoss')).toBe(false);
     expect(regions.assertive.textContent).toBe('');
-    expect(regions.polite.writes).toEqual(['Back online. Checking for newer changes…']);
+    expect(regions.polite.writes).toEqual([RESTORED]);
   });
 
   test('says the loss again after a second drop, because that is a second thing to have happened', () => {
@@ -290,11 +428,7 @@ describe('the assertive connection announcement, driven by a real live context',
     live.emit(dropped);
     live.emit(statusOf({ state: 'synchronised' }));
     live.emit(dropped);
-    expect(regions.assertive.writes).toEqual([
-      'Reconnecting; last public frame remains visible',
-      '',
-      'Reconnecting; last public frame remains visible',
-    ]);
+    expect(regions.assertive.writes).toEqual([RECONNECTING, '', RECONNECTING]);
   });
 
   test('a frame it could not read is not a connection loss and is never announced as one', () => {
@@ -328,6 +462,79 @@ describe('the assertive connection announcement, driven by a real live context',
     live.emit(statusOf({ state: 'synchronised' }));
     live.emit(statusOf({ state: 'synchronised' }));
     expect(regions.polite.writes).toEqual([]);
+  });
+});
+
+// Spec §14.3's failure injection — network loss during editing and during a live run — driven through
+// the client that actually holds the session rather than through statuses written by hand.
+describe('the assertive connection announcement, over a session that really drops', () => {
+  test('says one recoverable drop once, across the whole retry the client actually runs', async () => {
+    const { doc, regions } = shell();
+    const { client, opened, armed } = liveOn([ticket('ticket-1'), ticket('ticket-2')]);
+    announceConnection(client, createAnnouncer(doc), 'en');
+
+    await client.connect();
+    opened[0]?.accept();
+    opened[0]?.deliver(snapshotAt(1));
+    expect(client.status.state).toBe('synchronised');
+
+    opened[0]?.end(1006);
+    expect(client.status.state).toBe('degraded');
+    expect(regions.assertive.writes).toEqual([RECONNECTING]);
+
+    // The reconnect the client armed for itself. Everything it passes through on the way back —
+    // authorizing, connecting, resuming — is a state a room is not interrupted over.
+    armed[0]?.();
+    await vi.waitFor(() => expect(opened).toHaveLength(2));
+    opened[1]?.accept();
+    // The hub writes a joining connection a snapshot before it reads the resume; the client skips that
+    // one and adopts the answer to its own resume.
+    opened[1]?.deliver(snapshotAt(1));
+    opened[1]?.deliver(snapshotAt(4));
+
+    expect(client.status.state).toBe('synchronised');
+    expect(regions.assertive.writes).toEqual([RECONNECTING, '']);
+    expect(regions.polite.writes).toEqual([RESTORED]);
+  });
+
+  // The defect this module would otherwise have: a real client can go recoverable → unrecoverable
+  // without ever touching `synchronised` in between, and a loss announcement that only stands down on
+  // `synchronised` would leave the room holding "reconnecting" over a session that is not coming back.
+  test('escalates to a loss when the reconnect it promised cannot prove itself', async () => {
+    const { doc, regions } = shell();
+    const { client, opened, armed } = liveOn([ticket('ticket-1')]);
+    announceConnection(client, createAnnouncer(doc), 'en');
+
+    await client.connect();
+    opened[0]?.accept();
+    opened[0]?.deliver(snapshotAt(1));
+
+    opened[0]?.end(1006);
+    expect(regions.assertive.writes).toEqual([RECONNECTING]);
+
+    armed[0]?.();
+    await vi.waitFor(() => expect(client.status.state).toBe('closed'));
+
+    expect(client.status.failure).toMatchObject({ reason: 'unauthorized', recoverable: false });
+    expect(regions.assertive.writes).toEqual([RECONNECTING, '', LOST]);
+    expect(regions.assertive.textContent).toBe(LOST);
+    // Never passed back through a healthy session on the way, which is what made this reachable.
+    expect(regions.polite.writes).toEqual([]);
+  });
+
+  test('a close nothing could have retried is a loss the first time it is said', async () => {
+    const { doc, regions } = shell();
+    const { client, opened } = liveOn([ticket('ticket-1')]);
+    announceConnection(client, createAnnouncer(doc), 'en');
+
+    await client.connect();
+    opened[0]?.accept();
+    opened[0]?.deliver(snapshotAt(1));
+    // 1000 is an ordinary closure: the hub is done with this session and no reconnect is owed.
+    opened[0]?.end(1000);
+
+    expect(client.status.state).toBe('closed');
+    expect(regions.assertive.writes).toEqual([LOST]);
   });
 });
 

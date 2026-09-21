@@ -57,10 +57,14 @@ const en = {
   'liveMedia.follower.synchronized': 'Playing in step with {view}.',
   'liveMedia.follower.resynchronized': 'Caught back up with {view}.',
   // The words the two assertive connection announcements are said in (`apps/web/src/announcements.ts`),
-  // and the polite confirmation that takes them back. Punctuated as the UI contract's own scenarios
-  // record them, without a closing full stop: a live region reads a status, not a sentence of prose.
+  // and the polite confirmation that takes them back. `lost` and `restored` are the UI contract's own
+  // Offline and Reconnect copy, word for word — AX-F3 was raised over announcements that had an
+  // expected wording and nowhere to say it, so saying them in different words would only half answer
+  // it. `reconnecting` has no counterpart in the contract at all and is new copy: a recoverable drop,
+  // where the room keeps the last public frame and nobody has to do anything, is a state the contract
+  // never wrote a line for.
   'announce.connection.reconnecting': 'Reconnecting; last public frame remains visible',
-  'announce.connection.lost': 'Connection lost; editing is paused and typed text is safe',
+  'announce.connection.lost': 'Connection lost. Your last typed text is safe. Editing is paused while we reconnect.',
   'announce.connection.restored': 'Back online. Checking for newer changes…',
   'audienceOffline.live': 'Following the live service.',
   'audienceOffline.offline':
@@ -149,7 +153,8 @@ const de: Catalog = {
   'liveMedia.follower.synchronized': 'Wiedergabe synchron zu {view}.',
   'liveMedia.follower.resynchronized': 'Wieder synchron zu {view}.',
   'announce.connection.reconnecting': 'Verbindung wird wiederhergestellt; das letzte öffentliche Bild bleibt sichtbar',
-  'announce.connection.lost': 'Verbindung unterbrochen; die Bearbeitung ist angehalten und Eingegebenes ist gesichert',
+  'announce.connection.lost':
+    'Verbindung unterbrochen. Ihr zuletzt eingegebener Text ist gesichert. Die Bearbeitung pausiert, bis die Verbindung wiederhergestellt ist.',
   'announce.connection.restored': 'Wieder online. Es wird nach neueren Änderungen gesucht…',
   'audienceOffline.live': 'Folgt dem Live-Gottesdienst.',
   'audienceOffline.offline':
@@ -232,7 +237,8 @@ const ta: Catalog = {
   'liveMedia.follower.synchronized': '{view} உடன் ஒத்திசைவாக இயக்கப்படுகிறது.',
   'liveMedia.follower.resynchronized': '{view} உடன் மீண்டும் ஒத்திசைக்கப்பட்டது.',
   'announce.connection.reconnecting': 'மீண்டும் இணைக்கப்படுகிறது; கடைசியாகக் காட்டப்பட்ட பொதுச் சட்டகம் தொடர்ந்து தெரியும்',
-  'announce.connection.lost': 'இணைப்பு துண்டிக்கப்பட்டது; திருத்தம் நிறுத்தப்பட்டுள்ளது, தட்டச்சு செய்த உரை பாதுகாப்பாக உள்ளது',
+  'announce.connection.lost':
+    'இணைப்பு துண்டிக்கப்பட்டது. நீங்கள் கடைசியாகத் தட்டச்சு செய்த உரை பாதுகாப்பாக உள்ளது. மீண்டும் இணைக்கப்படும் வரை திருத்தம் இடைநிறுத்தப்பட்டுள்ளது.',
   'announce.connection.restored': 'மீண்டும் இணைப்பில். புதிய மாற்றங்கள் சரிபார்க்கப்படுகின்றன…',
   'audienceOffline.live': 'நேரடி வழிபாட்டைப் பின்தொடர்கிறது.',
   'audienceOffline.offline':

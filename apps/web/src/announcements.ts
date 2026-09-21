@@ -194,17 +194,25 @@ export type AnnouncingLiveClient = Pick<LiveClient, 'onStatus'>;
  * Every state in between — `authorizing`, `connecting`, `resuming` — is deliberately silent. A client
  * retrying clears its failure while it tries and sets it again when the attempt fails, and announcing
  * each of those would be the repeated interruption the contract forbids.
+ *
+ * The one thing that does get said twice is an escalation. A drop announced as recoverable that turns
+ * out not to be recoverable is a different situation, not a second telling of the same one — and a room
+ * left holding "reconnecting" is being told editing resumes shortly, which by then is untrue.
  */
 export function announceConnection(
   live: AnnouncingLiveClient,
   announcer: Announcer,
   locale: Locale,
 ): () => void {
+  /** Which of the two wordings the standing loss was said in; `undefined` while none is standing. What
+   *  tells an escalation from a repeat. */
+  let saidRecoverable: boolean | undefined;
   return live.onStatus((status) => {
     if (status.state === 'synchronised') {
       // Nothing to take back, so nothing to confirm: a session that was never lost has not come back.
       if (!announcer.standing('connectionLoss')) return;
       announcer.resolve('connectionLoss');
+      saidRecoverable = undefined;
       // Politely: coming back is a temporary confirmation, which is the layer the contract files a
       // toast under, and interrupting a room to say that everything is fine is the wrong trade.
       announcer.announce('toast', translate(locale, 'announce.connection.restored'));
@@ -214,9 +222,19 @@ export function announceConnection(
     if (failure === undefined) return;
     // A frame this client could not read leaves the session where it was and is not a lost connection.
     if (status.state !== 'degraded' && status.state !== 'closed') return;
-    announcer.announce(
+    // A real client reaches an unrecoverable close without ever passing through `synchronised` on the
+    // way: a recoverable close arms a retry, and the retry can fail to prove itself and close for good.
+    // The standing announcement is therefore taken back first, so the loss can be said in the wording
+    // that is now true. One way only — an unrecoverable loss is never re-announced as a recoverable
+    // one, and a second recoverable drop is still the interruption that has already been made.
+    if (!failure.recoverable && saidRecoverable === true) {
+      announcer.resolve('connectionLoss');
+      saidRecoverable = undefined;
+    }
+    const said = announcer.announce(
       'connectionLoss',
       translate(locale, failure.recoverable ? 'announce.connection.reconnecting' : 'announce.connection.lost'),
     );
+    if (said) saidRecoverable = failure.recoverable;
   });
 }
