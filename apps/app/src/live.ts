@@ -141,7 +141,12 @@ const proveGuestJoin = async (
     return true;
   } catch (error: unknown) {
     if (error instanceof GuestJoinError) {
-      await refuseAsForbidden(request, reply, CAPABILITY_QUERY, error.message);
+      if (error.kind === 'capability') {
+        request.log.warn({ err: error }, 'guest capability redeem refused');
+        await refuseAsForbidden(request, reply, CAPABILITY_QUERY, 'that capability could not be redeemed');
+      } else {
+        await refuseAsForbidden(request, reply, CAPABILITY_QUERY, error.message);
+      }
       return false;
     }
     request.log.error(error);
@@ -292,7 +297,10 @@ export async function serveLive(
       return;
     }
     const grant = capabilityGrant ?? grantFor(PROVEN.get(request)?.record.permissions ?? []);
-    const connection = hub.join(transportOf(socket), channel, grant, capabilityGrant !== undefined);
+    const connection = hub.join(
+      transportOf(socket), channel, grant, capabilityGrant !== undefined,
+      PROVEN.get(request)?.record.actor,
+    );
     if (connection === undefined) return;
 
     socket.on('message', (data: unknown) => {

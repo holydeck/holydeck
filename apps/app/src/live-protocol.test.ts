@@ -1,6 +1,6 @@
 import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
 import { LIVE_CHANNELS, LIVE_CLOSE, MAX_CLOSE_REASON, OUTPUT_CHANNELS } from '@holydeck/contracts/live';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { VIEW_GRANTS, grantFor, liveHub } from './live-protocol.js';
 import { PRESENTATION_CONTROL } from './roles.js';
@@ -63,9 +63,9 @@ const hubAt = (options: Partial<Parameters<typeof liveHub>[0]> = {}): LiveHub =>
  *  `guest` mirrors `LiveHub.join`'s own optional 4th argument (T81/T82): true only for a connection
  *  admitted through a capability, which is what tells a Guest's count apart from an ordinary Audience
  *  one in `connectionCounts()`. */
-const joined = (hub: LiveHub, channel: LiveChannel, grant: LiveGrant = WATCHER, guest = false) => {
+const joined = (hub: LiveHub, channel: LiveChannel, grant: LiveGrant = WATCHER, guest = false, clientId?: string) => {
   const far = peer();
-  const connection = hub.join(far.transport, channel, grant, guest);
+  const connection = hub.join(far.transport, channel, grant, guest, clientId);
   return { far, connection };
 };
 
@@ -322,6 +322,39 @@ describe('a change no client commanded', () => {
 });
 
 describe('a command sent twice under one idempotency key', () => {
+  it('applies commands with the same key from two different client identities', () => {
+    const hub = hubAt();
+    const first = joined(hub, 'live-control', OPERATOR, false, 'account:first');
+    const second = joined(hub, 'live-control', OPERATOR, false, 'account:second');
+    first.connection?.receive(command());
+    expect(first.far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'applied', sequence: 1 });
+    second.connection?.receive(command({ clientStateRevision: 1 }));
+    expect(second.far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'applied', sequence: 2 });
+    expect(hub.stateRevision()).toBe(2);
+  });
+
+  it('recognizes a replay after the same client identity reconnects', () => {
+    const hub = hubAt();
+    const first = joined(hub, 'live-control', OPERATOR, false, 'account:first');
+    first.connection?.receive(command());
+    first.connection?.leave();
+    const second = joined(hub, 'live-control', OPERATOR, false, 'account:first');
+    second.connection?.receive(command());
+    expect(second.far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'duplicate', sequence: 1 });
+    expect(hub.stateRevision()).toBe(1);
+  });
+
+  it('uses the capability identity ahead of the supplied client identity', () => {
+    const hub = hubAt();
+    const grant = { ...OPERATOR, capabilityId: 'capability:first' };
+    const first = joined(hub, 'live-control', grant, false, 'account:first');
+    const second = joined(hub, 'live-control', grant, false, 'account:second');
+    first.connection?.receive(command());
+    second.connection?.receive(command());
+    expect(second.far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'duplicate', sequence: 1 });
+    expect(hub.stateRevision()).toBe(1);
+  });
+
   it('moves the state once and answers the replay with what the first one did', () => {
     const hub = hubAt();
     const control = moved(hub, 1);
@@ -661,6 +694,26 @@ describe('a consumer that cannot keep up', () => {
 });
 
 describe('a connection that is no longer there', () => {
+  it.each([false, true])('closes a transport after an encoding failure, even when close throws: %s', (closeThrows) => {
+    const hub = hubAt();
+    const lost = joined(hub, 'audience');
+    const kept = joined(hub, 'stage');
+    const send = vi.spyOn(lost.far.transport, 'send').mockImplementation(() => {
+      throw new TypeError('encoding failed');
+    });
+    const close = vi.spyOn(lost.far.transport, 'close');
+    if (closeThrows) close.mockImplementation(() => { throw new Error('close failed'); });
+
+    expect(() => moved(hub, 2)).not.toThrow();
+    expect(close).toHaveBeenCalledExactlyOnceWith(
+      LIVE_CLOSE.overloaded, 'transport: this session could not be written to',
+    );
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(hub.connectionCounts().audience).toBe(0);
+    expect(kept.far.frames().filter((frame) => frame['kind'] === 'event')).toHaveLength(2);
+    expect(hub.stateRevision()).toBe(2);
+  });
+
   it('is dropped when a write to it fails, and the run carries on for everyone else', () => {
     const hub = hubAt();
     const lost = joined(hub, 'audience');

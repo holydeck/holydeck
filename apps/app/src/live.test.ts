@@ -764,6 +764,46 @@ describe('operator-visible connection counts by view type', () => {
 
 describe('live socket security without a listening port', () => {
   const headers = { host: 'localhost', origin: 'http://localhost', 'x-forwarded-proto': 'http' };
+  it.each(['unknown', 'expired', 'service', 'view', 'state'] as const)(
+    'keeps a %s refusal generic for capabilities and specific for service state',
+    async (reason) => {
+      let clockAt = Date.parse(AT);
+      const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => new Date(clockAt).toISOString() });
+      const services = servicesOn(fakeDb(), { now: () => AT });
+      const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
+      const created = await services.create(context, {
+        title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
+      });
+      if (reason !== 'state') await services.transition(context, created.stamp.id, 'presenting');
+      const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
+        kind: 'guest', service: created.stamp.id, view: 'audience',
+        expiresAt: new Date(clockAt + 60_000).toISOString(),
+      });
+      if (reason === 'expired') clockAt += 60_000;
+      const app = buildApp({ settings, logger: false, fetching: refusing });
+      running = app;
+      await serveLive(app, { clock: () => AT, capabilities, services });
+      const query = new URLSearchParams({
+        channel: reason === 'view' ? 'stage' : 'audience',
+        [CLIENT_VERSION_QUERY]: String(CLIENT_WINDOW.current),
+        [SERVICE_QUERY]: reason === 'service' ? 'different-service' : created.stamp.id,
+        [CAPABILITY_QUERY]: reason === 'unknown' ? 'unknown-token' : token,
+      });
+      const response = await app.inject({
+        method: 'GET', url: `${LIVE_PATH}?${query}`, headers: { ...headers, upgrade: 'websocket' },
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({
+        error: { fields: [{
+          path: CAPABILITY_QUERY,
+          message: reason === 'state'
+            ? `${created.stamp.id} is not Presenting, and a Guest capability opens only while its Service is`
+            : 'that capability could not be redeemed',
+        }] },
+      });
+    },
+  );
+
   const prepared = async (duringRead?: (capabilities: CapabilityStore, id: string) => Promise<void>) => {
     const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => AT });
     const services = servicesOn(fakeDb(), { now: () => AT });

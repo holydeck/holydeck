@@ -137,7 +137,7 @@ export interface LiveHub {
    * the one thing that tells a Guest's count apart from an ordinary Audience one, since the grant shape
    * alone does not.
    */
-  join(transport: LiveTransport, channel: LiveChannel, grant: LiveGrant, guest?: boolean): LiveConnection | undefined;
+  join(transport: LiveTransport, channel: LiveChannel, grant: LiveGrant, guest?: boolean, clientId?: string): LiveConnection | undefined;
   /** How many sessions are open right now, by view type only — never anything that could identify one
    *  of them (spec 9.5, LIVE-06). A lapsed or left connection stops counting the same instant it stops
    *  being a member, because this reads the same set every other operation here does. */
@@ -185,6 +185,7 @@ interface Member {
   readonly channel: LiveChannel;
   readonly grant: LiveGrant;
   readonly capabilityId: string | undefined;
+  readonly identity: string | undefined;
   /** Fixed at join, from the channel and whether this connection was a capability's rather than a
    *  session's — what `connectionCounts()` groups by. */
   readonly viewType: ConnectionViewType;
@@ -238,8 +239,12 @@ export function liveHub(options: LiveHubOptions): LiveHub {
       try {
         member.transport.send(text);
       } catch {
-        // The connection is gone and said so by failing, which is what a network loss looks like from
-        // here. Nothing is closed — there is nothing left to close — and every other session carries on.
+        // A failed write may leave the transport open. Close it best-effort before forgetting it.
+        try {
+          member.transport.close(LIVE_CLOSE.overloaded, 'transport: this session could not be written to');
+        } catch {
+          // A broken transport may also fail to close; every other session must still carry on.
+        }
         forget(member);
         return;
       }
@@ -325,6 +330,8 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     }
   };
 
+  const landedKey = (member: Member, key: string): string => `${member.identity ?? ''} ${key}`;
+
   const command = (member: Member, frame: LiveFrame & { kind: 'command' }): void => {
     if (!member.grant.command || !PUBLIC_COMMAND_TYPES.has(frame.type)) {
       // Answered rather than closed: a surface that mistakenly asks to command is still a surface an
@@ -335,7 +342,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     // Asked before staleness, deliberately. A client retrying a command it never saw acknowledged
     // retries the frame it sent, revision and all, and that revision is behind by exactly the change
     // its own first attempt made. Judging it stale first would refuse every successful retry there is.
-    const already = landed.get(frame.idempotencyKey);
+    const already = landed.get(landedKey(member, frame.idempotencyKey));
     if (already !== undefined) {
       write(member, ackOf(member, frame.id, 'duplicate', already));
       return;
@@ -345,7 +352,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
       return;
     }
     const at = publish(frame.type);
-    remember(frame.idempotencyKey, at);
+    remember(landedKey(member, frame.idempotencyKey), at);
     write(member, ackOf(member, frame.id, 'applied', at));
   };
 
@@ -410,7 +417,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     stateRevision: (): number => stateRevision,
     sequence: (): number => sequence,
 
-    join: (transport: LiveTransport, channel: LiveChannel, grant: LiveGrant, guest = false): LiveConnection | undefined => {
+    join: (transport: LiveTransport, channel: LiveChannel, grant: LiveGrant, guest = false, clientId?: string): LiveConnection | undefined => {
       if (!grant.watch.includes(channel)) {
         transport.close(LIVE_CLOSE.refused, `channel: this session may not watch ${channel}`.slice(0, MAX_CLOSE_REASON));
         return undefined;
@@ -420,6 +427,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
         channel,
         grant,
         capabilityId: grant.capabilityId,
+        identity: grant.capabilityId ?? clientId,
         viewType: viewTypeOf(channel, guest),
         pending: [],
         unanswered: 0,
