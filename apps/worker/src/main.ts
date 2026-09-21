@@ -3,7 +3,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { readSettingsText } from '@holydeck/app/boot';
+import { backupContext, backupDb } from '@holydeck/app/backups';
 import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
+import { SCHEMA_VERSION } from '@holydeck/app/migrations';
 import { queueDb, queueOn, workerContext } from '@holydeck/app/queue';
 import { repositoryDb } from '@holydeck/app/repositories';
 import { loadSettings, settingsPath } from '@holydeck/app/settings';
@@ -97,13 +99,28 @@ if (work.runs === 'nothing') {
     },
   };
   const queue = queueOn(queueDb(store.db()), { now });
-  const handlers = handlersOn({
-    context: mediaContext('system', name),
-    media: mediaLibraryOn(repositoryDb(store.db()), { now, queue, mediaRoot: settings.values.mediaRoot, ...mediaStorage }),
-    storage: mediaStorage,
-    mediaRoot: settings.values.mediaRoot,
-    poster: ffmpegPosterGenerator(),
-  });
+  // Restic itself is only touched once a backup job actually claims and runs: a build that never claims
+  // `backup-run` never needs the binary present, the same way `ffmpeg` is only ever reached per poster job.
+  const restic = { repository: settings.values.resticRepository };
+  const handlers = handlersOn(
+    {
+      context: mediaContext('system', name),
+      media: mediaLibraryOn(repositoryDb(store.db()), { now, queue, mediaRoot: settings.values.mediaRoot, ...mediaStorage }),
+      storage: mediaStorage,
+      mediaRoot: settings.values.mediaRoot,
+      poster: ffmpegPosterGenerator(),
+    },
+    {
+      context: backupContext('system', name),
+      archive: backupDb(store, store.db()),
+      db: repositoryDb(store.db()),
+      restic,
+      settingsDir: dirname(path),
+      mediaRoot: settings.values.mediaRoot,
+      schemaVersion: SCHEMA_VERSION,
+      now,
+    },
+  );
   const runner = runnerOn({
     queue,
     context: workerContext(name),

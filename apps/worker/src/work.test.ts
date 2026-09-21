@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 
 import { HANDLERS, handlersOn, workToDo } from './work.js';
 
+import type { BackupProducerOptions } from './backup-producer.js';
 import type { MediaIngestOptions } from './media-ingest.js';
 import type { Handler } from './runner.js';
 
@@ -28,25 +29,42 @@ test('a registered handler and a store to claim from is work to do', () => {
   });
 });
 
-test('this build registers media ingestion as its first kind of job', () => {
-  expect(Object.keys(HANDLERS)).toEqual(['media-ingest']);
+test('this build registers media ingestion and backup production as its kinds of job', () => {
+  expect(Object.keys(HANDLERS)).toEqual(['media-ingest', 'backup-run']);
 });
 
-test('the unconfigured placeholder refuses to run a job until an entry point wires it up', async () => {
+test('the unconfigured media-ingest placeholder refuses to run a job until an entry point wires it up', async () => {
   await expect(HANDLERS['media-ingest']?.({} as never, new AbortController().signal)).rejects.toThrow(
     'media ingestion has not been configured',
   );
 });
 
-test('an entry point supplying its dependencies replaces the placeholder with a real handler', () => {
-  const options = {
+test('the unconfigured backup-run placeholder refuses to run a job until an entry point wires it up', async () => {
+  await expect(HANDLERS['backup-run']?.({} as never, new AbortController().signal)).rejects.toThrow(
+    'backup production has not been configured',
+  );
+});
+
+test('an entry point supplying its dependencies replaces both placeholders with real handlers', () => {
+  const media = {
     context: undefined,
     media: {} as MediaIngestOptions['media'],
     storage: {} as MediaIngestOptions['storage'],
     mediaRoot: '/media',
     poster: {} as MediaIngestOptions['poster'],
   };
-  const handlers = handlersOn(options);
-  expect(Object.keys(handlers)).toEqual(['media-ingest']);
+  const backupProducer = {
+    context: undefined,
+    archive: {} as BackupProducerOptions['archive'],
+    db: {} as BackupProducerOptions['db'],
+    restic: { repository: '/data/holydeck/restic' },
+    settingsDir: '/data/holydeck/config',
+    mediaRoot: '/media',
+    schemaVersion: 1,
+    now: () => '2026-09-21T00:00:00.000Z',
+  };
+  const handlers = handlersOn(media, backupProducer);
+  expect(Object.keys(handlers)).toEqual(['media-ingest', 'backup-run']);
   expect(handlers['media-ingest']).not.toBe(HANDLERS['media-ingest']);
+  expect(handlers['backup-run']).not.toBe(HANDLERS['backup-run']);
 });

@@ -13,6 +13,10 @@
       "types": "./dist/accounts.d.ts",
       "import": "./dist/accounts.js"
     },
+    "./backups": {
+      "types": "./dist/backups.d.ts",
+      "import": "./dist/backups.js"
+    },
     "./canonical": {
       "types": "./dist/canonical.d.ts",
       "import": "./dist/canonical.js"

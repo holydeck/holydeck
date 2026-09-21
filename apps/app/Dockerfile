@@ -14,7 +14,7 @@ RUN pnpm --filter @holydeck/app deploy --legacy --prod /out/app \
 FROM node:24.20.0-slim
 ENV NODE_ENV=production
 WORKDIR /srv
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg restic && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/app ./app
 COPY --from=build /out/worker ./worker
 # The application serves this client from its own origin, and finds it at this path relative to its

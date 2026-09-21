@@ -8,6 +8,7 @@
 
 import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './accounts.js';
 import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
+import { BACKUP_INDEXES, BACKUP_RECORD } from './backups.js';
 import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } from './capabilities.js';
 import { SHELF_INDEXES, SHELF_RECORD } from './conflicts.js';
 import { CONTENT_LANGUAGE_INDEXES, CONTENT_LANGUAGE_RECORD } from './content-languages.js';
@@ -340,6 +341,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...MID_SERVICE_INDEXES].reverse()) await api.dropIndex(MID_SERVICE_RECORD, index.name);
+    },
+  },
+  {
+    version: 19,
+    name: 'the index a backup run is found by',
+    async up(api) {
+      for (const index of BACKUP_INDEXES) {
+        await api.createIndex(BACKUP_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...BACKUP_INDEXES].reverse()) await api.dropIndex(BACKUP_RECORD, index.name);
     },
   },
 ]);

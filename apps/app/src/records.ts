@@ -37,6 +37,14 @@ export const RECORDS = {
       durationMs: 'optional',
     },
   },
+  // Spec BACK-01: one row per backup run, naming the manifest it produced and the consistency it read
+  // under. A backup is never revised once made — a later run is a new backup, not a correction of an
+  // older one — so this is immutable like `runEvents`, not a stamp history like `services`.
+  backups: {
+    collection: 'backups',
+    kind: 'immutable',
+    fields: { ...HISTORY, backupId: 'required', at: 'required', manifest: 'required', consistency: 'required' },
+  },
   // Spec COLL-01: the losing side of an edit race, kept rather than dropped. Two kinds of row share the
   // collection and neither is ever rewritten: a `shelved` row is the body a writer lost the ordinal for,
   // and a `resolved` row is a later note naming the shelved row somebody settled and the revision that

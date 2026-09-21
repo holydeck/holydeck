@@ -6,8 +6,10 @@
 // check reads. The decision lives here rather than in the entry point so that both answers are read back
 // by a test, since an entry point is only ever run by running the worker.
 
+import { backupProducerOn } from './backup-producer.js';
 import { mediaIngestOn } from './media-ingest.js';
 
+import type { BackupProducerOptions } from './backup-producer.js';
 import type { MediaIngestOptions } from './media-ingest.js';
 import type { Handler } from './runner.js';
 
@@ -21,11 +23,22 @@ const unconfiguredMediaIngest: Handler = async () => {
   throw new Error('media ingestion has not been configured');
 };
 
-/** The kinds this build registers before the entry point supplies their deployment dependencies. */
-export const HANDLERS: Handlers = Object.freeze({ 'media-ingest': unconfiguredMediaIngest });
+const unconfiguredBackupRun: Handler = async () => {
+  throw new Error('backup production has not been configured');
+};
 
-export function handlersOn(mediaIngest: MediaIngestOptions): Handlers {
-  return Object.freeze({ ...HANDLERS, 'media-ingest': mediaIngestOn(mediaIngest) });
+/** The kinds this build registers before the entry point supplies their deployment dependencies. */
+export const HANDLERS: Handlers = Object.freeze({
+  'media-ingest': unconfiguredMediaIngest,
+  'backup-run': unconfiguredBackupRun,
+});
+
+export function handlersOn(mediaIngest: MediaIngestOptions, backupProducer: BackupProducerOptions): Handlers {
+  return Object.freeze({
+    ...HANDLERS,
+    'media-ingest': mediaIngestOn(mediaIngest),
+    'backup-run': backupProducerOn(backupProducer),
+  });
 }
 
 export type Work =

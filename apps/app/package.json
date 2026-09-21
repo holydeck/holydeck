@@ -28,6 +28,14 @@
     "./repositories": {
       "types": "./dist/repositories.d.ts",
       "import": "./dist/repositories.js"
+    },
+    "./backups": {
+      "types": "./dist/backups.d.ts",
+      "import": "./dist/backups.js"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.ts",
+      "import": "./dist/migrations.js"
     }
   },
   "scripts": {

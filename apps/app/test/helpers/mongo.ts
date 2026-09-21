@@ -1,5 +1,5 @@
 import { MongoClient } from 'mongodb';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet, MongoMemoryServer } from 'mongodb-memory-server';
 import type { Db } from 'mongodb';
 
 process.env.MONGOMS_VERSION ??= '8.0.4';
@@ -75,6 +75,32 @@ export async function startTestMongo(): Promise<TestMongo> {
       stopped = true;
       await client.close();
       await mongod.stop();
+    },
+  };
+}
+
+/** A database that supports sessions and transactions, which a standalone `startTestMongo` cannot. */
+export interface ReplicaSetMongo extends TestMongo {
+  readonly client: MongoClient;
+}
+
+/**
+ * A single-node replica set: the smallest deployment `session.withTransaction` will run against, so a
+ * test can prove real snapshot isolation instead of assuming a fake session provides it.
+ */
+export async function startTestMongoReplicaSet(): Promise<ReplicaSetMongo> {
+  const replSet = await MongoMemoryReplSet.create({ replSet: { storageEngine: 'wiredTiger', count: 1 } });
+  const client = new MongoClient(replSet.getUri(), { ignoreUndefined: true });
+  await client.connect();
+  let stopped = false;
+  return {
+    db: client.db(DATABASE),
+    client,
+    stop: async () => {
+      if (stopped) return;
+      stopped = true;
+      await client.close();
+      await replSet.stop();
     },
   };
 }

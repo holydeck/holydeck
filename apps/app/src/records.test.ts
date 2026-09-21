@@ -16,6 +16,7 @@ describe('the durable record classes', () => {
   it('are the ones the milestone invariants name, each with a collection of its own', () => {
     expect([...RECORD_NAMES]).toEqual([
       'auditEvents',
+      'backups',
       'conflictShelf',
       'contentLanguages',
       'contentLibrary',

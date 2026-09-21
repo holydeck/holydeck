@@ -89,6 +89,7 @@ describe('the shipped migrations', () => {
     expect([...created.keys()].sort()).toEqual([
       'accounts',
       'audit_events',
+      'backups',
       'capabilities',
       'conflict_shelf',
       'content_languages',
