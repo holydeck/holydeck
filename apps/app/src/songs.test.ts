@@ -320,8 +320,7 @@ describe('a song as bytes that travel', () => {
 });
 
 // ADR 0004's decision: a generated slide is a deterministic projection of a pinned source revision and a
-// pinned Slide Layout revision, reading nothing that was not pinned
-// (adrs/0004-generated-slide-materialisation.md; adrs/index.json lists T75 under ADR 0004's enforcedBy).
+// pinned Slide Layout revision, reading nothing that was not pinned.
 describe('song slide generation', () => {
   it('uses the selected source and Layout revisions, mixed bindings, section order and repeat expansion', async () => {
     const { songs, layouts, groups, source, selected, input } = await generation(LAYOUT, withSungChorus(SONG_WITH_META));

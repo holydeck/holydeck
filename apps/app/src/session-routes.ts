@@ -271,7 +271,7 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
       await chargeAddress();
       await recorded(request, 'the sign-in gate could not count a failure', async () => {
         if (await identity.attempts.failed(gate, asked)) {
-          await note('system', {
+          await note(actor, {
             action: 'session.lock',
             subject: asked,
             outcome: 'refused',

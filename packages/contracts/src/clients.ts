@@ -17,7 +17,6 @@ export const UPDATE_REQUIRED_MESSAGE = 'Update required';
 
 // The released status for this code. It is written out rather than looked up in the registry so a
 // refusal cannot fall back to a guessed status when the lookup finds nothing; `clients.test.ts`
-// holds it against `statusForCode(UPDATE_REQUIRED)` so the two cannot drift apart.
 export const UPDATE_REQUIRED_STATUS = 426;
 
 export type ClientDecision =

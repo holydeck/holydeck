@@ -8,7 +8,7 @@ import {
   decideClient,
   supportedClientVersions,
 } from './clients.js';
-import { UPDATE_REQUIRED, statusForCode } from './http.js';
+import { MESSAGE_CODES, UPDATE_REQUIRED } from './http.js';
 
 const window12 = { current: 12, previous: 11 };
 
@@ -72,7 +72,7 @@ describe('deciding about one client', () => {
   it('refuses with the status the released registry gives this code', () => {
     const decision = decideClient(10, window12);
     expect(decision.accepted).toBe(false);
-    expect(decision.accepted === false && decision.status).toBe(statusForCode(UPDATE_REQUIRED));
+    expect(decision.accepted === false && decision.status).toBe(MESSAGE_CODES.find((entry) => entry.code === UPDATE_REQUIRED)?.status);
   });
 
   it('has one version inside the window while nothing older has been released', () => {

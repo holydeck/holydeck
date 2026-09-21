@@ -124,10 +124,6 @@ export type ErrorEnvelope = {
 
 export const VALIDATION_MESSAGE = 'The request could not be accepted.';
 
-export function statusForCode(code: string): number | undefined {
-  return MESSAGE_CODES.find((entry) => entry.code === code)?.status;
-}
-
 export function successEnvelope<T>(data: T, requestId: string, version?: number): SuccessEnvelope<T> {
   return { data, meta: version === undefined ? { requestId } : { requestId, version } };
 }

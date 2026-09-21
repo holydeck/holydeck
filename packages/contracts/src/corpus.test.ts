@@ -21,7 +21,7 @@ import {
   parseCorpusVerses,
   presentedCorpusToken,
 } from './corpus.js';
-import { statusForCode } from './http.js';
+import { MESSAGE_CODES } from './http.js';
 
 const STABLE_CODE = /^[a-z][a-z0-9]*(\.[a-z0-9_]+)+$/u;
 
@@ -289,13 +289,13 @@ describe('the error mapping the boundary is built from', () => {
   it('maps every corpus error to a released application code carrying its released status', () => {
     for (const entry of CORPUS_ERROR_MAPPING) {
       expect(entry.code, entry.corpus).toMatch(STABLE_CODE);
-      expect(statusForCode(entry.code), entry.code).toBe(entry.http);
+      expect(MESSAGE_CODES.find((candidate) => candidate.code === entry.code)?.status, entry.code).toBe(entry.http);
     }
   });
 
   it('refuses an untranslated failure with a released code of its own', () => {
     expect(CORPUS_UNEXPECTED).toBe('corpus.unexpected_error');
-    expect(statusForCode(CORPUS_UNEXPECTED)).toBe(CORPUS_UNEXPECTED_STATUS);
+    expect(MESSAGE_CODES.find((candidate) => candidate.code === CORPUS_UNEXPECTED)?.status).toBe(CORPUS_UNEXPECTED_STATUS);
   });
 
   it('names each corpus error once, and never both maps and refuses one', () => {

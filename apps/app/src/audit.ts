@@ -92,12 +92,6 @@ export const AUDIT_ACTIONS = [
   'backup.run',
   // Reserved for the restore surface T101+ builds. Exercised only by this task's own tests today.
   'restore.run',
-  // Reserved for ADMN-04's outbound integration calls, first real caller T65's optional AI book-name
-  // resolver. Exercised only by this task's own tests today.
-  'integration.call',
-  // Reserved for an admin turning an integration off. No task yet owns the review/disable surface ADMN-04
-  // also asks for, so this has no named future caller either — exercised only by this task's own tests.
-  'integration.disable',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -164,8 +158,6 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'readiness.override': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',
-  'integration.call': 'integration',
-  'integration.disable': 'integration',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */
@@ -178,10 +170,6 @@ export interface AuditEntry {
   readonly outcome: AuditOutcome;
   /** Why, for a person reading the trail later. Never a secret. */
   readonly detail?: string;
-  /** An integration call's request tokens, response tokens and duration. Absent on every other action. */
-  readonly requestTokens?: number;
-  readonly responseTokens?: number;
-  readonly durationMs?: number;
 }
 
 export interface AuditTrail {
@@ -217,9 +205,6 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
         subject: entry.subject,
         outcome: entry.outcome,
         ...(entry.detail === undefined ? {} : { detail: entry.detail }),
-        ...(entry.requestTokens === undefined ? {} : { requestTokens: entry.requestTokens }),
-        ...(entry.responseTokens === undefined ? {} : { responseTokens: entry.responseTokens }),
-        ...(entry.durationMs === undefined ? {} : { durationMs: entry.durationMs }),
       });
     },
   };

@@ -5,7 +5,6 @@ import {
   MESSAGE_CODES,
   REMOVED_CODES,
   STALE_STATE_REVISION,
-  UNEXPECTED_ERROR,
   UPDATE_REQUIRED,
   VALIDATION_FAILED,
   errorEnvelope,
@@ -14,7 +13,6 @@ import {
   parseErrorEnvelope,
   parseSuccessEnvelope,
   parseValidationFailure,
-  statusForCode,
   successEnvelope,
   validationFailure,
 } from './http.js';
@@ -84,9 +82,6 @@ describe('the released message codes', () => {
 
   it('holds its own registry to the rule it states, so a released code cannot quietly move', () => {
     expect(messageCodeProblems(MESSAGE_CODES, REMOVED_CODES)).toEqual([]);
-    expect(statusForCode('auth.forbidden')).toBe(403);
-    expect(statusForCode(UNEXPECTED_ERROR)).toBe(500);
-    expect(statusForCode('auth.teapot')).toBeUndefined();
   });
 
   it('refuses a registry that is unstable, repeated, removed, or not a registry at all', () => {

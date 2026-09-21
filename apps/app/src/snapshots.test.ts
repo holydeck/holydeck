@@ -413,8 +413,7 @@ describe('readiness', () => {
 // regenerates on its own. Only an explicit `generate` call followed by a fresh `prepare` ever produces
 // the new output; the Layout edit alone changes nothing already pinned.
 // ADR 0004's decision: a generated slide is a deterministic projection of a pinned source revision and a
-// pinned Slide Layout revision, and every generated slide records both
-// (adrs/0004-generated-slide-materialisation.md; adrs/index.json lists T75 under ADR 0004's enforcedBy).
+// pinned Slide Layout revision, and every generated slide records both.
 describe('a generated slide group after preparation (ADR 0004)', () => {
   const TA = CONTENT_LANGUAGES[0]!.key;
 
