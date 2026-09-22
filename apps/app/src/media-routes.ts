@@ -27,7 +27,7 @@ import { CONTENT_EDIT, MEDIA_MANAGE } from './roles.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
-import type { MediaLibrary } from './media.js';
+import type { MediaLibrary, MediaRecord } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
@@ -71,6 +71,10 @@ const idIn = (request: FastifyRequest): string => (request.params as { readonly 
 
 const isRefusal = (error: unknown): error is MediaError & { kind: 'state' } =>
   error instanceof MediaError && error.kind === 'state';
+
+/** `storageKey` is this deployment's own filesystem layout — an Editor reads media, not the disk it sits on. */
+const visibleTo = (held: readonly string[], record: MediaRecord): Omit<MediaRecord, 'storageKey'> =>
+  held.includes(MEDIA_MANAGE) ? record : { stamp: record.stamp, manifest: record.manifest };
 
 export interface MediaRoutesOptions {
   /** Absent whenever `identity` is, per `main.ts`'s wiring — never independently, from this module's view. */
@@ -198,14 +202,16 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity }: Medi
     const asked = (request.query as { readonly archived?: string }).archived === 'true';
     const showArchived = held.includes(MEDIA_MANAGE) && asked;
     const items = showArchived ? all : all.filter((record) => record.stamp.archivedAt === undefined);
-    return reply.send(successEnvelope(items, request.id, CLIENT_WINDOW.current));
+    return reply.send(successEnvelope(items.map((record) => visibleTo(held, record)), request.id, CLIENT_WINDOW.current));
   });
 
   app.get(MEDIA_ID_PATH, { config: { need: READ_PERMISSION } }, async (request, reply) => {
     const context = mediaContext(provenSession(request).record.actor, correlationFor(MEDIA_PREFIX, request.id));
     const record = await library.inspect(context, idIn(request));
+    const held = provenSession(request).record.permissions;
     if (record === undefined) return reply.code(404).send(notFound(request));
-    return reply.send(successEnvelope(record, request.id, CLIENT_WINDOW.current));
+    if (record.stamp.archivedAt !== undefined && !held.includes(MEDIA_MANAGE)) return reply.code(404).send(notFound(request));
+    return reply.send(successEnvelope(visibleTo(held, record), request.id, CLIENT_WINDOW.current));
   });
 
   app.patch(MEDIA_STATUS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {

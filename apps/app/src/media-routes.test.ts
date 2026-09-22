@@ -211,6 +211,25 @@ describe('inspecting media', () => {
     expect(found.json().data.stamp.id).toBe(id);
     expect((await requesting('GET', `${MEDIA_PATH}/media-99`, editor)).statusCode).toBe(404);
   });
+
+  test('hides the storage path from a content editor but not from media managers', async () => {
+    const id = await uploaded();
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    const manager = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT, MEDIA_MANAGE] });
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}`, editor)).json().data.storageKey).toBeUndefined();
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}`, manager)).json().data.storageKey).toBeTypeOf('string');
+    expect((await requesting('GET', MEDIA_PATH, editor)).json().data[0].storageKey).toBeUndefined();
+    expect((await requesting('GET', MEDIA_PATH, manager)).json().data[0].storageKey).toBeTypeOf('string');
+  });
+
+  test('gates an archived item by id the same way the list does', async () => {
+    const id = await uploaded();
+    await requesting('PATCH', `${MEDIA_PATH}/${id}/status`, admin, { archived: true });
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    const manager = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT, MEDIA_MANAGE] });
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}`, editor)).statusCode).toBe(404);
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}`, manager)).statusCode).toBe(200);
+  });
 });
 
 describe('changing media status', () => {
