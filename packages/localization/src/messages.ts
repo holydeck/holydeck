@@ -192,6 +192,13 @@ const en = {
   'users.announce.updated': 'Account {name} updated.',
   'users.refused': 'The change was refused: {message}',
   'users.loadFailed': 'The accounts could not be loaded.',
+  'toast.dismiss': 'Dismiss',
+  'editor.saving': 'Saving…',
+  'editor.saved': 'Saved',
+  'editor.saveFailed': "Not saved yet. We'll keep trying.",
+  'editor.checkpoint': 'Save Checkpoint',
+  'editor.undone': 'Undid: {action}',
+  'editor.redone': 'Redid: {action}',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -380,6 +387,13 @@ const de: Catalog = {
   'users.announce.updated': 'Konto {name} aktualisiert.',
   'users.refused': 'Die Änderung wurde abgelehnt: {message}',
   'users.loadFailed': 'Die Konten konnten nicht geladen werden.',
+  'toast.dismiss': 'Schließen',
+  'editor.saving': 'Wird gespeichert…',
+  'editor.saved': 'Gespeichert',
+  'editor.saveFailed': 'Noch nicht gespeichert. Wir versuchen es weiter.',
+  'editor.checkpoint': 'Speicherpunkt sichern',
+  'editor.undone': 'Rückgängig gemacht: {action}',
+  'editor.redone': 'Wiederhergestellt: {action}',
 };
 
 const ta: Catalog = {
@@ -562,6 +576,13 @@ const ta: Catalog = {
   'users.announce.updated': '{name} கணக்கு புதுப்பிக்கப்பட்டது.',
   'users.refused': 'மாற்றம் மறுக்கப்பட்டது: {message}',
   'users.loadFailed': 'கணக்குகளை ஏற்ற முடியவில்லை.',
+  'toast.dismiss': 'மூடு',
+  'editor.saving': 'சேமிக்கப்படுகிறது…',
+  'editor.saved': 'சேமிக்கப்பட்டது',
+  'editor.saveFailed': 'இன்னும் சேமிக்கப்படவில்லை. நாங்கள் தொடர்ந்து முயற்சிப்போம்.',
+  'editor.checkpoint': 'சேமிப்பு நிலையைக் குறி',
+  'editor.undone': 'ரத்துசெய்யப்பட்டது: {action}',
+  'editor.redone': 'மீண்டும் செய்யப்பட்டது: {action}',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */
