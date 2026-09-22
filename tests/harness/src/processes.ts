@@ -6,6 +6,7 @@
 // that said exactly what was wrong. Nothing here swallows output.
 
 import { spawn } from 'node:child_process';
+import { get as getHttps } from 'node:https';
 import { createServer } from 'node:net';
 
 import type { ChildProcess } from 'node:child_process';
@@ -76,13 +77,27 @@ export async function runOrThrow(args: readonly string[], env: Environment, labe
   if (result.code !== 0) throw new Error(`${label} exited with ${result.code}:\n${result.output}`);
 }
 
-/** Whether an address answers at all. What it answers is the assertion's business, not the wait's. */
-export async function answers(url: string): Promise<boolean> {
-  try {
-    return (await fetch(url)).ok;
-  } catch {
-    return false;
+/**
+ * Whether an address answers at all. What it answers is the assertion's business, not the wait's. `ca`
+ * is the authority an HTTPS stack's own certificate is trusted through: the wait trusts exactly that one
+ * certificate rather than switching verification off for the whole process.
+ */
+export async function answers(url: string, ca?: string | Buffer): Promise<boolean> {
+  if (ca === undefined) {
+    try {
+      return (await fetch(url)).ok;
+    } catch {
+      return false;
+    }
   }
+  return new Promise((resolve) => {
+    const request = getHttps(url, { ca }, (response) => {
+      response.resume();
+      const status = response.statusCode ?? 0;
+      resolve(status >= 200 && status < 300);
+    });
+    request.once('error', () => resolve(false));
+  });
 }
 
 export function serve(

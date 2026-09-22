@@ -20,7 +20,14 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   reporter: process.env.CI === undefined ? [['list']] : [['list'], ['github']],
-  use: { trace: 'retain-on-failure' },
+  // The stack's certificate is made per run (e2e/global.ts), so no browser trusts it by name. Ignoring
+  // the error per context is enough for pages and cookies, but Chromium still refuses to register a
+  // service worker from an origin whose certificate it had to ignore unless the whole browser is told to.
+  use: {
+    trace: 'retain-on-failure',
+    ignoreHTTPSErrors: true,
+    launchOptions: { args: ['--ignore-certificate-errors'] },
+  },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
     { name: 'tablet', use: { ...devices['Galaxy Tab S4 landscape'] } },

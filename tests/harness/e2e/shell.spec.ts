@@ -4,25 +4,31 @@
 
 import { expect, test } from '@playwright/test';
 
-import { GERMAN_STATUS, PREPARING_STATUS } from './copy.js';
+import { GERMAN_SIGN_IN, GERMAN_WELCOME, PREPARING_STATUS } from './copy.js';
 
 test.describe('the shell a device opens', () => {
-  test('serves a readable page before any script has run', async ({ page }) => {
+  test('serves a readable page before any script has run', async ({ browser }) => {
     // JavaScript off is the worst case a projector-room laptop can be in, and it still has to say
-    // something true rather than show an empty dark rectangle.
-    await page.context().addInitScript(() => undefined);
-    const response = await page.goto('/');
-    expect(response?.status()).toBe(200);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('HolyDeck');
-    await expect(page.locator('#status')).toHaveText(PREPARING_STATUS);
+    // something true rather than show an empty dark rectangle. The served document is all it gets.
+    const context = await browser.newContext({ javaScriptEnabled: false, ignoreHTTPSErrors: true });
+    try {
+      const page = await context.newPage();
+      const response = await page.goto('/');
+      expect(response?.status()).toBe(200);
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText('HolyDeck');
+      await expect(page.locator('#status')).toHaveText(PREPARING_STATUS);
+    } finally {
+      await context.close();
+    }
   });
 
   test('replaces the served English with the language the device asked for', async ({ browser }) => {
-    const context = await browser.newContext({ locale: 'de-CH' });
+    const context = await browser.newContext({ locale: 'de-CH', ignoreHTTPSErrors: true });
     try {
       const page = await context.newPage();
       await page.goto('/');
-      await expect(page.locator('#status')).toHaveText(GERMAN_STATUS);
+      // Claimed or not, a device with no session lands on a form headed in its own language.
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(new RegExp(`^(?:${GERMAN_SIGN_IN}|${GERMAN_WELCOME})$`, 'u'));
       // What a screen reader announces the document in, which is the reason the client sets it first.
       await expect(page.locator('html')).toHaveAttribute('lang', 'de');
     } finally {
@@ -57,6 +63,9 @@ test.describe('the shell a device opens', () => {
 
   test('takes the kind of input the screen it is on has', async ({ page }, testInfo) => {
     await page.goto('/');
+    // The client moves `/` on to a form once it knows whether anybody is signed in; tapping before that
+    // would grade a heading the next render replaces.
+    await expect(page).toHaveURL(/\/(?:welcome|sign-in)(?:\?|$)/u);
     const pointers = await page.evaluate(() => {
       const seen: string[] = [];
       document.addEventListener('pointerdown', (event) => seen.push(event.pointerType));

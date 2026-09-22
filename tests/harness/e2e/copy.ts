@@ -4,4 +4,5 @@
 import { translate } from '@holydeck/localization/messages';
 
 export const PREPARING_STATUS = translate('en', 'shell.preparing');
-export const GERMAN_STATUS = translate('de', 'shell.preparing');
+export const GERMAN_SIGN_IN = translate('de', 'signIn.title');
+export const GERMAN_WELCOME = translate('de', 'welcome.title');

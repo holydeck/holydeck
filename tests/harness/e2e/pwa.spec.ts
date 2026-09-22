@@ -105,7 +105,9 @@ test.describe('the client a device can install and keep', () => {
     await context.setOffline(true);
     try {
       await page.reload();
-      await expect(page.getByRole('heading', { level: 1 })).toHaveText('HolyDeck');
+      // The worker answered the document and its scripts: the mounted client replaced the served
+      // fallback with its own main landmark, which only the running script renders.
+      await expect(page.locator('main#main')).toBeAttached();
       expect(await page.evaluate(() => navigator.onLine)).toBe(false);
     } finally {
       await context.setOffline(false);
@@ -134,7 +136,9 @@ test.describe('the client a device can install and keep', () => {
     await context.setOffline(true);
     try {
       await page.goto('/index.html');
-      await expect(page.getByRole('heading', { level: 1 })).toHaveText('HolyDeck');
+      // The worker answered the document and its scripts: the mounted client replaced the served
+      // fallback with its own main landmark, which only the running script renders.
+      await expect(page.locator('main#main')).toBeAttached();
     } finally {
       await context.setOffline(false);
     }

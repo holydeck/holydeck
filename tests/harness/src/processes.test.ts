@@ -1,8 +1,14 @@
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { answers, freePort, portFor, ready, run, runOrThrow, serve } from './processes.js';
+import { selfSignedCertificate } from './tls.js';
 
 const NODE_ENV = {} as const;
 const FOREVER = ['-e', 'setInterval(() => {}, 1000)'];
@@ -66,6 +72,29 @@ describe('waiting for a service to be ready', () => {
     expect(await answers(`http://127.0.0.1:${port}/`)).toBe(true);
     expect(await answers(`http://127.0.0.1:${await freePort()}/`)).toBe(false);
   });
+
+  it.skipIf(spawnSync('openssl', ['version']).status !== 0)(
+    'trusts an HTTPS stack through its own certificate, and only a successful answer',
+    async () => {
+      const directory = mkdtempSync(join(tmpdir(), 'holydeck-answers-'));
+      const certificate = selfSignedCertificate(directory);
+      const ca = readFileSync(certificate.certFile);
+      const server = createHttpsServer({ cert: ca, key: readFileSync(certificate.keyFile) }, (request, response) => {
+        response.statusCode = request.url === '/health' ? 200 : 503;
+        response.end();
+      });
+      const port = await freePort();
+      await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+      try {
+        expect(await answers(`https://127.0.0.1:${port}/health`, ca)).toBe(true);
+        expect(await answers(`https://127.0.0.1:${port}/starting`, ca)).toBe(false);
+        expect(await answers(`https://127.0.0.1:${await freePort()}/health`, ca)).toBe(false);
+      } finally {
+        server.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('returns as soon as the check passes', async () => {
     const served = serve(FOREVER, NODE_ENV);

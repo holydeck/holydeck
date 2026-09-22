@@ -5,7 +5,7 @@
 // with, what counts as ready, how a service is stopped — live in the modules beside this one, where each
 // is graded on its own; what this file adds is the order, and the integration run grades that by using it.
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { applicationEnvironment, applicationMongoUrl, corpusEnvironment, workerEnvironment } from './environment.js';
 import { mongoFor } from './mongo.js';
 import { answers, portFor, ready, run, runOrThrow, serve } from './processes.js';
+import { selfSignedCertificate, tlsEnvironment } from './tls.js';
 
 import type { Addresses } from './environment.js';
 import type { RunResult } from './processes.js';
@@ -25,6 +26,8 @@ export interface Stack {
   /** The application's own database, named, so a test can read what the application stored. */
   readonly mongoUrl: string;
   readonly dataDir: string;
+  /** The certificate an HTTPS stack serves, and so the one authority a Node client trusts to reach it. */
+  readonly certificateFile: string | undefined;
   /** Runs the worker's own health check, the same command the container is checked with. */
   workerHealth(): Promise<RunResult>;
   stop(): Promise<void>;
@@ -35,6 +38,11 @@ export interface StackOptions {
   readonly mongoUrl?: string;
   /** A fixed application port, which the browser suite needs so its base URL is known up front. */
   readonly appPort?: number;
+  /**
+   * Serves the application over HTTPS with a certificate made for this run. The browser suite needs it:
+   * the session cookie is `Secure`, and a browser signing in through the page only keeps it over HTTPS.
+   */
+  readonly tls?: boolean;
 }
 
 /** A built entry point, resolved from this file rather than from whatever directory the run started in. */
@@ -60,7 +68,13 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       mongoBase: mongo.base,
       dataDir,
     };
-    const baseUrl = `http://127.0.0.1:${addresses.appPort}`;
+    const certificate = options.tls === true ? selfSignedCertificate(dataDir) : undefined;
+    const ca = certificate === undefined ? undefined : readFileSync(certificate.certFile);
+    const baseUrl = `${certificate === undefined ? 'http' : 'https'}://127.0.0.1:${addresses.appPort}`;
+    const appEnvironment = {
+      ...applicationEnvironment(addresses),
+      ...(certificate === undefined ? {} : tlsEnvironment(certificate)),
+    };
     const corpusUrl = `http://127.0.0.1:${addresses.corpusPort}`;
 
     const corpus = serve([entry('apps/corpus/dist/server.js')], corpusEnvironment(addresses));
@@ -69,11 +83,11 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
 
     // The application refuses to serve an unmigrated database, so the migration is part of starting the
     // stack rather than something a test remembers to do.
-    await runOrThrow([entry('apps/app/dist/migrate.js')], applicationEnvironment(addresses), 'the migration');
+    await runOrThrow([entry('apps/app/dist/migrate.js')], appEnvironment, 'the migration');
 
-    const app = serve([entry('apps/app/dist/main.js')], applicationEnvironment(addresses));
+    const app = serve([entry('apps/app/dist/main.js')], appEnvironment);
     stopped.push(() => app.stop());
-    await ready(app, 'the application', () => answers(`${baseUrl}/health`));
+    await ready(app, 'the application', () => answers(`${baseUrl}/health`, ca));
 
     const worker = serve([entry('apps/worker/dist/main.js')], workerEnvironment(addresses));
     stopped.push(() => worker.stop());
@@ -85,6 +99,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
       corpusUrl,
       mongoUrl: applicationMongoUrl(mongo.base),
       dataDir,
+      certificateFile: certificate?.certFile,
       workerHealth: () => run([entry('apps/worker/dist/health.js')], workerEnvironment(addresses)),
       stop,
     };

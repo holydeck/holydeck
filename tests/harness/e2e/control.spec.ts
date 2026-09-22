@@ -8,14 +8,25 @@ import { ORDER_PATH } from '@holydeck/contracts/order';
 import { expect, test } from '@playwright/test';
 
 import { signInWithControlTo } from '../src/identity.js';
+import { claimOrSignIn } from './journey.js';
+
+import type { Page } from '@playwright/test';
+
+/** Any service id reaches the workspace today; service records and their own orders arrive in spec 03. */
+const SERVICE = '/services/harness-service';
+
+/** Signs in through the page and opens the operator workspace, where every test here starts. */
+const openWorkspace = async (page: Page, fragment = ''): Promise<void> => {
+  await claimOrSignIn(page);
+  await page.goto(`${SERVICE}${fragment}`);
+  await expect(page.locator('#order')).toBeAttached();
+};
 
 test.describe('the operator control surface', () => {
-  // The real session cookie is `__Host-`-prefixed and therefore always `Secure` (packages/contracts/src/
-  // sessions.ts) — a real browser will never accept it over this harness's plain-HTTP stack, in a browser
-  // cookie jar or from a live `Set-Cookie` response alike. That is the browser enforcing the same
-  // downgrade protection the prefix exists for in production, not a gap in this test's setup, so this
-  // proves the permission-bootstrap and order route over HTTP directly rather than through the page.
-  test('grants presentation control over HTTP and reaches the real order route', async ({ baseURL }) => {
+  // Granting presentation control has no page of its own for the operator's own account, so the
+  // permission bootstrap is proved over the API directly, trusting the run's certificate through
+  // `NODE_EXTRA_CA_CERTS` (e2e/global.ts), the same HTTPS a browser reaches.
+  test('grants presentation control and reaches the real order route', async ({ baseURL }) => {
     const session = await signInWithControlTo(baseURL!);
     const response = await fetch(`${baseURL!}${ORDER_PATH}`, {
       headers: { cookie: session.cookie, [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) },
@@ -24,7 +35,7 @@ test.describe('the operator control surface', () => {
   });
 
   test('takes the kind of input its device has, on the live transport it always renders', async ({ page }, testInfo) => {
-    await page.goto('/');
+    await openWorkspace(page);
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
 
@@ -36,7 +47,7 @@ test.describe('the operator control surface', () => {
 
     const next = page.locator('#live-next');
     await expect(next).toBeVisible();
-    // The order is empty until a real Service-management route exists to seed one, so `control.ts`
+    // The order is empty until a real Service-management route exists to seed one, so the workspace
     // correctly starts the transport disabled — there is nothing to advance to. `force` bypasses only
     // Playwright's actionability wait for "enabled," not the browser's own native handling of a disabled
     // control, so the input still reaches the surface exactly as a real device would deliver it; the
@@ -49,7 +60,7 @@ test.describe('the operator control surface', () => {
   });
 
   test('touch targets meet the 44x44 minimum, and the live transport meets 56px', async ({ page }) => {
-    await page.goto('/#live-controls');
+    await openWorkspace(page, '#live-controls');
 
     const liveButtonSize = await page.locator('#live-next').evaluate((element) => {
       const box = element.getBoundingClientRect();
@@ -76,7 +87,7 @@ test.describe('the operator control surface', () => {
   test('the T52 shortcut catalogue is wired in without conflict, even against an order with nothing bound', async ({
     page,
   }) => {
-    await page.goto('/');
+    await openWorkspace(page);
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
 
@@ -93,7 +104,7 @@ test.describe('the operator control surface', () => {
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop', 'the bypass-link requirement is graded on desktop');
-    await page.goto('/');
+    await openWorkspace(page);
 
     const links: ReadonlyArray<{ readonly link: string; readonly region: string }> = [
       { link: '#skip-order', region: '#order' },
@@ -106,7 +117,7 @@ test.describe('the operator control surface', () => {
     for (const { link, region } of links) {
       // A fresh navigation per link: activating one moves focus, and starting the next Tab walk from
       // wherever focus landed would make each link's own reachability depend on the one graded before it.
-      await page.goto('/');
+      await page.goto(SERVICE);
       await page.locator(link).focus();
       await page.keyboard.press('Enter');
       const focused = await page.evaluate(() => document.activeElement?.id ?? null);
@@ -118,7 +129,7 @@ test.describe('the operator control surface', () => {
   });
 
   test('gives every region the bypass links reach its own accessible name, no two alike', async ({ page }) => {
-    await page.goto('/');
+    await openWorkspace(page);
 
     const names = await page.evaluate(() => {
       const ids = ['order', 'editor-preview', 'properties', 'live-controls'];
