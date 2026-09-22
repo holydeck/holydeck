@@ -30,9 +30,17 @@ export const LAYOUTS_MANAGE = 'layouts.manage';
  */
 export const MEDIA_MANAGE = 'media.manage';
 
+/**
+ * Creates, schedules, transitions and edits Services and their items (spec SERV-01/02/03). Spelled
+ * `services.` rather than borrowing `services.ts`'s own store-permission vocabulary, for the same reason
+ * `layouts.` and `media.` were spelled apart from their record classes. Editor's first-ever permission
+ * grant — an Editor plans and runs Services without needing Admin's account/settings/Layouts/media reach.
+ */
+export const SERVICES_MANAGE = 'services.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
-  admin: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE],
-  editor: [],
+  admin: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE, SERVICES_MANAGE],
+  editor: [SERVICES_MANAGE],
   member: [],
 };
 

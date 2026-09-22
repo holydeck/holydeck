@@ -5,6 +5,7 @@ import {
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
   PRESENTATION_CONTROL,
+  SERVICES_MANAGE,
   SETTINGS_MANAGE,
   permissionsFor,
 } from './roles.js';
@@ -24,17 +25,22 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin the accounts, the settings, the Layouts and the media library a deployment is administered through', () => {
+  it('grants an admin accounts, settings, Layouts, media and services', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
       LAYOUTS_MANAGE,
       MEDIA_MANAGE,
+      SERVICES_MANAGE,
     ]);
   });
 
-  it('grants an editor and a member nothing by role alone', () => {
-    expect(permissionsFor(accountOf('editor', false))).toEqual([]);
+  it('grants an editor service management by role alone', () => {
+    expect(SERVICES_MANAGE).toBe('services.manage');
+    expect(permissionsFor(accountOf('editor', false))).toEqual([SERVICES_MANAGE]);
+  });
+
+  it('grants a member nothing by role alone', () => {
     expect(permissionsFor(accountOf('member', false))).toEqual([]);
   });
 });
@@ -43,7 +49,10 @@ describe('what Control presentation is', () => {
   // It is granted per account, not implied by a role — an admin does not hold it just for being admin,
   // and an editor or a member holds it the moment it is granted to them, same as anyone else would.
   it('is independent of role: granted to an editor or a member, it is theirs', () => {
-    expect(permissionsFor(accountOf('editor', true))).toEqual([PRESENTATION_CONTROL]);
+    expect(permissionsFor(accountOf('editor', true))).toEqual([
+      SERVICES_MANAGE,
+      PRESENTATION_CONTROL,
+    ]);
     expect(permissionsFor(accountOf('member', true))).toEqual([PRESENTATION_CONTROL]);
   });
 
@@ -57,6 +66,7 @@ describe('what Control presentation is', () => {
       SETTINGS_MANAGE,
       LAYOUTS_MANAGE,
       MEDIA_MANAGE,
+      SERVICES_MANAGE,
       PRESENTATION_CONTROL,
     ]);
   });
