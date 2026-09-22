@@ -42,6 +42,13 @@ export const ENTITY_CONFLICT = 'entity.state_conflict';
  */
 export const UNEXPECTED_ERROR = 'server.unexpected_error';
 
+/**
+ * A restore is applying to production, and every mutating route refuses while it runs (OPS-06): the one
+ * moment this deployment asks a client to wait rather than to fix its request. 503 for the same reason
+ * `corpus.unavailable` is a 503 — the server, not the client, is why the request cannot proceed right now.
+ */
+export const MAINTENANCE_ACTIVE = 'server.maintenance_active';
+
 export const MESSAGE_CODES: readonly MessageCode[] = [
   { code: VALIDATION_FAILED, status: 422, stable: true, since: 1 },
   { code: 'auth.session.expired', status: 401, stable: true, since: 1 },
@@ -76,6 +83,7 @@ export const MESSAGE_CODES: readonly MessageCode[] = [
   // A request whose body would have gone past the size ceiling this deployment enforces, refused while
   // it was still being read rather than after. 413 carries HTTP semantics 422 does not, so its own code.
   { code: 'media.too_large', status: 413, stable: true, since: 1 },
+  { code: MAINTENANCE_ACTIVE, status: 503, stable: true, since: 1 },
   { code: UNEXPECTED_ERROR, status: 500, stable: true, since: 1 },
 ];
 

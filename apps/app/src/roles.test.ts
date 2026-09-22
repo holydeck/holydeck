@@ -6,6 +6,7 @@ import {
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
   PRESENTATION_CONTROL,
+  RESTORE_MANAGE,
   SERVICES_MANAGE,
   SERVICE_TEMPLATES_MANAGE,
   SETTINGS_MANAGE,
@@ -36,6 +37,7 @@ describe('what a role grants', () => {
       MEDIA_MANAGE,
       SERVICES_MANAGE,
       BACKUP_MANAGE,
+      RESTORE_MANAGE,
     ]);
   });
 
@@ -75,6 +77,7 @@ describe('what Control presentation is', () => {
       MEDIA_MANAGE,
       SERVICES_MANAGE,
       BACKUP_MANAGE,
+      RESTORE_MANAGE,
       PRESENTATION_CONTROL,
     ]);
   });

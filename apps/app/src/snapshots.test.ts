@@ -623,6 +623,7 @@ describe('the Operator override', () => {
       'media.manage',
       'services.manage',
       'backup.manage',
+      'restore.manage',
     ]);
   });
 

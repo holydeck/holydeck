@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { RESTORE_CLASSES, parseBackupManifest, parseBackupProduction, parseBackupRequest, parseRestoreSelection } from './backups.js';
+import {
+  RESTORE_CLASSES,
+  parseBackupManifest,
+  parseBackupProduction,
+  parseBackupRequest,
+  parseRestoreRequest,
+  parseRestoreSelection,
+} from './backups.js';
 
 // Mirrors the valid fixture and the counterexamples backup-manifest.v1.json carries for `manifest` and
 // `consistency` — the two sections a backup run itself produces. The other three sections belong to
@@ -354,6 +361,53 @@ describe('what an operator may ask an on-demand backup to cover', () => {
     { components: ['mongo', 'mongo'], path: 'backup.components.1' },
   ])('refuses $components at $path', ({ components, path }) => {
     const parsed = parseBackupRequest({ components });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain(path);
+  });
+});
+
+describe('what an operator must confirm to restore a backup into production', () => {
+  it('accepts a request whose confirm repeats backupId exactly, defaulting components to every class', () => {
+    const parsed = parseRestoreRequest({ backupId: 'backup-2026-09-19T02-00-00Z', confirm: 'backup-2026-09-19T02-00-00Z' });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value : undefined).toEqual({
+      backupId: 'backup-2026-09-19T02-00-00Z',
+      components: RESTORE_CLASSES,
+    });
+  });
+
+  it('accepts a narrowed component list', () => {
+    const parsed = parseRestoreRequest({
+      backupId: 'backup-2026-09-19T02-00-00Z',
+      confirm: 'backup-2026-09-19T02-00-00Z',
+      components: ['mongo'],
+    });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.components : undefined).toEqual(['mongo']);
+  });
+
+  it('refuses a confirm that does not repeat backupId', () => {
+    const parsed = parseRestoreRequest({ backupId: 'backup-2026-09-19T02-00-00Z', confirm: 'backup-2026-09-18T02-00-00Z' });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('restore.confirm');
+  });
+
+  it('refuses a request with no confirm at all', () => {
+    const parsed = parseRestoreRequest({ backupId: 'backup-2026-09-19T02-00-00Z' });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('restore.confirm');
+  });
+
+  it.each([
+    { components: [], path: 'restore.components' },
+    { components: ['bogus'], path: 'restore.components.0' },
+    { components: ['mongo', 'mongo'], path: 'restore.components.1' },
+  ])('refuses $components at $path', ({ components, path }) => {
+    const parsed = parseRestoreRequest({
+      backupId: 'backup-2026-09-19T02-00-00Z',
+      confirm: 'backup-2026-09-19T02-00-00Z',
+      components,
+    });
     expect(parsed.ok).toBe(false);
     expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain(path);
   });

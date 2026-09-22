@@ -51,6 +51,12 @@ export const SERVICES_MANAGE = 'services.manage';
  */
 export const BACKUP_MANAGE = 'backup.manage';
 
+/**
+ * Requests a recorded backup be applied to production (OPS-06). Admin's alone, by role — the same as
+ * requesting a backup, and kept apart from `BACKUP_MANAGE` because granting one is not granting the other.
+ */
+export const RESTORE_MANAGE = 'restore.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -60,6 +66,7 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     MEDIA_MANAGE,
     SERVICES_MANAGE,
     BACKUP_MANAGE,
+    RESTORE_MANAGE,
   ],
   editor: [SERVICES_MANAGE],
   member: [],

@@ -94,6 +94,12 @@ export const AUDIT_ACTIONS = [
   'backup.request',
   // Reserved for the restore surface T101+ builds. Exercised only by this task's own tests today.
   'restore.run',
+  // A restore-apply's own history (OPS-06), apart from `restore.run`: `restore-routes.ts` writes the
+  // first when an operator's request is accepted onto the queue, and `restore-apply-handler.ts` writes
+  // the other two around its own call to `applyRestore` — which still writes `restore.run` itself.
+  'restore.apply.request',
+  'restore.apply.complete',
+  'restore.apply.fail',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -161,6 +167,9 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'backup.run': 'backup',
   'backup.request': 'backup',
   'restore.run': 'restore',
+  'restore.apply.request': 'restore',
+  'restore.apply.complete': 'restore',
+  'restore.apply.fail': 'restore',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */

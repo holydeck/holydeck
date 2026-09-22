@@ -303,3 +303,28 @@ export function parseRestoreSelection(value: unknown): Parsed<RestoreSelection> 
     classes: readRestoreClasses(reader),
   }));
 }
+
+export interface RestoreRequest {
+  readonly backupId: string;
+  readonly components: readonly RestoreClass[];
+}
+
+/**
+ * What an operator may ask for when applying a recorded backup to production (OPS-06). `confirm` guards
+ * against the wrong backup, not the wrong operator: the operator retypes the exact backup identifier, and
+ * a request whose `confirm` does not match its own `backupId` is refused before anything is queued — there
+ * being no human-readable label anywhere in a `BackupProduction` to retype instead. It is layered on top of,
+ * not instead of, the route's own step-up (a password re-check, the same mechanism already asked of
+ * revoking a second factor or a passkey — see `restore-routes.ts`), which guards against the wrong operator.
+ * `components` is optional and defaults to every class the same way an on-demand backup request does.
+ */
+export function parseRestoreRequest(value: unknown): Parsed<RestoreRequest> {
+  return parseObject(value, 'restore', (reader) => {
+    const backupId = reader.text('backupId');
+    const confirm = reader.text('confirm');
+    if (confirm !== backupId) {
+      reader.reject('confirm', FIELD_CODES.notAllowed, 'must repeat backupId exactly, to confirm a restore into production');
+    }
+    return { backupId, components: readClassList(reader, 'components', { optional: true }) };
+  });
+}

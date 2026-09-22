@@ -7,8 +7,31 @@ export interface FakeDb extends RepositoryDb {
   failOn?: (collection: string, document: Document) => Error | undefined;
 }
 
+const COMPARISON_OPERATORS = ['$gte', '$gt', '$lte', '$lt'] as const;
+
+type Comparison = Readonly<Partial<Record<(typeof COMPARISON_OPERATORS)[number], unknown>>>;
+
+const isComparison = (value: unknown): value is Comparison =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) &&
+  Object.keys(value).every((key) => (COMPARISON_OPERATORS as readonly string[]).includes(key));
+
+/** A range filter, the one operator shape besides equality this fake understands — see `totp.ts`'s own fake. */
+const compares = (actual: unknown, comparison: Comparison): boolean =>
+  Object.entries(comparison).every(([operator, expected]) => {
+    const left = actual as string | number;
+    const right = expected as string | number;
+    switch (operator) {
+      case '$gte': return left >= right;
+      case '$gt': return left > right;
+      case '$lte': return left <= right;
+      case '$lt': return left < right;
+      default: return false;
+    }
+  });
+
 const matches = (document: Document, filter: Filter): boolean =>
-  Object.entries(filter).every(([field, value]) => document[field] === value);
+  Object.entries(filter).every(([field, value]) =>
+    isComparison(value) ? compares(document[field], value) : document[field] === value);
 
 /** Enough of a Mongo database to replay a ledger: unique `_id`, equality filters, named indexes. */
 export function fakeDb(): FakeDb {

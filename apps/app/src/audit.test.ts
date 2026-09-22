@@ -151,6 +151,9 @@ describe('the context the trail is written under', () => {
       'backup.run',
       'backup.request',
       'restore.run',
+      'restore.apply.request',
+      'restore.apply.complete',
+      'restore.apply.fail',
     ]);
   });
 });
