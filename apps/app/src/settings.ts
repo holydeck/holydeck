@@ -6,6 +6,8 @@
 
 import { resolve as resolvePath } from 'node:path';
 
+import { RESTORE_CLASSES } from '@holydeck/contracts/backups';
+import type { RestoreClass } from '@holydeck/contracts/backups';
 import { INTERNAL_BINDINGS, MINIMUM_CORPUS_TOKEN_LENGTH } from '@holydeck/contracts/corpus';
 import { LOCALES, type Locale } from '@holydeck/localization/locales';
 import { parse, stringify } from 'yaml';
@@ -13,6 +15,9 @@ import { parse, stringify } from 'yaml';
 import { bindingOf, corpusBinding } from './corpus.js';
 
 export const CANONICAL_SETTINGS_PATH = '/data/holydeck/config/settings.yaml';
+
+export const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
 
 export interface Settings {
   port: number;
@@ -42,6 +47,14 @@ export interface Settings {
    * see `PROTECTED_SETTINGS` below for what that means and why this one is in it.
    */
   developmentDiagnostics: boolean;
+  backupDailyAt: string;
+  backupComponents: readonly RestoreClass[];
+  backupMinimumGapMinutes: number;
+  backupRehearsalWeekday: Weekday;
+  retentionSweepAt: string;
+  notificationReadRetentionDays: number;
+  autosaveRetentionDays: number;
+  auditRetentionDays: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -56,6 +69,14 @@ export const DEFAULT_SETTINGS: Settings = {
   mongoUrl: '',
   timezone: 'Europe/Zurich',
   developmentDiagnostics: false,
+  backupDailyAt: '03:00',
+  backupComponents: RESTORE_CLASSES,
+  backupMinimumGapMinutes: 120,
+  backupRehearsalWeekday: 'sunday',
+  retentionSweepAt: '04:00',
+  notificationReadRetentionDays: 30,
+  autosaveRetentionDays: 30,
+  auditRetentionDays: 400,
 };
 
 /**
@@ -111,6 +132,14 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   mongoUrl: 'HOLYDECK_MONGO_URL',
   timezone: 'HOLYDECK_TIMEZONE',
   developmentDiagnostics: 'HOLYDECK_DEVELOPMENT_DIAGNOSTICS',
+  backupDailyAt: 'HOLYDECK_BACKUP_DAILY_AT',
+  backupComponents: 'HOLYDECK_BACKUP_COMPONENTS',
+  backupMinimumGapMinutes: 'HOLYDECK_BACKUP_MINIMUM_GAP_MINUTES',
+  backupRehearsalWeekday: 'HOLYDECK_BACKUP_REHEARSAL_WEEKDAY',
+  retentionSweepAt: 'HOLYDECK_RETENTION_SWEEP_AT',
+  notificationReadRetentionDays: 'HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS',
+  autosaveRetentionDays: 'HOLYDECK_AUTOSAVE_RETENTION_DAYS',
+  auditRetentionDays: 'HOLYDECK_AUDIT_RETENTION_DAYS',
 };
 
 // Normalized so a relative or non-canonical override still matches, byte for byte, the mount table
@@ -142,6 +171,48 @@ const parseFlag = (raw: unknown): Parsed<boolean> => {
   if (raw === 'true') return { ok: true, value: true };
   if (raw === 'false') return { ok: true, value: false };
   return { ok: false, problem: `expected true or false, got ${JSON.stringify(raw)}` };
+};
+
+const TIME_OF_DAY = /^([01]\d|2[0-3]):([0-5]\d)$/u;
+
+const parseTimeOfDay = (raw: unknown): Parsed<string> => {
+  if (typeof raw !== 'string' || !TIME_OF_DAY.test(raw)) {
+    return { ok: false, problem: `expected HH:mm (24-hour), got ${JSON.stringify(raw)}` };
+  }
+  return { ok: true, value: raw };
+};
+
+const parseBackupComponents = (raw: unknown): Parsed<readonly RestoreClass[]> => {
+  const items = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? raw.split(',').map((item) => item.trim()).filter((item) => item !== '')
+      : undefined;
+  if (items === undefined) {
+    return { ok: false, problem: `expected a list of ${RESTORE_CLASSES.join('/')}, got ${JSON.stringify(raw)}` };
+  }
+  if (items.length === 0) return { ok: false, problem: 'expected at least one component' };
+  const invalid = items.find((item) => !RESTORE_CLASSES.includes(item as RestoreClass));
+  if (invalid !== undefined) {
+    return { ok: false, problem: `expected one of ${RESTORE_CLASSES.join(', ')}, got ${JSON.stringify(invalid)}` };
+  }
+  return { ok: true, value: Object.freeze([...new Set(items)] as RestoreClass[]) };
+};
+
+const parseBoundedInteger = (min: number, max: number) => (raw: unknown): Parsed<number> => {
+  const value = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : raw;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    return { ok: false, problem: `expected a whole number between ${min} and ${max}, got ${JSON.stringify(raw)}` };
+  }
+  return { ok: true, value };
+};
+
+const parseWeekday = (raw: unknown): Parsed<Weekday> => {
+  const weekday = WEEKDAYS.find((candidate) => candidate === raw);
+  if (weekday === undefined) {
+    return { ok: false, problem: `expected one of ${WEEKDAYS.join(', ')}, got ${JSON.stringify(raw)}` };
+  }
+  return { ok: true, value: weekday };
 };
 
 const parseAbsolutePath = (raw: unknown): Parsed<string> => {
@@ -342,6 +413,34 @@ export function loadSettings(input: {
     parseFlag,
     layers,
   );
+  const backupDailyAt = resolve('backupDailyAt', DEFAULT_SETTINGS.backupDailyAt, parseTimeOfDay, layers);
+  const backupComponents = resolve('backupComponents', DEFAULT_SETTINGS.backupComponents, parseBackupComponents, layers);
+  const backupMinimumGapMinutes = resolve(
+    'backupMinimumGapMinutes',
+    DEFAULT_SETTINGS.backupMinimumGapMinutes,
+    parseBoundedInteger(1, 10_080),
+    layers,
+  );
+  const backupRehearsalWeekday = resolve(
+    'backupRehearsalWeekday',
+    DEFAULT_SETTINGS.backupRehearsalWeekday,
+    parseWeekday,
+    layers,
+  );
+  const retentionSweepAt = resolve('retentionSweepAt', DEFAULT_SETTINGS.retentionSweepAt, parseTimeOfDay, layers);
+  const notificationReadRetentionDays = resolve(
+    'notificationReadRetentionDays',
+    DEFAULT_SETTINGS.notificationReadRetentionDays,
+    parseBoundedInteger(1, 3_650),
+    layers,
+  );
+  const autosaveRetentionDays = resolve(
+    'autosaveRetentionDays',
+    DEFAULT_SETTINGS.autosaveRetentionDays,
+    parseBoundedInteger(1, 3_650),
+    layers,
+  );
+  const auditRetentionDays = resolve('auditRetentionDays', DEFAULT_SETTINGS.auditRetentionDays, parseBoundedInteger(1, 3_650), layers);
 
   if (problems.length > 0) throw new SettingsError(problems);
 
@@ -358,6 +457,14 @@ export function loadSettings(input: {
       mongoUrl: mongoUrl.value,
       timezone: timezone.value,
       developmentDiagnostics: developmentDiagnostics.value,
+      backupDailyAt: backupDailyAt.value,
+      backupComponents: backupComponents.value,
+      backupMinimumGapMinutes: backupMinimumGapMinutes.value,
+      backupRehearsalWeekday: backupRehearsalWeekday.value,
+      retentionSweepAt: retentionSweepAt.value,
+      notificationReadRetentionDays: notificationReadRetentionDays.value,
+      autosaveRetentionDays: autosaveRetentionDays.value,
+      auditRetentionDays: auditRetentionDays.value,
     },
     sources: {
       port: port.source,
@@ -371,6 +478,14 @@ export function loadSettings(input: {
       mongoUrl: mongoUrl.source,
       timezone: timezone.source,
       developmentDiagnostics: developmentDiagnostics.source,
+      backupDailyAt: backupDailyAt.source,
+      backupComponents: backupComponents.source,
+      backupMinimumGapMinutes: backupMinimumGapMinutes.source,
+      backupRehearsalWeekday: backupRehearsalWeekday.source,
+      retentionSweepAt: retentionSweepAt.source,
+      notificationReadRetentionDays: notificationReadRetentionDays.source,
+      autosaveRetentionDays: autosaveRetentionDays.source,
+      auditRetentionDays: auditRetentionDays.source,
     },
     path,
   };

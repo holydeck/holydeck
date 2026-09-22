@@ -46,6 +46,14 @@ describe('precedence', () => {
       mongoUrl: 'default',
       timezone: 'default',
       developmentDiagnostics: 'default',
+      backupDailyAt: 'default',
+      backupComponents: 'default',
+      backupMinimumGapMinutes: 'default',
+      backupRehearsalWeekday: 'default',
+      retentionSweepAt: 'default',
+      notificationReadRetentionDays: 'default',
+      autosaveRetentionDays: 'default',
+      auditRetentionDays: 'default',
     });
     expect(loaded.path).toBe(CANONICAL_SETTINGS_PATH);
   });
@@ -67,6 +75,14 @@ describe('precedence', () => {
       mongoUrl: 'default',
       timezone: 'default',
       developmentDiagnostics: 'default',
+      backupDailyAt: 'default',
+      backupComponents: 'default',
+      backupMinimumGapMinutes: 'default',
+      backupRehearsalWeekday: 'default',
+      retentionSweepAt: 'default',
+      notificationReadRetentionDays: 'default',
+      autosaveRetentionDays: 'default',
+      auditRetentionDays: 'default',
     });
   });
 
@@ -91,6 +107,14 @@ describe('precedence', () => {
       HOLYDECK_MONGO_URL: 'mongodb://mongo:27017/holydeck',
       HOLYDECK_TIMEZONE: 'Asia/Tokyo',
       HOLYDECK_DEVELOPMENT_DIAGNOSTICS: 'true',
+      HOLYDECK_BACKUP_DAILY_AT: '01:30',
+      HOLYDECK_BACKUP_COMPONENTS: 'mongo,media',
+      HOLYDECK_BACKUP_MINIMUM_GAP_MINUTES: '180',
+      HOLYDECK_BACKUP_REHEARSAL_WEEKDAY: 'monday',
+      HOLYDECK_RETENTION_SWEEP_AT: '02:30',
+      HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS: '31',
+      HOLYDECK_AUTOSAVE_RETENTION_DAYS: '32',
+      HOLYDECK_AUDIT_RETENTION_DAYS: '401',
     });
     expect(loaded.values).toEqual({
       port: 8080,
@@ -104,8 +128,16 @@ describe('precedence', () => {
       mongoUrl: 'mongodb://mongo:27017/holydeck',
       timezone: 'Asia/Tokyo',
       developmentDiagnostics: true,
+      backupDailyAt: '01:30',
+      backupComponents: ['mongo', 'media'],
+      backupMinimumGapMinutes: 180,
+      backupRehearsalWeekday: 'monday',
+      retentionSweepAt: '02:30',
+      notificationReadRetentionDays: 31,
+      autosaveRetentionDays: 32,
+      auditRetentionDays: 401,
     });
-    expect(Object.values(loaded.sources)).toEqual(Array(11).fill('env'));
+    expect(Object.values(loaded.sources)).toEqual(Array(19).fill('env'));
   });
 });
 
@@ -215,6 +247,8 @@ describe('the media root and the Restic repository accept a filesystem path only
     expect(Object.keys(DEFAULT_SETTINGS)).toEqual([
       'port', 'dataDir', 'mediaRoot', 'resticRepository', 'resticPassword', 'locale', 'corpusUrl', 'corpusToken',
       'mongoUrl', 'timezone', 'developmentDiagnostics',
+      'backupDailyAt', 'backupComponents', 'backupMinimumGapMinutes', 'backupRehearsalWeekday',
+      'retentionSweepAt', 'notificationReadRetentionDays', 'autosaveRetentionDays', 'auditRetentionDays',
     ]);
   });
 
@@ -254,6 +288,128 @@ describe('the installation’s time zone', () => {
     expect(problemsOf(undefined, { HOLYDECK_TIMEZONE: 'not/a-zone' })).toEqual([
       'HOLYDECK_TIMEZONE: expected an IANA time zone, got "not/a-zone"',
     ]);
+  });
+});
+
+describe('operations settings', () => {
+  const fields = [
+    'backupDailyAt',
+    'backupComponents',
+    'backupMinimumGapMinutes',
+    'backupRehearsalWeekday',
+    'retentionSweepAt',
+    'notificationReadRetentionDays',
+    'autosaveRetentionDays',
+    'auditRetentionDays',
+  ] as const;
+
+  it('defaults every operations setting when neither layer sets it', () => {
+    const loaded = load();
+    for (const field of fields) {
+      expect(loaded.values[field]).toEqual(DEFAULT_SETTINGS[field]);
+      expect(loaded.sources[field]).toBe('default');
+    }
+  });
+
+  it('reads every operations setting from the file', () => {
+    const loaded = load([
+      'backupDailyAt: "01:30"',
+      'backupComponents: [mongo, media]',
+      'backupMinimumGapMinutes: 180',
+      'backupRehearsalWeekday: monday',
+      'retentionSweepAt: "02:30"',
+      'notificationReadRetentionDays: 31',
+      'autosaveRetentionDays: 32',
+      'auditRetentionDays: 401',
+    ].join('\n'));
+    expect(loaded.values).toMatchObject({
+      backupDailyAt: '01:30',
+      backupComponents: ['mongo', 'media'],
+      backupMinimumGapMinutes: 180,
+      backupRehearsalWeekday: 'monday',
+      retentionSweepAt: '02:30',
+      notificationReadRetentionDays: 31,
+      autosaveRetentionDays: 32,
+      auditRetentionDays: 401,
+    });
+    for (const field of fields) expect(loaded.sources[field]).toBe('file');
+  });
+
+  it('lets the environment override every operations setting from the file', () => {
+    const loaded = load([
+      'backupDailyAt: "01:30"',
+      'backupComponents: [mongo]',
+      'backupMinimumGapMinutes: 180',
+      'backupRehearsalWeekday: monday',
+      'retentionSweepAt: "02:30"',
+      'notificationReadRetentionDays: 31',
+      'autosaveRetentionDays: 32',
+      'auditRetentionDays: 401',
+    ].join('\n'), {
+      HOLYDECK_BACKUP_DAILY_AT: '03:30',
+      HOLYDECK_BACKUP_COMPONENTS: 'settings,media',
+      HOLYDECK_BACKUP_MINIMUM_GAP_MINUTES: '181',
+      HOLYDECK_BACKUP_REHEARSAL_WEEKDAY: 'tuesday',
+      HOLYDECK_RETENTION_SWEEP_AT: '04:30',
+      HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS: '33',
+      HOLYDECK_AUTOSAVE_RETENTION_DAYS: '34',
+      HOLYDECK_AUDIT_RETENTION_DAYS: '402',
+    });
+    expect(loaded.values).toMatchObject({
+      backupDailyAt: '03:30',
+      backupComponents: ['settings', 'media'],
+      backupMinimumGapMinutes: 181,
+      backupRehearsalWeekday: 'tuesday',
+      retentionSweepAt: '04:30',
+      notificationReadRetentionDays: 33,
+      autosaveRetentionDays: 34,
+      auditRetentionDays: 402,
+    });
+    for (const field of fields) expect(loaded.sources[field]).toBe('env');
+  });
+
+  it('requires a zero-padded valid 24-hour time', () => {
+    for (const field of ['backupDailyAt', 'retentionSweepAt']) {
+      for (const raw of ['3:00', '24:00', '03:60', '', 300]) {
+        expect(problemsOf(`${field}: ${typeof raw === 'string' ? JSON.stringify(raw) : raw}\n`)[0]).toContain(
+          `${field}: expected HH:mm (24-hour)`,
+        );
+      }
+    }
+  });
+
+  it('accepts backup components as YAML or comma-separated text, and deduplicates them', () => {
+    expect(load('backupComponents: [mongo, media]\n').values.backupComponents).toEqual(['mongo', 'media']);
+    expect(load(undefined, { HOLYDECK_BACKUP_COMPONENTS: 'mongo,media,mongo' }).values.backupComponents)
+      .toEqual(['mongo', 'media']);
+  });
+
+  it('requires at least one known backup component', () => {
+    expect(problemsOf('backupComponents: []\n')).toEqual(['backupComponents: expected at least one component']);
+    expect(problemsOf('backupComponents: [unknown]\n')[0]).toContain('"unknown"');
+  });
+
+  it('bounds every operations retention and gap window to whole positive days or minutes', () => {
+    for (const [field, max] of [
+      ['backupMinimumGapMinutes', 10_080],
+      ['notificationReadRetentionDays', 3_650],
+      ['autosaveRetentionDays', 3_650],
+      ['auditRetentionDays', 3_650],
+    ] as const) {
+      for (const raw of [0, -1, max + 1, '12.5']) {
+        expect(problemsOf(`${field}: ${raw}\n`)[0]).toContain(`expected a whole number between 1 and ${max}`);
+      }
+    }
+  });
+
+  it('requires a lower-case named weekday', () => {
+    for (const raw of ['Sunday', 'someday']) {
+      expect(problemsOf(`backupRehearsalWeekday: ${raw}\n`)[0]).toContain('expected one of sunday, monday');
+    }
+  });
+
+  it('does not treat operations settings as secrets', () => {
+    for (const field of fields) expect(SETTINGS_SECRET_FIELDS).not.toContain(field);
   });
 });
 

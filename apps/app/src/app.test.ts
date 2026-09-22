@@ -55,6 +55,14 @@ const sources: LoadedSettings['sources'] = {
   mongoUrl: 'default',
   timezone: 'default',
   developmentDiagnostics: 'default',
+  backupDailyAt: 'default',
+  backupComponents: 'default',
+  backupMinimumGapMinutes: 'default',
+  backupRehearsalWeekday: 'default',
+  retentionSweepAt: 'default',
+  notificationReadRetentionDays: 'default',
+  autosaveRetentionDays: 'default',
+  auditRetentionDays: 'default',
 };
 
 const settings: LoadedSettings = {
