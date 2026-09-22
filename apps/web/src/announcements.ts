@@ -25,7 +25,7 @@
 // `preparation-storage.ts` keeps between a code and the words for it. The one exception is
 // `announceConnection` below, which owns the wording for the one announcement this module itself drives.
 //
-// Every element is reached through a narrow interface, the way `control.ts` reaches its own: this
+// Every element is reached through a narrow interface rather than the DOM types: this
 // workspace's `lib` is ES2023 with no DOM, and a real element satisfies these two members anyway.
 
 import { type Locale } from '@holydeck/localization/locales';

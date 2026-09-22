@@ -25,6 +25,10 @@ describe('the route to page switch', () => {
   beforeEach(() => {
     resetAppState();
     at('/services');
+    setFetching(async () => ({
+      status: 500,
+      json: async (): Promise<unknown> => ({ error: { code: 'test.refused', message: 'Refused', requestId: 'test' } }),
+    }));
   });
 
   it('shows only the loading line until boot has answered', () => {
@@ -38,12 +42,12 @@ describe('the route to page switch', () => {
     ['/services/s1', 'Service s1'],
     ['/admin/users', 'Users'],
     ['/nowhere', 'Page not found'],
-  ])('renders %s inside the shell', (path, heading) => {
+  ])('renders %s inside the shell', async (path, heading) => {
     session.value = signedIn;
     at(path);
     render(<App />);
-    expect(screen.getByRole('heading', { level: 1, name: heading })).toBeTruthy();
-    expect(screen.getByRole('navigation')).toBeTruthy();
+    expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy();
   });
 
   it.each([

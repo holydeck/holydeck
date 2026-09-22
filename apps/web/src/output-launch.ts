@@ -161,9 +161,9 @@ export interface SurfaceLaunchControls {
  * wants tried again, typically `launchOutputSurface` re-run from the click's own gesture, which is the
  * only kind of gesture a browser will honour a second `window.open` from. `onclick` is assigned rather
  * than added as a listener, so presenting the same controls again replaces the previous retry instead
- * of stacking another one behind it. `locale` is supplied by the caller exactly as `renderShell` supplies
- * it to the shell's own copy (`shell.ts`), so the status line renders in whatever language the device
- * already resolved rather than a hardcoded one.
+ * of stacking another one behind it. `locale` is supplied by the caller from the application locale,
+ * so the status line renders in whatever language the device already resolved rather than a hardcoded
+ * one.
  */
 export function presentSurfaceLaunch(
   controls: SurfaceLaunchControls,

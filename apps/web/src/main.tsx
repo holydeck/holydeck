@@ -1,73 +1,48 @@
-import { LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
-import { ORDER_PATH } from '@holydeck/contracts/order';
-import { isRecord, parseObject } from '@holydeck/contracts/problems';
-import { SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
-import { SHORTCUT_KEYS } from '@holydeck/contracts/slide-labels';
-import { translate } from '@holydeck/localization/messages';
+// The entry point owns browser-wide lifetimes only: language, history, the mounting root, session clock
+// and offline registration. Pages own their data and connections, so leaving a route also leaves the
+// resources that only made sense while it was visible.
 
-import { type AnnouncementDocumentLike, announceConnection, createAnnouncer } from './announcements.js';
-import { ask, type FetchLike } from './api.js';
-import { type ControlData, type ControlDocumentLike, renderControl } from './control.js';
-import { createLiveClient, detectLiveSocket, type LiveSocketGlobalLike } from './live-client.js';
+import { effect } from '@preact/signals';
+import { render } from 'preact';
+
+import { App } from './app.js';
+import { locale } from './app-state.js';
 import {
   type ServiceWorkerContainerLike,
   registerServiceWorker,
 } from './register-service-worker.js';
-import { type ShellDocumentLike, renderShell } from './shell.js';
+import { startRouter } from './router.js';
+import { boot } from './request.js';
+import { startSessionTimer } from './session-timer.js';
 
-const { document, navigator, location } = globalThis as {
-  document?: ShellDocumentLike & ControlDocumentLike & AnnouncementDocumentLike;
-  navigator?: { languages?: readonly string[]; serviceWorker?: ServiceWorkerContainerLike };
-  location?: { origin: string };
-};
-
-const fetching: FetchLike = (path, init) => globalThis.fetch(path, init);
-
-const readControlData = (value: unknown) => parseObject<ControlData>(value, 'order', (reader) => ({
-  items: reader.parsedList('items', (item, path) => parseObject(item, path, (fields) => ({
-    id: fields.text('id'),
-    label: fields.text('label'),
-  }))),
-  catalogue: reader.parsedList('catalogue', (entry, path) => parseObject(entry, path, (fields) => ({
-    id: fields.text('id'),
-    name: fields.text('name'),
-    shortcut: fields.names.includes('shortcut') ? fields.choice('shortcut', SHORTCUT_KEYS) : undefined,
-  }))),
-}));
-
-// Before anything asynchronous: the served HTML is English, and a device that asked for another
-// language should not read a sentence in the wrong one while the client starts up.
-if (document !== undefined) {
-  const locale = renderShell(document, navigator?.languages ?? []);
-  void ask(ORDER_PATH, fetching).then((answer) => {
-    const parsed = answer.ok ? readControlData(answer.data) : undefined;
-    renderControl(document, locale, parsed?.ok ? parsed.value : { items: [], catalogue: [] });
+/** Starts the mounted application and returns the browser-wide lifetimes its caller can stop. */
+export function start(win: Window): () => void {
+  const root = win.document.getElementById('app');
+  if (root === null) return () => undefined;
+  const stopRouter = startRouter(win);
+  const stopLocale = effect(() => {
+    win.document.documentElement.lang = locale.value;
   });
-
-  const live = createLiveClient({
-    channel: LIVE_CONTROL_CHANNEL,
-    origin: location?.origin ?? '',
-    open: detectLiveSocket(globalThis as LiveSocketGlobalLike),
-    credentials: async () => {
-      const session = await ask(SESSION_PATH, fetching);
-      if (!session.ok || !isRecord(session.data) || typeof session.data.csrf !== 'string' || session.data.csrf === '') {
-        return undefined;
-      }
-      const issued = await ask(TICKET_PATH, fetching, { method: 'POST', csrf: session.data.csrf });
-      if (!issued.ok || !isRecord(issued.data) || typeof issued.data.ticket !== 'string' || issued.data.ticket === '') {
-        return undefined;
-      }
-      return { kind: 'ticket', ticket: issued.data.ticket };
-    },
-  });
-  const indicator = document.getElementById('connection-status');
-  live.onStatus((status) => {
-    if (indicator !== null) indicator.textContent = translate(locale, `control.connection.${status.state}`);
-  });
-  announceConnection(live, createAnnouncer(document), locale);
-  void live.connect();
+  root.replaceChildren();
+  render(<App />, root);
+  void boot();
+  const stopSessionTimer = startSessionTimer();
+  return (): void => {
+    stopSessionTimer();
+    stopLocale();
+    stopRouter();
+    render(null, root);
+  };
 }
 
-void registerServiceWorker(navigator?.serviceWorker, '/service-worker.js', (error) => {
+const browser = globalThis as {
+  document?: Document;
+  navigator?: { serviceWorker?: ServiceWorkerContainerLike };
+  window?: Window;
+};
+
+if (browser.document !== undefined && browser.window !== undefined) void start(browser.window);
+
+void registerServiceWorker(browser.navigator?.serviceWorker, '/service-worker.js', (error) => {
   console.warn('HolyDeck will run online only: the service worker was refused', error);
 });

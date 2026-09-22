@@ -125,8 +125,8 @@ export function presentFullscreenState(
 // Keyboard navigation
 // ---------------------------------------------------------------------------------------------------
 
-/** What a key press moves. This is a separate, narrower concern than `control.ts`'s shortcut catalogue:
- *  that module drives the operator's own control document, this one runs on the output surface itself,
+/** What a key press moves. This is a separate, narrower concern than `control-state.ts`'s shortcut catalogue:
+ *  that module drives the operator's own workspace, this one runs on the output surface itself,
  *  where the only choices a presenter needs without looking away from the audience are forward and
  *  back. */
 export interface LocalOutputNavigation {

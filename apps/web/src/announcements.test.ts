@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs';
-
+// @vitest-environment happy-dom
 import { LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
+import { h } from 'preact';
+import { render } from '@testing-library/preact';
 import { describe, expect, test, vi } from 'vitest';
 
 import {
@@ -17,6 +18,7 @@ import {
   createAnnouncer,
 } from './announcements.js';
 import { createLiveClient } from './live-client.js';
+import { AppShell } from './components/app-shell.js';
 
 import type { LiveClient, LiveCredentials, LiveStatus, SocketEventLike, WebSocketLike } from './live-client.js';
 
@@ -208,16 +210,16 @@ describe('the announcements the UI contract names', () => {
     expect(Object.keys(POLITENESS_OF).sort()).toEqual([...ANNOUNCEMENTS].sort());
   });
 
-  // AX-F3 itself: every contracted announcement had an expected wording and none had a live region to
-  // say it in. This reads the served document rather than a fixture of it.
-  test('the served shell carries a live region for each, at the politeness the contract states', () => {
-    const html = readFileSync(new URL('./static/index.html', import.meta.url), 'utf8');
+  // AX-F3 itself: every contracted announcement has one persistent region in the rendered application
+  // shell, at the politeness the contract states.
+  test('the rendered shell carries a live region for each, at the politeness the contract states', () => {
+    render(h(AppShell, null, h('p', null, 'page')));
     for (const announcement of ANNOUNCEMENTS) {
       const politeness = POLITENESS_OF[announcement];
       const id = REGION_ID[politeness];
-      const tag = new RegExp(`<[a-z]+[^>]*\\sid="${id}"[^>]*>`, 'u').exec(html);
-      expect(tag, `the shell has no #${id} for a ${politeness} announcement`).not.toBeNull();
-      expect(tag?.[0]).toContain(`aria-live="${politeness}"`);
+      const region = document.getElementById(id);
+      expect(region, `the shell has no #${id} for a ${politeness} announcement`).not.toBeNull();
+      expect(region?.getAttribute('aria-live')).toBe(politeness);
     }
   });
 });

@@ -23,6 +23,7 @@ import { signOut } from './sign-out.js';
 import type { JSX } from 'preact';
 
 const OutputPage = lazy(() => import('./pages/output.js').then((module) => module.OutputPage));
+const ServicePage = lazy(() => import('./pages/service.js').then((module) => module.ServicePage));
 
 /** What the current route renders inside the shell. */
 function Page(): JSX.Element {
@@ -32,7 +33,7 @@ function Page(): JSX.Element {
     case 'services':
       return <ServicesPage />;
     case 'service':
-      return <h1>{t('app.service.title', { id: current.id })}</h1>;
+      return <ServicePage id={current.id} />;
     case 'admin-users':
       return <h1>{t('users.title')}</h1>;
     case 'welcome':
