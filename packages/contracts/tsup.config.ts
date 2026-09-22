@@ -13,6 +13,7 @@ export default defineConfig({
     'src/live.ts',
     'src/live-media.ts',
     'src/live-mode.ts',
+    'src/live-state.ts',
     'src/live-theme.ts',
     'src/jobs.ts',
     'src/entities.ts',
