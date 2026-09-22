@@ -57,6 +57,24 @@ describe('RETENTION_POLICIES', () => {
   });
 });
 
+describe('policyFor with a settings-driven override', () => {
+  it('uses the hardcoded default when no override is given, for back-compat', () => {
+    expect(policyFor('audit-entry').retentionDays).toBe(400);
+  });
+
+  it('uses the override when one is given for that class', () => {
+    expect(policyFor('audit-entry', { 'audit-entry': 90 }).retentionDays).toBe(90);
+  });
+
+  it('leaves protected unchanged by an override', () => {
+    expect(policyFor('audit-entry', { 'audit-entry': 90 }).protected).toBe(false);
+  });
+
+  it('leaves a class the overrides object does not name unaffected', () => {
+    expect(policyFor('current-revision', { 'audit-entry': 90 }).retentionDays).toBe(3650);
+  });
+});
+
 describe('a referenced or historical entity cannot be destructively removed', () => {
   it('refuses a protected class with a named error, whatever its age', () => {
     const error = thrown(() => guardRemoval(candidate({ class: 'prepared-snapshot', ageDays: 9000 })));

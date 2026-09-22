@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn } from './audit.js';
+import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn, retentionSweepContext } from './audit.js';
 import { ContextError, requestContext } from './context.js';
 import { RepositoryError } from './repositories.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -93,6 +93,14 @@ describe('what the trail refuses', () => {
 });
 
 describe('the context the trail is written under', () => {
+  it('grants a retention sweep exactly reading and appending the trail, and nothing else', () => {
+    expect(retentionSweepContext('system', CORRELATION)).toMatchObject({
+      actor: 'system',
+      permissions: ['auditEvents.read', 'auditEvents.append'],
+      correlationId: CORRELATION,
+    });
+  });
+
   it('grants appending and nothing else, so the trail cannot be read back through it', () => {
     expect(auditContext('system', CORRELATION)).toMatchObject({
       actor: 'system',
@@ -154,6 +162,7 @@ describe('the context the trail is written under', () => {
       'restore.apply.request',
       'restore.apply.complete',
       'restore.apply.fail',
+      'retention.sweep',
     ]);
   });
 });

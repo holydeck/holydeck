@@ -3,7 +3,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { checkOwnSettingsMount, readSettingsText } from '@holydeck/app/boot';
-import { AUDIT_CATEGORIES, CATEGORY_OF, auditReadContext } from '@holydeck/app/audit';
+import { AUDIT_CATEGORIES, CATEGORY_OF, auditReadContext, retentionSweepContext } from '@holydeck/app/audit';
 import { backupContext, backupDb } from '@holydeck/app/backups';
 import { capabilityDb, capabilitiesOn } from '@holydeck/app/capabilities';
 import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
@@ -191,6 +191,15 @@ if (work.runs === 'nothing') {
       mediaRoot: settings.values.mediaRoot,
       now,
       report: (line) => void process.stdout.write(`${line}\n`),
+    },
+    retentionSweep: {
+      context: retentionSweepContext('system', name),
+      db: repositoryDb(store.db()),
+      autosaveRetentionDays: configured.values.autosaveRetentionDays,
+      auditRetentionDays: configured.values.auditRetentionDays,
+      now,
+      report: (line) => void process.stdout.write(`${line}\n`),
+      schedulerState,
     },
   });
   const runner = runnerOn({

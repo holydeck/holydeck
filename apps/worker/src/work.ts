@@ -9,12 +9,14 @@
 import { backupProducerOn } from './backup-producer.js';
 import { mediaIngestOn } from './media-ingest.js';
 import { restoreApplyOn } from './restore-apply-handler.js';
+import { retentionSweepOn } from './retention-sweep-handler.js';
 import { restoreRehearsalOn } from './restore-rehearsal.js';
 
 import type { BackupProducerOptions } from './backup-producer.js';
 import type { MediaIngestOptions } from './media-ingest.js';
 import type { RestoreApplyHandlerOptions } from './restore-apply-handler.js';
 import type { RestoreRehearsalOptions } from './restore-rehearsal.js';
+import type { RetentionSweepOptions } from './retention-sweep-handler.js';
 import type { Handler } from './runner.js';
 
 export type Handlers = Readonly<Record<string, Handler>>;
@@ -39,12 +41,17 @@ const unconfiguredRestoreApply: Handler = async () => {
   throw new Error('restore-apply has not been configured');
 };
 
+const unconfiguredRetentionSweep: Handler = async () => {
+  throw new Error('retention sweep has not been configured');
+};
+
 /** The kinds this build registers before the entry point supplies their deployment dependencies. */
 export const HANDLERS: Handlers = Object.freeze({
   'media-ingest': unconfiguredMediaIngest,
   'backup-run': unconfiguredBackupRun,
   'restore-run': unconfiguredRestoreRun,
   'restore-apply': unconfiguredRestoreApply,
+  'retention-sweep': unconfiguredRetentionSweep,
 });
 
 export interface HandlersOptions {
@@ -52,6 +59,7 @@ export interface HandlersOptions {
   readonly backupProducer: BackupProducerOptions;
   readonly restoreRehearsal: RestoreRehearsalOptions;
   readonly restoreApply: RestoreApplyHandlerOptions;
+  readonly retentionSweep: RetentionSweepOptions;
 }
 
 export function handlersOn(options: HandlersOptions): Handlers {
@@ -61,6 +69,7 @@ export function handlersOn(options: HandlersOptions): Handlers {
     'backup-run': backupProducerOn(options.backupProducer),
     'restore-run': restoreRehearsalOn(options.restoreRehearsal),
     'restore-apply': restoreApplyOn(options.restoreApply),
+    'retention-sweep': retentionSweepOn(options.retentionSweep),
   });
 }
 

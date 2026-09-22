@@ -100,6 +100,9 @@ export const AUDIT_ACTIONS = [
   'restore.apply.request',
   'restore.apply.complete',
   'restore.apply.fail',
+  // A grading pass over the audit trail's own declared retention window (OPS-07): counts what it found
+  // removable and retained, and removes nothing itself — `retention.ts`'s own header says why.
+  'retention.sweep',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -170,6 +173,7 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'restore.apply.request': 'restore',
   'restore.apply.complete': 'restore',
   'restore.apply.fail': 'restore',
+  'retention.sweep': 'content',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */
@@ -231,4 +235,17 @@ export function auditContext(actor: string, correlationId: string): RequestConte
 /** The context a reader of the trail runs under: able to read it, and to do nothing else. */
 export function auditReadContext(actor: string, correlationId: string): RequestContext {
   return requestContext({ actor, permissions: [permissionsFor('auditEvents').read], correlationId });
+}
+
+/**
+ * The context a retention sweep runs under (OPS-07): able to read the trail to find what is old enough
+ * to grade, and to append its own `retention.sweep` summary — nothing else, and nothing more of the
+ * trail than that.
+ */
+export function retentionSweepContext(actor: string, correlationId: string): RequestContext {
+  return requestContext({
+    actor,
+    permissions: [permissionsFor('auditEvents').read, permissionsFor('auditEvents').append],
+    correlationId,
+  });
 }

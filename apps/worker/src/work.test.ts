@@ -6,6 +6,7 @@ import type { BackupProducerOptions } from './backup-producer.js';
 import type { MediaIngestOptions } from './media-ingest.js';
 import type { RestoreApplyHandlerOptions } from './restore-apply-handler.js';
 import type { RestoreRehearsalOptions } from './restore-rehearsal.js';
+import type { RetentionSweepOptions } from './retention-sweep-handler.js';
 import type { Handler } from './runner.js';
 
 const handler: Handler = async () => undefined;
@@ -31,8 +32,8 @@ test('a registered handler and a store to claim from is work to do', () => {
   });
 });
 
-test('this build registers media ingestion, backup production, restore rehearsal and restore-apply as its kinds of job', () => {
-  expect(Object.keys(HANDLERS)).toEqual(['media-ingest', 'backup-run', 'restore-run', 'restore-apply']);
+test('this build registers media ingestion, backup production, restore rehearsal, restore-apply and retention sweep as its kinds of job', () => {
+  expect(Object.keys(HANDLERS)).toEqual(['media-ingest', 'backup-run', 'restore-run', 'restore-apply', 'retention-sweep']);
 });
 
 test('the unconfigured media-ingest placeholder refuses to run a job until an entry point wires it up', async () => {
@@ -56,6 +57,12 @@ test('the unconfigured restore-run placeholder refuses to run a job until an ent
 test('the unconfigured restore-apply placeholder refuses to run a job until an entry point wires it up', async () => {
   await expect(HANDLERS['restore-apply']?.({} as never, new AbortController().signal)).rejects.toThrow(
     'restore-apply has not been configured',
+  );
+});
+
+test('the unconfigured retention-sweep placeholder refuses to run a job until an entry point wires it up', async () => {
+  await expect(HANDLERS['retention-sweep']?.({} as never, new AbortController().signal)).rejects.toThrow(
+    'retention sweep has not been configured',
   );
 });
 
@@ -101,10 +108,19 @@ test('an entry point supplying its dependencies replaces every placeholder with 
     mediaRoot: '/media',
     now: () => '2026-09-21T00:00:00.000Z',
   };
-  const handlers = handlersOn({ mediaIngest: media, backupProducer, restoreRehearsal, restoreApply });
-  expect(Object.keys(handlers)).toEqual(['media-ingest', 'backup-run', 'restore-run', 'restore-apply']);
+  const retentionSweep = {
+    context: undefined,
+    db: {} as RetentionSweepOptions['db'],
+    autosaveRetentionDays: 30,
+    auditRetentionDays: 400,
+    now: () => '2026-09-21T00:00:00.000Z',
+    schedulerState: {} as RetentionSweepOptions['schedulerState'],
+  };
+  const handlers = handlersOn({ mediaIngest: media, backupProducer, restoreRehearsal, restoreApply, retentionSweep });
+  expect(Object.keys(handlers)).toEqual(['media-ingest', 'backup-run', 'restore-run', 'restore-apply', 'retention-sweep']);
   expect(handlers['media-ingest']).not.toBe(HANDLERS['media-ingest']);
   expect(handlers['backup-run']).not.toBe(HANDLERS['backup-run']);
   expect(handlers['restore-run']).not.toBe(HANDLERS['restore-run']);
   expect(handlers['restore-apply']).not.toBe(HANDLERS['restore-apply']);
+  expect(handlers['retention-sweep']).not.toBe(HANDLERS['retention-sweep']);
 });

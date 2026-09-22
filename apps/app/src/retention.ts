@@ -79,10 +79,14 @@ export class RetentionError extends Error {
 }
 
 /** The declared window for a class, or a named refusal — never a silent policy of "anything goes". */
-export function policyFor(retentionClass: string): RetentionPolicy {
+export function policyFor(
+  retentionClass: string,
+  overrides?: Partial<Record<'autosave-revision' | 'audit-entry', number>>,
+): RetentionPolicy {
   const policy = POLICY_BY_CLASS.get(retentionClass);
   if (policy === undefined) throw new RetentionError('no-policy', `${retentionClass} has no declared retention window`);
-  return policy;
+  const retentionDays = overrides?.[retentionClass as 'autosave-revision' | 'audit-entry'] ?? policy.retentionDays;
+  return { ...policy, retentionDays };
 }
 
 export interface RetentionCandidate {

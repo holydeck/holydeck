@@ -72,6 +72,10 @@
     "./maintenance": {
       "types": "./dist/maintenance.d.ts",
       "import": "./dist/maintenance.js"
+    },
+    "./retention": {
+      "types": "./dist/retention.d.ts",
+      "import": "./dist/retention.js"
     }
   },
   "scripts": {
