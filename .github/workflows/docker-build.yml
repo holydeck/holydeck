@@ -142,13 +142,18 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
           NAME: ${{ matrix.name }}
         run: cosign sign --yes "ghcr.io/holydeck/${NAME}@${DIGEST}"
-      # An alias is not a second build: it is the primary digest recreated under a second
-      # repository name via `imagetools create`, kept for one deprecation window (see
-      # MAINTENANCE.md) so a puller still using the old name does not break. `--annotation`
-      # stamps an OCI annotation onto that new manifest without touching the image config, so
-      # the alias can carry its own deprecation marker even though it shares the primary's exact
-      # digest, layers and image-config labels. A registry stores a cosign signature per
-      # repository, not per digest, so each alias repository still needs its own sign call below.
+      - name: Set up crane
+        if: inputs.push && join(matrix.aliases, ',') != ''
+        uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+      # An alias is not a second build: crane copies the primary digest's raw manifest and blobs
+      # to a second repository name unmodified, so the alias's digest is byte-for-byte identical
+      # to the primary's — the promise MAINTENANCE.md makes to anyone still pulling the old name
+      # during its one-release deprecation window. (`docker buildx imagetools create` was tried
+      # first, but even without its `--annotation` flags it re-serializes the manifest into a new
+      # index and so mints a different digest — exactly the drift this step exists to avoid, and
+      # why the cosign call below is safe to reuse the primary's own $DIGEST for the alias too.)
+      # A registry stores a cosign signature per repository, not per digest, so each alias
+      # repository still needs its own sign call below, signing that same shared digest.
       - name: Recreate the image under each alias name
         if: inputs.push && join(matrix.aliases, ',') != ''
         env:
@@ -167,11 +172,7 @@ jobs:
             IFS=',' read -ra tag_list <<<"$alias_tags"
             for tag in "${tag_list[@]}"; do
               [ -n "$tag" ] || continue
-              docker buildx imagetools create \
-                --tag "$tag" \
-                --annotation "manifest:holydeck.deprecated-alias=true" \
-                --annotation "manifest:holydeck.deprecated-alias-of=${NAME}" \
-                "ghcr.io/holydeck/${NAME}@${DIGEST}"
+              crane copy "ghcr.io/holydeck/${NAME}@${DIGEST}" "$tag"
             done
             cosign sign --yes "ghcr.io/holydeck/${alias}@${DIGEST}"
             echo "- ghcr.io/holydeck/${alias} recreated as a deprecated alias of ghcr.io/holydeck/${NAME} (see MAINTENANCE.md)" >> "$GITHUB_STEP_SUMMARY"
