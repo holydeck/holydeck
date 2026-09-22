@@ -8,7 +8,7 @@ import { LIBRARY_PERMISSIONS } from './library.js';
 import { RECORDS } from './records.js';
 import { RepositoryError } from './repositories.js';
 import { addressOf } from './revisions.js';
-import { SlideGroupError, slideGroupContext, slideGroupsOn } from './slide-groups.js';
+import { SlideGroupError, slideGroupContext, slideGroupsOn, subjectFor } from './slide-groups.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { LanguageBlock, Slide, SlideGroupBody } from '@holydeck/contracts/slide-groups';
@@ -609,5 +609,11 @@ describe('what the Slide Group store is reached through', () => {
     const { groups } = store();
     const reader = requestContext({ actor: ADMINISTRATOR, permissions: [], correlationId: 'req-3b7a19de' });
     await expect(groups.create(reader, 'slideGroup', 'Nope', CUSTOM)).rejects.toBeInstanceOf(RepositoryError);
+  });
+});
+
+describe('subjectFor', () => {
+  it('names a slide group for the audit trail', () => {
+    expect(subjectFor('group-1')).toBe('slideGroup:group-1');
   });
 });

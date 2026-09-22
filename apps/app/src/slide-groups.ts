@@ -70,6 +70,8 @@ export function slideGroupContext(actor: string, correlationId: string): Request
   });
 }
 
+export const subjectFor = (id: string): string => `slideGroup:${id}`;
+
 export interface SlideGroupRecord {
   readonly stamp: EntityStamp;
   readonly title: string;

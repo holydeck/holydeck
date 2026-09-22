@@ -32,6 +32,8 @@ export default defineConfig({
     'src/slide-groups.ts',
     'src/slide-labels.ts',
     'src/songs.ts',
+    'src/sermons.ts',
+    'src/scripture.ts',
     'src/totp.ts',
     'src/translation-offsets.ts',
     'src/webauthn.ts',

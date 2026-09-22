@@ -15,8 +15,13 @@ import {
   importSong,
   parseLyricSection,
   parseSongBody,
+  parseSongDraft,
+  parseSongEdit,
+  parseSongGeneration,
+  parseSongImportRequest,
   parseSongMetadata,
   parseSongProvenance,
+  parseSongSingerChordsDraft,
 } from './songs.js';
 
 import type { LyricSection, SongBody } from './songs.js';
@@ -118,6 +123,63 @@ describe('reading one song configuration', () => {
       'song.titles.tamil: field.not_text',
     ]);
     expect(problemsOf(song({ titles: { romanized: 'Paadal' } }))).toEqual(['song.titles.tamil: field.required']);
+  });
+});
+
+describe('reading song route payloads', () => {
+  const body = { titles: { tamil: '', romanized: '' }, languages: [], sections: [], provenance: { source: 'manual' } };
+
+  it('accepts a SongDraft', () => {
+    expect(parseSongDraft({ title: 'Grace', body }, 'song')).toEqual({ ok: true, value: { title: 'Grace', body } });
+  });
+
+  it('refuses each required SongDraft field', () => {
+    expect(parseSongDraft({ body }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.title', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongDraft({ title: 'Grace' }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.body', code: FIELD_CODES.required, message: 'is required' }] });
+  });
+
+  it('accepts a SongEdit', () => {
+    expect(parseSongEdit({ expectedRevision: 2, body }, 'song')).toEqual({ ok: true, value: { expectedRevision: 2, body } });
+  });
+
+  it('refuses each required SongEdit field', () => {
+    expect(parseSongEdit({ body }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.expectedRevision', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongEdit({ expectedRevision: 2 }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.body', code: FIELD_CODES.required, message: 'is required' }] });
+  });
+
+  it('accepts a SongImportRequest', () => {
+    expect(parseSongImportRequest({ title: 'Grace', text: 'Amazing grace' }, 'song')).toEqual({ ok: true, value: { title: 'Grace', text: 'Amazing grace' } });
+  });
+
+  it('refuses each required SongImportRequest field', () => {
+    expect(parseSongImportRequest({ text: 'Amazing grace' }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.title', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongImportRequest({ title: 'Grace' }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.text', code: FIELD_CODES.required, message: 'is required' }] });
+  });
+
+  it('accepts a SongGeneration with an optional group', () => {
+    const value = { songRevision: 2, slideLayoutId: 'layout', slideLayoutRevision: 3, slideGroupId: 'group' };
+    expect(parseSongGeneration(value, 'song')).toEqual({ ok: true, value });
+  });
+
+  it('accepts a singer chord draft', () => {
+    expect(parseSongSingerChordsDraft({ chords: 'Am  F  C  G' }, 'songSingerChords')).toEqual({
+      ok: true,
+      value: { chords: 'Am  F  C  G' },
+    });
+  });
+
+  it('refuses a singer chord draft without chords', () => {
+    expect(parseSongSingerChordsDraft({}, 'songSingerChords')).toEqual({
+      ok: false,
+      problems: [{ path: 'songSingerChords.chords', code: FIELD_CODES.required, message: 'is required' }],
+    });
+  });
+
+  it('refuses each required SongGeneration field', () => {
+    const value = { songRevision: 2, slideLayoutId: 'layout', slideLayoutRevision: 3 };
+    expect(parseSongGeneration({ ...value, songRevision: undefined }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.songRevision', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongGeneration({ ...value, slideLayoutId: undefined }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.slideLayoutId', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongGeneration({ ...value, slideLayoutRevision: undefined }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.slideLayoutRevision', code: FIELD_CODES.required, message: 'is required' }] });
   });
 });
 
@@ -297,6 +359,12 @@ describe('a song as bytes that travel', () => {
 
   it('exports the same bytes every time for a song nothing changed', () => {
     expect(exportSong(SONG)).toBe(exportSong(SONG));
+  });
+
+  it('structurally excludes singer chord relationship data from an export', () => {
+    const document = JSON.parse(exportSong(SONG)) as { readonly body: Record<string, unknown> };
+    expect(Object.keys(document.body).sort()).toEqual(['languages', 'metadata', 'provenance', 'sections', 'titles']);
+    expect(JSON.stringify(document.body)).not.toMatch(/chords|singer/iu);
   });
 
   it('exports the same bytes for a song whose fields were written in another order', () => {

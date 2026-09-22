@@ -93,6 +93,8 @@ export function sermonContext(actor: string, correlationId: string): RequestCont
   });
 }
 
+export const subjectFor = (id: string): string => `sermon:${id}`;
+
 const own = async <T>(work: () => Promise<T>): Promise<T> => {
   try {
     return await work();

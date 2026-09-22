@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACCOUNTS_MANAGE,
+  CATALOGUE_MANAGE,
+  CONTENT_EDIT,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
   PRESENTATION_CONTROL,
@@ -26,7 +28,7 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin accounts, settings, Layouts, media, services and Service Templates', () => {
+  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, content and catalogues', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
@@ -34,18 +36,22 @@ describe('what a role grants', () => {
       SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
+      CONTENT_EDIT,
+      CATALOGUE_MANAGE,
     ]);
   });
 
-  it('grants an editor service management, but not Service Template management, by role alone', () => {
+  it('grants an editor service management and content editing, but neither catalogue nor Service Template management', () => {
     expect(SERVICES_MANAGE).toBe('services.manage');
-    expect(permissionsFor(accountOf('editor', false))).toEqual([SERVICES_MANAGE]);
+    expect(permissionsFor(accountOf('editor', false))).toEqual([SERVICES_MANAGE, CONTENT_EDIT]);
     expect(permissionsFor(accountOf('editor', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
+    expect(permissionsFor(accountOf('editor', false))).not.toContain(CATALOGUE_MANAGE);
   });
 
   it('grants a member nothing by role alone', () => {
     expect(permissionsFor(accountOf('member', false))).toEqual([]);
     expect(permissionsFor(accountOf('member', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
+    expect(permissionsFor(accountOf('member', false))).not.toContain(CONTENT_EDIT);
   });
 });
 
@@ -55,6 +61,7 @@ describe('what Control presentation is', () => {
   it('is independent of role: granted to an editor or a member, it is theirs', () => {
     expect(permissionsFor(accountOf('editor', true))).toEqual([
       SERVICES_MANAGE,
+      CONTENT_EDIT,
       PRESENTATION_CONTROL,
     ]);
     expect(permissionsFor(accountOf('member', true))).toEqual([PRESENTATION_CONTROL]);
@@ -72,6 +79,8 @@ describe('what Control presentation is', () => {
       SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
+      CONTENT_EDIT,
+      CATALOGUE_MANAGE,
       PRESENTATION_CONTROL,
     ]);
   });

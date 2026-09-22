@@ -12,7 +12,7 @@ import { enforceAuthorization } from './authorization.js';
 import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { passkeysOn } from './passkeys.js';
-import { LAYOUTS_MANAGE } from './roles.js';
+import { CONTENT_EDIT, LAYOUTS_MANAGE } from './roles.js';
 import {
   LAYOUT_BOXES_PATH,
   LAYOUT_PATH,
@@ -113,6 +113,9 @@ const statusing = (id: string, payload: unknown, held: StartedSession = admin) =
 
 const listing = (id: string, held: StartedSession = admin) =>
   app.inject({ method: 'GET', url: at(LAYOUT_REVISIONS_PATH, id), headers: withHeaders(held) });
+
+const listLayouts = (query = '', held: StartedSession = admin) =>
+  app.inject({ method: 'GET', url: `${SLIDE_LAYOUTS_PATH}${query}`, headers: withHeaders(held) });
 
 const restoring = (id: string, revision: string, held: StartedSession = admin) =>
   app.inject({
@@ -351,6 +354,25 @@ describe('archiving a Slide Layout and bringing it back', () => {
   });
 });
 
+describe('listing Slide Layouts', () => {
+  test('lists active layouts for a content editor and ignores archived=true', async () => {
+    const id = await created();
+    await statusing(id, { archived: true });
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    const response = await listLayouts('?archived=true', editor);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual([]);
+  });
+
+  test('lets a layout manager include archived layouts only when asked', async () => {
+    const active = await created();
+    const archived = await created({ name: 'Archived layout', boxes: [backdrop] });
+    await statusing(archived, { archived: true });
+    expect((await listLayouts()).json().data.map((row: { stamp: { id: string } }) => row.stamp.id)).toEqual([active]);
+    expect((await listLayouts('?archived=true')).json().data.map((row: { stamp: { id: string } }) => row.stamp.id)).toEqual([active, archived]);
+  });
+});
+
 describe('the history a Slide Layout keeps', () => {
   test('lists every ordinal and how it came to exist, and never the boxes themselves', async () => {
     const id = await created();
@@ -460,6 +482,7 @@ describe('what this surface refuses to answer at all', () => {
     await app.close();
     await serving(undefined, undefined);
     expect((await creating(DRAFT)).statusCode).toBe(404);
+    expect((await listLayouts())).toHaveProperty('statusCode', 404);
     expect((await previewing('layout-1')).statusCode).toBe(404);
     expect((await listing('layout-1')).statusCode).toBe(404);
     expect((await versioning('layout-1', { boxes: [text] })).statusCode).toBe(404);
@@ -471,6 +494,7 @@ describe('what this surface refuses to answer at all', () => {
     await app.close();
     await serving(undefined);
     expect((await creating(DRAFT)).statusCode).toBe(404);
+    expect((await listLayouts())).toHaveProperty('statusCode', 404);
     expect((await previewing('layout-1')).statusCode).toBe(404);
   });
 });

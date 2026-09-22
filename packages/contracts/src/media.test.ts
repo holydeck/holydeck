@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MEDIA_PROCESSING_STATES, imageDimensionsOf, parseMediaManifestEntry, sniffMediaType } from './media.js';
+import { MEDIA_PROCESSING_STATES, imageDimensionsOf, parseMediaManifestEntry, parseMediaStatus, sniffMediaType } from './media.js';
 import { FIELD_CODES } from './problems.js';
 
 const entry = () => ({
@@ -10,6 +10,16 @@ const entry = () => ({
   type: 'image/png',
   processingState: 'pending',
   derivatives: [{ kind: 'thumbnail', bytes: 4, hash: 'sha256:def', from: 'media-1' }],
+});
+
+describe('reading media status', () => {
+  it('accepts archived', () => {
+    expect(parseMediaStatus({ archived: true })).toEqual({ ok: true, value: { archived: true } });
+  });
+
+  it('refuses missing archived', () => {
+    expect(parseMediaStatus({})).toEqual({ ok: false, problems: [{ path: 'media.archived', code: FIELD_CODES.required, message: 'is required' }] });
+  });
 });
 
 describe('media manifest entries', () => {

@@ -24,7 +24,8 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
-import { LAYOUTS_MANAGE } from './roles.js';
+import { settled } from './refusals.js';
+import { CONTENT_EDIT, LAYOUTS_MANAGE } from './roles.js';
 import { SlideLayoutError, slideLayoutContext, subjectFor } from './slide-layouts.js';
 
 import type { AuditOutcome } from './audit.js';
@@ -52,15 +53,17 @@ const LAYOUT_REVISION_PATH = `${LAYOUT_REVISIONS_PATH}/:revision`;
 const LAYOUT_STATUS_PATH = `${LAYOUT_PATH}/status`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: LAYOUTS_MANAGE };
+const LIST_PERMISSION: RouteNeed = { kind: 'any-permission', needs: [CONTENT_EDIT, LAYOUTS_MANAGE] };
 
 /** Every route this module serves, in the order it registers them. */
 const ROUTES = [
-  ['POST', SLIDE_LAYOUTS_PATH],
-  ['GET', LAYOUT_PATH],
-  ['GET', LAYOUT_REVISIONS_PATH],
-  ['PUT', LAYOUT_BOXES_PATH],
-  ['POST', LAYOUT_REVISION_PATH],
-  ['PATCH', LAYOUT_STATUS_PATH],
+  ['GET', SLIDE_LAYOUTS_PATH, LIST_PERMISSION],
+  ['POST', SLIDE_LAYOUTS_PATH, PERMISSION],
+  ['GET', LAYOUT_PATH, PERMISSION],
+  ['GET', LAYOUT_REVISIONS_PATH, PERMISSION],
+  ['PUT', LAYOUT_BOXES_PATH, PERMISSION],
+  ['POST', LAYOUT_REVISION_PATH, PERMISSION],
+  ['PATCH', LAYOUT_STATUS_PATH, PERMISSION],
 ] as const;
 
 /** Counting from one, the same as history does. A leading zero is not an ordinal anything wrote. */
@@ -83,24 +86,14 @@ const listed = (record: RevisionRecord) => ({
   origin: record.origin,
 });
 
-type Answer<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly message: string };
-
 /**
  * The two refusals a caller can do something about — the state moved under them, or another writer got
  * there first — told apart from the two nobody can. A schema refusal cannot reach here, because every
  * payload below was graded before the store saw it; a corrupt record is this server's own fault. Both of
  * those stay thrown, and are answered as faults rather than as something the caller should correct.
  */
-async function settled<T>(work: () => Promise<T>): Promise<Answer<T>> {
-  try {
-    return { ok: true, value: await work() };
-  } catch (error) {
-    if (error instanceof SlideLayoutError && (error.kind === 'state' || error.kind === 'conflict')) {
-      return { ok: false, message: error.message };
-    }
-    throw error;
-  }
-}
+const isRefusal = (error: unknown): error is SlideLayoutError & { kind: 'state' | 'conflict' } =>
+  error instanceof SlideLayoutError && (error.kind === 'state' || error.kind === 'conflict');
 
 export interface SlideLayoutRoutesOptions {
   /** Absent whenever `identity` is, per `main.ts`'s wiring — never independently, from this module's view. */
@@ -116,11 +109,11 @@ export function serveSlideLayoutRoutes(
   // A deployment with nowhere to keep an identity has nothing here to audit a change against. Every path
   // is still served, so the guard's table remains the complete shape of the surface in every deployment.
   if (identity === undefined) {
-    for (const [method, url] of ROUTES) {
+    for (const [method, url, need] of ROUTES) {
       app.route({
         method,
         url,
-        config: { need: PERMISSION },
+        config: { need },
         handler: (request, reply) => reply.code(404).send(notFound(request)),
       });
     }
@@ -133,6 +126,15 @@ export function serveSlideLayoutRoutes(
 
   const call = (request: FastifyRequest) =>
     slideLayoutContext(provenSession(request).record.actor, correlationFor(LAYOUT_PREFIX, request.id));
+
+  app.get(SLIDE_LAYOUTS_PATH, { config: { need: LIST_PERMISSION } }, async (request, reply) => {
+    const all = await layouts.list(call(request));
+    const held = provenSession(request).record.permissions;
+    const asked = (request.query as { readonly archived?: string }).archived === 'true';
+    const showArchived = held.includes(LAYOUTS_MANAGE) && asked;
+    const items = showArchived ? all : all.filter((row) => row.stamp.archivedAt === undefined);
+    return reply.send(successEnvelope(items, request.id, CLIENT_WINDOW.current));
+  });
 
   /**
    * Written after the change, and logged rather than answered when the trail refuses it: a Layout that was
@@ -158,7 +160,7 @@ export function serveSlideLayoutRoutes(
   app.post(SLIDE_LAYOUTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const parsed = parseSlideLayoutDraft(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
-    const answer = await settled(() => layouts.create(call(request), parsed.value));
+    const answer = await settled(() => layouts.create(call(request), parsed.value), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     await note(request, answer.value.stamp.id, 'allowed', 'created');
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
@@ -189,7 +191,7 @@ export function serveSlideLayoutRoutes(
     const parsed = parseSlideLayoutBody(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
-    const answer = await settled(() => layouts.version(call(request), id, parsed.value));
+    const answer = await settled(() => layouts.version(call(request), id, parsed.value), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     // A save that changed nothing is not a change, and the trail is a record of changes.
@@ -201,7 +203,7 @@ export function serveSlideLayoutRoutes(
     const revision = ordinalIn((request.params as { readonly revision: string }).revision);
     if (revision === undefined) return reply.code(422).send(validationFailure(request.id, NOT_AN_ORDINAL));
     const id = idIn(request);
-    const answer = await settled(() => layouts.restoreVersion(call(request), id, revision));
+    const answer = await settled(() => layouts.restoreVersion(call(request), id, revision), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     const restored = answer.value;
@@ -216,8 +218,9 @@ export function serveSlideLayoutRoutes(
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
     const context = call(request);
-    const answer = await settled(() =>
-      parsed.value.archived ? layouts.archive(context, id) : layouts.unarchive(context, id),
+    const answer = await settled(
+      () => (parsed.value.archived ? layouts.archive(context, id) : layouts.unarchive(context, id)),
+      isRefusal,
     );
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));

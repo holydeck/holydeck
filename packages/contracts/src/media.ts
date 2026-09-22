@@ -1,4 +1,10 @@
-import { FIELD_CODES, type FieldReader, type ParseFn, parseObject } from './problems.js';
+import { FIELD_CODES, type FieldReader, type Parsed, type ParseFn, parseObject } from './problems.js';
+
+export type MediaStatus = { readonly archived: boolean };
+
+export function parseMediaStatus(value: unknown): Parsed<MediaStatus> {
+  return parseObject(value, 'media', (reader) => ({ archived: reader.flag('archived') }));
+}
 
 export const MEDIA_PROCESSING_STATES = ['pending', 'processing', 'ready', 'failed'] as const;
 

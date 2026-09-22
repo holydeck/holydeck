@@ -17,10 +17,10 @@
 // false precision this schema cannot back up.
 
 import { isContentLanguageKey } from '@holydeck/contracts/content-languages';
-import { FIELD_CODES, isRecord } from '@holydeck/contracts/problems';
+import { FIELD_CODES, isRecord, parseObject } from '@holydeck/contracts/problems';
 import { parseSermonFile } from '@holydeck/core/sermon';
 
-import type { Parsed, Problem } from '@holydeck/contracts/problems';
+import type { ParseFn, Parsed, Problem } from '@holydeck/contracts/problems';
 import type { SermonFile } from '@holydeck/core/sermon';
 
 /** Where every problem in a sermon body is reported under, and the root a raw editor locates against. */
@@ -127,3 +127,24 @@ export function parseSermonBody(value: unknown): Parsed<SermonBody> {
     throw error;
   }
 }
+
+const EMPTY_SERMON_BODY: SermonBody = {
+  sermon: { translations: [], entries: [], notices: [] },
+  languages: {},
+};
+
+export type SermonDraft = { readonly title: string; readonly body: SermonBody };
+
+export const parseSermonDraft: ParseFn<SermonDraft> = (value, path) =>
+  parseObject(value, path, (reader) => ({
+    title: reader.text('title'),
+    body: reader.parsed('body', parseSermonBody, EMPTY_SERMON_BODY),
+  }));
+
+export type SermonEdit = { readonly expectedRevision: number; readonly body: SermonBody };
+
+export const parseSermonEdit: ParseFn<SermonEdit> = (value, path) =>
+  parseObject(value, path, (reader) => ({
+    expectedRevision: reader.wholeNumber('expectedRevision', 1),
+    body: reader.parsed('body', parseSermonBody, EMPTY_SERMON_BODY),
+  }));

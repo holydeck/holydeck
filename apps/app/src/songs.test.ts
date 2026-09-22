@@ -9,7 +9,7 @@ import { addressOf, revisionsOn } from './revisions.js';
 import { slideGroupsOn } from './slide-groups.js';
 import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
 import { songFromYaml, songToYaml } from './song-yaml.js';
-import { SongError, songContext, songsOn } from './songs.js';
+import { SongError, songContext, songsOn, subjectFor } from './songs.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { BoxBinding, SlideLayoutBody, TextLayoutBox } from '@holydeck/contracts/layouts';
@@ -20,6 +20,12 @@ import type { SongGeneration, SongStore } from './songs.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 
 const START = Date.parse('2026-09-17T09:30:00.000Z');
+
+describe('subjectFor', () => {
+  it('names a song for the audit trail', () => {
+    expect(subjectFor('song-1')).toBe('song:song-1');
+  });
+});
 
 const ADMINISTRATOR = `account:${'C'.repeat(22)}`;
 
