@@ -3,7 +3,7 @@
 // rendered first, then clicks and key presses move the same selection that the live transport reports.
 
 import { act, fireEvent, render, screen } from '@testing-library/preact';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { LOCALES } from '@holydeck/localization/locales';
 import { translate } from '@holydeck/localization/messages';
@@ -30,6 +30,25 @@ const empty: ControlData = { items: [], catalogue: [] };
 describe('OrderView', () => {
   beforeEach(() => {
     resetAppState();
+  });
+
+  afterEach(() => {
+    history.replaceState(null, '', '/');
+  });
+
+  it('replays a fragment naming one of its panels so the panel rules can match it once it exists', () => {
+    history.replaceState(null, '', '/services/sunday#live-controls');
+    render(<OrderView data={empty} serviceId="sunday" />);
+
+    expect(location.pathname).toBe('/services/sunday');
+    expect(location.hash).toBe('#live-controls');
+  });
+
+  it('leaves a fragment that names nothing it rendered alone', () => {
+    history.replaceState(null, '', '/services/sunday#elsewhere');
+    render(<OrderView data={empty} serviceId="sunday" />);
+
+    expect(location.hash).toBe('#elsewhere');
   });
 
   it('renders every workspace target, service heading and empty-state boundary honestly', () => {

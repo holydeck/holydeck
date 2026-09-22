@@ -29,6 +29,16 @@ export function OrderView({ data, serviceId, connectionStatus = '' }: OrderViewP
   const next = positions.next === undefined ? undefined : data.items[positions.next];
 
   useEffect(() => {
+    // A deep link such as `/services/<id>#live-controls` is resolved before this view exists, and a
+    // browser only settles `:target` when it navigates. Replaying the same fragment once the panels are
+    // rendered lets the small-screen panel rules show the one the address names, without a history entry.
+    const { hash, pathname, search } = location;
+    if (hash === '' || document.getElementById(decodeURIComponent(hash.slice(1))) === null) return;
+    history.replaceState(history.state, '', `${pathname}${search}`);
+    location.replace(hash);
+  }, []);
+
+  useEffect(() => {
     const selectShortcut = (event: KeyboardEvent): void => {
       if (!isShortcutKey(event.key)) return;
       const index = indexForShortcut(data.items, data.catalogue, event.key);
