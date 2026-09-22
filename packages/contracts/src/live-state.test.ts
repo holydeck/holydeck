@@ -5,7 +5,7 @@ import type { LiveState } from './live-state.js';
 const BASE: LiveState = {
   runId: 'run-1', snapshotId: 'snap-1', mode: 'live',
   public: { itemId: 'item-1', slideIndex: 0 }, selected: { itemId: 'item-2', slideIndex: 1 },
-  themes: { control: 'default', audience: 'default', stage: 'default', singer: 'default' },
+  themes: { operator: 'default', audience: 'default', stage: 'default', singer: 'default' },
   additionsRevision: 0,
 };
 

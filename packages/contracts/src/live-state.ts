@@ -12,8 +12,7 @@ export type LiveState = {
   readonly mode: LiveMode;
   readonly public: LivePosition | { readonly standby: string };
   readonly selected: LivePosition;
-  readonly themes: Readonly<Record<'control' | Exclude<ThemeSurface, 'operator'>, string>> &
-    Readonly<Partial<Record<'operator', string>>>;
+  readonly themes: Readonly<Record<ThemeSurface, string>>;
   readonly additionsRevision: number;
 };
 
