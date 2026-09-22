@@ -22,7 +22,7 @@ import { serveSettingsRoutes } from './settings-routes.js';
 import { serveSlideLayoutRoutes } from './slide-layout-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
 import { serveTranslationOffsetRoutes } from './translation-offset-routes.js';
-import { serveWebClient, withSecurityHeaders } from './static.js';
+import { serveWebClient, shellFallback, withSecurityHeaders } from './static.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
@@ -132,7 +132,10 @@ export function buildApp({
   // this asks for it, and every route registered from here down is one this check was on for.
   enforceAuthorization(app, { sessions, identity });
 
-  app.setNotFoundHandler((request, reply) => reply.code(404).send(notFound(request)));
+  // A path the client routes to itself is answered with the shell, so a reload or a shared link lands on
+  // the page it names; everything else that nothing serves stays the JSON 404 the API has always given.
+  const shell = web === undefined ? undefined : shellFallback(web);
+  app.setNotFoundHandler((request, reply) => shell?.(request, reply) ?? reply.code(404).send(notFound(request)));
 
   app.get('/health', { config: { need: PUBLIC } }, (request) =>
     successEnvelope({ status: 'ok', locale: settings.values.locale }, request.id, CLIENT_WINDOW.current),

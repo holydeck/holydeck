@@ -291,6 +291,24 @@ describe('the web client, served from the application own origin', () => {
     expect(response.body).toBe('export const ready = 1;\n');
   });
 
+  it('answers an unauthenticated client route with the shell while API misses remain JSON errors', async () => {
+    const app = buildApp({ settings, logger: false, fetching: refusing, web: assets });
+    try {
+      const clientRoute = await app.inject({ method: 'GET', url: '/services/some-id' });
+      const apiMiss = await app.inject({
+        method: 'GET',
+        url: '/api/v1/does-not-exist',
+        headers: { [CLIENT_VERSION_HEADER]: CLIENT_WINDOW.current },
+      });
+      expect(clientRoute.statusCode).toBe(200);
+      expect(clientRoute.headers['content-type']).toBe('text/html; charset=utf-8');
+      expect(apiMiss.statusCode).toBe(404);
+      expect(apiMiss.json()).toMatchObject({ error: { code: 'resource.not_found' } });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('names no other origin anywhere in what it serves, so a client makes no cross-origin request', async () => {
     for (const url of ['/', '/main.js']) {
       const { body } = await client(url);

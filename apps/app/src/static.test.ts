@@ -9,8 +9,10 @@ import {
   SECURITY_HEADERS,
   WebBuildError,
   crossOriginReferences,
+  isShellNavigation,
   readWebBuild,
   serveWebClient,
+  shellFallback,
   withSecurityHeaders,
 } from './static.js';
 
@@ -179,6 +181,87 @@ describe('serving the built web client', () => {
     for (const [header, value] of Object.entries(SECURITY_HEADERS)) {
       expect(response.headers[header], header).toBe(value);
     }
+  });
+});
+
+describe('falling back to the web shell', () => {
+  let app: FastifyInstance;
+  let dir: string;
+  let assets: ReadonlyMap<string, import('./static.js').WebAsset>;
+
+  beforeAll(async () => {
+    dir = buildDir({ 'icons/icon-192.png': 'not really a png' });
+    assets = readWebBuild(dir);
+    const shell = shellFallback(assets);
+    app = Fastify();
+    withSecurityHeaders(app);
+    serveWebClient(app, assets);
+    app.setNotFoundHandler((request, reply) => shell(request, reply) ?? reply.code(404).send({ error: { code: 'resource.not_found' } }));
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    rmSync(dir, { recursive: true });
+  });
+
+  it.each([
+    ['GET', '/', true],
+    ['GET', '/sign-in?next=/services/x', true],
+    ['GET', '/api/v1/nope', false],
+    ['GET', '/api', false],
+    ['GET', '/health', false],
+    ['GET', '/health/ready', false],
+    ['GET', '/healthy', true],
+    ['GET', '/missing.js', false],
+    ['GET', '/a.b/c', true],
+    ['POST', '/services/x', false],
+    ['HEAD', '/admin/users', true],
+  ])('recognizes %s %s as a shell navigation: %s', (method, url, expected) => {
+    expect(isShellNavigation(method, url)).toBe(expected);
+  });
+
+  it('answers client routes with the shell and its document policy', async () => {
+    const response = await app.inject({ method: 'GET', url: '/services/abc' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toBe('text/html; charset=utf-8');
+    expect(response.body).toBe(shell);
+    expect(response.headers['cache-control']).toBe('no-cache');
+    expect(response.headers['content-security-policy']).toBe(SECURITY_HEADERS['content-security-policy']);
+  });
+
+  it('answers HEAD navigations without a body', async () => {
+    const response = await app.inject({ method: 'HEAD', url: '/admin/users' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe('');
+  });
+
+  it('keeps the query on a client route out of the asset lookup', async () => {
+    const response = await app.inject({ method: 'GET', url: '/sign-in?next=%2Fservices%2Fx' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(shell);
+  });
+
+  it.each(['/api/v1/nope', '/health/x', '/missing.js'])('keeps %s as a JSON not-found', async (url) => {
+    const response = await app.inject({ method: 'GET', url });
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: { code: 'resource.not_found' } });
+  });
+
+  it('does not turn a mutating client-route request into a document', async () => {
+    const response = await app.inject({ method: 'POST', url: '/services/x' });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('revalidates the shell the same way as a directly requested asset', async () => {
+    const first = await app.inject({ method: 'GET', url: '/services/abc' });
+    const again = await app.inject({
+      method: 'GET',
+      url: '/services/abc',
+      headers: { 'if-none-match': String(first.headers.etag) },
+    });
+    expect(again.statusCode).toBe(304);
+    expect(again.body).toBe('');
   });
 });
 

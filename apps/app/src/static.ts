@@ -148,7 +148,37 @@ function answer(request: FastifyRequest, reply: FastifyReply, asset: WebAsset): 
   // Nothing in the build is named after its contents yet, so every answer is revalidated. When the
   // build names its assets by content hash, those assets can be held for far longer than one visit.
   if (request.headers['if-none-match'] === asset.etag) return reply.code(304).send();
+  // Fastify's injection keeps a payload supplied to HEAD, unlike an HTTP server which drops it on
+  // the wire, so omit it here and make both paths describe the same response to every caller.
+  if (request.method === 'HEAD') return reply.send();
   return reply.send(asset.body);
+}
+
+/**
+ * Whether a request that no route or build asset answered is a navigation the client owns.
+ *
+ * Only GET and HEAD can ask to read a document: other methods must remain missing rather than
+ * quietly becoming a page load. API and health paths are server surfaces, where a JSON 404 lets a
+ * caller distinguish a miss from an HTML document. A dot in the final segment names a file, so an
+ * absent script, icon or manifest must remain an asset miss instead of receiving the shell.
+ */
+export function isShellNavigation(method: string, url: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  const path = url.slice(0, url.search(/[?#]/u) === -1 ? undefined : url.search(/[?#]/u));
+  if (path === '/api' || path.startsWith('/api/')) return false;
+  if (path === '/health' || path.startsWith('/health/')) return false;
+  return !path.slice(path.lastIndexOf('/') + 1).includes('.');
+}
+
+/**
+ * Answers client-owned navigations with the shell after every concrete route and asset has missed.
+ *
+ * `readWebBuild` refuses a build without the shell, so the fallback can reuse the normal answer
+ * path and preserve its entity tag, revalidation and document cache policy.
+ */
+export function shellFallback(assets: ReadonlyMap<string, WebAsset>): (request: FastifyRequest, reply: FastifyReply) => FastifyReply | undefined {
+  const shell = assets.get(SHELL_PATH);
+  return (request, reply) => isShellNavigation(request.method, request.url) ? answer(request, reply, shell!) : undefined;
 }
 
 /**
