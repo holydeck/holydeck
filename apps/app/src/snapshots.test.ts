@@ -7,7 +7,7 @@ import { CATEGORY_OF } from './audit.js';
 import { RECORDS, RECORD_ACTIONS } from './records.js';
 import { repositoriesOn } from './repositories.js';
 import { revisionsOn } from './revisions.js';
-import { ACCOUNTS_MANAGE, PRESENTATION_CONTROL, permissionsFor } from './roles.js';
+import { ACCOUNTS_MANAGE, PRESENTATION_CONTROL, SERVICE_TEMPLATES_MANAGE, permissionsFor } from './roles.js';
 import { serviceContext, servicesOn } from './services.js';
 import { slideGroupsOn } from './slide-groups.js';
 import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
@@ -619,6 +619,7 @@ describe('the Operator override', () => {
       ACCOUNTS_MANAGE,
       'settings.manage',
       'layouts.manage',
+      SERVICE_TEMPLATES_MANAGE,
       'media.manage',
       'services.manage',
     ]);

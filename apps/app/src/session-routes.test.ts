@@ -38,6 +38,7 @@ import {
   MEDIA_MANAGE,
   PRESENTATION_CONTROL,
   SERVICES_MANAGE,
+  SERVICE_TEMPLATES_MANAGE,
   SETTINGS_MANAGE,
 } from './roles.js';
 import { SIGN_IN_REFUSED, serveSessionRoutes } from './session-routes.js';
@@ -306,7 +307,14 @@ describe('signing in', () => {
       actor: actorFor(ID),
       rotation: 'authentication',
       // Granted from the account this session was opened for: a founder is Admin by role.
-      permissions: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE, SERVICES_MANAGE],
+      permissions: [
+        ACCOUNTS_MANAGE,
+        SETTINGS_MANAGE,
+        LAYOUTS_MANAGE,
+        SERVICE_TEMPLATES_MANAGE,
+        MEDIA_MANAGE,
+        SERVICES_MANAGE,
+      ],
     });
     const cookie = String(response.headers['set-cookie']);
     expect(isOpaqueToken(tokenIn(cookie))).toBe(true);
@@ -375,7 +383,14 @@ describe('signing in with a passkey', () => {
     expect(response.json().data).toMatchObject({
       actor: actorFor(ID),
       rotation: 'authentication',
-      permissions: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE, SERVICES_MANAGE],
+      permissions: [
+        ACCOUNTS_MANAGE,
+        SETTINGS_MANAGE,
+        LAYOUTS_MANAGE,
+        SERVICE_TEMPLATES_MANAGE,
+        MEDIA_MANAGE,
+        SERVICES_MANAGE,
+      ],
     });
     const cookie = String(response.headers['set-cookie']);
     expect(isOpaqueToken(tokenIn(cookie))).toBe(true);

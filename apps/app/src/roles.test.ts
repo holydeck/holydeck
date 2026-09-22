@@ -6,6 +6,7 @@ import {
   MEDIA_MANAGE,
   PRESENTATION_CONTROL,
   SERVICES_MANAGE,
+  SERVICE_TEMPLATES_MANAGE,
   SETTINGS_MANAGE,
   permissionsFor,
 } from './roles.js';
@@ -25,23 +26,26 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin accounts, settings, Layouts, media and services', () => {
+  it('grants an admin accounts, settings, Layouts, media, services and Service Templates', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
       LAYOUTS_MANAGE,
+      SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
     ]);
   });
 
-  it('grants an editor service management by role alone', () => {
+  it('grants an editor service management, but not Service Template management, by role alone', () => {
     expect(SERVICES_MANAGE).toBe('services.manage');
     expect(permissionsFor(accountOf('editor', false))).toEqual([SERVICES_MANAGE]);
+    expect(permissionsFor(accountOf('editor', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
   });
 
   it('grants a member nothing by role alone', () => {
     expect(permissionsFor(accountOf('member', false))).toEqual([]);
+    expect(permissionsFor(accountOf('member', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
   });
 });
 
@@ -65,6 +69,7 @@ describe('what Control presentation is', () => {
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
       LAYOUTS_MANAGE,
+      SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
       PRESENTATION_CONTROL,

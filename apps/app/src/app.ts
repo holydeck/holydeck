@@ -16,6 +16,7 @@ import { serveOrderRoutes } from './order-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
 import { serveServiceRoutes } from './service-routes.js';
+import { serveServiceTemplateRoutes } from './service-template-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
 import { serveSettingsRoutes } from './settings-routes.js';
 import { serveSlideLayoutRoutes } from './slide-layout-routes.js';
@@ -29,6 +30,7 @@ import type { Fetching } from './corpus.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { ServiceStore } from './services.js';
+import type { ServiceTemplateStore } from './service-templates.js';
 import type { SlideLabelStore } from './slide-labels.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
@@ -65,6 +67,7 @@ export interface AppOptions {
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
   shownReferences?: ShownReferenceStore;
   services?: ServiceStore;
+  serviceTemplates?: ServiceTemplateStore;
   slideLabels?: SlideLabelStore;
 }
 
@@ -89,6 +92,7 @@ export function buildApp({
   translationOffsets,
   shownReferences,
   services,
+  serviceTemplates,
   slideLabels,
 }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
@@ -231,6 +235,7 @@ export function buildApp({
   serveReferenceRoutes(app, { corpus, shownReferences });
   serveOrderRoutes(app, { services, slideLabels });
   serveServiceRoutes(app, { services });
+  serveServiceTemplateRoutes(app, { serviceTemplates });
 
   if (web !== undefined) serveWebClient(app, web);
 

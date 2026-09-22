@@ -23,6 +23,13 @@ export const SETTINGS_MANAGE = 'settings.manage';
 export const LAYOUTS_MANAGE = 'layouts.manage';
 
 /**
+ * Creates and previews Service Templates (spec TMPL-04, which gives them to Admin).
+ * Spelled `serviceTemplates.` rather than borrowing the record class's internal vocabulary, for the
+ * same reason `layouts.` was spelled apart from `slideLayouts.`.
+ */
+export const SERVICE_TEMPLATES_MANAGE = 'serviceTemplates.manage';
+
+/**
  * Uploads to and administers the media library MEDI-01 describes. Spelled `media.` rather than borrowing
  * `media.ts`'s own store-permission vocabulary, for the same reason `layouts.` was spelled apart from
  * `slideLayouts.`: an operator-facing permission and a repository's internal one are never the same word.
@@ -39,7 +46,14 @@ export const MEDIA_MANAGE = 'media.manage';
 export const SERVICES_MANAGE = 'services.manage';
 
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
-  admin: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE, SERVICES_MANAGE],
+  admin: [
+    ACCOUNTS_MANAGE,
+    SETTINGS_MANAGE,
+    LAYOUTS_MANAGE,
+    SERVICE_TEMPLATES_MANAGE,
+    MEDIA_MANAGE,
+    SERVICES_MANAGE,
+  ],
   editor: [SERVICES_MANAGE],
   member: [],
 };
