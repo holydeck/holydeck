@@ -7,7 +7,14 @@
 // have, the cookie that carries it, the two windows a session lives inside, and the header a client
 // returns its CSRF token in.
 
-import { FIELD_CODES, type Parsed, parseObject } from './problems.js';
+import { ACCOUNT_ROLES, type AccountRole } from './accounts.js';
+import { FIELD_CODES, type FieldReader, type Parsed, parseObject } from './problems.js';
+
+/** Answered when there is no session to act under. The client's move is the same in every such case. */
+export const SESSION_EXPIRED = 'auth.session.expired';
+
+/** The one answer every refused sign-in takes, whatever it was refused for. */
+export const SIGN_IN_REFUSED = 'auth.sign_in_refused';
 
 /** Where a session is opened, read, and ended. One resource: signing in creates it, signing out removes it. */
 export const SESSION_PATH = '/api/v1/session';
@@ -88,6 +95,21 @@ export interface SlotSummary {
   readonly actor: string;
 }
 
+/** Who a signed-in slot is, as the client renders it: never a credential, a second factor, or a flag nobody shows. */
+export interface SessionAccount {
+  readonly id: string;
+  readonly name: string;
+  readonly displayName: string;
+  readonly role: AccountRole;
+  readonly controlPresentation: boolean;
+}
+
+/** What GET SESSION_PATH answers: the record, every slot the container holds, and the account behind the actor when there is one. */
+export interface SessionView extends SessionRecord {
+  readonly slots: readonly SlotSummary[];
+  readonly account?: SessionAccount;
+}
+
 const TOKEN = /^[A-Za-z0-9_-]{43,}$/u;
 
 const MINUTE = 60_000;
@@ -152,23 +174,48 @@ export function sessionState(record: SessionRecord, at: string): SessionState {
   return 'active';
 }
 
+const readSessionRecord = (reader: FieldReader): SessionRecord => {
+  // Read in field order, so a session missing everything reports its fields in the order they are
+  // declared rather than in the order this function happened to need them.
+  const record = {
+    actor: reader.text('actor'),
+    permissions: reader.textList('permissions'),
+    startedAt: reader.time('startedAt'),
+    lastSeenAt: reader.time('lastSeenAt'),
+    expiresAt: reader.time('expiresAt'),
+    rotation: reader.choice('rotation', SESSION_ROTATIONS),
+    csrf: reader.text('csrf'),
+  };
+  if (record.csrf !== '' && !isOpaqueToken(record.csrf)) {
+    reader.reject('csrf', FIELD_CODES.notAllowed, 'must be an opaque token this server issued');
+  }
+  return record;
+};
+
+const parseSlotSummary = (value: unknown, path: string): Parsed<SlotSummary> =>
+  parseObject(value, path, (reader) => ({ slotId: reader.text('slotId'), actor: reader.text('actor') }));
+
+const parseSessionAccount = (value: unknown, path: string): Parsed<SessionAccount> =>
+  parseObject(value, path, (reader) => ({
+    id: reader.text('id'),
+    name: reader.text('name'),
+    displayName: reader.text('displayName'),
+    role: reader.choice('role', ACCOUNT_ROLES),
+    controlPresentation: reader.flag('controlPresentation'),
+  }));
+
 export function parseSessionRecord(value: unknown): Parsed<SessionRecord> {
+  return parseObject(value, 'session', (reader) => readSessionRecord(reader));
+}
+
+export function parseSessionView(value: unknown): Parsed<SessionView> {
   return parseObject(value, 'session', (reader) => {
-    // Read in field order, so a session missing everything reports its fields in the order they are
-    // declared rather than in the order this function happened to need them.
-    const record = {
-      actor: reader.text('actor'),
-      permissions: reader.textList('permissions'),
-      startedAt: reader.time('startedAt'),
-      lastSeenAt: reader.time('lastSeenAt'),
-      expiresAt: reader.time('expiresAt'),
-      rotation: reader.choice('rotation', SESSION_ROTATIONS),
-      csrf: reader.text('csrf'),
-    };
-    if (record.csrf !== '' && !isOpaqueToken(record.csrf)) {
-      reader.reject('csrf', FIELD_CODES.notAllowed, 'must be an opaque token this server issued');
-    }
-    return record;
+    const record = readSessionRecord(reader);
+    const slots = reader.parsedList('slots', parseSlotSummary);
+    const account = reader.names.includes('account')
+      ? reader.parsed('account', parseSessionAccount, undefined)
+      : undefined;
+    return { ...record, slots, account };
   });
 }
 

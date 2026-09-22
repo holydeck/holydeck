@@ -74,6 +74,21 @@ beforeEach(async () => {
 });
 
 describe('claiming an instance in a real database', () => {
+  test('lists accounts by name without exposing stored account secrets', async () => {
+    await declareIndexes(db);
+    await store.claim(FIRST_RUN, CLAIM);
+    await store.create(FIRST_RUN, { ...CLAIM, name: 'zara', role: 'member' });
+    await store.create(FIRST_RUN, { ...CLAIM, name: 'amina', role: 'editor' });
+
+    await expect(store.list(FIRST_RUN)).resolves.toMatchObject([
+      { name: 'amina' },
+      { name: 'andru' },
+      { name: 'zara' },
+    ]);
+    const stored = await accounts().find({}).toArray();
+    expect(stored.every((row) => typeof row.credential === 'string' && row.founder !== undefined)).toBe(true);
+  });
+
   test('is refused a second time by the index, whatever handle the second claim asks for', async () => {
     await declareIndexes(db);
     const founder = await store.claim(FIRST_RUN, CLAIM);

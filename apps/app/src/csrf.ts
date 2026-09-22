@@ -14,12 +14,14 @@ import { errorEnvelope } from '@holydeck/contracts/http';
 import {
   CSRF_HEADER,
   SESSION_COOKIE,
+  SESSION_EXPIRED,
   SESSION_PATH,
   clearedSessionCookie,
   cookieIn,
   isSameOrigin,
   mutates,
 } from '@holydeck/contracts/sessions';
+export { SESSION_EXPIRED } from '@holydeck/contracts/sessions';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 import { correlationFor } from './context.js';
@@ -31,9 +33,6 @@ import type { SessionRecord } from '@holydeck/contracts/sessions';
 import type { RequestContext } from './context.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest, HTTPMethods } from 'fastify';
 import type { SessionRefusal, SessionStore } from './sessions.js';
-
-/** Answered when there is no session to act under. The client's move is the same in every such case. */
-export const SESSION_EXPIRED = 'auth.session.expired';
 
 /** Answered when there is a session and the request still cannot be accepted from where it came from. */
 export const FORBIDDEN = 'auth.forbidden';

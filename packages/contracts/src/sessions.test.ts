@@ -16,12 +16,13 @@ import {
   isSameOrigin,
   mutates,
   parseSessionRecord,
+  parseSessionView,
   sessionCookie,
   sessionDeadlines,
   sessionState,
 } from './sessions.js';
 
-import type { SessionRecord } from './sessions.js';
+import type { SessionRecord, SessionView } from './sessions.js';
 
 const TOKEN = 'Zm9vYmFyYmF6cXV1eGNvcmdlZ3JhdWx0Z2FycGx5eHg';
 
@@ -33,6 +34,18 @@ const RECORD: SessionRecord = {
   expiresAt: '2026-09-14T09:00:00.000Z',
   rotation: 'authentication',
   csrf: 'Y3NyZi10b2tlbi13aXRoLWVub3VnaC1sZW5ndGgtdG8tY291bnQ',
+};
+
+const VIEW: SessionView = {
+  ...RECORD,
+  slots: [{ slotId: 'slot-1', actor: RECORD.actor }],
+  account: {
+    id: 'ZmFrZS1hY2NvdW50LWlk',
+    name: 'andru',
+    displayName: 'Andru Tharmarajah',
+    role: 'admin',
+    controlPresentation: true,
+  },
 };
 
 describe('what a session is', () => {
@@ -170,6 +183,34 @@ describe('reading a stored session', () => {
 
   it('rotates for three reasons and no others', () => {
     expect([...SESSION_ROTATIONS]).toEqual(['authentication', 'privilege-change', 'reauthentication']);
+  });
+});
+
+describe('reading the session view', () => {
+  it('reads a view with the account behind its actor', () => {
+    const parsed = parseSessionView(VIEW);
+    expect(parsed.ok && parsed.value).toEqual(VIEW);
+  });
+
+  it('reads a view without an account for an actor that has none', () => {
+    const withoutAccount = Object.fromEntries(Object.entries(VIEW).filter(([name]) => name !== 'account'));
+    const parsed = parseSessionView(withoutAccount);
+    expect(parsed.ok && parsed.value).toEqual(withoutAccount);
+  });
+
+  it('refuses an account role the permission model does not name', () => {
+    const parsed = parseSessionView({ ...VIEW, account: { ...VIEW.account, role: 'owner' } });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problems[0]?.path).toBe('session.account.role');
+  });
+
+  it('refuses a view without its slots', () => {
+    const withoutSlots = Object.fromEntries(Object.entries(VIEW).filter(([name]) => name !== 'slots'));
+    const parsed = parseSessionView(withoutSlots);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.problems[0]?.path).toBe('session.slots');
   });
 });
 

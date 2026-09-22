@@ -15,6 +15,8 @@
 import { actorFor, parseSignIn } from '@holydeck/contracts/accounts';
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
+import { SIGN_IN_REFUSED } from '@holydeck/contracts/sessions';
+export { SIGN_IN_REFUSED } from '@holydeck/contracts/sessions';
 import {
   SESSION_ABSOLUTE_HOURS,
   SESSION_COOKIE,
@@ -49,9 +51,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 const PUBLIC: RouteNeed = { kind: 'public' };
 
 const SESSION: RouteNeed = { kind: 'session' };
-
-/** The one answer every refused sign-in takes, whatever it was refused for. */
-export const SIGN_IN_REFUSED = 'auth.sign_in_refused';
 
 const SIGN_IN_MESSAGE = 'Signing in failed. Check the handle and the password, and try again in a few minutes.';
 

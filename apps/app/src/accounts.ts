@@ -101,6 +101,7 @@ export class AccountError extends Error {
 export interface AccountCollection {
   insertOne(document: Document): Promise<{ insertedId: unknown }>;
   findOne(filter: Filter): Promise<Document | null>;
+  find(filter: Filter, options?: { readonly projection?: Document; readonly sort?: Document }): { toArray(): Promise<Document[]> };
   countDocuments(filter: Filter): Promise<number>;
   updateOne(filter: Filter, update: Document): Promise<{ matchedCount: number }>;
   createIndex(keys: Readonly<Record<string, 1 | -1>>, options?: Readonly<Record<string, unknown>>): Promise<string>;
@@ -149,6 +150,8 @@ export interface AccountStore {
   claim(context: unknown, claim: InstanceClaim): Promise<AccountRecord>;
   claimed(context: unknown): Promise<boolean>;
   count(context: unknown): Promise<number>;
+  /** Every account, by name — for an administrator's list, never a way to look one up by what it holds. */
+  list(context: unknown): Promise<readonly AccountRecord[]>;
   /** The account these credentials belong to, or nothing at all — and the same work is done either way. */
   authenticate(context: unknown, credentials: SignIn): Promise<AccountRecord | undefined>;
   /** The account an actor names, for a surface already holding a session: never a way to look for one. */
@@ -234,6 +237,18 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
       throw new AccountError('schema', `an account this store cannot read back: ${problems}`);
     }
     return parsed.value;
+  };
+
+  // Inclusion means a secret field added later is never read by this list; the credential and founder
+  // marker stay in the database.
+  const LISTED: Document = {
+    _id: 1,
+    name: 1,
+    displayName: 1,
+    role: 1,
+    createdAt: 1,
+    controlPresentation: 1,
+    disabled: 1,
   };
 
   /**
@@ -389,6 +404,15 @@ export function accountsOn(db: AccountDb, options: AccountOptions): AccountStore
     async count(context) {
       permit(context, 'read');
       return db.collection(ACCOUNTS_COLLECTION).countDocuments({});
+    },
+
+    async list(context) {
+      permit(context, 'read');
+      const found = await db
+        .collection(ACCOUNTS_COLLECTION)
+        .find({}, { projection: LISTED, sort: { name: 1 } })
+        .toArray();
+      return found.map(readBack);
     },
   };
   return Object.freeze(store);

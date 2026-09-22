@@ -277,6 +277,55 @@ describe('signing in', () => {
   });
 });
 
+describe('listing accounts', () => {
+  test('returns every account sorted by name through an inclusion projection', async () => {
+    const memory = memoryAccounts();
+    const original = memory.db.collection;
+    let requested: { projection?: Document; sort?: Document } | undefined;
+    memory.db.collection = (name) => {
+      const collection = original(name);
+      return {
+        ...collection,
+        find: (filter, options) => {
+          requested = options;
+          return collection.find(filter, options);
+        },
+      };
+    };
+    const accounts = accountsOn(memory.db, { now: () => NOW, hash: weakly });
+    await accounts.create(FIRST_RUN, { ...CLAIM, name: 'zara', role: 'member' });
+    await accounts.create(FIRST_RUN, { ...CLAIM, name: 'amina', role: 'editor' });
+
+    await expect(accounts.list(FIRST_RUN)).resolves.toMatchObject([{ name: 'amina' }, { name: 'zara' }]);
+    expect(requested?.sort).toEqual({ name: 1 });
+    expect(requested?.projection).toEqual({
+      _id: 1,
+      name: 1,
+      displayName: 1,
+      role: 1,
+      createdAt: 1,
+      controlPresentation: 1,
+      disabled: 1,
+    });
+    expect(requested?.projection).not.toHaveProperty('credential');
+    expect(requested?.projection).not.toHaveProperty('founder');
+  });
+
+  test('returns no records from an empty collection', async () => {
+    const memory = memoryAccounts();
+    const accounts = accountsOn(memory.db, { now: () => NOW, hash: weakly });
+    await expect(accounts.list(FIRST_RUN)).resolves.toEqual([]);
+  });
+
+  test('requires the read permission', async () => {
+    const memory = memoryAccounts();
+    const accounts = accountsOn(memory.db, { now: () => NOW, hash: weakly });
+    await expect(accounts.list({ actor: 'system', permissions: [], correlationId: 'req-0f9c2a41' })).rejects.toMatchObject({
+      kind: 'permission',
+    });
+  });
+});
+
 describe('reading an account back by the identifier history carries', () => {
   test('answers the record and never the credential it is kept next to', async () => {
     const claimed = await store.claim(FIRST_RUN, CLAIM);

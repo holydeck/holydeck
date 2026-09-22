@@ -34,6 +34,13 @@ export const memoryAccounts = (): { rows: Map<string, Document>; db: AccountDb; 
       return { insertedId: id };
     },
     findOne: async (filter) => [...rows.values()].find((row) => matches(row, filter)) ?? null,
+    find: (filter, options) => ({
+      toArray: async () => {
+        const found = [...rows.values()].filter((row) => matches(row, filter));
+        if (options?.sort?.['name'] === 1) found.sort((left, right) => String(left['name']).localeCompare(String(right['name'])));
+        return found;
+      },
+    }),
     countDocuments: async (filter) => [...rows.values()].filter((row) => matches(row, filter)).length,
     updateOne: async (filter, update) => {
       const row = [...rows.values()].find((candidate) => matches(candidate, filter));
