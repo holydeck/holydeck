@@ -19,6 +19,7 @@ const PERMISSION: RouteNeed = { kind: 'permission', need: SERVICE_TEMPLATES_MANA
 
 const ROUTES = [
   ['POST', SERVICE_TEMPLATE_PATH],
+  ['GET', SERVICE_TEMPLATE_PATH],
   ['GET', SERVICE_TEMPLATE_ID_PATH],
 ] as const;
 
@@ -73,6 +74,12 @@ export function serveServiceTemplateRoutes(
     const answer = await settled(() => serviceTemplates.create(call(request), parsed.value));
     if (!answer.ok) return refused(request, reply, answer);
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  app.get(SERVICE_TEMPLATE_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const answer = await settled(() => serviceTemplates.list(call(request)));
+    if (!answer.ok) return refused(request, reply, answer);
+    return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
   app.get(SERVICE_TEMPLATE_ID_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
