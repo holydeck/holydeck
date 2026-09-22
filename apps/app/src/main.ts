@@ -21,6 +21,7 @@ import {
 import { systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
 import { serveLive } from './live.js';
+import { liveHub } from './live-protocol.js';
 import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
 import { queueDb, queueOn } from './queue.js';
@@ -177,6 +178,13 @@ const https = settings.values.tlsCertFile === ''
   ? undefined
   : { cert: readFileSync(settings.values.tlsCertFile), key: readFileSync(settings.values.tlsKeyFile) };
 
+// Built here, not inside `serveLive`, because a later task's run engine publishes through the same hub
+// from outside the live socket entirely (Design §1) — the hub is a piece of this deployment's own state,
+// not a detail of how a connection to it is served. Kept unconditional, unlike the durable stores above:
+// a deployment with nowhere to keep a run still serves a live socket, watch-only, the same way it always
+// has (see the comment on `serveLive` below).
+const hub = liveHub({ clock: () => new Date().toISOString() });
+
 const app = buildApp({
   settings,
   // Every secret this deployment was configured with is replaced wherever it appears in a log line: a
@@ -208,7 +216,7 @@ const app = buildApp({
 // deployment that keeps no durable records has neither to hand the guard, and its socket refuses every
 // client there is — which is the same answer as before, reached now because there is nothing to sign in
 // to or be invited into, rather than no way to sign in.
-await serveLive(app, { sessions, capabilities, services });
+await serveLive(app, { hub, sessions, capabilities, services });
 
 for (const [key, source] of Object.entries(settings.sources)) {
   app.log.info(`${key} came from the ${source}`);

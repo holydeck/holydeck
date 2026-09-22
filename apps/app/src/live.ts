@@ -28,14 +28,14 @@ import websocket from '@fastify/websocket';
 import { correlationFor } from './context.js';
 import { unexpectedFailure } from './failures.js';
 import { GuestJoinError, admitGuest } from './guest-join.js';
-import { grantFor, liveHub } from './live-protocol.js';
+import { grantFor } from './live-protocol.js';
 import { originOf, refuseAsForbidden, refuseAsStoreSaid, sessionCallFor, sessionFor } from './csrf.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { SessionError } from './sessions.js';
 
 import type { CapabilityStore } from './capabilities.js';
 import type { Guarded } from './csrf.js';
-import type { LiveGrant, LiveHubOptions, LiveTransport } from './live-protocol.js';
+import type { LiveGrant, LiveHub, LiveTransport } from './live-protocol.js';
 import type { RouteNeed } from './authorization.js';
 import type { ServiceStore } from './services.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -95,9 +95,10 @@ const PROVEN = new WeakMap<FastifyRequest, Guarded>();
  *  the capability-token counterpart to `PROVEN`, held apart because a Guest never has a `Guarded`. */
 const CAPABILITY_GRANT = new WeakMap<FastifyRequest, LiveGrant>();
 
-export interface LiveOptions extends Omit<LiveHubOptions, 'clock'> {
-  /** Explicit, so a frame's time is the session's time and a test does not have to read a clock. */
-  readonly clock?: () => string;
+export interface LiveOptions {
+  /** Built and owned by the caller (`main.ts`), never by this module: what a session may reach and how
+   *  it is served does not need to know how the state it reaches was assembled. */
+  readonly hub: LiveHub;
   /** Absent where a deployment keeps no sessions, and there is no ticket for a socket to be carrying. */
   readonly sessions?: SessionStore;
   /** Absent the same way, and for the same reason: with nowhere a capability is kept, a shared join
@@ -221,18 +222,10 @@ const transportOf = (socket: {
 
 export async function serveLive(
   app: FastifyInstance,
-  {
-    clock = () => new Date().toISOString(),
-    sessions,
-    capabilities,
-    services,
-    heartbeatMs = HEARTBEAT_MS,
-    ...limits
-  }: LiveOptions = {},
+  { hub, sessions, capabilities, services, heartbeatMs = HEARTBEAT_MS }: LiveOptions,
 ): Promise<void> {
   await app.register(websocket, { options: { maxPayload: MAX_LIVE_PAYLOAD_BYTES } });
 
-  const hub = liveHub({ clock, ...limits });
   let revocationRevision = 0;
   const admittedAt = new WeakMap<FastifyRequest, number>();
   const unsubscribe = capabilities?.onRevoked((capabilityId) => {

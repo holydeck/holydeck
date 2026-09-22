@@ -19,6 +19,7 @@ import {
   isUpgrade,
   serveLive,
 } from './live.js';
+import { liveHub } from './live-protocol.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { serviceContext, servicesOn } from './services.js';
 import { sessionContext, sessionsOn } from './sessions.js';
@@ -29,6 +30,7 @@ import { memorySessions } from '../test/helpers/sessions.js';
 
 import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
+import type { LiveHub } from './live-protocol.js';
 import type { ServiceStore } from './services.js';
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
@@ -60,12 +62,16 @@ const AT = '2026-09-13T10:00:00.000Z';
 
 let running: FastifyInstance | undefined;
 
+/** The hub `serveLive` no longer builds for itself (Design §1) — a fixed clock, same as every other test
+ *  here, unless a test asks for the wall clock to prove that a live one works too. */
+const hubFor = (clock: () => string = () => AT): LiveHub => liveHub({ clock });
+
 const listening = async (
   sessions?: SessionStore,
   guests?: { readonly capabilities: CapabilityStore; readonly services: ServiceStore },
 ): Promise<string> => {
   const app = buildApp({ settings, logger: false, fetching: refusing, sessions });
-  await serveLive(app, { clock: () => AT, sessions, ...guests });
+  await serveLive(app, { hub: hubFor(), sessions, ...guests });
   await app.listen({ host: '127.0.0.1', port: 0 });
   running = app;
   const { port } = app.server.address() as AddressInfo;
@@ -390,9 +396,9 @@ describe('the live session', () => {
     expect(response?.statusCode).toBe(200);
   });
 
-  it('stamps frames with the wall clock when nothing hands it one', async () => {
+  it('stamps frames with whatever clock its hub was built with, the wall clock included', async () => {
     const app = buildApp({ settings, logger: false, fetching: refusing });
-    await serveLive(app);
+    await serveLive(app, { hub: hubFor(() => new Date().toISOString()) });
     await app.listen({ host: '127.0.0.1', port: 0 });
     running = app;
     const { port } = app.server.address() as AddressInfo;
@@ -784,7 +790,7 @@ describe('live socket security without a listening port', () => {
       if (reason === 'expired') clockAt += 60_000;
       const app = buildApp({ settings, logger: false, fetching: refusing });
       running = app;
-      await serveLive(app, { clock: () => AT, capabilities, services });
+      await serveLive(app, { hub: hubFor(), capabilities, services });
       const query = new URLSearchParams({
         channel: reason === 'view' ? 'stage' : 'audience',
         [CLIENT_VERSION_QUERY]: String(CLIENT_WINDOW.current),
@@ -821,7 +827,7 @@ describe('live socket security without a listening port', () => {
     const app = buildApp({ settings, logger: false, fetching: refusing });
     running = app;
     await serveLive(app, {
-      clock: () => AT, capabilities,
+      hub: hubFor(), capabilities,
       services: duringRead === undefined ? services : {
         ...services,
         current: async (...args) => {

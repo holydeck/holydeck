@@ -7,6 +7,7 @@ import { PRESENTATION_CONTROL } from './roles.js';
 
 import type { LiveGrant, LiveHub, LiveTransport } from './live-protocol.js';
 import type { LiveChannel } from '@holydeck/contracts/live';
+import type { ChannelState } from '@holydeck/contracts/live-state';
 
 const AT = '2026-09-13T10:00:00.000Z';
 
@@ -318,6 +319,63 @@ describe('a change no client commanded', () => {
       'theme-changed',
     ]);
     expect(events.map((frame) => frame['sequence'])).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe('publishTo: a change addressed to the one channel it concerns', () => {
+  const audienceState: ChannelState = {
+    view: 'audience',
+    runId: 'r',
+    snapshotId: 's',
+    frame: { itemId: 'i', slideIndex: 0 },
+    themeId: 'default',
+    additionsRevision: 0,
+  };
+
+  it('sends a per-channel state only to members of that channel', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    const stage = joined(hub, 'stage');
+
+    const landed = hub.publishTo('audience', 'current-slide-changed', (channel) =>
+      channel === 'audience' ? audienceState : undefined,
+    );
+
+    expect(landed).toEqual({ stateRevision: 1, sequence: 1 });
+    expect(audience.far.frames().at(-1)).toMatchObject({
+      kind: 'event',
+      channel: 'audience',
+      type: 'current-slide-changed',
+      state: { view: 'audience' },
+    });
+    // Never reached at all — not even with an event carrying no state — because this change was never
+    // asked about the stage channel.
+    expect(stage.far.kinds()).toEqual(['snapshot']);
+  });
+
+  it('publish (unchanged) still reaches every member on every channel with no state', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+    const control = joined(hub, 'live-control', OPERATOR);
+
+    hub.publish('run-state-changed');
+
+    for (const member of [audience, control]) {
+      const event = member.far.frames().at(-1) as Record<string, unknown>;
+      expect(event['type']).toBe('run-state-changed');
+      expect(event).not.toHaveProperty('state');
+    }
+  });
+
+  it('leaves the hub unmoved, and reaches no one, when the channel it is asked about has nothing to say', () => {
+    const hub = hubAt();
+    const audience = joined(hub, 'audience');
+
+    const landed = hub.publishTo('audience', 'current-slide-changed', () => undefined);
+
+    expect(landed).toEqual({ stateRevision: 0, sequence: 0 });
+    expect(hub.stateRevision()).toBe(0);
+    expect(audience.far.kinds()).toEqual(['snapshot']);
   });
 });
 

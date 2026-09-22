@@ -36,6 +36,7 @@ import type {
   OutputChannel,
   SnapshotFrame,
 } from '@holydeck/contracts/live';
+import type { ChannelState } from '@holydeck/contracts/live-state';
 
 /**
  * The far side of a live session, reduced to the three things this protocol needs of it: write a frame,
@@ -149,6 +150,19 @@ export interface LiveHub {
    * publish through it. Every joined session, on every channel, is written the resulting event.
    */
   publish(type: string): Landed;
+  /**
+   * The channel-aware counterpart to `publish` (RUN-02/LIVE-04): reaches only the members of `channel`,
+   * carrying whatever `stateFor(channel)` projects for it — never a wider audience computing its own
+   * projection from a frame meant for someone else, which is what keeps privacy enforced on the wire
+   * (Design §2) rather than trusted to every reader of one. `stateFor` takes the channel it is asked
+   * about, not just `channel` back, so one projector can serve every `publishTo` call a change needs
+   * without a caller writing one closure per channel.
+   *
+   * Nothing is published, and the hub does not move, when `stateFor(channel)` answers `undefined`: a
+   * channel a change has nothing to say to is not a change that channel saw, and `stateRevision`/
+   * `sequence` count only what was actually landed.
+   */
+  publishTo(channel: LiveChannel, type: string, stateFor: (channel: LiveChannel) => ChannelState | undefined): Landed;
   revokeCapability(capabilityId: string | undefined): void;
   /** One beat: drains whatever a transport had room for, then asks every session whether it is still there. */
   tick(): void;
@@ -281,7 +295,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     at: clock(),
   });
 
-  const eventOf = (channel: LiveChannel, change: Change): EventFrame => ({
+  const eventOf = (channel: LiveChannel, change: Change, state?: ChannelState): EventFrame => ({
     kind: 'event',
     channel,
     sequence: change.sequence,
@@ -289,6 +303,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     type: change.type,
     mutatesState: true,
     at: change.at,
+    ...(state === undefined ? {} : { state }),
   });
 
   const ackOf = (member: Member, id: string, outcome: AckOutcome, at: Landed): AckFrame => {
@@ -309,15 +324,36 @@ export function liveHub(options: LiveHubOptions): LiveHub {
   /** Where the hub stands right now, which is what every refused command is answered with. */
   const standing = (): Landed => ({ stateRevision, sequence });
 
-  const publish = (type: string): Landed => {
+  /** Lands one change — the counters and the backlog entry every published frame is built from — shared
+   *  by `publish` and `publishTo` so the two ways a change reaches a member never drift apart on it. */
+  const land = (type: string): Change => {
     stateRevision += 1;
     sequence += 1;
     const change: Change = { sequence, stateRevision, type, at: clock() };
     backlog.push(change);
     while (backlog.length > backlogFrames) backlog.shift();
+    return change;
+  };
+
+  const publish = (type: string): Landed => {
+    const change = land(type);
     // Copied before it is walked, because serving one member can end another's session, and a set
     // being written to while it is read is how a live run starts losing frames nobody asked it to lose.
     for (const member of [...members]) write(member, eventOf(member.channel, change));
+    return { stateRevision, sequence };
+  };
+
+  const publishTo = (
+    channel: LiveChannel,
+    type: string,
+    stateFor: (channel: LiveChannel) => ChannelState | undefined,
+  ): Landed => {
+    const state = stateFor(channel);
+    if (state === undefined) return standing();
+    const change = land(type);
+    for (const member of [...members]) {
+      if (member.channel === channel) write(member, eventOf(member.channel, change, state));
+    }
     return { stateRevision, sequence };
   };
 
@@ -455,6 +491,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     },
 
     publish,
+    publishTo,
 
     revokeCapability: (capabilityId: string | undefined): void => {
       for (const member of [...members]) {
