@@ -45,6 +45,10 @@
       "types": "./dist/live.d.ts",
       "import": "./dist/live.js"
     },
+    "./live-state": {
+      "types": "./dist/live-state.d.ts",
+      "import": "./dist/live-state.js"
+    },
     "./live-media": {
       "types": "./dist/live-media.d.ts",
       "import": "./dist/live-media.js"
