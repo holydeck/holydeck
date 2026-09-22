@@ -321,7 +321,7 @@ describe('service workspace routes', () => {
   test('maps unknown items, invalid calendar days and duplicate item ids to 404', async () => {
     await creating();
     for (const response of [
-      await asking('DELETE', `${ITEMS}/unknown`),
+      await asking('DELETE', `${ITEM_ACTIONS}/unknown`),
       await asking('POST', `${ROOT}/schedule`, { date: '2026-09-31' }),
       await asking('POST', ITEMS, ITEM),
     ]) {
