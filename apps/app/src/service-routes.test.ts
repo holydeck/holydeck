@@ -32,6 +32,7 @@ const DRAFT: ServiceDraft = {
 };
 const ROOT = '/api/v1/services/service-1';
 const ITEMS = `${ROOT}/sections/section-1/items`;
+const ITEM_ACTIONS = `${ROOT}/items`;
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 const ROUTES: readonly (readonly [Method, string, unknown])[] = [
   ['POST', '/api/v1/services', DRAFT],
@@ -44,12 +45,12 @@ const ROUTES: readonly (readonly [Method, string, unknown])[] = [
   ['PATCH', ROOT, DRAFT],
   ['PATCH', `${ROOT}/status`, { archived: true }],
   ['POST', ITEMS, { ...ITEM, id: 'item-2' }],
-  ['DELETE', `${ITEMS}/item-1`, undefined],
-  ['POST', `${ITEMS}/item-1/enable`, undefined],
-  ['POST', `${ITEMS}/item-1/disable`, undefined],
-  ['POST', `${ITEMS}/item-1/duplicate`, undefined],
+  ['DELETE', `${ITEM_ACTIONS}/item-1`, undefined],
+  ['POST', `${ITEM_ACTIONS}/item-1/enable`, undefined],
+  ['POST', `${ITEM_ACTIONS}/item-1/disable`, undefined],
+  ['POST', `${ITEM_ACTIONS}/item-1/duplicate`, undefined],
   ['POST', `${ITEMS}/reorder`, { itemIds: ['item-1'] }],
-  ['POST', `${ITEMS}/item-1/revise`, { revision: 2 }],
+  ['POST', `${ITEM_ACTIONS}/item-1/revise`, { revision: 2 }],
   ['GET', `${ROOT}/content-drift`, undefined],
 ] as const;
 
@@ -198,19 +199,19 @@ describe('service workspace routes', () => {
     const added = await asking('POST', ITEMS, { ...ITEM, id: 'item-2' });
     expect(added.statusCode).toBe(200);
     expect(added.json().data.sections[0].items).toEqual([ITEM, { ...ITEM, id: 'item-2' }]);
-    const disabled = await asking('POST', `${ITEMS}/item-1/disable`);
+    const disabled = await asking('POST', `${ITEM_ACTIONS}/item-1/disable`);
     expect(disabled.statusCode).toBe(200);
     expect(disabled.json().data.sections[0].items[0].enabled).toBe(false);
-    const enabled = await asking('POST', `${ITEMS}/item-1/enable`);
+    const enabled = await asking('POST', `${ITEM_ACTIONS}/item-1/enable`);
     expect(enabled.statusCode).toBe(200);
     expect(enabled.json().data.sections[0].items[0].enabled).toBe(true);
-    const duplicated = await asking('POST', `${ITEMS}/item-1/duplicate`);
+    const duplicated = await asking('POST', `${ITEM_ACTIONS}/item-1/duplicate`);
     expect(duplicated.statusCode).toBe(200);
     expect(duplicated.json().data.sections[0].items).toEqual([ITEM, { ...ITEM, id: 'service-2' }, { ...ITEM, id: 'item-2' }]);
     const reordered = await asking('POST', `${ITEMS}/reorder`, { itemIds: ['item-2', 'service-2', 'item-1'] });
     expect(reordered.statusCode).toBe(200);
     expect(reordered.json().data.sections[0].items.map((item: { id: string }) => item.id)).toEqual(['item-2', 'service-2', 'item-1']);
-    const removed = await asking('DELETE', `${ITEMS}/item-1`);
+    const removed = await asking('DELETE', `${ITEM_ACTIONS}/item-1`);
     expect(removed.statusCode).toBe(200);
     expect(removed.json().data.sections[0].items).toHaveLength(2);
     expect(removed.json().data.sections[0].items.map((item: { id: string }) => item.id)).toEqual(['item-2', 'service-2']);
@@ -218,6 +219,22 @@ describe('service workspace routes', () => {
       'service.create', 'service.item.add', 'service.item.disable', 'service.item.enable',
       'service.item.duplicate', 'service.item.reorder', 'service.item.remove',
     ]);
+  });
+
+  test('disables an item in the second section without naming its section', async () => {
+    const draft: ServiceDraft = {
+      ...DRAFT,
+      sections: [
+        { id: 'section-1', name: 'Welcome', items: [] },
+        { id: 'section-2', name: 'Announcements', items: [{ ...ITEM, content: undefined }] },
+      ],
+    };
+    expect((await asking('POST', '/api/v1/services', draft)).statusCode).toBe(201);
+    const disabled = await asking('POST', `${ITEM_ACTIONS}/item-1/disable`);
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json().data.sections[1]).toEqual({
+      id: 'section-2', name: 'Announcements', items: [{ ...ITEM, enabled: false }],
+    });
   });
 
   test('reads content drift and revises a pinned item only on request', async () => {
@@ -236,7 +253,7 @@ describe('service workspace routes', () => {
     expect(drift.json().data).toEqual([
       { itemId: 'song-item', contentId: 'song-1', pinnedRevision: 1, latestRevision: 2, drifted: true },
     ]);
-    const revised = await asking('POST', `${ITEMS}/song-item/revise`, { revision: 2 });
+    const revised = await asking('POST', `${ITEM_ACTIONS}/song-item/revise`, { revision: 2 });
     expect(revised.statusCode).toBe(200);
     expect(revised.json().data.sections[0].items[1].content).toEqual({ id: 'song-1', revision: 2, hash: second.revision.hash });
     expect((await asking('GET', `${ROOT}/content-drift`)).json().data[0].drifted).toBe(false);
@@ -278,7 +295,7 @@ describe('service workspace routes', () => {
     ['PATCH', `${ROOT}/status`, 'archive'],
     ['POST', ITEMS, 'addItem'],
     ['POST', `${ITEMS}/reorder`, 'reorderItems'],
-    ['POST', `${ITEMS}/item-1/revise`, 'reviseItem'],
+    ['POST', `${ITEM_ACTIONS}/item-1/revise`, 'reviseItem'],
   ] as const)('rejects malformed bodies before %s %s reaches %s', async (method, url, operation) => {
     const spy = vi.spyOn(services, operation);
     const response = await asking(method, url, {});
