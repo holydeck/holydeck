@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { nextCalver } from './calver.mjs';
+import { CALVER_PATTERN, nextCalver, nextPrerelease } from './calver.mjs';
 
 const at = (iso) => new Date(iso);
 
@@ -34,4 +34,31 @@ test('a missing latest version starts a fresh month', () => {
 
 test('the boundary is UTC: late local time past a UTC month change rolls over', () => {
   assert.equal(nextCalver('2026.9.5', at('2026-10-01T01:30:00Z')), '2026.10.0');
+});
+
+test('CALVER_PATTERN accepts a calver version with or without a prerelease suffix', () => {
+  assert.ok(CALVER_PATTERN.test('2026.10.0'));
+  assert.ok(CALVER_PATTERN.test('2026.10.0-next.2'));
+});
+
+test('CALVER_PATTERN rejects a prerelease suffix with no digits', () => {
+  assert.ok(!CALVER_PATTERN.test('2026.10.0-next'));
+  assert.ok(!CALVER_PATTERN.test('2026.10.0-next.'));
+  assert.ok(!CALVER_PATTERN.test('2026.10.0-next.abc'));
+});
+
+test('no existing prerelease starts at .1 on the next stable base', () => {
+  assert.equal(nextPrerelease('2026.9.2', undefined, at('2026-09-21T10:00:00Z')), '2026.9.3-next.1');
+});
+
+test('an existing prerelease on the same base increments the prerelease number', () => {
+  assert.equal(nextPrerelease('2026.9.2', '2026.9.3-next.1', at('2026-09-21T10:00:00Z')), '2026.9.3-next.2');
+});
+
+test('an existing prerelease on an older base resets to .1 on the new base', () => {
+  assert.equal(nextPrerelease('2026.9.5', '2026.9.3-next.4', at('2026-10-01T01:30:00Z')), '2026.10.0-next.1');
+});
+
+test('a v-prefixed latest prerelease is accepted', () => {
+  assert.equal(nextPrerelease('2026.9.2', 'v2026.9.3-next.1', at('2026-09-21T10:00:00Z')), '2026.9.3-next.2');
 });
