@@ -12,12 +12,13 @@ export default defineConfig({
     // A test that renders a component opts into a document with a `// @vitest-environment happy-dom`
     // comment at its top.
     environment: 'node',
+    setupFiles: ['src/test-setup.ts'],
     retry: testRetry,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],
       // The service worker entry delegates to the covered handlers and requires a worker context.
-      exclude: ['src/**/*.test.{ts,tsx}', 'src/service-worker.ts'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/test-setup.ts', 'src/service-worker.ts'],
       thresholds: coverageFloor,
     },
   },

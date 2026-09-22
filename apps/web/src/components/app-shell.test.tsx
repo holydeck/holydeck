@@ -1,0 +1,93 @@
+// @vitest-environment happy-dom
+import { act, fireEvent, render, screen } from '@testing-library/preact';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { resetAppState, session } from '../app-state.js';
+import { currentPath } from '../router.js';
+import { AppShell } from './app-shell.js';
+
+import type { SessionView } from '@holydeck/contracts/sessions';
+
+const signedIn = (permissions: readonly string[], role: 'admin' | 'editor' | 'member' = 'admin'): SessionView =>
+  ({
+    csrf: 'c'.repeat(43),
+    permissions,
+    slots: [],
+    account: { id: 'a1', name: 'ruth', displayName: 'Ruth Example', role, controlPresentation: false },
+  }) as unknown as SessionView;
+
+describe('the navigation shell', () => {
+  beforeEach(() => {
+    resetAppState();
+    currentPath.value = '/services';
+  });
+
+  it('keeps only the skip link, main and live regions while signed out', () => {
+    session.value = null;
+    render(<AppShell><p>form</p></AppShell>);
+    expect(screen.getByRole('link', { name: 'Skip to main content' }).getAttribute('href')).toBe('#main');
+    expect(screen.queryByRole('navigation')).toBeNull();
+    expect(screen.queryByRole('banner')).toBeNull();
+    expect(screen.getByRole('main').id).toBe('main');
+    expect(document.getElementById('announce-polite')?.getAttribute('aria-live')).toBe('polite');
+    expect(document.getElementById('announce-assertive')?.getAttribute('aria-live')).toBe('assertive');
+  });
+
+  it('names who is signed in, their role, and offers sign-out', () => {
+    session.value = signedIn(['accounts.manage']);
+    const signOut = vi.fn();
+    render(<AppShell onSignOut={signOut}><p>page</p></AppShell>);
+    expect(screen.getByText('Signed in as Ruth Example')).toBeTruthy();
+    expect(screen.getByText('Administrator')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(signOut).toHaveBeenCalledOnce();
+  });
+
+  it('shows Administration only to a session that administers accounts or settings', () => {
+    session.value = signedIn([], 'editor');
+    const view = render(<AppShell><p>page</p></AppShell>);
+    expect(screen.queryByRole('link', { name: 'Administration' })).toBeNull();
+    expect(screen.getByText('Editor')).toBeTruthy();
+    view.unmount();
+
+    session.value = signedIn(['settings.manage']);
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('href')).toBe('/admin/users');
+  });
+
+  it('marks the current section and keeps the library out of the tab order', () => {
+    session.value = signedIn(['accounts.manage']);
+    currentPath.value = '/services/s1';
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByRole('link', { name: 'Services' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('aria-current')).toBeNull();
+    const library = screen.getByText('Library');
+    expect(library.getAttribute('aria-disabled')).toBe('true');
+    expect(library.hasAttribute('href')).toBe(false);
+
+    act(() => {
+      currentPath.value = '/admin/users';
+    });
+    expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('aria-current')).toBe('page');
+  });
+
+  it('omits the account line for a session with no account behind it, and sign-out when it is not wired', () => {
+    session.value = { ...signedIn([]), account: undefined } as unknown as SessionView;
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByText('HolyDeck')).toBeTruthy();
+    expect(screen.queryByText(/Signed in as/u)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  });
+
+  it('never resets what was last said in a live region when it re-renders', () => {
+    session.value = null;
+    render(<AppShell><p>page</p></AppShell>);
+    const polite = document.getElementById('announce-polite') as HTMLElement;
+    polite.textContent = 'Saved';
+    act(() => {
+      session.value = signedIn([]);
+    });
+    expect(screen.getByRole('navigation')).toBeTruthy();
+    expect(document.getElementById('announce-polite')?.textContent).toBe('Saved');
+  });
+});

@@ -1,4 +1,45 @@
-:root { color-scheme: dark light; }
+/*
+ * Design tokens (roadmap D1). Every screen styles itself from these rather than from literal values, so
+ * a later theme or a contrast fix is one edit here. Dark is the default because a sanctuary is usually
+ * dim and the operator's screen should not be the brightest thing in it; a device set to light gets the
+ * light set. Both sets keep body text at 4.5:1 or better against their surfaces.
+ */
+:root {
+  color-scheme: dark light;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --font-size-0: 0.875rem;
+  --font-size-1: 1rem;
+  --font-size-2: 1.25rem;
+  --font-size-3: 1.5rem;
+  --font-size-4: 2rem;
+  --radius: 6px;
+  --color-surface: #0b0b0f;
+  --color-surface-raised: #1a1a22;
+  --color-text: #f5f5f7;
+  --color-text-muted: #b4b4be;
+  --color-accent: #8ab4ff;
+  --color-accent-text: #0b0b0f;
+  --color-danger: #ff8a8a;
+  --color-border: #3a3a46;
+  --focus-ring: 2px solid var(--color-accent);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-surface: #ffffff;
+    --color-surface-raised: #f2f2f6;
+    --color-text: #16161c;
+    --color-text-muted: #55555f;
+    --color-accent: #1f56c7;
+    --color-accent-text: #ffffff;
+    --color-danger: #b3261e;
+    --color-border: #c8c8d2;
+  }
+}
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -7,13 +48,14 @@ body {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   overflow-wrap: anywhere;
-  background: #0b0b0f;
-  color: #f5f5f7;
+  background: var(--color-surface);
+  color: var(--color-text);
 }
-main { min-width: 0; max-width: 40rem; padding: 32px; overflow-y: auto; }
+main { min-width: 0; max-width: 40rem; padding: var(--space-6); overflow-y: auto; }
 button { font: inherit; max-width: 100%; }
 a { color: currentColor; }
 :focus { outline: 2px solid currentColor; outline-offset: 2px; }
+:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 
 .workspace { display: grid; gap: 16px; }
 .workspace-panel { display: none; min-width: 0; }
@@ -84,3 +126,37 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 /* WCAG-style touch target minimums: 44px generally, 56px for the live transport (spec 9.5, LIVE-07). */
 button, a { min-width: 44px; min-height: 44px; }
 #live-controls button { min-width: 96px; min-height: 56px; }
+
+/* The navigation shell (SHELL-03). Wraps on a phone rather than hiding anything behind a menu button:
+   three sections fit, and a menu would add a step to every navigation. */
+.app-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface-raised);
+  border-bottom: 1px solid var(--color-border);
+}
+.app-name { margin: 0; font-weight: 700; font-size: var(--font-size-2); }
+.app-account { margin: 0 0 0 auto; display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--color-text-muted); }
+.app-role {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.app-nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  list-style: none;
+  border-bottom: 1px solid var(--color-border);
+}
+.app-nav a { display: inline-flex; align-items: center; padding: 0 var(--space-3); border-radius: var(--radius); }
+.app-nav a[aria-current="page"] { background: var(--color-accent); color: var(--color-accent-text); }
+.app-nav a[aria-disabled="true"] { color: var(--color-text-muted); cursor: not-allowed; }
+
+/* An output window is a projector surface: the whole window, nothing else. */
+.output-surface { position: fixed; inset: 0; background: #000; }
