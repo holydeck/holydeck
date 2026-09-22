@@ -620,6 +620,7 @@ describe('the Operator override', () => {
       'settings.manage',
       'layouts.manage',
       'media.manage',
+      'services.manage',
     ]);
   });
 

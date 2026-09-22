@@ -16,6 +16,21 @@ import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
+import {
+  SERVICE_DUPLICATE_PATH,
+  SERVICE_ID_PATH,
+  SERVICE_ITEMS_PATH,
+  SERVICE_ITEMS_REORDER_PATH,
+  SERVICE_ITEM_DISABLE_PATH,
+  SERVICE_ITEM_DUPLICATE_PATH,
+  SERVICE_ITEM_ENABLE_PATH,
+  SERVICE_ITEM_PATH,
+  SERVICE_ITEM_REVISE_PATH,
+  SERVICE_PATH,
+  SERVICE_SCHEDULE_PATH,
+  SERVICE_STATUS_PATH,
+  SERVICE_TRANSITION_PATH,
+} from './service-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
@@ -120,6 +135,23 @@ describe('every route that changes something', () => {
       // The one route on this list that puts something in front of a room: looking a reference up
       // changes nothing and is absent here, and showing one is a change because it is recorded.
       { method: 'POST', url: SHOWN_REFERENCES_PATH },
+      // A Service's own surface, gated by its own permission: creating one, moving it through duplication,
+      // scheduling, lifecycle transition, edit or archival, and every item-level change within it — adding,
+      // removing, enabling, disabling, duplicating, reordering or revising an item — are all Admin's or an
+      // Editor's, never a merely-proved session's.
+      { method: 'POST', url: SERVICE_PATH },
+      { method: 'POST', url: SERVICE_DUPLICATE_PATH },
+      { method: 'POST', url: SERVICE_SCHEDULE_PATH },
+      { method: 'POST', url: SERVICE_TRANSITION_PATH },
+      { method: 'PATCH', url: SERVICE_ID_PATH },
+      { method: 'PATCH', url: SERVICE_STATUS_PATH },
+      { method: 'POST', url: SERVICE_ITEMS_PATH },
+      { method: 'DELETE', url: SERVICE_ITEM_PATH },
+      { method: 'POST', url: SERVICE_ITEM_ENABLE_PATH },
+      { method: 'POST', url: SERVICE_ITEM_DISABLE_PATH },
+      { method: 'POST', url: SERVICE_ITEM_DUPLICATE_PATH },
+      { method: 'POST', url: SERVICE_ITEMS_REORDER_PATH },
+      { method: 'POST', url: SERVICE_ITEM_REVISE_PATH },
     ]);
   });
 

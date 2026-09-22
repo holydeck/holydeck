@@ -32,7 +32,14 @@ import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { codeAt, stepAt } from './otp.js';
 import { passkeyContext, passkeysOn } from './passkeys.js';
-import { ACCOUNTS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE, PRESENTATION_CONTROL, SETTINGS_MANAGE } from './roles.js';
+import {
+  ACCOUNTS_MANAGE,
+  LAYOUTS_MANAGE,
+  MEDIA_MANAGE,
+  PRESENTATION_CONTROL,
+  SERVICES_MANAGE,
+  SETTINGS_MANAGE,
+} from './roles.js';
 import { SIGN_IN_REFUSED, serveSessionRoutes } from './session-routes.js';
 import { SessionError, sessionContext, sessionsOn, tokenDigest } from './sessions.js';
 import { totpContext, totpsOn } from './totp.js';
@@ -299,7 +306,7 @@ describe('signing in', () => {
       actor: actorFor(ID),
       rotation: 'authentication',
       // Granted from the account this session was opened for: a founder is Admin by role.
-      permissions: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE],
+      permissions: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE, SERVICES_MANAGE],
     });
     const cookie = String(response.headers['set-cookie']);
     expect(isOpaqueToken(tokenIn(cookie))).toBe(true);
@@ -368,7 +375,7 @@ describe('signing in with a passkey', () => {
     expect(response.json().data).toMatchObject({
       actor: actorFor(ID),
       rotation: 'authentication',
-      permissions: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE],
+      permissions: [ACCOUNTS_MANAGE, SETTINGS_MANAGE, LAYOUTS_MANAGE, MEDIA_MANAGE, SERVICES_MANAGE],
     });
     const cookie = String(response.headers['set-cookie']);
     expect(isOpaqueToken(tokenIn(cookie))).toBe(true);
