@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveDeck, projectDeck } from './run-deck.js';
+import { adjacentPosition, deriveDeck, projectDeck } from './run-deck.js';
 
 import type { PreparedSnapshot, SnapshotPin } from '@holydeck/contracts/snapshots';
 
@@ -76,6 +76,7 @@ describe('deriveDeck', () => {
 
     expect(deck).toEqual({
       snapshotId: 'snapshot-run-deck',
+      pinnedRevisions: snapshot().pins,
       aspectRatio: '16:9',
       safeAreaMargins: { top: 5, right: 5, bottom: 5, left: 5, unit: 'percent' },
       items: [{
@@ -133,6 +134,7 @@ describe('projectDeck', () => {
   };
   const deck: RunDeck = {
     snapshotId: 'snapshot-private',
+    pinnedRevisions: snapshot().pins,
     aspectRatio: '16:9',
     safeAreaMargins: { top: 5, right: 5, bottom: 5, left: 5, unit: 'percent' },
     items: [privateItem],
@@ -152,5 +154,30 @@ describe('projectDeck', () => {
 
   it('control projection is the deck unchanged', () => {
     expect(projectDeck(deck, 'control')).toBe(deck);
+  });
+});
+
+describe('adjacentPosition', () => {
+  const deck: RunDeck = {
+    snapshotId: 'navigation', pinnedRevisions: snapshot().pins, aspectRatio: '16:9', safeAreaMargins: snapshot().resolved.safeAreaMargins,
+    items: [0, 2, 0, 1, 0].map((count, index) => ({
+      itemId: `item-${index}`, kind: 'song', title: 'Song',
+      slides: Array.from({ length: count }, (_, slide) => ({ slideId: `slide-${slide}`, boxes: [] })),
+    })),
+  };
+
+  it.each([
+    ['item-1', 0, 'next', 'item-1', 1],
+    ['item-1', 1, 'next', 'item-3', 0],
+    ['item-3', 0, 'previous', 'item-1', 1],
+    ['item-1', 1, 'previous', 'item-1', 0],
+    ['item-1', 0, 'previous', 'item-1', 0],
+    ['item-3', 0, 'next', 'item-3', 0],
+  ] as const)('navigates %s:%s %s to %s:%s', (itemId, slideIndex, direction, target, index) => {
+    expect(adjacentPosition(deck, { itemId, slideIndex }, direction)).toEqual({ itemId: target, slideIndex: index });
+  });
+
+  it.each([['missing', 0], ['item-2', 0], ['item-1', 2], ['item-1', -1]])('refuses absent position %s:%s', (itemId, slideIndex) => {
+    expect(adjacentPosition(deck, { itemId: String(itemId), slideIndex: Number(slideIndex) }, 'next')).toBeUndefined();
   });
 });

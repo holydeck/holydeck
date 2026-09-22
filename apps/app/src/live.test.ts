@@ -894,3 +894,23 @@ describe('live socket security without a listening port', () => {
     expect((await closed)[0]).toBe(1009);
   });
 });
+
+describe('run engine wiring', () => {
+  it('delegates through the supplied engine when the live endpoint is registered', async () => {
+    const app = buildApp({ settings, logger: false, fetching: refusing });
+    running = app;
+    const hub = hubFor();
+    const frames: Record<string, unknown>[] = [];
+    await serveLive(app, { hub, engine: { command: async () => ({ outcome: 'invalid' }) } });
+    const connection = hub.join({
+      send: (text) => { frames.push(JSON.parse(text) as Record<string, unknown>); },
+      close: () => {}, buffered: () => 0,
+    }, 'live-control', { watch: LIVE_CHANNELS, command: true });
+    connection?.receive(JSON.stringify({
+      kind: 'command', channel: 'live-control', id: 'engine-command', idempotencyKey: 'engine-key',
+      type: 'pause', clientStateRevision: 0,
+    }));
+    await Promise.resolve();
+    expect(frames.at(-1)).toMatchObject({ kind: 'ack', outcome: 'invalid' });
+  });
+});

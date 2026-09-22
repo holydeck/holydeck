@@ -2,6 +2,7 @@
 // persisted beside them. Persisting it would duplicate content that can be reproduced exactly and could
 // drift from the snapshot; changing PreparedSnapshot persistence is deliberately outside this module.
 
+import type { LivePosition } from '@holydeck/contracts/live-state';
 import type { SafeAreaMargins, PreparedSnapshot } from '@holydeck/contracts/snapshots';
 
 import type { MidServiceAddition } from './mid-service-additions.js';
@@ -33,6 +34,7 @@ export type DeckItem = {
 
 export type RunDeck = {
   readonly snapshotId: string;
+  readonly pinnedRevisions: PreparedSnapshot['pins'];
   readonly aspectRatio: string;
   readonly safeAreaMargins: SafeAreaMargins;
   readonly items: readonly DeckItem[];
@@ -91,6 +93,7 @@ export async function deriveDeck(
   }));
   const deck: RunDeck = {
     snapshotId: snapshot.id,
+    pinnedRevisions: snapshot.pins,
     aspectRatio: snapshot.resolved.aspectRatio,
     safeAreaMargins: snapshot.resolved.safeAreaMargins,
     items: [...generated.filter((item): item is DeckItem => item !== undefined), ...additions.map(additionItem)],
@@ -109,4 +112,19 @@ const withoutPrivateFields = (item: DeckItem): DeckItem => {
 export function projectDeck(deck: RunDeck, view: DeckView): RunDeck {
   if (view === 'control' || view === 'stage') return deck;
   return { ...deck, items: deck.items.map(withoutPrivateFields) };
+}
+
+export function adjacentPosition(
+  deck: RunDeck,
+  current: LivePosition,
+  direction: 'next' | 'previous',
+): LivePosition | undefined {
+  const positions = deck.items.flatMap((item) =>
+    item.slides.map((_, slideIndex) => ({ itemId: item.itemId, slideIndex })),
+  );
+  const index = positions.findIndex((position) =>
+    position.itemId === current.itemId && position.slideIndex === current.slideIndex,
+  );
+  if (index === -1) return undefined;
+  return positions[index + (direction === 'next' ? 1 : -1)] ?? current;
 }

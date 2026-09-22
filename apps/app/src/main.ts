@@ -18,17 +18,21 @@ import {
   checkSchema,
   readSettingsText,
 } from './boot.js';
-import { systemContext } from './context.js';
+import { requestContext, systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
+import { LIBRARY_PERMISSIONS } from './library.js';
 import { serveLive } from './live.js';
 import { liveHub } from './live-protocol.js';
 import { themesOn } from './live-theme.js';
 import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
-import { midServiceOn } from './mid-service-additions.js';
+import { MID_SERVICE_PERMISSIONS, midServiceOn } from './mid-service-additions.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
+import { REVISION_PERMISSIONS } from './revisions.js';
+import { deriveDeck } from './run-deck.js';
+import { runEngineOn } from './run-engine.js';
 import { runEventsOn } from './run-events.js';
 import { runReviewOn } from './run-review.js';
 import { runsOn } from './runs.js';
@@ -40,6 +44,7 @@ import { sessionDb, sessionsOn } from './sessions.js';
 import { passkeyDb, passkeysOn } from './passkeys.js';
 import { settingsAdminOn } from './settings-admin.js';
 import { slideLayoutsOn } from './slide-layouts.js';
+import { slideGroupsOn } from './slide-groups.js';
 import { slideLabelsOn } from './slide-labels.js';
 import { shownReferenceDb, shownReferencesOn } from './shown-references.js';
 import { totpDb, totpsOn } from './totp.js';
@@ -55,7 +60,11 @@ import type { RunEventStore } from './run-events.js';
 import type { RunReviewStore } from './run-review.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
-import type { RunStore } from './runs.js';
+import type { RequestContext } from './context.js';
+import type { RunDeck } from './run-deck.js';
+import type { RunEngine } from './run-engine.js';
+import type { SlideGroupStore } from './slide-groups.js';
+import type { RunRecord, RunStore } from './runs.js';
 import type { PreparationStore } from './snapshots.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
@@ -115,6 +124,8 @@ let runEvents: RunEventStore | undefined;
 let themes: ThemeStore | undefined;
 let runReview: RunReviewStore | undefined;
 let midService: MidServiceStore | undefined;
+let slideGroups: SlideGroupStore | undefined;
+let engine: RunEngine | undefined;
 let slideLabels: SlideLabelStore | undefined;
 // The settings admin is kept apart from the durable store, but wired up alongside it: a deployment with
 // nowhere to keep accounts has nobody who could administer settings either, and its route answers
@@ -156,6 +167,26 @@ if (settings.values.mongoUrl !== '') {
   themes = themesOn(hub, runEvents);
   runReview = runReviewOn(runEvents);
   midService = midServiceOn(repositoryDb(store.db()), { now, runs, runEvents });
+  slideGroups = slideGroupsOn(repositoryDb(store.db()), { now });
+  const manifests = preparation;
+  const additions = midService;
+  const groups = slideGroups;
+  const deckFor = async (context: unknown, run: RunRecord): Promise<RunDeck> => {
+    const held = context as RequestContext;
+    const deckContext = requestContext({
+      ...held,
+      permissions: [...new Set([
+        ...held.permissions,
+        LIBRARY_PERMISSIONS.read,
+        REVISION_PERMISSIONS.read,
+        MID_SERVICE_PERMISSIONS.read,
+      ])],
+    });
+    const snapshot = await manifests.snapshot(deckContext, run.snapshotId);
+    if (snapshot === undefined) throw new Error(`${run.snapshotId} is not a manifest this server holds`);
+    return deriveDeck(deckContext, { slideGroups: groups }, snapshot, await additions.additions(deckContext, run.runId));
+  };
+  engine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
@@ -238,7 +269,8 @@ const app = buildApp({
 // deployment that keeps no durable records has neither to hand the guard, and its socket refuses every
 // client there is — which is the same answer as before, reached now because there is nothing to sign in
 // to or be invited into, rather than no way to sign in.
-await serveLive(app, { hub, sessions, capabilities, services });
+if (engine !== undefined) await engine.restore();
+await serveLive(app, { hub, engine, sessions, capabilities, services });
 
 for (const [key, source] of Object.entries(settings.sources)) {
   app.log.info(`${key} came from the ${source}`);

@@ -488,3 +488,20 @@ describe('a Mongo interruption mid-run', () => {
     expect((await refused(runs.resume(READ_CONTEXT, 'run-9'))).kind).toBe('corrupt');
   });
 });
+
+describe('active runs', () => {
+  it('keeps only the latest row per run before filtering active phases', async () => {
+    const { runs, serviceId } = await prepared();
+    const first = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+    const second = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'rehearsal' });
+    await runs.advance(READ_CONTEXT, second.runId, 0, { ...second.live, mode: 'paused' });
+    await runs.end(OPERATOR_SESSION, first.runId);
+    const active = await runs.active(READ_CONTEXT);
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({ runId: second.runId, stateRevision: 1, live: { mode: 'paused' } });
+  });
+
+  it('returns no active runs from an empty store', async () => {
+    expect(await harness({}).runs.active(READ_CONTEXT)).toEqual([]);
+  });
+});

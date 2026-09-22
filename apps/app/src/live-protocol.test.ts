@@ -947,3 +947,59 @@ describe('revoked live members', () => {
     expect(hub.connectionCounts()).toMatchObject({ guest: 0, audience: 1 });
   });
 });
+
+describe('delegated commands', () => {
+  it('seeds the revision monotonically without moving sequence', () => {
+    const hub = hubAt();
+    hub.seedStateRevision(12);
+    hub.seedStateRevision(3);
+    expect(hub.stateRevision()).toBe(12);
+    expect(hub.sequence()).toBe(0);
+    hub.publish('run-state-changed');
+    expect(hub.stateRevision()).toBe(13);
+  });
+
+  it('delegates command policy and remembers only applied commands', async () => {
+    const hub = hubAt();
+    const received: unknown[] = [];
+    hub.useCommands(async (member, frame) => {
+      received.push({ member, frame });
+      hub.publish('run-state-changed');
+      return { outcome: frame.type === 'pause' ? 'applied' : 'invalid' };
+    });
+    const { connection, far } = joined(hub, 'live-control', OPERATOR, false, 'operator');
+    connection?.receive(command({ type: 'pause', clientStateRevision: 999 }));
+    await Promise.resolve();
+    expect(far.frames().at(-1)).toMatchObject({ outcome: 'applied', stateRevision: 1 });
+    expect(received).toMatchObject([{ member: { channel: 'live-control', grant: OPERATOR, identity: 'operator' } }]);
+    connection?.receive(command({ type: 'pause' }));
+    expect(far.frames().at(-1)).toMatchObject({ outcome: 'duplicate' });
+    expect(received).toHaveLength(1);
+    for (let i = 0; i < 2; i += 1) {
+      connection?.receive(command({ type: 'unknown', idempotencyKey: 'invalid' }));
+      await Promise.resolve();
+      expect(far.frames().at(-1)).toMatchObject({ outcome: 'invalid' });
+    }
+    expect(received).toHaveLength(3);
+  });
+
+  it('refuses unprivileged commands before delegation', () => {
+    const hub = hubAt();
+    hub.useCommands(async () => { throw new Error('must not delegate'); });
+    const { connection, far } = joined(hub, 'stage');
+    connection?.receive(command({ channel: 'stage', type: 'pause' }));
+    expect(far.frames().at(-1)).toMatchObject({ outcome: 'unauthorized' });
+  });
+
+  it('does not acknowledge a connection that closes while the command is pending', async () => {
+    const hub = hubAt();
+    let finish: (() => void) | undefined;
+    hub.useCommands(() => new Promise((resolve) => { finish = () => resolve({ outcome: 'applied' }); }));
+    const { connection, far } = joined(hub, 'live-control', OPERATOR);
+    connection?.receive(command({ type: 'pause' }));
+    connection?.leave();
+    finish?.();
+    await Promise.resolve();
+    expect(far.kinds()).toEqual(['snapshot']);
+  });
+});

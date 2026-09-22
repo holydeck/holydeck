@@ -98,6 +98,7 @@ beforeEach(async () => {
   services = servicesOn(db, { now: () => NOW, newId: () => `service-${++serial}` });
   preparation = preparationOn(db, { now: () => NOW, newId: () => `audit-${++serial}`, observe: () => OBSERVED });
   routed = {
+    snapshot: (context, id) => preparation.snapshot(context, id),
     prepare: (context, id, inputs) => preparation.prepare(context, id, inputs),
     prepared: (context, id) => preparation.prepared(context, id),
     readiness: (context, id, observed) => preparation.readiness(context, id, observed),

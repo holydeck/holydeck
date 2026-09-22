@@ -36,6 +36,7 @@ import { SessionError } from './sessions.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { Guarded } from './csrf.js';
 import type { LiveGrant, LiveHub, LiveTransport } from './live-protocol.js';
+import type { RunEngine } from './run-engine.js';
 import type { RouteNeed } from './authorization.js';
 import type { ServiceStore } from './services.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -96,6 +97,7 @@ const PROVEN = new WeakMap<FastifyRequest, Guarded>();
 const CAPABILITY_GRANT = new WeakMap<FastifyRequest, LiveGrant>();
 
 export interface LiveOptions {
+  readonly engine?: Pick<RunEngine, 'command'>;
   /** Built and owned by the caller (`main.ts`), never by this module: what a session may reach and how
    *  it is served does not need to know how the state it reaches was assembled. */
   readonly hub: LiveHub;
@@ -222,8 +224,9 @@ const transportOf = (socket: {
 
 export async function serveLive(
   app: FastifyInstance,
-  { hub, sessions, capabilities, services, heartbeatMs = HEARTBEAT_MS }: LiveOptions,
+  { hub, engine, sessions, capabilities, services, heartbeatMs = HEARTBEAT_MS }: LiveOptions,
 ): Promise<void> {
+  if (engine !== undefined) hub.useCommands((member, frame) => engine.command(member, frame));
   await app.register(websocket, { options: { maxPayload: MAX_LIVE_PAYLOAD_BYTES } });
 
   let revocationRevision = 0;

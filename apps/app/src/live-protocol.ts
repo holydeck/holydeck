@@ -29,6 +29,7 @@ import { PRESENTATION_CONTROL } from './roles.js';
 import type {
   AckFrame,
   AckOutcome,
+  CommandFrame,
   EventFrame,
   HeartbeatFrame,
   LiveChannel,
@@ -47,6 +48,13 @@ export interface LiveTransport {
   send(text: string): void;
   close(code: number, reason: string): void;
   buffered(): number;
+}
+
+/** The authority and identity command policy needs, without socket bookkeeping. */
+export interface LiveMember {
+  readonly channel: LiveChannel;
+  readonly grant: LiveGrant;
+  readonly identity?: string;
 }
 
 /** What one session may reach: the channels it may watch, and whether it may move the state at all. */
@@ -128,6 +136,8 @@ export interface LiveConnection {
 }
 
 export interface LiveHub {
+  seedStateRevision(value: number): void;
+  useCommands(handler: (member: LiveMember, frame: CommandFrame) => Promise<{ readonly outcome: AckOutcome; readonly conflictCode?: string }>): void;
   /** How many times the live state has moved. What a command is issued against. */
   stateRevision(): number;
   /** The last frame number published. What a resume is measured from. */
@@ -226,6 +236,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
   // Insertion order is also the eviction order, which is what keeps the oldest key the first forgotten.
   const landed = new Map<string, Landed>();
 
+  let commandHandler: Parameters<LiveHub['useCommands']>[0] | undefined;
   let stateRevision = 0;
   let sequence = 0;
 
@@ -368,8 +379,8 @@ export function liveHub(options: LiveHubOptions): LiveHub {
 
   const landedKey = (member: Member, key: string): string => `${member.identity ?? ''} ${key}`;
 
-  const command = (member: Member, frame: LiveFrame & { kind: 'command' }): void => {
-    if (!member.grant.command || !PUBLIC_COMMAND_TYPES.has(frame.type)) {
+  const command = async (member: Member, frame: CommandFrame): Promise<void> => {
+    if (!member.grant.command) {
       // Answered rather than closed: a surface that mistakenly asks to command is still a surface an
       // audience is watching, and ending its session would take the service off a screen over a mistake.
       write(member, ackOf(member, frame.id, 'unauthorized', standing()));
@@ -381,6 +392,19 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     const already = landed.get(landedKey(member, frame.idempotencyKey));
     if (already !== undefined) {
       write(member, ackOf(member, frame.id, 'duplicate', already));
+      return;
+    }
+    if (commandHandler !== undefined) {
+      const liveMember: LiveMember = { channel: member.channel, grant: member.grant, identity: member.identity };
+      const { outcome } = await commandHandler(liveMember, frame);
+      if (!member.open) return;
+      const at = standing();
+      if (outcome === 'applied') remember(landedKey(member, frame.idempotencyKey), at);
+      write(member, ackOf(member, frame.id, outcome, at));
+      return;
+    }
+    if (!PUBLIC_COMMAND_TYPES.has(frame.type)) {
+      write(member, ackOf(member, frame.id, 'unauthorized', standing()));
       return;
     }
     if (frame.clientStateRevision !== stateRevision) {
@@ -441,7 +465,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
       return;
     }
     if (frame.kind === 'command') {
-      command(member, frame);
+      void command(member, frame);
       return;
     }
     // A snapshot, an event or an acknowledgement arriving from a client is not a mistake to be forgiven
@@ -450,6 +474,8 @@ export function liveHub(options: LiveHubOptions): LiveHub {
   };
 
   return Object.freeze({
+    seedStateRevision: (value: number): void => { stateRevision = Math.max(stateRevision, value); },
+    useCommands: (handler: Parameters<LiveHub['useCommands']>[0]): void => { commandHandler = handler; },
     stateRevision: (): number => stateRevision,
     sequence: (): number => sequence,
 

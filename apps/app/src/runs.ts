@@ -115,6 +115,7 @@ export interface RunRecord {
 export type StartRunRequest = RunStartBody;
 
 export interface RunStore {
+  active(context: unknown): Promise<readonly RunRecord[]>;
   /** Starts a fresh run from a Ready prepared snapshot. Refuses with a named error from anything else,
    *  Outdated included (spec LIVE-01). Requires Control presentation, checked before anything is read. */
   start(session: OperatorSession, request: StartRunRequest): Promise<RunRecord>;
@@ -316,6 +317,18 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
   };
 
   const store: RunStore = {
+    active: async (context) => {
+      const found = await runs.read(context, {});
+      const latest = new Map<unknown, Record<string, unknown>>();
+      for (const row of found) {
+        const previous = latest.get(row['runId']);
+        if (previous === undefined || Number(row['sequence']) > Number(previous['sequence'])) {
+          latest.set(row['runId'], row);
+        }
+      }
+      return [...latest.values()].map(rowFrom).filter((run) => run.phase === 'active');
+    },
+
     start: (session, request) =>
       own(async () => {
         // THR-11: checked first, before a single read, so the refusal is this server's and not a client's.
