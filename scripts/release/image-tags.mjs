@@ -16,11 +16,30 @@ export function isNewestStable(version, existingTags) {
   });
 }
 
+// Mirrors isNewestStable so the moving `:next` pointer is guarded the same way `:latest` is: a
+// re-run of an old prerelease build, or a build cut for an older calendar base after a newer
+// prerelease already shipped, must not walk `:next` backwards.
+export function isNewestPrerelease(version, existingTags) {
+  const prereleaseVersions = existingTags
+    .map((tag) => tag.replace(/^v/, ''))
+    .filter((v) => CALVER_PATTERN.test(v) && v.includes('-next.'));
+  const parts = (v) => CALVER_PATTERN.exec(v).slice(1, 5).map(Number);
+  const [year, month, patch, next] = parts(version);
+  return prereleaseVersions.every((candidate) => {
+    if (candidate === version) return true;
+    const [cy, cm, cp, cn] = parts(candidate);
+    if (cy !== year) return cy < year;
+    if (cm !== month) return cm < month;
+    if (cp !== patch) return cp < patch;
+    return cn <= next;
+  });
+}
+
 export function imageTags({ version, existingTags, names }) {
   const prerelease = version.includes('-next.');
   const suffixes = [
     version,
-    prerelease ? 'next' : undefined,
+    prerelease && isNewestPrerelease(version, existingTags) ? 'next' : undefined,
     !prerelease && isNewestStable(version, existingTags) ? 'latest' : undefined,
   ].filter((s) => s !== undefined);
   const result = {};

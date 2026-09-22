@@ -6,7 +6,7 @@ test('a prerelease gets its version and next tags only', () => {
   assert.deepEqual(
     imageTags({
       version: '2026.10.0-next.1',
-      existingTags: ['v2026.9.2', 'v2026.11.0', 'v2026.12.0-next.1'],
+      existingTags: ['v2026.9.2', 'v2026.11.0'],
       names: ['corpus'],
     }),
     {
@@ -14,6 +14,35 @@ test('a prerelease gets its version and next tags only', () => {
         'ghcr.io/holydeck/corpus:2026.10.0-next.1',
         'ghcr.io/holydeck/corpus:next',
       ],
+    },
+  );
+});
+
+test('the newest prerelease gets next when an older one already exists', () => {
+  assert.deepEqual(
+    imageTags({
+      version: '2026.10.0-next.2',
+      existingTags: ['v2026.10.0-next.1', 'v2026.10.0-next.2'],
+      names: ['corpus'],
+    }),
+    {
+      corpus: [
+        'ghcr.io/holydeck/corpus:2026.10.0-next.2',
+        'ghcr.io/holydeck/corpus:next',
+      ],
+    },
+  );
+});
+
+test('an older prerelease does not get next, so re-running an old build cannot move it backwards', () => {
+  assert.deepEqual(
+    imageTags({
+      version: '2026.10.0-next.1',
+      existingTags: ['v2026.10.0-next.1', 'v2026.12.0-next.1'],
+      names: ['corpus'],
+    }),
+    {
+      corpus: ['ghcr.io/holydeck/corpus:2026.10.0-next.1'],
     },
   );
 });
