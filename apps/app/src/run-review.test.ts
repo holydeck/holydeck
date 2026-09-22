@@ -87,7 +87,7 @@ const live = async (): Promise<Live> => {
   const runs = runsOn(db, { now, newId: () => `run-${(serial += 1)}`, observe: () => ({ slideLayoutRevision: 3, checks: [] }) });
   const run = await runs.start(SESSION, { serviceId: service.stamp.id, mode: 'live' });
   const events = runEventsOn(db, { now });
-  const additions = midServiceOn(db, { now: () => ADDED_AT, newId: () => CONTENT_ID });
+  const additions = midServiceOn(db, { now: () => ADDED_AT, newId: () => CONTENT_ID, runs, runEvents: events });
   return {
     db,
     events,

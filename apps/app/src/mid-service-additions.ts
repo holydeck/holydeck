@@ -44,8 +44,8 @@ import { permissionsFor as recordPermissions } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 import { REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
 import { PRESENTATION_CONTROL } from './roles.js';
-import { RunEventError, runEventsOn } from './run-events.js';
-import { RUN_PERMISSIONS, runsOn } from './runs.js';
+import { RunEventError } from './run-events.js';
+import { RUN_PERMISSIONS } from './runs.js';
 import { SNAPSHOT_PERMISSIONS, SNAPSHOT_RECORD } from './snapshots.js';
 
 import type { LibraryKind } from '@holydeck/contracts/library';
@@ -54,8 +54,8 @@ import type { SnapshotPin } from '@holydeck/contracts/snapshots';
 
 import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
-import type { RunEventRecord } from './run-events.js';
-import type { RunRecord } from './runs.js';
+import type { RunEventRecord, RunEventStore } from './run-events.js';
+import type { RunRecord, RunStore } from './runs.js';
 import type { OperatorSession } from './snapshots.js';
 
 export const MID_SERVICE_RECORD = 'midServiceAdditions';
@@ -148,6 +148,11 @@ export interface MidServiceOptions {
   readonly now: () => string;
   /** Mints the identifier the body is saved under. Injected so a test can pin it; never the library's. */
   readonly newId?: () => string;
+  /** Where a run's own row is read back from (runs.resume), injected rather than built here so every
+   *  caller of this module shares one store instead of each constructing its own over the same database. */
+  readonly runs: Pick<RunStore, 'resume'>;
+  /** Where the addition is logged into the run's own event log, injected for the same reason. */
+  readonly runEvents: Pick<RunEventStore, 'record'>;
 }
 
 const CONTENT_ID_BYTES = 16;
@@ -185,10 +190,9 @@ export function midServiceOn(db: RepositoryDb, options: MidServiceOptions): MidS
   const repositories = repositoriesOn(db);
   const records = repositories[MID_SERVICE_RECORD];
   const snapshots = repositories[SNAPSHOT_RECORD];
-  const runs = runsOn(db, { now: options.now });
+  const { runs, runEvents } = options;
   const revisions = revisionsOn(db, { now: options.now });
   const library = libraryOn(db, { now: options.now });
-  const runEvents = runEventsOn(db, { now: options.now });
   const newId = options.newId ?? ((): string => randomBytes(CONTENT_ID_BYTES).toString('base64url'));
 
   const rowFrom = (found: Record<string, unknown>): MidServiceAddition => {

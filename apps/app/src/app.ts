@@ -29,7 +29,9 @@ import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { MediaLibrary } from './media.js';
+import type { MidServiceStore } from './mid-service-additions.js';
 import type { Identity } from './onboarding.js';
+import type { RunReviewStore } from './run-review.js';
 import type { RunStore } from './runs.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
@@ -41,6 +43,7 @@ import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
 import type { ShownReferenceStore } from './shown-references.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
+import type { ThemeStore } from './live-theme.js';
 import type { WebAsset } from './static.js';
 
 const PUBLIC: RouteNeed = { kind: 'public' };
@@ -79,6 +82,11 @@ export interface AppOptions {
    *  skipped, the same way every other optional store here is. */
   runs?: Pick<RunStore, 'resume'>;
   slideLabels?: SlideLabelStore;
+  /** Threaded through for a later task's run routes to consume; nothing in this file reads these three
+   *  yet (buildApp's own parameter list below deliberately does not destructure them). */
+  themes?: ThemeStore;
+  runReview?: RunReviewStore;
+  midService?: MidServiceStore;
 }
 
 /**
