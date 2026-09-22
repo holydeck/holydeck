@@ -57,6 +57,8 @@ export const KNOWN_INTEGRATION_GAPS = {
   'slide-layout-routes.ts PUT LAYOUT_BOXES_PATH LAYOUTS_MANAGE': 'no harness test refuses layout edits to a non-admin',
   'slide-layout-routes.ts POST LAYOUT_REVISION_PATH LAYOUTS_MANAGE': 'no harness test refuses layout restoration to a non-admin',
   'slide-layout-routes.ts PATCH LAYOUT_STATUS_PATH LAYOUTS_MANAGE': 'no harness test refuses layout archival to a non-admin',
+  'service-template-routes.ts POST SERVICE_TEMPLATE_PATH SERVICE_TEMPLATES_MANAGE': 'no harness test refuses template creation to a non-admin',
+  'service-template-routes.ts GET SERVICE_TEMPLATE_ID_PATH SERVICE_TEMPLATES_MANAGE': 'no harness test refuses template previews to a non-admin',
   'translation-offset-routes.ts PUT SET_PATH SETTINGS_MANAGE': 'no harness test refuses translation offset changes to a non-admin',
 };
 
