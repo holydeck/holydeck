@@ -92,7 +92,8 @@ export type FieldProblem = { readonly path: string; readonly code: string; reado
 
 export type SuccessEnvelope<T> = {
   readonly data: T;
-  readonly meta: { readonly requestId: string; readonly version?: number };
+  /** `dropped` is only ever present on the one route that revalidates a stored position (SERV-01). */
+  readonly meta: { readonly requestId: string; readonly version?: number; readonly dropped?: readonly string[] };
 };
 
 /**
@@ -157,12 +158,13 @@ const parseFieldProblem = (value: unknown, path: string): Parsed<FieldProblem> =
 const readMeta = (reader: FieldReader) => ({
   requestId: reader.text('requestId'),
   version: reader.optionalWholeNumber('version', 1),
+  dropped: reader.optionalTextList('dropped'),
 });
 
 export function parseSuccessEnvelope(value: unknown, path = 'success'): Parsed<SuccessEnvelope<unknown>> {
   return parseObject(value, path, (reader) => ({
     data: reader.present('data'),
-    meta: reader.parsed('meta', (raw, at) => parseObject(raw, at, readMeta), { requestId: '', version: undefined }),
+    meta: reader.parsed('meta', (raw, at) => parseObject(raw, at, readMeta), { requestId: '', version: undefined, dropped: undefined }),
   }));
 }
 

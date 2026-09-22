@@ -28,6 +28,18 @@ describe('asking the application for something', () => {
     });
   });
 
+  it('reads dropped out of meta where the route reports it, and leaves it undefined where it does not', async () => {
+    const dropped = { data: { position: {} }, meta: { requestId: 'req-4', dropped: ['itemId'] } };
+    expect(await ask('/api/v1/me/workspace-position', answering(200, dropped))).toEqual({
+      ok: true,
+      data: { position: {} },
+      requestId: 'req-4',
+      version: undefined,
+      dropped: ['itemId'],
+    });
+    expect((await ask('/health', answering(200, success)) as { dropped?: unknown }).dropped).toBeUndefined();
+  });
+
   it('reads the code, the message and the refused fields out of an error envelope', async () => {
     const body = {
       error: {

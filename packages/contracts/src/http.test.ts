@@ -138,6 +138,11 @@ describe('envelopes', () => {
     expect(parseValidationFailure(failure)).toEqual({ ok: true, value: failure });
   });
 
+  it('reads dropped off a success envelope that carries it, as a route revalidating a position does', () => {
+    const envelope = { data: { position: {} }, meta: { requestId: 'req-9', dropped: ['itemId', 'slideId'] } };
+    expect(parseSuccessEnvelope(envelope)).toEqual({ ok: true, value: envelope });
+  });
+
   it('refuses a success envelope that is not one', () => {
     const parsed = parseSuccessEnvelope({ meta: {} });
     expect(parsed.ok).toBe(false);

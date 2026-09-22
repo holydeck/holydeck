@@ -229,6 +229,10 @@ export class FieldReader {
     return this.#source[name] === undefined ? undefined : this.parsedList(name, parse);
   }
 
+  optionalTextList(name: string): readonly string[] | undefined {
+    return this.#source[name] === undefined ? undefined : this.textList(name);
+  }
+
   #merge<T>(parsed: Parsed<T>, fallback: T): T {
     if (parsed.ok) return parsed.value;
     this.#problems.push(...parsed.problems);

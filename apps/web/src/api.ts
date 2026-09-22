@@ -63,6 +63,8 @@ export type Answered<T> = {
   readonly data: T;
   readonly requestId: string;
   readonly version: number | undefined;
+  /** Set only by the one route that revalidates a stored position; every other answer leaves it undefined. */
+  readonly dropped: readonly string[] | undefined;
 };
 
 export type ApiResult<T> = Answered<T> | Refused;
@@ -96,7 +98,13 @@ export async function ask(path: string, fetching: FetchLike, change?: Change): P
   if (response.status >= 200 && response.status < 300) {
     const parsed = parseSuccessEnvelope(body);
     return parsed.ok
-      ? { ok: true, data: parsed.value.data, requestId: parsed.value.meta.requestId, version: parsed.value.meta.version }
+      ? {
+        ok: true,
+        data: parsed.value.data,
+        requestId: parsed.value.meta.requestId,
+        version: parsed.value.meta.version,
+        dropped: parsed.value.meta.dropped,
+      }
       : unreadable(parsed.problems);
   }
 
