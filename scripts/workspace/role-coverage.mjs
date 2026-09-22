@@ -42,6 +42,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'service-routes.ts POST SERVICE_TRANSITION_PATH SERVICES_MANAGE': 'no harness test refuses a service transition without services.manage',
   'service-routes.ts PATCH SERVICE_ID_PATH SERVICES_MANAGE': 'no harness test refuses a service edit without services.manage',
   'service-routes.ts PATCH SERVICE_STATUS_PATH SERVICES_MANAGE': 'no harness test refuses service archival without services.manage',
+  'service-routes.ts PATCH SERVICE_OUTPUT_PATH SERVICES_MANAGE': 'no harness test refuses an output override without services.manage',
   'service-routes.ts POST SERVICE_ITEMS_PATH SERVICES_MANAGE': 'no harness test refuses adding an item without services.manage',
   'service-routes.ts DELETE SERVICE_ITEM_PATH SERVICES_MANAGE': 'no harness test refuses removing an item without services.manage',
   'service-routes.ts POST SERVICE_ITEM_ENABLE_PATH SERVICES_MANAGE': 'no harness test refuses enabling an item without services.manage',

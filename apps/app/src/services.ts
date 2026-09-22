@@ -24,7 +24,7 @@ import { RepositoryError, repositoriesOn } from './repositories.js';
 import { REVISION_RECORD, revisionsOn } from './revisions.js';
 
 import type { EntityStamp } from '@holydeck/contracts/entities';
-import type { RevisionRef, ServiceDraft, ServiceItem, ServiceSection, ServiceState } from '@holydeck/contracts/services';
+import type { RevisionRef, ServiceDraft, ServiceItem, ServiceOutput, ServiceSection, ServiceState } from '@holydeck/contracts/services';
 
 import type { AuditAction } from './audit.js';
 import type { RequestContext } from './context.js';
@@ -78,6 +78,7 @@ export interface ServiceRecord {
   readonly site: string;
   readonly state: ServiceState;
   readonly sections: readonly ServiceSection[];
+  readonly output?: ServiceOutput;
 }
 
 export type ItemContentDrift = {
@@ -102,6 +103,8 @@ export interface ServiceStore {
   transition(context: unknown, id: string, toState: ServiceState): Promise<ServiceRecord | undefined>;
   /** Changes sections/items. Never touches title, date, site, or state. */
   edit(context: unknown, id: string, sections: readonly ServiceSection[]): Promise<ServiceRecord | undefined>;
+  /** Changes the optional output profile before a Service is presented. */
+  setOutput(context: unknown, id: string, output: ServiceOutput): Promise<ServiceRecord | undefined>;
   /** Appends one new item, whole (including its own id), to a named section. */
   addItem(context: unknown, id: string, sectionId: string, item: ServiceItem): Promise<ServiceRecord | undefined>;
   /** Drops one item from wherever it lives in this Service. Never touches the global content its
@@ -262,6 +265,8 @@ interface StampRow extends ServiceRecord {
   readonly sequence: number;
 }
 
+type ServiceFields = ServiceDraft & { readonly state: ServiceState; readonly output?: ServiceOutput };
+
 export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceStore {
   const records = repositoriesOn(db)[SERVICE_RECORD];
   const trail = auditOn(db, { now: options.now });
@@ -287,8 +292,11 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
     if (!service.ok) {
       throw new ServiceError('corrupt', `${id} holds a Service this code cannot read: ${problems(service.problems)}`);
     }
-    const { title, date, site, state, sections } = service.value;
-    return { stamp: parsed.value, title, date, site, state, sections, sequence };
+    const { title, date, site, state, sections, output } = service.value;
+    return {
+      stamp: parsed.value, title, date, site, state, sections,
+      ...(output === undefined ? {} : { output }), sequence,
+    };
   };
 
   const standing = async (context: unknown, id: string): Promise<StampRow | undefined> => {
@@ -299,11 +307,11 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
   const stampOnto = async (
     context: unknown,
     stamp: EntityStamp,
-    fields: ServiceDraft & { readonly state: ServiceState },
+    fields: ServiceFields,
     sequence: number,
   ): Promise<ServiceRecord> => {
-    const { title, date, site, state, sections } = fields;
-    const record = { stamp, title, date, site, state, sections };
+    const { title, date, site, state, sections, output } = fields;
+    const record = { stamp, title, date, site, state, sections, ...(output === undefined ? {} : { output }) };
     await records.append(context, {
       _id: `${stamp.id}${STAMP_SEPARATOR}${sequence}`,
       serviceId: stamp.id,
@@ -358,6 +366,12 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
     return audited(context, record, 'service.archive', detail);
   };
 
+  const lockedFor = (row: StampRow, alsoPresenting = false): void => {
+    if (row.state === 'completed' || row.state === 'archived' || (alsoPresenting && row.state === 'presenting')) {
+      throw new ServiceError('state', `${row.stamp.id} is ${row.state}; its order is kept as it was`);
+    }
+  };
+
   const mutateItems = async (
     context: unknown,
     id: string,
@@ -368,9 +382,10 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
     requireAuditPermission(context);
     const row = await standing(context, id);
     if (row === undefined) return undefined;
+    lockedFor(row);
     const draft = readDraft({ title: row.title, date: row.date, site: row.site, sections: compute(row.sections) });
     const stamp = touchedStamp(row.stamp, { at: options.now(), by: author(context).actor });
-    const record = await stampOnto(context, stamp, { ...draft, state: row.state }, row.sequence + 1);
+    const record = await stampOnto(context, stamp, { ...draft, state: row.state, output: row.output }, row.sequence + 1);
     return audited(context, record, action, detail);
   };
 
@@ -390,13 +405,14 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
           const current = byId.get(serviceId);
           if (current === undefined || current.sequence < row.sequence) byId.set(serviceId, row);
         }
-        return [...byId.values()].map(({ stamp, title, date, site, state, sections }) => ({
+        return [...byId.values()].map(({ stamp, title, date, site, state, sections, output }) => ({
           stamp,
           title,
           date,
           site,
           state,
           sections,
+          ...(output === undefined ? {} : { output }),
         }));
       }),
 
@@ -447,10 +463,22 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
         requireAuditPermission(context);
         const row = await standing(context, id);
         if (row === undefined) return undefined;
+        lockedFor(row);
         const draft = readDraft({ title: row.title, date: row.date, site: row.site, sections });
         const stamp = touchedStamp(row.stamp, { at: options.now(), by: author(context).actor });
-        const record = await stampOnto(context, stamp, { ...draft, state: row.state }, row.sequence + 1);
+        const record = await stampOnto(context, stamp, { ...draft, state: row.state, output: row.output }, row.sequence + 1);
         return audited(context, record, 'service.edit', 'Edited a Service’s sections and items');
+      }),
+
+    setOutput: (context, id, output) =>
+      own(async () => {
+        requireAuditPermission(context);
+        const row = await standing(context, id);
+        if (row === undefined) return undefined;
+        lockedFor(row, true);
+        const stamp = touchedStamp(row.stamp, { at: options.now(), by: author(context).actor });
+        const record = await stampOnto(context, stamp, { ...row, output }, row.sequence + 1);
+        return audited(context, record, 'service.output', "Set a Service's output profile");
       }),
 
     addItem: (context, id, sectionId, item) =>
@@ -500,6 +528,7 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
         requireAuditPermission(context);
         const row = await standing(context, id);
         if (row === undefined) return undefined;
+        lockedFor(row);
         const { sectionIndex, itemIndex } = locateItem(row.sections, itemId);
         const current = row.sections[sectionIndex]!.items[itemIndex]!.content;
         if (current === undefined) {
@@ -519,7 +548,7 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
           sections: withChangedItem(row.sections, itemId, (item) => ({ ...item, content: ref })),
         });
         const stamp = touchedStamp(row.stamp, { at: options.now(), by: author(context).actor });
-        const record = await stampOnto(context, stamp, { ...draft, state: row.state }, row.sequence + 1);
+        const record = await stampOnto(context, stamp, { ...draft, state: row.state, output: row.output }, row.sequence + 1);
         return audited(context, record, 'service.item.revise', `Revised ${itemId} onto content revision ${revision}`);
       }),
 
@@ -550,8 +579,8 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
       own(async () => {
         const row = await standing(context, id);
         if (row === undefined) return undefined;
-        const { stamp, title, date, site, state, sections } = row;
-        return { stamp, title, date, site, state, sections };
+        const { stamp, title, date, site, state, sections, output } = row;
+        return { stamp, title, date, site, state, sections, ...(output === undefined ? {} : { output }) };
       }),
   };
 }

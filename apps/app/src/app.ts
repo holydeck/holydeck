@@ -13,6 +13,7 @@ import { isUpgrade } from './live.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveOrderRoutes } from './order-routes.js';
+import { serveOutputDefaultsRoutes } from './output-defaults-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
 import { serveServiceRoutes } from './service-routes.js';
@@ -241,6 +242,7 @@ export function buildApp({
   // the capability surface above is behind, because running a presentation is what this surface is for.
   serveReferenceRoutes(app, { corpus, shownReferences });
   serveOrderRoutes(app, { services, slideLabels });
+  serveOutputDefaultsRoutes(app);
   serveServiceRoutes(app, { services });
   serveServiceTemplateRoutes(app, { serviceTemplates });
 

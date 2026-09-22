@@ -28,6 +28,7 @@ import {
   SERVICE_ITEM_REVISE_PATH,
   SERVICE_PATH,
   SERVICE_SCHEDULE_PATH,
+  SERVICE_OUTPUT_PATH,
   SERVICE_STATUS_PATH,
   SERVICE_TRANSITION_PATH,
 } from './service-routes.js';
@@ -148,6 +149,7 @@ describe('every route that changes something', () => {
       { method: 'POST', url: SERVICE_TRANSITION_PATH },
       { method: 'PATCH', url: SERVICE_ID_PATH },
       { method: 'PATCH', url: SERVICE_STATUS_PATH },
+      { method: 'PATCH', url: SERVICE_OUTPUT_PATH },
       { method: 'POST', url: SERVICE_ITEMS_PATH },
       { method: 'DELETE', url: SERVICE_ITEM_PATH },
       { method: 'POST', url: SERVICE_ITEM_ENABLE_PATH },

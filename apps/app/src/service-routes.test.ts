@@ -44,6 +44,7 @@ const ROUTES: readonly (readonly [Method, string, unknown])[] = [
   ['POST', `${ROOT}/transition`, { state: 'presenting' }],
   ['PATCH', ROOT, DRAFT],
   ['PATCH', `${ROOT}/status`, { archived: true }],
+  ['PATCH', `${ROOT}/output`, { aspectRatio: '4:3' }],
   ['POST', ITEMS, { ...ITEM, id: 'item-2' }],
   ['DELETE', `${ITEM_ACTIONS}/item-1`, undefined],
   ['POST', `${ITEM_ACTIONS}/item-1/enable`, undefined],
@@ -192,6 +193,16 @@ describe('service workspace routes', () => {
     expect(restored.statusCode).toBe(200);
     expect(restored.json().data.stamp.archivedAt).toBeUndefined();
     expect(entries().map((entry) => entry['action'])).toEqual(['service.create', 'service.archive', 'service.archive']);
+  });
+
+  test('sets an output override, validates it, and refuses it while presenting', async () => {
+    await creating();
+    const output = await asking('PATCH', `${ROOT}/output`, { aspectRatio: '4:3' });
+    expect(output.statusCode).toBe(200);
+    expect(output.json().data.output).toEqual({ aspectRatio: '4:3' });
+    expect((await asking('PATCH', `${ROOT}/output`, { aspectRatio: 'bad' })).statusCode).toBe(422);
+    expect((await asking('POST', `${ROOT}/transition`, { state: 'presenting' })).statusCode).toBe(200);
+    expect((await asking('PATCH', `${ROOT}/output`, { aspectRatio: '16:9' })).statusCode).toBe(409);
   });
 
   test('adds, disables, enables, duplicates, reorders and removes items', async () => {

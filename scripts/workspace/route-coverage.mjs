@@ -29,6 +29,7 @@ export const ROUTE_INTEGRATION_TESTS = {
 // to ROUTE_INTEGRATION_TESTS above, which is a diff a reviewer sees, not a rule someone quietly stopped
 // enforcing.
 export const KNOWN_INTEGRATION_GAPS = {
+  'output-defaults-routes.ts': 'no harness test reads the output defaults over HTTP',
   'app.ts GET /api/contracts': 'no harness test reads the released contract registry over HTTP',
   'app.ts GET /api/v1/translations/:abbr/canon': "no harness test reads a translation's canon over HTTP",
   'app.ts GET /api/v1/translations/:abbr/verses': 'no harness test reads verses over HTTP',

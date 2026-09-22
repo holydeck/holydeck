@@ -5,6 +5,7 @@ import {
   parseServiceItem,
   parseServiceItemReorder,
   parseServiceItemRevision,
+  parseServiceOutput,
   parseServiceSchedule,
   parseServiceStatus,
   parseServiceTransition,
@@ -27,6 +28,8 @@ export const SERVICE_DUPLICATE_PATH = `${SERVICE_ID_PATH}/duplicate`;
 export const SERVICE_SCHEDULE_PATH = `${SERVICE_ID_PATH}/schedule`;
 export const SERVICE_TRANSITION_PATH = `${SERVICE_ID_PATH}/transition`;
 export const SERVICE_STATUS_PATH = `${SERVICE_ID_PATH}/status`;
+/** The optional output profile for one Service. */
+export const SERVICE_OUTPUT_PATH = `${SERVICE_ID_PATH}/output`;
 export const SERVICE_ITEMS_PATH = `${SERVICE_ID_PATH}/sections/:sectionId/items`;
 export const SERVICE_ITEM_PATH = `${SERVICE_ID_PATH}/items/:itemId`;
 export const SERVICE_ITEM_ENABLE_PATH = `${SERVICE_ITEM_PATH}/enable`;
@@ -48,6 +51,7 @@ const ROUTES = [
   ['POST', SERVICE_TRANSITION_PATH],
   ['PATCH', SERVICE_ID_PATH],
   ['PATCH', SERVICE_STATUS_PATH],
+  ['PATCH', SERVICE_OUTPUT_PATH],
   ['POST', SERVICE_ITEMS_PATH],
   ['DELETE', SERVICE_ITEM_PATH],
   ['POST', SERVICE_ITEM_ENABLE_PATH],
@@ -178,6 +182,15 @@ export function serveServiceRoutes(app: FastifyInstance, { services }: ServiceRo
     const answer = await settled(() =>
       parsed.value.archived ? services.archive(context, id) : services.unarchive(context, id),
     );
+    if (!answer.ok) return refused(request, reply, answer);
+    if (answer.value === undefined) return reply.code(404).send(notFound(request));
+    return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  app.patch(SERVICE_OUTPUT_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const parsed = parseServiceOutput(request.body);
+    if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
+    const answer = await settled(() => services.setOutput(call(request), idIn(request), parsed.value));
     if (!answer.ok) return refused(request, reply, answer);
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
