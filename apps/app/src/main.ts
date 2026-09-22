@@ -1,5 +1,5 @@
-import { constants, readFileSync, watch } from 'node:fs';
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { constants, createReadStream, readFileSync, watch } from 'node:fs';
+import { access, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,6 +43,7 @@ import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
+import type { MediaByteSource } from './media-delivery-routes.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { ServiceStore } from './services.js';
@@ -98,6 +99,7 @@ let slideLayouts: SlideLayoutStore | undefined;
 // The media library is kept the same way and administered by the same Admin: a deployment with nowhere to
 // keep one has nothing here to upload to, and its route answers not-found the same way.
 let media: MediaLibrary | undefined;
+let mediaBytes: MediaByteSource | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
@@ -148,6 +150,10 @@ if (settings.values.mongoUrl !== '') {
       return new Uint8Array(await readFile(key));
     },
   });
+  mediaBytes = {
+    size: async (key) => (await stat(key)).size,
+    stream: (key, range) => createReadStream(key, range === undefined ? {} : { start: range.start, end: range.end }),
+  };
   settingsAdmin = settingsAdminOn(settings, {
     readFile: (path) => readFile(path, 'utf8'),
     writeFile,
@@ -189,6 +195,7 @@ const app = buildApp({
   settingsAdmin,
   slideLayouts,
   media,
+  mediaBytes,
   translationOffsets,
   workspacePositions,
   contentExists,

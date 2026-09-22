@@ -19,6 +19,7 @@ export const ROUTES_DIR = 'apps/app/src';
 // Every route identity with harness-level HTTP or WebSocket coverage, and its test file — checked to
 // exist, so a deleted or renamed test file is a census failure rather than a claim nobody rechecks.
 export const ROUTE_INTEGRATION_TESTS = {
+  'media-delivery-routes.ts': 'tests/harness/integration/media-delivery.test.ts',
   'session-routes.ts': 'tests/harness/integration/surfaces.test.ts',
   'app.ts GET /health': 'tests/harness/integration/surfaces.test.ts',
   'app.ts GET /api/v1/translations': 'tests/harness/integration/surfaces.test.ts',
