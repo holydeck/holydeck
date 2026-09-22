@@ -3,7 +3,14 @@ import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { authorshipClaimsIn, commitMessageProblemsIn, pathProblemsIn, readRepo, verifyDocsSplit } from './docs-split.mjs';
+import {
+  authorshipClaimsIn,
+  commitMessageProblemsIn,
+  pathProblemsIn,
+  readCommitMessages,
+  readRepo,
+  verifyDocsSplit,
+} from './docs-split.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -229,4 +236,13 @@ test('readRepo reads every commit message this repository\'s history holds, keye
 
 test('this repository has no forbidden artifact and credits no AI coding assistant', () => {
   assert.deepEqual(verifyDocsSplit(readRepo()), []);
+});
+
+test('readCommitMessages keys every commit by its full sha, never a mangled or partial one', () => {
+  const commitMessages = readCommitMessages();
+  const shas = Object.keys(commitMessages);
+  assert.ok(shas.length > 0, 'expected at least one commit');
+  for (const sha of shas) {
+    assert.match(sha, /^[0-9a-f]{40}$/, `expected a full 40-character sha, got ${JSON.stringify(sha)}`);
+  }
 });
