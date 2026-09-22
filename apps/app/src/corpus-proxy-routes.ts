@@ -31,6 +31,14 @@ const PROXY_TIMEOUT_MS = 10_000;
 // Matches apps/corpus's own per-route convention (see routes/stats.ts), registered per-route rather than
 // globally so a burst against one path — say, a sermon's worth of verse lookups — never throttles the
 // others.
+//
+// Keyed on request.ip, which Fastify resolves from the socket's own remote address rather than an
+// `x-forwarded-for` header, because this application has no `trustProxy` configured. The supported
+// `compose.yaml` deployment exposes this application directly (see its own comments), so that address
+// already is the caller's. Trusting a forwarded-for header without a specific, configured number of
+// trusted hops in front would let any caller write their own value and either dodge this limit or paint
+// another address as the one that hit it — worse than the collapsed-together limit an unproxied header
+// gives a deployment an operator chooses to put behind a reverse proxy of their own.
 const PROXY_RATE_LIMIT = { max: 60, timeWindow: '1 minute' };
 
 // Generous for a translations list, a canon, a verse range or a rendered slide payload — all JSON or plain
