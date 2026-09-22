@@ -15,7 +15,10 @@ import { t } from './i18n.js';
 import { lazy } from './lazy.js';
 import { NotFoundPage } from './pages/not-found.js';
 import { ServicesPage } from './pages/services.js';
+import { SignInPage } from './pages/sign-in.js';
+import { WelcomePage } from './pages/welcome.js';
 import { route } from './router.js';
+import { signOut } from './sign-out.js';
 
 import type { JSX } from 'preact';
 
@@ -33,9 +36,9 @@ function Page(): JSX.Element {
     case 'admin-users':
       return <h1>{t('users.title')}</h1>;
     case 'welcome':
-      return <h1>{t('welcome.title')}</h1>;
+      return <WelcomePage />;
     case 'sign-in':
-      return <h1>{t('signIn.title')}</h1>;
+      return <SignInPage next={current.next} />;
     // `boot()` moves `/` on to `/services`, `/welcome` or `/sign-in`; until it has, there is nothing to show.
     case 'root':
       return <p role="status">{t('app.loading')}</p>;
@@ -48,12 +51,12 @@ function Page(): JSX.Element {
 }
 
 export interface AppProps {
-  /** Passed through to the shell's sign-out button. */
+  /** Replaces the usual session-ending action where an embedding host needs to own it. */
   readonly onSignOut?: () => void;
 }
 
 /** The whole client: an output surface on its own, every other route inside the shell. */
-export function App({ onSignOut }: AppProps): JSX.Element {
+export function App({ onSignOut = () => void signOut() }: AppProps): JSX.Element {
   const current = route.value;
   if (current.name === 'output') return <OutputPage kind={current.kind} />;
   return (

@@ -1,9 +1,16 @@
 // @vitest-environment happy-dom
-import { render, screen } from '@testing-library/preact';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/preact';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { onboardingOffer } from '@holydeck/contracts/accounts';
+import { successEnvelope } from '@holydeck/contracts/http';
+import { SESSION_PATH } from '@holydeck/contracts/sessions';
+
+import type { FetchLike } from './api.js';
 
 import { App } from './app.js';
-import { resetAppState, session } from './app-state.js';
+import { onboarding, resetAppState, session } from './app-state.js';
+import { setFetching } from './request.js';
 import { currentPath } from './router.js';
 
 import type { SessionView } from '@holydeck/contracts/sessions';
@@ -40,15 +47,30 @@ describe('the route to page switch', () => {
   });
 
   it.each([
-    ['/welcome', 'Welcome'],
+    ['/welcome', 'Welcome to HolyDeck'],
     ['/sign-in', 'Sign in'],
   ])('renders %s in the signed-out frame', (path, heading) => {
     session.value = null;
+    onboarding.value = path === '/welcome' ? onboardingOffer() : 'claimed';
     at(path);
     render(<App />);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toContain(heading);
+    expect(screen.getByRole('heading', { level: 1, name: heading })).toBeTruthy();
     expect(screen.queryByRole('navigation')).toBeNull();
     expect(screen.getByRole('main')).toBeTruthy();
+  });
+
+  it('ends the session when the shell sign-out button is clicked', () => {
+    const fetching = vi.fn<FetchLike>(async () => ({
+      status: 200,
+      json: async (): Promise<unknown> => successEnvelope({}, 'request-1'),
+    }));
+    setFetching(fetching);
+    session.value = signedIn;
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+    expect(fetching).toHaveBeenCalledWith(SESSION_PATH, expect.objectContaining({ method: 'DELETE' }));
   });
 
   it('waits on the root path for boot to move on', () => {
