@@ -439,9 +439,13 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
       return { serviceId, preparedAt: String(latest['preparedAt']), snapshot: snapshotFrom(latest) };
     },
 
-    async readiness(context, serviceId, observed = {}) {
+    async readiness(context, serviceId, given) {
       const row = await standing(context, serviceId);
       if (row === undefined) return undefined;
+      // A caller may provide a contemporaneous observation for a one-off calculation, while an ordinary
+      // readiness read belongs to this deployment's observer. The absent-Service answer stays above this
+      // lookup: asking about no Service must not ask an external observer about one either.
+      const observed = given ?? (await observe(context, serviceId));
       const record = await store.prepared(context, serviceId);
       const checks: ReadinessCheck[] = [];
       const shown = row.items.filter((item) => item.enabled);
@@ -519,16 +523,25 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
       const problem = transitionProblem(checklist.state, 'Go Live', checklist, override);
       if (problem !== undefined) throw new PreparationError('state', problem);
       const sequence = (await runEvents.count(context, { runId: request.runId })) + 1;
-      await runEvents.append(context, {
-        _id: `${request.runId}${SNAPSHOT_KEY_SEPARATOR}${sequence}`,
-        runId: request.runId,
-        sequence,
-        at: options.now(),
-        kind: OVERRIDE_ACTION,
-        // The run event carries what the run replays from, which is the manifest this override did not touch.
-        pinnedRevisions: record.snapshot.pins,
-        ...author(context),
-      });
+      try {
+        await runEvents.append(context, {
+          _id: `${request.runId}${SNAPSHOT_KEY_SEPARATOR}${sequence}`,
+          runId: request.runId,
+          sequence,
+          at: options.now(),
+          kind: OVERRIDE_ACTION,
+          // The run event carries what the run replays from, which is the manifest this override did not touch.
+          pinnedRevisions: record.snapshot.pins,
+          ...author(context),
+        });
+      } catch (error) {
+        // Counting gives a sequence only until another Operator reaches the same empty slot. The immutable
+        // key is the final authority, and its duplicate answer is a request conflict rather than a fault.
+        if (error instanceof RepositoryError && error.kind === 'duplicate') {
+          throw new PreparationError('conflict', `${request.runId} already has an override at sequence ${sequence}`);
+        }
+        throw error;
+      }
       const carried = override.carried.map((check) => `${check.name} (${check.cause})`).join('; ');
       await trail.record(context, {
         action: OVERRIDE_ACTION,

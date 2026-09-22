@@ -1,6 +1,6 @@
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
-import { type Parsed, parseObject } from '@holydeck/contracts/problems';
+import { FIELD_CODES, type Parsed, parseObject } from '@holydeck/contracts/problems';
 import { parsePreparationInputs } from '@holydeck/contracts/snapshots';
 
 import { correlationFor } from './context.js';
@@ -33,8 +33,17 @@ interface OverrideBody {
   readonly reason: string;
 }
 
+// The separator belongs to the immutable event key, never to a run's own name: accepting it here would
+// make two distinct run and sequence pairs spell one stored `_id`. Keep the route's boundary narrower
+// than the key it will later construct, and leave the reason's human-readable emptiness to the store.
+const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/u;
+
 const parseOverrideBody = (value: unknown): Parsed<OverrideBody> =>
-  parseObject(value, 'override', (reader) => ({ runId: reader.text('runId'), reason: reader.text('reason') }));
+  parseObject(value, '', (reader) => {
+    const runId = reader.text('runId');
+    if (!RUN_ID.test(runId)) reader.reject('runId', FIELD_CODES.notAllowed, 'must be 1 to 64 letters, digits, hyphens or underscores');
+    return { runId, reason: reader.text('reason') };
+  });
 
 type Answer<T> =
   | { readonly ok: true; readonly value: T }

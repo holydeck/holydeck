@@ -13,7 +13,7 @@ import {
 } from './preparation-routes.js';
 import { PRESENTATION_CONTROL, SERVICES_MANAGE } from './roles.js';
 import { serviceContext, servicesOn } from './services.js';
-import { preparationContext, preparationOn } from './snapshots.js';
+import { PreparationError, preparationContext, preparationOn } from './snapshots.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { loadSettings } from './settings.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -150,6 +150,19 @@ describe('Preparation routes', () => {
     }, { serviceId: id, runId: 'run-1', reason: 'The backup projector is on standby' });
   });
 
+  // Readiness is this deployment's observation when the route has no observation to offer: the browser
+  // asks for the checklist, while the configured observer is what knows the missing media is still open.
+  test('reports a configured readiness blocker when the caller supplies no observation', async () => {
+    const id = await service();
+    await asking('POST', servicePath(PREPARATION_PREPARE_PATH, id), INPUTS);
+
+    const response = await asking('GET', servicePath(PREPARATION_READINESS_PATH, id));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.state).toBe('blocked');
+    expect(response.json().data.blockers).toEqual(OBSERVED.checks);
+  });
+
   test('gates the three preparation routes from a session without Services manage', async () => {
     const id = await service();
     const refused = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [PRESENTATION_CONTROL] });
@@ -196,6 +209,48 @@ describe('Preparation routes', () => {
     expect(response.statusCode).toBe(422);
     expect(response.json().error.code).toBe(VALIDATION_FAILED);
     expect(prepare).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['a key separator', 'run#1'],
+    ['only whitespace', '   \t'],
+    ['more than 64 characters', 'r'.repeat(65)],
+  ])('rejects an override runId containing %s before calling the store', async (_what, runId) => {
+    const override = vi.spyOn(routed, 'override');
+
+    const response = await asking('POST', servicePath(PREPARATION_OVERRIDE_PATH, 'service-1'), {
+      runId, reason: 'The backup projector is on standby',
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+    expect(response.json().error.fields).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'runId' })]));
+    expect(override).not.toHaveBeenCalled();
+  });
+
+  // Whitespace is text and therefore reaches the store: that boundary owns whether a reason is one a
+  // person can read, while the route keeps its refusal in the validation envelope a client expects.
+  test('maps the store-side override reason refusal to 422', async () => {
+    const response = await asking('POST', servicePath(PREPARATION_OVERRIDE_PATH, 'service-1'), {
+      runId: 'run-1', reason: '   ',
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+  });
+
+  test.each([
+    ['schema', 422],
+    ['conflict', 409],
+  ] as const)('maps a store-side override %s refusal to %i', async (kind, status) => {
+    vi.spyOn(routed, 'override').mockRejectedValueOnce(new PreparationError(kind, `the store refused ${kind}`));
+
+    const response = await asking('POST', servicePath(PREPARATION_OVERRIDE_PATH, 'service-1'), {
+      runId: 'run-1', reason: 'The backup projector is on standby',
+    });
+
+    expect(response.statusCode).toBe(status);
+    expect(response.json().error.code).toBe(status === 422 ? VALIDATION_FAILED : ENTITY_CONFLICT);
   });
 
   test.each([
