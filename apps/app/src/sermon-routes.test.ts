@@ -10,6 +10,7 @@ import { accountsOn } from './accounts.js';
 import { attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
 import { enforceAuthorization } from './authorization.js';
+import { corpusClient } from './corpus.js';
 import { FORBIDDEN, guardMutations } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { passkeysOn } from './passkeys.js';
@@ -26,6 +27,7 @@ import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
+import type { Fetching } from './corpus.js';
 import type { Identity } from './onboarding.js';
 import type { SermonBody, SermonStore } from './sermons.js';
 import type { SessionStore, StartedSession } from './sessions.js';
@@ -49,6 +51,42 @@ verses:
   },
 };
 
+const LIBRARY = 'http://corpus.example.invalid';
+const CORPUS_TOKEN = 'a'.repeat(24);
+const TAM_VERSES_URL = `${LIBRARY}/api/v1/translations/TAM/verses`;
+const ROM_VERSES_URL = `${LIBRARY}/api/v1/translations/ROM/verses`;
+
+// Chapter 117's verses the sermon fixture's entries need once each translation's offset is applied:
+// TAM (no offset) needs {1, 2}; ROM (offset 1 on the first entry) needs {1, 3}.
+const TAM_CHAPTER_117 = {
+  verses: { '1': 'தமிழ் வசனம் 1', '2': 'தமிழ் வசனம் 2' },
+  citation: 'Psalm 117 (TAM)',
+  revision: 1,
+  fetchedAt: '2026-09-13T09:30:00Z',
+  source: 'cache',
+};
+const ROM_CHAPTER_117 = {
+  verses: { '1': 'Romanized verse 1', '3': 'Romanized verse 3' },
+  citation: 'Psalm 117 (ROM)',
+  revision: 1,
+  fetchedAt: '2026-09-13T09:30:00Z',
+  source: 'cache',
+};
+
+/** Answers by base path, ignoring the query string, the same as `reference-routes.test.ts`'s stub. */
+function routedByBase(byUrl: ReadonlyMap<string, { status: number; body: unknown }>): Fetching {
+  return (url) => {
+    const answer = byUrl.get(url.split('?')[0] ?? url) ?? { status: 500, body: {} };
+    return Promise.resolve({ status: answer.status, json: () => Promise.resolve(answer.body) });
+  };
+}
+
+const answeringCorpus = (): Fetching =>
+  routedByBase(new Map([
+    [TAM_VERSES_URL, { status: 200, body: TAM_CHAPTER_117 }],
+    [ROM_VERSES_URL, { status: 200, body: ROM_CHAPTER_117 }],
+  ]));
+
 let app: FastifyInstance;
 let sessions: SessionStore;
 let identity: Identity;
@@ -70,12 +108,16 @@ const ask = (method: Method, url: string, payload?: unknown, held: StartedSessio
 const create = (payload: unknown = { title: 'Sunday sermon', body: BODY }) => ask('POST', SERMONS_PATH, payload);
 const created = async (): Promise<string> => ((await create()).json().data['stamp'] as { readonly id: string }).id;
 
-const serving = async (held: Identity | undefined, store: SermonStore | undefined = sermons): Promise<void> => {
+const serving = async (
+  held: Identity | undefined,
+  store: SermonStore | undefined = sermons,
+  fetching: Fetching = answeringCorpus(),
+): Promise<void> => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
   enforceAuthorization(app, { sessions, identity: undefined });
-  serveSermonRoutes(app, { sermons: store, identity: held });
+  serveSermonRoutes(app, { sermons: store, corpus: corpusClient({ url: LIBRARY, token: CORPUS_TOKEN }, fetching), identity: held });
   await app.ready();
 };
 
@@ -105,7 +147,7 @@ describe('sermon routes', () => {
     expect(title.json().error.fields).toHaveLength(1);
     const empty = await create({ title: '', body: BODY });
     expect(empty.statusCode).toBe(422);
-    expect(empty.json().error.fields).toEqual([expect.objectContaining({ path: 'sermon' })]);
+    expect(empty.json().error.fields).toEqual([expect.objectContaining({ path: 'sermon.title' })]);
     const body = await create({ title: 'Broken', body: { ...BODY, languages: {} } });
     expect(body.statusCode).toBe(422);
     expect(body.json().error.fields).not.toHaveLength(0);
@@ -120,23 +162,34 @@ describe('sermon routes', () => {
     expect((await ask('GET', at(SERMON_ID_PATH, 'missing'))).statusCode).toBe(404);
   });
 
-  test('edits sermons and handles missing and malformed bodies', async () => {
+  test('edits sermons, checks the expected revision and handles missing and malformed bodies', async () => {
     const id = await created();
-    expect((await ask('PUT', at(SERMON_ID_PATH, id), { ...BODY, languages: { ta: BODY.languages['ta'] } })).statusCode).toBe(200);
-    expect((await ask('PUT', at(SERMON_ID_PATH, 'missing'), BODY)).statusCode).toBe(404);
-    expect((await ask('PUT', at(SERMON_ID_PATH, id), { ...BODY, languages: {} })).statusCode).toBe(422);
+    const stale = await ask('PUT', at(SERMON_ID_PATH, id), { expectedRevision: 2, body: BODY });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error.code).toBe(ENTITY_CONFLICT);
+    const edited = { expectedRevision: 1, body: { ...BODY, languages: { ta: BODY.languages['ta'] } } };
+    expect((await ask('PUT', at(SERMON_ID_PATH, id), edited)).statusCode).toBe(200);
+    expect((await ask('PUT', at(SERMON_ID_PATH, 'missing'), { expectedRevision: 1, body: BODY })).statusCode).toBe(404);
+    expect((await ask('PUT', at(SERMON_ID_PATH, id), { expectedRevision: 2, body: { ...BODY, languages: {} } })).statusCode).toBe(422);
+    expect((await ask('PUT', at(SERMON_ID_PATH, id), BODY)).statusCode).toBe(422);
   });
 
-  test('reads and edits raw YAML', async () => {
+  test('reads and edits raw YAML, checking the expected revision', async () => {
     const id = await created();
     expect((await ask('GET', at(`${SERMON_ID_PATH}/raw`, 'missing'))).statusCode).toBe(404);
     const raw = await ask('GET', at(`${SERMON_ID_PATH}/raw`, id));
     expect(raw.headers['content-type']).toContain('text/yaml');
     expect((await ask('GET', `${at(`${SERMON_ID_PATH}/raw`, id)}?revision=1`)).statusCode).toBe(200);
-    expect((await ask('PUT', at(`${SERMON_ID_PATH}/raw`, id), { bad: true })).statusCode).toBe(422);
-    expect((await ask('PUT', at(`${SERMON_ID_PATH}/raw`, id), 'languages:\n\tbad', admin, { 'content-type': 'text/plain' })).statusCode).toBe(422);
-    expect((await ask('PUT', at(`${SERMON_ID_PATH}/raw`, id), raw.body, admin, { 'content-type': 'text/plain' })).statusCode).toBe(200);
-    expect((await ask('PUT', at(`${SERMON_ID_PATH}/raw`, 'missing'), raw.body, admin, { 'content-type': 'text/plain' })).statusCode).toBe(404);
+    const rawPath = at(`${SERMON_ID_PATH}/raw`, id);
+    expect((await ask('PUT', rawPath, { bad: true })).statusCode).toBe(422);
+    expect((await ask('PUT', `${rawPath}?expectedRevision=1`, 'languages:\n\tbad', admin, { 'content-type': 'text/plain' })).statusCode).toBe(422);
+    expect((await ask('PUT', rawPath, raw.body, admin, { 'content-type': 'text/plain' })).statusCode).toBe(422);
+    expect((await ask('PUT', `${rawPath}?expectedRevision=bad`, raw.body, admin, { 'content-type': 'text/plain' })).statusCode).toBe(422);
+    const staleRaw = await ask('PUT', `${rawPath}?expectedRevision=2`, raw.body, admin, { 'content-type': 'text/plain' });
+    expect(staleRaw.statusCode).toBe(409);
+    expect(staleRaw.json().error.code).toBe(ENTITY_CONFLICT);
+    expect((await ask('PUT', `${rawPath}?expectedRevision=1`, raw.body, admin, { 'content-type': 'text/plain' })).statusCode).toBe(200);
+    expect((await ask('PUT', `${at(`${SERMON_ID_PATH}/raw`, 'missing')}?expectedRevision=1`, raw.body, admin, { 'content-type': 'text/plain' })).statusCode).toBe(404);
   });
 
   test('lists history and answers not found when empty', async () => {
@@ -145,7 +198,7 @@ describe('sermon routes', () => {
     expect((await ask('GET', at(`${SERMON_ID_PATH}/history`, id))).json().data).toHaveLength(1);
   });
 
-  test('validates generation and translates its reachable corpus failure', async () => {
+  test('validates generation and refuses a missing sermon or Slide Layout', async () => {
     const id = await created();
     expect((await ask('POST', at(`${SERMON_ID_PATH}/slides`, id), {})).statusCode).toBe(422);
     const request = { sermonRevision: 1, slideLayoutId: 'layout-missing', slideLayoutRevision: 1 };
@@ -153,14 +206,35 @@ describe('sermon routes', () => {
     expect(missing.statusCode).toBe(409);
     expect(missing.json().error.code).toBe(ENTITY_CONFLICT);
     expect((await ask('POST', at(`${SERMON_ID_PATH}/slides`, id), request)).statusCode).toBe(409);
+  });
+
+  test('generates slides from the corpus this deployment holds', async () => {
+    const id = await created();
     const layout = await layouts.create(slideLayoutContext(ADMINISTRATOR, CORRELATION), { name: 'Layout', body: { boxes: [{
       id: 'static', kind: 'text', importance: 'required', frame: { x: 0, y: 0, width: 1, height: 1 },
       binding: { mode: 'static', text: 'Sunday' },
       style: { fontFamily: 'Inter', fontWeight: 400, sizeRatio: 0.1, lineHeight: 1, align: 'start', verticalAlign: 'start' },
     }] } });
-    const generated = await ask('POST', at(`${SERMON_ID_PATH}/slides`, id), { ...request, slideLayoutId: layout.stamp.id });
-    expect(generated.statusCode).toBe(404);
-    expect(generated.json().error.code).toBe('corpus.reference.not_found');
+    const request = { sermonRevision: 1, slideLayoutId: layout.stamp.id, slideLayoutRevision: 1 };
+    const generated = await ask('POST', at(`${SERMON_ID_PATH}/slides`, id), request);
+    expect(generated.statusCode).toBe(200);
+    const body = generated.json().data['body'] as { readonly mode: string; readonly slides: readonly unknown[] };
+    expect(body.mode).toBe('generated');
+    expect(body.slides).toHaveLength(2);
+  });
+
+  test('translates a genuine corpus refusal while generating slides', async () => {
+    const id = await created();
+    const failing: Fetching = () => Promise.resolve({
+      status: 503,
+      json: () => Promise.resolve({ error: { code: 'store_locked', message: 'the library is busy' } }),
+    });
+    await app.close();
+    await serving(identity, sermons, failing);
+    const request = { sermonRevision: 1, slideLayoutId: 'layout-missing', slideLayoutRevision: 1 };
+    const refused = await ask('POST', at(`${SERMON_ID_PATH}/slides`, id), request);
+    expect(refused.statusCode).toBe(503);
+    expect(refused.json().error.code).toBe('corpus.unavailable');
   });
 });
 

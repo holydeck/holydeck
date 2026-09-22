@@ -267,17 +267,20 @@ export function buildApp({
   serveServiceRoutes(app, { services });
   serveServiceTemplateRoutes(app, { serviceTemplates });
 
-  // The content surfaces content-routes spec adds: each behind `content.edit`, the one permission an
-  // Editor holds and an Admin's Layout/Label/Language vocabulary above is deliberately not — this is
-  // what an Editor builds a service's content with, not what an Admin administers the catalogue with.
+  // The content surfaces content-routes spec adds: songs, sermons, slide groups and the library are each
+  // behind `content.edit` alone, the one permission an Editor holds and an Admin's own catalogue
+  // permissions above are deliberately not — this is what an Editor builds a service's content with, not
+  // what an Admin administers the catalogue with. Scripture search sits beside them but is reachable by
+  // either `content.edit` or `presentation.control`, since Control presentation searches mid-service too.
   serveSongRoutes(app, { songs, chords, identity });
-  serveSermonRoutes(app, { sermons, identity });
+  serveSermonRoutes(app, { sermons, corpus, identity });
   serveSlideGroupRoutes(app, { slideGroups, identity });
   serveLibraryRoutes(app, { library, identity });
   serveScriptureSearchRoutes(app, { corpus });
 
-  // Behind the same permission as the Slide Layout and media surfaces above: administering the
-  // content-language registry and the slide-label catalogue is Admin's, the same vocabulary again.
+  // Their own permission again, the same Admin's tier as the Slide Layout and media surfaces above but not
+  // the same permission: administering the content-language registry and the slide-label catalogue is
+  // gated behind `catalogue.manage`, read there behind `content.edit` the same as an Editor's other surfaces.
   serveContentLanguageRoutes(app, { contentLanguages, identity });
   serveSlideLabelRoutes(app, { slideLabels, identity });
 
