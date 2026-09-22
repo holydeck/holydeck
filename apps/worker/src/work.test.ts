@@ -62,6 +62,7 @@ test('an entry point supplying its dependencies replaces every placeholder with 
   };
   const backupProducer = {
     context: undefined,
+    schedulerState: {} as BackupProducerOptions['schedulerState'],
     archive: {} as BackupProducerOptions['archive'],
     db: {} as BackupProducerOptions['db'],
     restic: { repository: '/data/holydeck/restic', password: 'p'.repeat(64) },

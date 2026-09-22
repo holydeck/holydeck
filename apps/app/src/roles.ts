@@ -45,6 +45,12 @@ export const MEDIA_MANAGE = 'media.manage';
  */
 export const SERVICES_MANAGE = 'services.manage';
 
+/**
+ * Lists recorded backups and requests an on-demand run (OPS-05). Admin's alone, by role — the same as
+ * administering settings and accounts, with its own operator-facing permission apart from the stores.
+ */
+export const BACKUP_MANAGE = 'backup.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -53,6 +59,7 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     SERVICE_TEMPLATES_MANAGE,
     MEDIA_MANAGE,
     SERVICES_MANAGE,
+    BACKUP_MANAGE,
   ],
   editor: [SERVICES_MANAGE],
   member: [],

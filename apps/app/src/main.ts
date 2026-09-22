@@ -43,6 +43,8 @@ import { readWebBuild } from './static.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { Queue } from './queue.js';
+import type { RepositoryDb } from './repositories.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { SettingsAdmin } from './settings-admin.js';
@@ -95,6 +97,7 @@ let slideLayouts: SlideLayoutStore | undefined;
 // The media library is kept the same way and administered by the same Admin: a deployment with nowhere to
 // keep one has nothing here to upload to, and its route answers not-found the same way.
 let media: MediaLibrary | undefined;
+let backups: { readonly db: RepositoryDb; readonly queue: Queue } | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
@@ -108,6 +111,7 @@ if (settings.values.mongoUrl !== '') {
   await store.connect();
   checkSchema(await schemaStatus(repositoryDb(store.db()), systemContext(`boot:${process.pid}`)));
   const now = (): string => new Date().toISOString();
+  const queue = queueOn(queueDb(store.db()), { now });
   sessions = sessionsOn(sessionDb(store.db()), { now });
   identity = {
     accounts: accountsOn(accountDb(store.db()), { now }),
@@ -128,7 +132,7 @@ if (settings.values.mongoUrl !== '') {
   await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
   media = mediaLibraryOn(repositoryDb(store.db()), {
     now,
-    queue: queueOn(queueDb(store.db()), { now }),
+    queue,
     mediaRoot: settings.values.mediaRoot,
     write: async (root, key, bytes) => {
       await mkdir(root, { recursive: true });
@@ -140,6 +144,7 @@ if (settings.values.mongoUrl !== '') {
       return new Uint8Array(await readFile(key));
     },
   });
+  backups = { db: repositoryDb(store.db()), queue };
   settingsAdmin = settingsAdminOn(settings, {
     readFile: (path) => readFile(path, 'utf8'),
     writeFile,
@@ -175,6 +180,7 @@ const app = buildApp({
   settingsAdmin,
   slideLayouts,
   media,
+  backups,
   translationOffsets,
   shownReferences,
   services,

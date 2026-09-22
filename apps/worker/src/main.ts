@@ -154,6 +154,7 @@ if (work.runs === 'nothing') {
     },
     {
       context: backupContext('system', name),
+      schedulerState,
       archive: backupDb(store, store.db()),
       db: repositoryDb(store.db()),
       restic,

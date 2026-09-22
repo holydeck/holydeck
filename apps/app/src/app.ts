@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 
 import { serveAccountRoutes } from './accounts-routes.js';
 import { enforceAuthorization } from './authorization.js';
+import { serveBackupRoutes } from './backup-routes.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
@@ -29,6 +30,8 @@ import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { Queue } from './queue.js';
+import type { RepositoryDb } from './repositories.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { SlideLabelStore } from './slide-labels.js';
@@ -62,6 +65,9 @@ export interface AppOptions {
   slideLayouts?: SlideLayoutStore;
   /** Where an uploaded file becomes a media asset. Without it, there is nowhere for one to be uploaded to. */
   media?: MediaLibrary;
+  /** Where a backup is recorded and where an on-demand run is queued. Without both, there is
+   * nothing here to trigger or list. */
+  backups?: { readonly db: RepositoryDb; readonly queue: Queue };
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
   translationOffsets?: TranslationOffsetStore;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
@@ -89,6 +95,7 @@ export function buildApp({
   settingsAdmin,
   slideLayouts,
   media,
+  backups,
   translationOffsets,
   shownReferences,
   services,
@@ -224,6 +231,15 @@ export function buildApp({
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
   serveMediaRoutes(app, { media, identity });
+
+  // Behind its own Admin permission: listing recorded backups and asking for an on-demand run.
+  serveBackupRoutes(app, {
+    db: backups?.db,
+    queue: backups?.queue,
+    now: () => new Date().toISOString(),
+    timezone: settings.values.timezone,
+    identity,
+  });
 
   // Reading is public, the same as the corpus routes above: BIBL-02 calls an offset inspectable, and
   // there is nothing in one worth a session. Setting one is behind the same permission once again.

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACCOUNTS_MANAGE,
+  BACKUP_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
   PRESENTATION_CONTROL,
@@ -34,6 +35,7 @@ describe('what a role grants', () => {
       SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
+      BACKUP_MANAGE,
     ]);
   });
 
@@ -72,6 +74,7 @@ describe('what Control presentation is', () => {
       SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
+      BACKUP_MANAGE,
       PRESENTATION_CONTROL,
     ]);
   });

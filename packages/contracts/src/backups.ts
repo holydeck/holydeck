@@ -256,22 +256,46 @@ export interface RestoreSelection {
   readonly classes: readonly RestoreClass[];
 }
 
-const readRestoreClasses = (reader: FieldReader): readonly RestoreClass[] => {
-  const raw = reader.textList('classes');
+const readClassList = (
+  reader: FieldReader,
+  field: string,
+  options: { readonly optional: boolean } = { optional: false },
+): readonly RestoreClass[] => {
+  if (options.optional && !reader.names.includes(field)) return RESTORE_CLASSES;
+  const raw = reader.textList(field);
   const classes: RestoreClass[] = [];
   for (const [index, value] of raw.entries()) {
     const found = RESTORE_CLASSES.find((candidate) => candidate === value);
     if (found === undefined) {
-      reader.reject(`classes.${index}`, FIELD_CODES.notAllowed, `must be one of ${RESTORE_CLASSES.join(', ')}`);
+      reader.reject(`${field}.${index}`, FIELD_CODES.notAllowed, `must be one of ${RESTORE_CLASSES.join(', ')}`);
     } else if (classes.includes(found)) {
-      reader.reject(`classes.${index}`, FIELD_CODES.notAllowed, `${found} is selected more than once`);
+      reader.reject(`${field}.${index}`, FIELD_CODES.notAllowed, `${found} is selected more than once`);
     } else {
       classes.push(found);
     }
   }
-  if (classes.length === 0) reader.reject('classes', FIELD_CODES.notAllowed, 'selects nothing to restore');
+  if (classes.length === 0) reader.reject(field, FIELD_CODES.notAllowed, 'selects nothing to restore');
   return classes;
 };
+
+const readRestoreClasses = (reader: FieldReader): readonly RestoreClass[] => readClassList(reader, 'classes');
+
+export interface BackupRequest {
+  readonly components: readonly RestoreClass[];
+}
+
+/**
+ * What an operator may ask for when triggering a backup on demand. `components` is optional and
+ * defaults to every class (`RESTORE_CLASSES`) when absent — the whole point of an on-demand
+ * backup is "back up everything, right now" unless the operator narrows it. An explicit empty
+ * list is still refused, the same as a restore selecting nothing: there is no reading of "back up
+ * nothing" that is a legitimate request.
+ */
+export function parseBackupRequest(value: unknown): Parsed<BackupRequest> {
+  return parseObject(value, 'backup', (reader) => ({
+    components: readClassList(reader, 'components', { optional: true }),
+  }));
+}
 
 export function parseRestoreSelection(value: unknown): Parsed<RestoreSelection> {
   return parseObject(value, 'restore', (reader) => ({

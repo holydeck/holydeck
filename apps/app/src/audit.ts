@@ -90,6 +90,8 @@ export const AUDIT_ACTIONS = [
   'readiness.override',
   // Reserved for the backup surface T100+ builds. Exercised only by this task's own tests today.
   'backup.run',
+  // Written by backup-routes.ts when an operator triggers an on-demand backup.
+  'backup.request',
   // Reserved for the restore surface T101+ builds. Exercised only by this task's own tests today.
   'restore.run',
 ] as const;
@@ -157,6 +159,7 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'presentation.run': 'presentation',
   'readiness.override': 'presentation',
   'backup.run': 'backup',
+  'backup.request': 'backup',
   'restore.run': 'restore',
 };
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { RESTORE_CLASSES, parseBackupManifest, parseBackupProduction, parseRestoreSelection } from './backups.js';
+import { RESTORE_CLASSES, parseBackupManifest, parseBackupProduction, parseBackupRequest, parseRestoreSelection } from './backups.js';
 
 // Mirrors the valid fixture and the counterexamples backup-manifest.v1.json carries for `manifest` and
 // `consistency` — the two sections a backup run itself produces. The other three sections belong to
@@ -331,5 +331,30 @@ describe('what a restore may be asked to do', () => {
     const parsed = parseRestoreSelection({ classes: ['mongo'] });
     expect(parsed.ok).toBe(false);
     expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('restore.mode');
+  });
+});
+
+
+describe('what an operator may ask an on-demand backup to cover', () => {
+  it('defaults absent components to every class', () => {
+    const parsed = parseBackupRequest({});
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.components : undefined).toEqual(RESTORE_CLASSES);
+  });
+
+  it('accepts a settings-only backup', () => {
+    const parsed = parseBackupRequest({ components: ['settings'] });
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.components : undefined).toEqual(['settings']);
+  });
+
+  it.each([
+    { components: [], path: 'backup.components' },
+    { components: ['bogus'], path: 'backup.components.0' },
+    { components: ['mongo', 'mongo'], path: 'backup.components.1' },
+  ])('refuses $components at $path', ({ components, path }) => {
+    const parsed = parseBackupRequest({ components });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain(path);
   });
 });

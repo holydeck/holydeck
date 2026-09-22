@@ -13,6 +13,7 @@ import { PASSKEY_OPTIONS_PATH, PASSKEY_PATH } from '@holydeck/contracts/webauthn
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { VERSIONED_PREFIX, buildApp } from './app.js';
+import { BACKUPS_PATH } from './backup-routes.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
@@ -138,6 +139,9 @@ describe('every route that changes something', () => {
       // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
       // Admin's, the same as a Slide Layout's own surface above is.
       { method: 'POST', url: MEDIA_PATH },
+      // And triggering an on-demand backup: listing what has run is not a change, asking for a new one is,
+      // which is why only the POST side of the backup surface is on this list.
+      { method: 'POST', url: BACKUPS_PATH },
       // Behind the same permission once more: configuring a translation's offset is Admin's alone,
       // reading every one configured is not, which is why only this one route is on this list at all.
       { method: 'PUT', url: `${TRANSLATION_OFFSETS_PATH}/:abbr` },

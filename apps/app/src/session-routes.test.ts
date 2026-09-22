@@ -34,6 +34,7 @@ import { codeAt, stepAt } from './otp.js';
 import { passkeyContext, passkeysOn } from './passkeys.js';
 import {
   ACCOUNTS_MANAGE,
+  BACKUP_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
   PRESENTATION_CONTROL,
@@ -314,6 +315,7 @@ describe('signing in', () => {
         SERVICE_TEMPLATES_MANAGE,
         MEDIA_MANAGE,
         SERVICES_MANAGE,
+        BACKUP_MANAGE,
       ],
     });
     const cookie = String(response.headers['set-cookie']);
@@ -390,6 +392,7 @@ describe('signing in with a passkey', () => {
         SERVICE_TEMPLATES_MANAGE,
         MEDIA_MANAGE,
         SERVICES_MANAGE,
+        BACKUP_MANAGE,
       ],
     });
     const cookie = String(response.headers['set-cookie']);

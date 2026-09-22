@@ -149,6 +149,7 @@ describe('the context the trail is written under', () => {
       'presentation.run',
       'readiness.override',
       'backup.run',
+      'backup.request',
       'restore.run',
     ]);
   });
