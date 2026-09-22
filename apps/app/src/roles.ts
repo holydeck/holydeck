@@ -57,6 +57,15 @@ export const BACKUP_MANAGE = 'backup.manage';
  */
 export const RESTORE_MANAGE = 'restore.manage';
 
+/**
+ * Sees what the queue holds and asks a failed job be tried again (OPS-08). Admin's alone, by role —
+ * the same as every other administrative surface. Spelled `jobs.manage` deliberately apart from the
+ * store-level `jobs.read`/`jobs.run`/`jobs.requeue` `queue.ts` already grants at the record layer:
+ * an operator-facing permission and the internal vocabulary it is checked against are never the
+ * same word.
+ */
+export const JOBS_MANAGE = 'jobs.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -67,6 +76,7 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     SERVICES_MANAGE,
     BACKUP_MANAGE,
     RESTORE_MANAGE,
+    JOBS_MANAGE,
   ],
   editor: [SERVICES_MANAGE],
   member: [],

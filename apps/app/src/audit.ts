@@ -103,6 +103,10 @@ export const AUDIT_ACTIONS = [
   // A grading pass over the audit trail's own declared retention window (OPS-07): counts what it found
   // removable and retained, and removes nothing itself — `retention.ts`'s own header says why.
   'retention.sweep',
+  // A failed job an administrator asked to run again (OPS-08). Written by `job-routes.ts`. Category
+  // `integration` — queued work crossing into the systems it does, not any of the more specific
+  // categories above.
+  'job.requeue',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -174,6 +178,7 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'restore.apply.complete': 'restore',
   'restore.apply.fail': 'restore',
   'retention.sweep': 'content',
+  'job.requeue': 'integration',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */

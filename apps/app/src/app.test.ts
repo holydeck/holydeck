@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { BACKUPS_PATH } from './backup-routes.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
+import { JOBS_PATH } from './job-routes.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
 import { RESTORES_PATH } from './restore-routes.js';
@@ -145,6 +146,9 @@ describe('every route that changes something', () => {
       { method: 'POST', url: BACKUPS_PATH },
       // Behind the same permission as the backup surface: applying a recorded backup to production.
       { method: 'POST', url: RESTORES_PATH },
+      // The queue's own surface, gated by its own permission: trying a failed job again is Admin's.
+      // Listing what the queue holds and summarizing it are not changes and are absent here.
+      { method: 'POST', url: `${JOBS_PATH}/:id/requeue` },
       // Behind the same permission once more: configuring a translation's offset is Admin's alone,
       // reading every one configured is not, which is why only this one route is on this list at all.
       { method: 'PUT', url: `${TRANSLATION_OFFSETS_PATH}/:abbr` },

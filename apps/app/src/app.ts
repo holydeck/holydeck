@@ -10,6 +10,7 @@ import { serveCapabilityRoutes } from './capability-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
+import { serveJobRoutes } from './job-routes.js';
 import { isUpgrade } from './live.js';
 import { guardMaintenance } from './maintenance.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
@@ -258,6 +259,14 @@ export function buildApp({
     db: backups?.db,
     queue: backups?.queue,
     now: () => new Date().toISOString(),
+    identity,
+  });
+
+  // Behind its own Admin permission: showing what the queue holds and trying a failed job again.
+  // Reuses the backup surface's own `queue` — the same queue every backup, restore-apply and future
+  // job kind is recorded in.
+  serveJobRoutes(app, {
+    queue: backups?.queue,
     identity,
   });
 
