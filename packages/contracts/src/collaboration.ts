@@ -117,8 +117,8 @@ export interface ConflictResolutionInput {
 }
 
 /** Reads a resolution request so the body exists exactly where the chosen settlement needs one. */
-export const parseConflictResolution: ParseFn<ConflictResolutionInput> & ((value: unknown) => Parsed<ConflictResolutionInput>) = (value, path: string = 'body') =>
-  parseObject(value, path, (reader) => {
+export function parseConflictResolution(value: unknown, path = 'body'): Parsed<ConflictResolutionInput> {
+  return parseObject(value, path, (reader) => {
     const strategy = reader.choice('strategy', CONFLICT_RESOLUTION_STRATEGIES);
     if (strategy === 'combine') {
       const raw = reader.present('resolvedBody');
@@ -135,3 +135,4 @@ export const parseConflictResolution: ParseFn<ConflictResolutionInput> & ((value
     );
     return { strategy };
   });
+}

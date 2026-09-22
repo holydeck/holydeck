@@ -67,5 +67,6 @@ export interface PresenceEnterInput {
 }
 
 /** Reads an enter request through the same key rule the store relies on when it refreshes an entry. */
-export const parsePresenceEnter: ParseFn<PresenceEnterInput> & ((value: unknown) => Parsed<PresenceEnterInput>) = (value, path: string = 'params') =>
-  parseObject(value, path, (reader) => ({ contentId: keyPart(reader, 'contentId') }));
+export function parsePresenceEnter(value: unknown, path = 'params'): Parsed<PresenceEnterInput> {
+  return parseObject(value, path, (reader) => ({ contentId: keyPart(reader, 'contentId') }));
+}
