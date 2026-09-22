@@ -33,6 +33,8 @@ import { FIELD_CODES, type FieldReader, type Parsed, type ParseFn, parseObject }
 /** Where every problem in a song body is reported under, and the root a raw editor locates against. */
 export const SONG_PATH = 'song';
 
+export const SONGS_PATH = '/api/v1/songs';
+
 /** The version of the portable song file this build writes. Older versions are read by declared steps. */
 export const SONG_SCHEMA_VERSION = 1;
 
@@ -215,6 +217,13 @@ export const parseLyricSection: ParseFn<LyricSection> = (value, path) =>
 
 const MANUAL: SongProvenance = { source: 'manual' };
 
+const EMPTY_SONG_BODY: SongBody = {
+  titles: { tamil: '', romanized: '' },
+  languages: [],
+  sections: [],
+  provenance: MANUAL,
+};
+
 /** The fields only an import has. A song somebody typed carrying one of them is a song about nothing. */
 const IMPORT_FIELDS = ['importer', 'importedAt', 'reference', 'importId'] as const;
 
@@ -314,6 +323,43 @@ export function parseSongBody(value: unknown): Parsed<SongBody> {
     };
   });
 }
+
+export type SongDraft = { readonly title: string; readonly body: SongBody };
+
+export const parseSongDraft: ParseFn<SongDraft> = (value, path) =>
+  parseObject(value, path, (reader) => ({
+    title: reader.text('title'),
+    body: reader.parsed('body', parseSongBody, EMPTY_SONG_BODY),
+  }));
+
+export type SongEdit = { readonly expectedRevision: number; readonly body: SongBody };
+
+export const parseSongEdit: ParseFn<SongEdit> = (value, path) =>
+  parseObject(value, path, (reader) => ({
+    expectedRevision: reader.wholeNumber('expectedRevision', 1),
+    body: reader.parsed('body', parseSongBody, EMPTY_SONG_BODY),
+  }));
+
+export type SongImportRequest = { readonly title: string; readonly text: string };
+
+export const parseSongImportRequest: ParseFn<SongImportRequest> = (value, path) =>
+  parseObject(value, path, (reader) => ({ title: reader.text('title'), text: reader.text('text') }));
+
+export type SongGeneration = {
+  readonly songRevision: number;
+  readonly slideLayoutId: string;
+  readonly slideLayoutRevision: number;
+  readonly slideGroupId?: string;
+};
+
+export const parseSongGeneration: ParseFn<SongGeneration> = (value, path) =>
+  parseObject(value, path, (reader) => {
+    const songRevision = reader.wholeNumber('songRevision', 1);
+    const slideLayoutId = reader.text('slideLayoutId');
+    const slideLayoutRevision = reader.wholeNumber('slideLayoutRevision', 1);
+    const slideGroupId = reader.optionalText('slideGroupId');
+    return { songRevision, slideLayoutId, slideLayoutRevision, ...(slideGroupId === undefined ? {} : { slideGroupId }) };
+  });
 
 /**
  * How a song travels between one HolyDeck and another. No migration step is declared because no earlier

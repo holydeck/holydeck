@@ -13,9 +13,11 @@
 // payload shape, kept in contracts because a shape a store validates against belongs beside the
 // entity kind it is stamped as, the same way `slide-labels.ts` keeps `SlideLabelDraft`.
 
-import { type FieldReader, type ParseFn, parseObject } from './problems.js';
+import { type FieldReader, type Parsed, type ParseFn, parseObject } from './problems.js';
 
 import type { EntityKind } from './entities.js';
+
+export const CONTENT_LANGUAGES_PATH = '/api/v1/content-languages';
 
 /** One entry of the content-language registry: a stable key, a name to show, the script it's
  *  written in, and the CSS font stack that script renders through. */
@@ -43,6 +45,22 @@ export const parseContentLanguageDraft: ParseFn<ContentLanguageDraft> = (value, 
     script: reader.text('script'),
     fallbackFont: reader.text('fallbackFont'),
   }));
+
+export type ContentLanguageCreate = ContentLanguageDraft & { readonly key: string };
+
+export const parseContentLanguageCreate: ParseFn<ContentLanguageCreate> = (value, path) =>
+  parseObject(value, path, (reader) => ({
+    key: reader.text('key'),
+    displayName: reader.text('displayName'),
+    script: reader.text('script'),
+    fallbackFont: reader.text('fallbackFont'),
+  }));
+
+export type ContentLanguageStatus = { readonly archived: boolean };
+
+export function parseContentLanguageStatus(value: unknown): Parsed<ContentLanguageStatus> {
+  return parseObject(value, 'contentLanguage', (reader) => ({ archived: reader.flag('archived') }));
+}
 
 /**
  * The T11 legal decision: HolyDeck ships no bundled or licensed webfont for Tamil script. Both

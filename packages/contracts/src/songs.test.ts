@@ -15,6 +15,10 @@ import {
   importSong,
   parseLyricSection,
   parseSongBody,
+  parseSongDraft,
+  parseSongEdit,
+  parseSongGeneration,
+  parseSongImportRequest,
   parseSongMetadata,
   parseSongProvenance,
 } from './songs.js';
@@ -118,6 +122,49 @@ describe('reading one song configuration', () => {
       'song.titles.tamil: field.not_text',
     ]);
     expect(problemsOf(song({ titles: { romanized: 'Paadal' } }))).toEqual(['song.titles.tamil: field.required']);
+  });
+});
+
+describe('reading song route payloads', () => {
+  const body = { titles: { tamil: '', romanized: '' }, languages: [], sections: [], provenance: { source: 'manual' } };
+
+  it('accepts a SongDraft', () => {
+    expect(parseSongDraft({ title: 'Grace', body }, 'song')).toEqual({ ok: true, value: { title: 'Grace', body } });
+  });
+
+  it('refuses each required SongDraft field', () => {
+    expect(parseSongDraft({ body }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.title', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongDraft({ title: 'Grace' }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.body', code: FIELD_CODES.required, message: 'is required' }] });
+  });
+
+  it('accepts a SongEdit', () => {
+    expect(parseSongEdit({ expectedRevision: 2, body }, 'song')).toEqual({ ok: true, value: { expectedRevision: 2, body } });
+  });
+
+  it('refuses each required SongEdit field', () => {
+    expect(parseSongEdit({ body }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.expectedRevision', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongEdit({ expectedRevision: 2 }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.body', code: FIELD_CODES.required, message: 'is required' }] });
+  });
+
+  it('accepts a SongImportRequest', () => {
+    expect(parseSongImportRequest({ title: 'Grace', text: 'Amazing grace' }, 'song')).toEqual({ ok: true, value: { title: 'Grace', text: 'Amazing grace' } });
+  });
+
+  it('refuses each required SongImportRequest field', () => {
+    expect(parseSongImportRequest({ text: 'Amazing grace' }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.title', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongImportRequest({ title: 'Grace' }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.text', code: FIELD_CODES.required, message: 'is required' }] });
+  });
+
+  it('accepts a SongGeneration with an optional group', () => {
+    const value = { songRevision: 2, slideLayoutId: 'layout', slideLayoutRevision: 3, slideGroupId: 'group' };
+    expect(parseSongGeneration(value, 'song')).toEqual({ ok: true, value });
+  });
+
+  it('refuses each required SongGeneration field', () => {
+    const value = { songRevision: 2, slideLayoutId: 'layout', slideLayoutRevision: 3 };
+    expect(parseSongGeneration({ ...value, songRevision: undefined }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.songRevision', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongGeneration({ ...value, slideLayoutId: undefined }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.slideLayoutId', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSongGeneration({ ...value, slideLayoutRevision: undefined }, 'song')).toEqual({ ok: false, problems: [{ path: 'song.slideLayoutRevision', code: FIELD_CODES.required, message: 'is required' }] });
   });
 });
 
