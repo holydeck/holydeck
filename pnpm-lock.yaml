@@ -381,9 +381,15 @@ importers:
       '@holydeck/app':
         specifier: workspace:*
         version: link:../../apps/app
+      '@holydeck/cli':
+        specifier: workspace:*
+        version: link:../../apps/cli
       '@holydeck/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@holydeck/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@holydeck/corpus':
         specifier: workspace:*
         version: link:../../apps/corpus

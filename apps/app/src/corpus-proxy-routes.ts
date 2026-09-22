@@ -106,10 +106,17 @@ async function proxy(
     const response = await fetching(`${address}${upstreamPathFor(request)}`, {
       method: request.method,
       headers: forwardableHeaders(request.headers),
-      // The one body this proxy ever forwards is render's, and Fastify has already parsed it into an
-      // object by the time a handler sees it — re-serialized here rather than streamed, which is
-      // byte-identical to what a client sent for the well-formed JSON every render request carries.
-      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : JSON.stringify(request.body),
+      // The one body this proxy ever forwards is render's, and Fastify has already parsed it into a
+      // string or an object by the time a handler sees it, never a raw buffer — re-serialized here
+      // rather than streamed. A string (the sermon text `server-client.ts` posts as `text/plain`) is
+      // forwarded byte-identical to what the client sent; anything else is JSON, re-encoded the same
+      // way it was decoded.
+      body:
+        request.method === 'GET' || request.method === 'HEAD'
+          ? undefined
+          : typeof request.body === 'string'
+            ? request.body
+            : JSON.stringify(request.body),
       signal: controller.signal,
     });
     reply.code(response.status);

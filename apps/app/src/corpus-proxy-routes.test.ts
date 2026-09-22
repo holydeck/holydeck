@@ -119,6 +119,21 @@ describe('the corpus proxy', () => {
     await app.close();
   });
 
+  it('forwards a text/plain render body byte-identical, the way server-client.ts posts a sermon', async () => {
+    const { fetching, asked } = answering({ output: 'rendered', notices: [] });
+    const app = proxiedApp(fetching);
+    const sermon = 'translations:\n  - KJV\nverses:\n  - book: PSA\n    chapter: 117\n    verses: 1-2\n';
+    const response = await app.inject({
+      method: 'POST',
+      url: '/corpus/api/v1/render',
+      payload: sermon,
+      headers: { authorization: 'Bearer client-token', 'content-type': 'text/plain; charset=utf-8' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(asked[0]?.init.body).toBe(sermon);
+    await app.close();
+  });
+
   it('refuses a render request without a bearer authorization header, before any upstream call', async () => {
     const { fetching, asked } = answering({});
     const app = proxiedApp(fetching);

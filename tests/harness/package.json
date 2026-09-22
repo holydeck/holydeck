@@ -15,7 +15,9 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "@holydeck/app": "workspace:*",
+    "@holydeck/cli": "workspace:*",
     "@holydeck/contracts": "workspace:*",
+    "@holydeck/core": "workspace:*",
     "@holydeck/corpus": "workspace:*",
     "@holydeck/localization": "workspace:*",
     "@holydeck/web": "workspace:*",
