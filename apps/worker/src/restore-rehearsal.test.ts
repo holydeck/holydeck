@@ -13,6 +13,7 @@ import { fakeDb } from '../../app/test/helpers/fake-db.js';
 import type { Document } from '@holydeck/app/repositories';
 import type { RestoreCollection, RestoreDb } from '@holydeck/app/restores';
 import type { LeasedJob } from '@holydeck/contracts/jobs';
+import type { SchedulerStateStore } from './scheduler-state.js';
 
 class FakeChild extends EventEmitter {
   readonly kill = vi.fn();
@@ -109,6 +110,20 @@ const fakeTarget = (): RestoreDb & { readonly rows: Map<string, Document[]> } =>
   };
 };
 
+/** Records what a rehearsal reported when it finished, without asserting on any other job's fields. */
+const fakeSchedulerState = (): SchedulerStateStore & { readonly calls: string[] } => {
+  const calls: string[] = [];
+  return {
+    calls,
+    read: async () => ({}),
+    markBackup: async () => {},
+    markRestoreRehearsal: async (at: string) => {
+      calls.push(at);
+    },
+    markRetentionSweep: async () => {},
+  };
+};
+
 const options = (over: Partial<Parameters<typeof restoreRehearsalOn>[0]> = {}): Parameters<typeof restoreRehearsalOn>[0] => ({
   context: CONTEXT,
   db: fakeDb(),
@@ -119,6 +134,7 @@ const options = (over: Partial<Parameters<typeof restoreRehearsalOn>[0]> = {}): 
   schemaVersion: 19,
   now: () => NOW,
   newId: () => 'restore-fixed',
+  schedulerState: fakeSchedulerState(),
   ...over,
 });
 
@@ -142,8 +158,15 @@ describe('rehearsing a restore', () => {
     const target = fakeTarget();
     const revokeEvery = vi.fn(async () => 3);
     const revokeEveryCapability = vi.fn(async () => 6);
+    const schedulerState = fakeSchedulerState();
     const handler = restoreRehearsalOn(
-      options({ db, target, sessions: { revokeEvery }, capabilities: { revokeEvery: revokeEveryCapability } }),
+      options({
+        db,
+        target,
+        sessions: { revokeEvery },
+        capabilities: { revokeEvery: revokeEveryCapability },
+        schedulerState,
+      }),
     );
 
     const running = handler(job(), new AbortController().signal);
@@ -190,6 +213,8 @@ describe('rehearsing a restore', () => {
     expect(target.rows.get('services') ?? []).toEqual([]);
     // And the directory the archive was restored into is not left behind on the worker's disk.
     expect(existsSync(restored)).toBe(false);
+    // The scheduler never writes this itself (R7) — the job that finished records it.
+    expect(schedulerState.calls).toEqual([NOW]);
   });
 
   it('refuses when this deployment has never recorded a backup to rehearse', async () => {
@@ -215,7 +240,8 @@ describe('rehearsing a restore', () => {
     const db = fakeDb();
     db.rows.set('backups', [recordedBackup([...dumps.map((dump) => dump.content), ...RESTIC_CONTENTS])]);
     const stopping = new AbortController();
-    const handler = restoreRehearsalOn(options({ db }));
+    const schedulerState = fakeSchedulerState();
+    const handler = restoreRehearsalOn(options({ db, schedulerState }));
 
     const running = handler(job(), stopping.signal);
     await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(1));
@@ -225,5 +251,6 @@ describe('rehearsing a restore', () => {
     await expect(running).rejects.toThrow('restore rehearsal stopped after its lease was lost');
     expect(spawned).toHaveBeenCalledTimes(1);
     expect(db.rows.get('restores') ?? []).toHaveLength(0);
+    expect(schedulerState.calls).toEqual([]);
   });
 });

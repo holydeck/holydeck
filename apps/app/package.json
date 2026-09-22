@@ -60,6 +60,14 @@
     "./migrations": {
       "types": "./dist/migrations.d.ts",
       "import": "./dist/migrations.js"
+    },
+    "./schedule": {
+      "types": "./dist/schedule.d.ts",
+      "import": "./dist/schedule.js"
+    },
+    "./audit": {
+      "types": "./dist/audit.d.ts",
+      "import": "./dist/audit.js"
     }
   },
   "scripts": {

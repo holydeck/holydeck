@@ -16,6 +16,7 @@ import { checkRepository, restoreSnapshot } from './restic.js';
 
 import type { RepositoryDb } from '@holydeck/app/repositories';
 import type { RecoveryTargets, RestoreCapabilities, RestoreDb, RestoreSessions } from '@holydeck/app/restores';
+import type { SchedulerStateStore } from './scheduler-state.js';
 import type { ResticOptions } from './restic.js';
 import type { Handler } from './runner.js';
 
@@ -32,6 +33,8 @@ export interface RestoreRehearsalOptions {
   readonly now: () => string;
   readonly newId?: () => string;
   readonly objectives?: RecoveryTargets;
+  /** Where this job records that it finished (R7): the scheduler only reads this, never writes it. */
+  readonly schedulerState: SchedulerStateStore;
 }
 
 const stopped = (signal: AbortSignal): void => {
@@ -73,6 +76,7 @@ export function restoreRehearsalOn(options: RestoreRehearsalOptions): Handler {
         schemaVersion: options.schemaVersion,
         objectives: options.objectives,
       });
+      await options.schedulerState.markRestoreRehearsal(options.now());
     } finally {
       await rm(restoredRoot, { recursive: true, force: true });
     }

@@ -118,6 +118,11 @@ export function workerContext(correlationId: string): RequestContext {
   });
 }
 
+/** The context the scheduler enqueues under: the product acting as itself, allowed to enqueue and nothing else. */
+export function schedulerContext(correlationId: string): RequestContext {
+  return requestContext({ actor: 'system', permissions: [QUEUE_PERMISSIONS.enqueue], correlationId });
+}
+
 // Mongo compares `leaseExpiresAt` as a string, which is the comparison of the instants it names only while
 // every one of them is written the same way. A clock that writes them any other way is refused here rather
 // than producing a lease that never expires or one that expires at once.

@@ -3,12 +3,13 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { checkOwnSettingsMount, readSettingsText } from '@holydeck/app/boot';
+import { AUDIT_CATEGORIES, CATEGORY_OF, auditReadContext } from '@holydeck/app/audit';
 import { backupContext, backupDb } from '@holydeck/app/backups';
 import { capabilityDb, capabilitiesOn } from '@holydeck/app/capabilities';
 import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
 import { SCHEMA_VERSION } from '@holydeck/app/migrations';
-import { queueDb, queueOn, workerContext } from '@holydeck/app/queue';
-import { repositoryDb } from '@holydeck/app/repositories';
+import { queueDb, queueOn, schedulerContext, workerContext } from '@holydeck/app/queue';
+import { repositoriesOn, repositoryDb } from '@holydeck/app/repositories';
 import { rehearsalDatabaseName, restoreContext, restoreDb } from '@holydeck/app/restores';
 import { sessionDb, sessionsOn } from '@holydeck/app/sessions';
 import { ensureResticPassword } from '@holydeck/app/settings-admin';
@@ -19,7 +20,19 @@ import { HEARTBEAT_INTERVAL_MS, heartbeatPath, heartbeatText } from './heartbeat
 import { ffmpegPosterGenerator } from './poster-generator.js';
 import { runnerOn } from './runner.js';
 import { assertUsablePaths, workerPaths } from './runtime.js';
+import { schedulerOn } from './scheduler.js';
+import { schedulerStateDb, schedulerStateOn } from './scheduler-state.js';
 import { HANDLERS, handlersOn, workToDo } from './work.js';
+
+/** Every action a due backup should treat as "the deployment changed since it last ran" (R7's `dueJobs`). */
+const CHANGE_CATEGORIES: ReadonlySet<string> = new Set<(typeof AUDIT_CATEGORIES)[number]>([
+  'settings',
+  'content',
+  'presentation',
+]);
+const CHANGE_ACTIONS = Object.entries(CATEGORY_OF)
+  .filter(([, category]) => CHANGE_CATEGORIES.has(category))
+  .map(([action]) => action);
 
 const path = settingsPath(process.env);
 checkOwnSettingsMount(path);
@@ -83,6 +96,10 @@ const parked = (): Promise<void> =>
 
 const work = workToDo(HANDLERS, settings.values.mongoUrl);
 const now = (): string => new Date().toISOString();
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 if (work.runs === 'nothing') {
   process.stdout.write(`worker claims no job: ${work.reason}\n`);
@@ -126,6 +143,7 @@ if (work.runs === 'nothing') {
   // deployment would prove the same thing at the price of signing a congregation out mid-service, which
   // is not a price a rehearsal ever gets to charge.
   const rehearsal = store.db(rehearsalDatabaseName(store.db().databaseName));
+  const schedulerState = schedulerStateOn(schedulerStateDb(store.db()));
   const handlers = handlersOn(
     {
       context: mediaContext('system', name),
@@ -154,6 +172,7 @@ if (work.runs === 'nothing') {
       restic,
       schemaVersion: SCHEMA_VERSION,
       now,
+      schedulerState,
     },
   );
   const runner = runnerOn({
@@ -162,18 +181,40 @@ if (work.runs === 'nothing') {
     worker: name,
     handlers,
     now,
-    sleep: (ms) =>
-      new Promise((resolve) => {
-        setTimeout(resolve, ms);
-      }),
+    sleep,
     ticker: (everyMs, tick) => {
       const timer = setInterval(tick, everyMs);
       return () => void clearInterval(timer);
     },
     report: (line) => void process.stdout.write(`${line}\n`),
   });
+  // R7: the scheduler only ever reads `scheduler_state` and enqueues what is due — each job handler above
+  // records its own success. It shares the worker's queue and settings but is otherwise independent of the
+  // runner, so the two loops run concurrently and either one stopping the process stops both.
+  const auditEvents = repositoriesOn(repositoryDb(store.db())).auditEvents;
+  const scheduler = schedulerOn({
+    queue,
+    state: schedulerState,
+    settings: {
+      timezone: configured.values.timezone,
+      backupDailyAt: configured.values.backupDailyAt,
+      backupComponents: configured.values.backupComponents,
+      backupMinimumGapMinutes: configured.values.backupMinimumGapMinutes,
+      backupRehearsalWeekday: configured.values.backupRehearsalWeekday,
+      retentionSweepAt: configured.values.retentionSweepAt,
+    },
+    context: schedulerContext(name),
+    changedSince: async (since) => {
+      const filter = since === undefined
+        ? { action: { $in: CHANGE_ACTIONS }, outcome: 'allowed' }
+        : { action: { $in: CHANGE_ACTIONS }, outcome: 'allowed', at: { $gt: since } };
+      return (await auditEvents.count(auditReadContext('system', name), filter)) > 0;
+    },
+    now: () => new Date(),
+    sleep,
+  });
   try {
-    await runner.run(stopping.signal);
+    await Promise.all([runner.run(stopping.signal), scheduler.run(stopping.signal)]);
   } finally {
     await store.close();
   }

@@ -215,3 +215,8 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
 export function auditContext(actor: string, correlationId: string): RequestContext {
   return requestContext({ actor, permissions: [permissionsFor('auditEvents').append], correlationId });
 }
+
+/** The context a reader of the trail runs under: able to read it, and to do nothing else. */
+export function auditReadContext(actor: string, correlationId: string): RequestContext {
+  return requestContext({ actor, permissions: [permissionsFor('auditEvents').read], correlationId });
+}

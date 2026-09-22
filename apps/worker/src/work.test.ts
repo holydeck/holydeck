@@ -79,6 +79,7 @@ test('an entry point supplying its dependencies replaces every placeholder with 
     restic: { repository: '/data/holydeck/restic', password: 'p'.repeat(64) },
     schemaVersion: 1,
     now: () => '2026-09-21T00:00:00.000Z',
+    schedulerState: {} as RestoreRehearsalOptions['schedulerState'],
   };
   const handlers = handlersOn(media, backupProducer, restoreRehearsal);
   expect(Object.keys(handlers)).toEqual(['media-ingest', 'backup-run', 'restore-run']);
