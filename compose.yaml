@@ -31,10 +31,20 @@ services:
   mongo:
     image: mongo:8
     restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${HOLYDECK_MONGO_ROOT_PASSWORD:?set a long random value before starting}
+      HOLYDECK_MONGO_PASSWORD: ${HOLYDECK_MONGO_PASSWORD:?set a long random value before starting}
     volumes:
       - mongo-data:/data/db
+      - ./deploy/mongo-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      # A plain ping succeeds even against the throwaway, unauthenticated mongod the entrypoint runs
+      # the initdb scripts against, before it restarts into the authenticated instance this stack
+      # actually depends on (ping is deliberately exempt from authorization) - so depends_on could
+      # race a server that is mid-restart. listDatabases needs a session, so demanding it fail
+      # unauthenticated is what actually proves the authenticated instance is the one answering.
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping')\" >/dev/null 2>&1 && ! mongosh --quiet --eval \"db.adminCommand('listDatabases')\" >/dev/null 2>&1"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -43,7 +53,7 @@ services:
     image: ghcr.io/holydeck/server:latest
     restart: unless-stopped
     environment:
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017
+      HOLYDECK_MONGO_URL: mongodb://holydeck:${HOLYDECK_MONGO_PASSWORD:?set a long random value before starting}@mongo:27017?authSource=holydeck
       HOLYDECK_MONGO_DB: holydeck
       # Long and random, kept out of this file. Generate one with: openssl rand -hex 32
       HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:?set a long random value before starting}
@@ -65,7 +75,7 @@ services:
       dockerfile: apps/app/Dockerfile
     command: ["node", "/srv/app/dist/migrate.js"]
     environment:
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+      HOLYDECK_MONGO_URL: mongodb://holydeck:${HOLYDECK_MONGO_PASSWORD:?set a long random value before starting}@mongo:27017/holydeck?authSource=holydeck
     volumes:
       - holydeck-data:/data/holydeck
       - ./config:/data/holydeck/config
@@ -85,7 +95,7 @@ services:
       # The application reads the corpus over this network and never publishes it onwards.
       HOLYDECK_CORPUS_URL: http://server:3000
       HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:?set a long random value before starting}
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+      HOLYDECK_MONGO_URL: mongodb://holydeck:${HOLYDECK_MONGO_PASSWORD:?set a long random value before starting}@mongo:27017/holydeck?authSource=holydeck
     ports:
       - "3100:3100"
     depends_on:
@@ -109,7 +119,7 @@ services:
     command: ["node", "/srv/worker/dist/main.js"]
     restart: unless-stopped
     environment:
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+      HOLYDECK_MONGO_URL: mongodb://holydeck:${HOLYDECK_MONGO_PASSWORD:?set a long random value before starting}@mongo:27017/holydeck?authSource=holydeck
     volumes:
       - holydeck-data:/data/holydeck
       - ./config:/data/holydeck/config

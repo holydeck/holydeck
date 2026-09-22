@@ -25,11 +25,29 @@ const DEV_TOP_SERVICES = ['app', 'server', 'web', 'worker'];
 // services named here, and --wait follows their depends_on conditions rather than needing them spelled out.
 const DEPLOY_TOP_SERVICES = ['app', 'server', 'worker'];
 
-// compose.yaml requires this and has no dev-token fallback; nothing this script does is a real deployment,
-// so a fixed placeholder is enough to bring it up for verification.
+// compose.yaml requires these and has no dev-token/dev-password fallback; nothing this script does is a
+// real deployment, so fixed placeholders are enough to bring it up for verification.
 const DEPLOY_TOKEN = 'stack-verify-corpus-token-not-a-secret';
+const DEPLOY_MONGO_ROOT_PASSWORD = 'stack-verify-mongo-root-not-a-secret';
+const DEPLOY_MONGO_PASSWORD = 'stack-verify-mongo-app-not-a-secret';
 
-const ENV_FOR = Object.freeze({ [DEPLOY_FILE]: { HOLYDECK_CORPUS_TOKEN: DEPLOY_TOKEN } });
+const ENV_FOR = Object.freeze({
+  [DEPLOY_FILE]: {
+    HOLYDECK_CORPUS_TOKEN: DEPLOY_TOKEN,
+    HOLYDECK_MONGO_ROOT_PASSWORD: DEPLOY_MONGO_ROOT_PASSWORD,
+    HOLYDECK_MONGO_PASSWORD: DEPLOY_MONGO_PASSWORD,
+  },
+});
+
+// Every stack now runs mongo with authentication on (OPS's Mongo-auth change), so the app-user password
+// this script uses to inspect each database directly must match what each compose file actually applied:
+// compose.dev.yaml's own `:-` default (this script never overrides it), compose.test.yaml's hardcoded
+// literal, and the DEPLOY_MONGO_PASSWORD this script sets above.
+const MONGO_PASSWORD_FOR = Object.freeze({
+  [DEV_FILE]: 'dev-mongo-app-not-a-secret',
+  [TEST_FILE]: 'test-mongo-password-not-a-secret',
+  [DEPLOY_FILE]: DEPLOY_MONGO_PASSWORD,
+});
 
 // What "a usable seeded instance" (T59, SEED-01) means: the content-language registry, the slide-label
 // catalogue, the built-in slide layouts and the default service template are all non-empty. slide_groups
@@ -73,7 +91,15 @@ const down = (file, { volumes }) =>
   compose(file, ['down', '--remove-orphans', ...(volumes ? ['--volumes'] : [])]);
 
 const mongo = (file, script) =>
-  compose(file, ['exec', '-T', 'mongo', 'mongosh', 'holydeck', '--quiet', '--eval', script], true).trim();
+  compose(
+    file,
+    [
+      'exec', '-T', 'mongo', 'mongosh', 'holydeck',
+      '-u', 'holydeck', '-p', MONGO_PASSWORD_FOR[file], '--authenticationDatabase', 'holydeck',
+      '--quiet', '--eval', script,
+    ],
+    true,
+  ).trim();
 
 const check = (claim, ok, detail) => {
   if (!ok) failures.push(claim);

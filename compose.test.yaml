@@ -28,7 +28,7 @@ services:
       context: .
       dockerfile: apps/corpus/Dockerfile
     environment:
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017
+      HOLYDECK_MONGO_URL: mongodb://holydeck:test-mongo-password-not-a-secret@mongo:27017?authSource=holydeck
       HOLYDECK_MONGO_DB: holydeck
       HOLYDECK_LOG_LEVEL: warn
       HOLYDECK_CORPUS_TOKEN: test-corpus-token-not-a-secret
@@ -42,7 +42,7 @@ services:
       dockerfile: apps/app/Dockerfile
     command: ["node", "/srv/app/dist/migrate.js"]
     environment:
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+      HOLYDECK_MONGO_URL: mongodb://holydeck:test-mongo-password-not-a-secret@mongo:27017/holydeck?authSource=holydeck
       HOLYDECK_LOG_LEVEL: warn
     tmpfs:
       - /data/holydeck:size=64m,mode=1777
@@ -59,7 +59,7 @@ services:
       HOLYDECK_LOG_LEVEL: warn
       HOLYDECK_CORPUS_URL: http://server:3000
       HOLYDECK_CORPUS_TOKEN: test-corpus-token-not-a-secret
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+      HOLYDECK_MONGO_URL: mongodb://holydeck:test-mongo-password-not-a-secret@mongo:27017/holydeck?authSource=holydeck
     ports:
       - "127.0.0.1:3300:3100"
     tmpfs:
@@ -99,6 +99,7 @@ services:
     command: ["node", "/srv/worker/dist/main.js"]
     environment:
       HOLYDECK_LOG_LEVEL: warn
+      HOLYDECK_MONGO_URL: mongodb://holydeck:test-mongo-password-not-a-secret@mongo:27017/holydeck?authSource=holydeck
     tmpfs:
       - /data/holydeck:size=256m,mode=1777
     depends_on:
@@ -114,10 +115,21 @@ services:
     image: mongo:8
     ports:
       - "127.0.0.1:27018:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: test-mongo-root-not-a-secret
+      HOLYDECK_MONGO_PASSWORD: test-mongo-password-not-a-secret
     tmpfs:
       - /data/db:size=1g,mode=1777
+    volumes:
+      - ./deploy/mongo-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      # A plain ping succeeds even against the throwaway, unauthenticated mongod the entrypoint runs
+      # the initdb scripts against, before it restarts into the authenticated instance this stack
+      # actually depends on (ping is deliberately exempt from authorization) - so depends_on could
+      # race a server that is mid-restart. listDatabases needs a session, so demanding it fail
+      # unauthenticated is what actually proves the authenticated instance is the one answering.
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping')\" >/dev/null 2>&1 && ! mongosh --quiet --eval \"db.adminCommand('listDatabases')\" >/dev/null 2>&1"]
       interval: 5s
       timeout: 5s
       retries: 12

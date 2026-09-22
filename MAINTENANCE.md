@@ -61,12 +61,11 @@ being written or shipped in the first place. What says a rollback works is the t
 
 ## Rotating a secret
 
-A supported deployment holds two secrets: the corpus token (`HOLYDECK_CORPUS_TOKEN`) and the
-backup repository password (`resticPassword` / `HOLYDECK_RESTIC_PASSWORD`). `HOLYDECK_MONGO_URL`
-can carry a third — a URL of the form `mongodb://user:password@host/db` — and is redacted from
-every log line and settings response when it does, but `compose.yaml` runs MongoDB without
-authentication and reaches it over the deployment's private network only, so by default there is
-no credential in it to rotate.
+A supported deployment holds three secrets: the corpus token (`HOLYDECK_CORPUS_TOKEN`), the
+backup repository password (`resticPassword` / `HOLYDECK_RESTIC_PASSWORD`), and the MongoDB
+application-user password (`HOLYDECK_MONGO_PASSWORD`). Every deployment now runs MongoDB with
+authentication by default, so `HOLYDECK_MONGO_PASSWORD` is always a real secret to track and
+rotate like the other two.
 
 The corpus token rotates the plain way. To rotate it (or a MongoDB credential, if this deployment
 has given itself one):
