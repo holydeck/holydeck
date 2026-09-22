@@ -164,6 +164,9 @@ describe('the context the trail is written under', () => {
       'restore.apply.fail',
       'retention.sweep',
       'job.requeue',
+      'notification.read',
+      'notification.dismiss',
+      'notification.preferences',
     ]);
   });
 });

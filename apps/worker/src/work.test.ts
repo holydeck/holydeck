@@ -113,6 +113,8 @@ test('an entry point supplying its dependencies replaces every placeholder with 
     db: {} as RetentionSweepOptions['db'],
     autosaveRetentionDays: 30,
     auditRetentionDays: 400,
+    notificationStore: {} as RetentionSweepOptions['notificationStore'],
+    notificationReadRetentionDays: 30,
     now: () => '2026-09-21T00:00:00.000Z',
     schedulerState: {} as RetentionSweepOptions['schedulerState'],
   };

@@ -76,6 +76,10 @@
     "./retention": {
       "types": "./dist/retention.d.ts",
       "import": "./dist/retention.js"
+    },
+    "./notification-store": {
+      "types": "./dist/notification-store.d.ts",
+      "import": "./dist/notification-store.js"
     }
   },
   "scripts": {

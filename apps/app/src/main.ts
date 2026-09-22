@@ -26,6 +26,7 @@ import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
+import { notificationDb } from './notification-store.js';
 import { repositoryDb } from './repositories.js';
 import { seedContext, seedOn } from './seed.js';
 import { servicesOn } from './services.js';
@@ -46,6 +47,7 @@ import type { MaintenanceStore } from './maintenance.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { Queue } from './queue.js';
+import type { NotificationDb } from './notification-store.js';
 import type { RepositoryDb } from './repositories.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
@@ -99,6 +101,7 @@ let slideLayouts: SlideLayoutStore | undefined;
 // The media library is kept the same way and administered by the same Admin: a deployment with nowhere to
 // keep one has nothing here to upload to, and its route answers not-found the same way.
 let media: MediaLibrary | undefined;
+let notificationDatabase: NotificationDb | undefined;
 let backups: { readonly db: RepositoryDb; readonly queue: Queue } | undefined;
 // The restore-apply lease is kept the same way: a deployment with nowhere to keep one has no worker
 // applying a restore to it either, so `guardMaintenance` has nothing it could ever find held.
@@ -150,6 +153,7 @@ if (settings.values.mongoUrl !== '') {
     },
   });
   backups = { db: repositoryDb(store.db()), queue };
+  notificationDatabase = notificationDb(store.db());
   maintenance = maintenanceOn(maintenanceDb(store.db()));
   settingsAdmin = settingsAdminOn(settings, {
     readFile: (path) => readFile(path, 'utf8'),
@@ -187,6 +191,7 @@ const app = buildApp({
   slideLayouts,
   media,
   backups,
+  notificationDb: notificationDatabase,
   maintenance,
   translationOffsets,
   shownReferences,

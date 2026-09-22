@@ -107,6 +107,9 @@ export const AUDIT_ACTIONS = [
   // `integration` — queued work crossing into the systems it does, not any of the more specific
   // categories above.
   'job.requeue',
+  'notification.read',
+  'notification.dismiss',
+  'notification.preferences',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -179,6 +182,9 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'restore.apply.fail': 'restore',
   'retention.sweep': 'content',
   'job.requeue': 'integration',
+  'notification.read': 'content',
+  'notification.dismiss': 'content',
+  'notification.preferences': 'content',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */

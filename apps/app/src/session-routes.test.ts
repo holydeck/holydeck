@@ -33,6 +33,7 @@ import { withSafeErrors } from './failures.js';
 import { codeAt, stepAt } from './otp.js';
 import { passkeyContext, passkeysOn } from './passkeys.js';
 import {
+  NOTIFICATIONS_USE,
   ACCOUNTS_MANAGE,
   BACKUP_MANAGE,
   JOBS_MANAGE,
@@ -312,6 +313,7 @@ describe('signing in', () => {
       rotation: 'authentication',
       // Granted from the account this session was opened for: a founder is Admin by role.
       permissions: [
+        NOTIFICATIONS_USE,
         ACCOUNTS_MANAGE,
         SETTINGS_MANAGE,
         LAYOUTS_MANAGE,
@@ -392,6 +394,7 @@ describe('signing in with a passkey', () => {
       actor: actorFor(ID),
       rotation: 'authentication',
       permissions: [
+        NOTIFICATIONS_USE,
         ACCOUNTS_MANAGE,
         SETTINGS_MANAGE,
         LAYOUTS_MANAGE,

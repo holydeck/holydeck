@@ -1,6 +1,7 @@
 // The job that grades the audit trail against its own declared window (OPS-07): finds which rows are
 // old enough to be considered, asks `retention.ts`'s own `sweep` to grade them, and writes down what it
-// found. It deletes nothing — `retention.ts`'s own header says wiring an actual delete is later work it
+// found. Notification read-state expiry deletes rows through its own store; the audit trail remains
+// append-only — `retention.ts`'s own header says wiring an actual delete is later work it
 // deliberately leaves undone (no `Repository` class exposes update or delete at all, ADR 0009). Grading
 // and auditing the outcome is everything OPS-07's literal text asks of this job.
 //
@@ -14,6 +15,7 @@ import { auditOn } from '@holydeck/app/audit';
 import { repositoriesOn } from '@holydeck/app/repositories';
 import { policyFor, sweep } from '@holydeck/app/retention';
 
+import type { NotificationStore } from '@holydeck/app/notification-store';
 import type { RepositoryDb } from '@holydeck/app/repositories';
 import type { RetentionCandidate } from '@holydeck/app/retention';
 import type { SchedulerStateStore } from './scheduler-state.js';
@@ -26,6 +28,8 @@ export interface RetentionSweepOptions {
   readonly autosaveRetentionDays: number;
   /** `settings.values.auditRetentionDays` (Task 10-3). */
   readonly auditRetentionDays: number;
+  readonly notificationStore: NotificationStore;
+  readonly notificationReadRetentionDays: number;
   readonly now: () => string;
   readonly report?: (line: string) => void;
   /** Where this job records that it finished (R7): the scheduler only reads this, never writes it. */
@@ -92,13 +96,16 @@ export function retentionSweepOn(options: RetentionSweepOptions): Handler {
 
     options.report?.('retention sweep: autosave-revision sweep deferred — see maintainer TODO');
     const autosaveOutcome = sweep([]);
+    const notificationCutoff = new Date(nowMs - options.notificationReadRetentionDays * MS_PER_DAY).toISOString();
+    const expiredNotifications = await options.notificationStore.expireRead(notificationCutoff);
 
     const trail = auditOn(options.db, { now: options.now });
     await trail.record(options.context, {
       action: 'retention.sweep',
       subject:
         `audit-entry: ${auditOutcome.removable.length} removable, ${auditOutcome.retained.length} retained; ` +
-        `autosave-revision: ${autosaveOutcome.removable.length} removable, ${autosaveOutcome.retained.length} retained (deferred)`,
+        `autosave-revision: ${autosaveOutcome.removable.length} removable, ${autosaveOutcome.retained.length} retained (deferred); ` +
+        `notifications: ${expiredNotifications} expired`,
       outcome: 'allowed',
     });
 

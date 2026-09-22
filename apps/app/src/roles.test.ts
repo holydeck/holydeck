@@ -6,6 +6,7 @@ import {
   JOBS_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
+  NOTIFICATIONS_USE,
   OPERATIONS_READ,
   PRESENTATION_CONTROL,
   RESTORE_MANAGE,
@@ -32,6 +33,7 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 describe('what a role grants', () => {
   it('grants an admin accounts, settings, Layouts, media, services and Service Templates', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
+      NOTIFICATIONS_USE,
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
       LAYOUTS_MANAGE,
@@ -47,12 +49,12 @@ describe('what a role grants', () => {
 
   it('grants an editor service management, but not Service Template management, by role alone', () => {
     expect(SERVICES_MANAGE).toBe('services.manage');
-    expect(permissionsFor(accountOf('editor', false))).toEqual([SERVICES_MANAGE]);
+    expect(permissionsFor(accountOf('editor', false))).toEqual([NOTIFICATIONS_USE, SERVICES_MANAGE]);
     expect(permissionsFor(accountOf('editor', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
   });
 
-  it('grants a member nothing by role alone', () => {
-    expect(permissionsFor(accountOf('member', false))).toEqual([]);
+  it('grants a member access to their own notifications', () => {
+    expect(permissionsFor(accountOf('member', false))).toEqual([NOTIFICATIONS_USE]);
     expect(permissionsFor(accountOf('member', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
   });
 });
@@ -62,10 +64,11 @@ describe('what Control presentation is', () => {
   // and an editor or a member holds it the moment it is granted to them, same as anyone else would.
   it('is independent of role: granted to an editor or a member, it is theirs', () => {
     expect(permissionsFor(accountOf('editor', true))).toEqual([
+      NOTIFICATIONS_USE,
       SERVICES_MANAGE,
       PRESENTATION_CONTROL,
     ]);
-    expect(permissionsFor(accountOf('member', true))).toEqual([PRESENTATION_CONTROL]);
+    expect(permissionsFor(accountOf('member', true))).toEqual([NOTIFICATIONS_USE, PRESENTATION_CONTROL]);
   });
 
   it('is not granted to an admin implicitly, whatever else admin carries', () => {
@@ -74,6 +77,7 @@ describe('what Control presentation is', () => {
 
   it('adds to what the role already grants, rather than replacing it', () => {
     expect(permissionsFor(accountOf('admin', true))).toEqual([
+      NOTIFICATIONS_USE,
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
       LAYOUTS_MANAGE,

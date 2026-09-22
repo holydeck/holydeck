@@ -16,6 +16,7 @@ import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { BACKUPS_PATH } from './backup-routes.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { JOBS_PATH } from './job-routes.js';
+import { NOTIFICATIONS_PATH, NOTIFICATIONS_READ_ALL_PATH, NOTIFICATIONS_PREFERENCES_PATH } from './notification-routes.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
 import { RESTORES_PATH } from './restore-routes.js';
@@ -149,6 +150,10 @@ describe('every route that changes something', () => {
       // The queue's own surface, gated by its own permission: trying a failed job again is Admin's.
       // Listing what the queue holds and summarizing it are not changes and are absent here.
       { method: 'POST', url: `${JOBS_PATH}/:id/requeue` },
+      { method: 'POST', url: `${NOTIFICATIONS_PATH}/:id/read` },
+      { method: 'POST', url: NOTIFICATIONS_READ_ALL_PATH },
+      { method: 'POST', url: `${NOTIFICATIONS_PATH}/:id/dismiss` },
+      { method: 'PUT', url: NOTIFICATIONS_PREFERENCES_PATH },
       // Behind the same permission once more: configuring a translation's offset is Admin's alone,
       // reading every one configured is not, which is why only this one route is on this list at all.
       { method: 'PUT', url: `${TRANSLATION_OFFSETS_PATH}/:abbr` },

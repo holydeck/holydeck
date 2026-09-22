@@ -73,6 +73,9 @@ export const JOBS_MANAGE = 'jobs.manage';
  */
 export const OPERATIONS_READ = 'operations.read';
 
+/** Reads and manages the caller's own notification inbox, granted to every signed-in account (OPS-10). */
+export const NOTIFICATIONS_USE = 'notifications.use';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -97,6 +100,7 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
  */
 export function permissionsFor(account: AccountRecord): readonly string[] {
   return Object.freeze([
+    NOTIFICATIONS_USE,
     ...ROLE_PERMISSIONS[account.role],
     ...(account.controlPresentation ? [PRESENTATION_CONTROL] : []),
   ]);

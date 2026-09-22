@@ -616,6 +616,7 @@ describe('the Operator override', () => {
     expect(rows(db, RUN_EVENTS)).toHaveLength(0);
     expect(sessions.every(([, session]) => !session.permissions.includes(PRESENTATION_CONTROL))).toBe(true);
     expect(permissionsFor(accountOf('admin'))).toEqual([
+      'notifications.use',
       ACCOUNTS_MANAGE,
       'settings.manage',
       'layouts.manage',

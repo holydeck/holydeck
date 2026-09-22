@@ -14,6 +14,9 @@ import { serveJobRoutes } from './job-routes.js';
 import { isUpgrade } from './live.js';
 import { guardMaintenance } from './maintenance.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
+import { serveNotificationRoutes } from './notification-routes.js';
+import { notificationStoreOn } from './notification-store.js';
+import { repositoriesOn } from './repositories.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveOperationsRoutes } from './operations-routes.js';
 import { serveOrderRoutes } from './order-routes.js';
@@ -34,6 +37,7 @@ import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { MaintenanceStore } from './maintenance.js';
 import type { MediaLibrary } from './media.js';
+import type { NotificationDb } from './notification-store.js';
 import type { Identity } from './onboarding.js';
 import type { Queue } from './queue.js';
 import type { RepositoryDb } from './repositories.js';
@@ -62,6 +66,8 @@ export interface AppOptions {
   sessions?: SessionStore;
   /** Where accounts are kept and what is done to them is recorded. Without it, there is nothing to claim. */
   identity?: Identity;
+  /** The same database as the audit trail, with the notification store’s mutation methods. */
+  notificationDb?: NotificationDb;
   /** Where a Guest's invitation or an output window's capability is kept. Without it, there is none to grant. */
   capabilities?: CapabilityStore;
   /** Where the settings file is written and hot-reloaded. Without it, there is nothing to administer. */
@@ -98,6 +104,7 @@ export function buildApp({
   web,
   sessions,
   identity,
+  notificationDb,
   capabilities,
   settingsAdmin,
   slideLayouts,
@@ -110,6 +117,9 @@ export function buildApp({
   serviceTemplates,
   slideLabels,
 }: AppOptions): FastifyInstance {
+  const notifications = identity === undefined || notificationDb === undefined
+    ? undefined
+    : notificationStoreOn(notificationDb, { now: () => new Date().toISOString() });
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
 
@@ -280,6 +290,12 @@ export function buildApp({
     media,
     dataDir: settings.values.dataDir,
     now: () => new Date().toISOString(),
+    identity,
+  });
+
+  serveNotificationRoutes(app, {
+    store: notifications,
+    events: identity === undefined || notificationDb === undefined ? undefined : repositoriesOn(notificationDb).auditEvents,
     identity,
   });
 

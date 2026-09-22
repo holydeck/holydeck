@@ -140,6 +140,10 @@
     "./webauthn": {
       "types": "./dist/webauthn.d.ts",
       "import": "./dist/webauthn.js"
+    },
+    "./notifications": {
+      "types": "./dist/notifications.d.ts",
+      "import": "./dist/notifications.js"
     }
   },
   "scripts": {

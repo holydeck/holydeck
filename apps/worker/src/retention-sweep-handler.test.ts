@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { retentionSweepOn } from './retention-sweep-handler.js';
 import { fakeDb } from '../../app/test/helpers/fake-db.js';
 
+import type { NotificationStore } from '@holydeck/app/notification-store';
 import type { Document } from '@holydeck/app/repositories';
 import type { LeasedJob } from '@holydeck/contracts/jobs';
 import type { RetentionSweepOptions } from './retention-sweep-handler.js';
@@ -48,21 +49,51 @@ const fixture = (rows: Document[] = [], overrides: Partial<RetentionSweepOptions
     markRestoreRehearsal: async () => undefined,
     markRetentionSweep,
   };
+  const expireRead = vi.fn<NotificationStore['expireRead']>().mockResolvedValue(3);
+  const notificationStore: NotificationStore = {
+    listFor: async () => [],
+    markRead: async () => false,
+    markAllRead: async () => {},
+    markDismissed: async () => false,
+    expireRead,
+    preferencesFor: async (recipient) => ({ recipient, muted: false, channels: [] }),
+    setPreferences: async () => {},
+    materialize: async () => {},
+    watermarkFor: async () => undefined,
+    setWatermark: async () => {},
+  };
   const run = retentionSweepOn({
     context: CONTEXT,
     db,
     autosaveRetentionDays: 30,
     auditRetentionDays: 400,
+    notificationStore,
+    notificationReadRetentionDays: 30,
     now: () => NOW,
     schedulerState,
     ...overrides,
   });
   const summary = (): Document | undefined =>
     db.rows.get('audit_events')?.find((row) => row['action'] === 'retention.sweep');
-  return { db, run, summary, markRetentionSweep };
+  return { db, run, summary, markRetentionSweep, expireRead };
 };
 
 describe('sweeping the audit trail against its own retention window', () => {
+  it('expires read notifications at the configured cutoff and audits the actual count', async () => {
+    const { run, summary, expireRead } = fixture([], { notificationReadRetentionDays: 7 });
+    await run(job(), new AbortController().signal);
+    expect(expireRead).toHaveBeenCalledExactlyOnceWith('2026-09-16T02:00:00.000Z');
+    expect(summary()?.['subject']).toContain('notifications: 3 expired');
+  });
+
+  it('does not record success when notification expiry fails', async () => {
+    const { run, summary, expireRead, markRetentionSweep } = fixture();
+    expireRead.mockRejectedValue(new Error('notification expiry unavailable'));
+    await expect(run(job(), new AbortController().signal)).rejects.toThrow('notification expiry unavailable');
+    expect(summary()).toBeUndefined();
+    expect(markRetentionSweep).not.toHaveBeenCalled();
+  });
+
   it('grades only rows older than the configured window', async () => {
     const { run, summary } = fixture([auditRow(1, 600), auditRow(2, 501), auditRow(3, 499)], {
       auditRetentionDays: 500,

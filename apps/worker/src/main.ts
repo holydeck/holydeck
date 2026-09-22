@@ -7,6 +7,7 @@ import { AUDIT_CATEGORIES, CATEGORY_OF, auditReadContext, retentionSweepContext 
 import { backupContext, backupDb } from '@holydeck/app/backups';
 import { capabilityDb, capabilitiesOn } from '@holydeck/app/capabilities';
 import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
+import { notificationDb, notificationStoreOn } from '@holydeck/app/notification-store';
 import { SCHEMA_VERSION } from '@holydeck/app/migrations';
 import { queueDb, queueOn, schedulerContext, workerContext } from '@holydeck/app/queue';
 import { maintenanceDb, maintenanceOn } from '@holydeck/app/maintenance';
@@ -197,6 +198,8 @@ if (work.runs === 'nothing') {
       db: repositoryDb(store.db()),
       autosaveRetentionDays: configured.values.autosaveRetentionDays,
       auditRetentionDays: configured.values.auditRetentionDays,
+      notificationStore: notificationStoreOn(notificationDb(store.db()), { now }),
+      notificationReadRetentionDays: configured.values.notificationReadRetentionDays,
       now,
       report: (line) => void process.stdout.write(`${line}\n`),
       schedulerState,
