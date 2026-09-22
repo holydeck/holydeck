@@ -141,6 +141,32 @@ const draftFields = (reader: FieldReader): ServiceDraft => ({
   sections: reader.parsedList('sections', sectionParser(new Set(), new Set())),
 });
 
+export function parseServiceItem(value: unknown): Parsed<ServiceItem> {
+  return itemParser(new Set())(value, 'item');
+}
+
+export function parseServiceSchedule(value: unknown): Parsed<{ date: string }> {
+  return parseObject(value, 'service', (reader) => ({ date: reader.text('date') }));
+}
+
+export function parseServiceTransition(value: unknown): Parsed<{ state: ServiceState }> {
+  return parseObject(value, 'service', (reader) => ({
+    state: reader.choice('state', SERVICE_STATES),
+  }));
+}
+
+export function parseServiceStatus(value: unknown): Parsed<{ archived: boolean }> {
+  return parseObject(value, 'service', (reader) => ({ archived: reader.flag('archived') }));
+}
+
+export function parseServiceItemReorder(value: unknown): Parsed<{ itemIds: readonly string[] }> {
+  return parseObject(value, 'service', (reader) => ({ itemIds: reader.textList('itemIds') }));
+}
+
+export function parseServiceItemRevision(value: unknown): Parsed<{ revision: number }> {
+  return parseObject(value, 'service', (reader) => ({ revision: reader.wholeNumber('revision') }));
+}
+
 export function parseServiceDraft(value: unknown): Parsed<ServiceDraft> {
   return parseObject(value, 'service', draftFields);
 }

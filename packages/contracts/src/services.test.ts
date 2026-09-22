@@ -10,6 +10,12 @@ import {
   parseRevisionRef,
   parseService,
   parseServiceDraft,
+  parseServiceItem,
+  parseServiceItemReorder,
+  parseServiceItemRevision,
+  parseServiceSchedule,
+  parseServiceStatus,
+  parseServiceTransition,
 } from './services.js';
 
 import type { ServiceState } from './services.js';
@@ -50,6 +56,65 @@ const defective = (change: (value: ReturnType<typeof service>) => void) => {
   change(value);
   return codes(value);
 };
+
+describe('reading a standalone service item', () => {
+  it('reads a pinned item and starts fresh for each call', () => {
+    const item = service().sections[0]!.items[0]!;
+    expect(parseServiceItem(item)).toEqual({ ok: true, value: item });
+    expect(parseServiceItem(item)).toEqual({ ok: true, value: item });
+  });
+
+  it('reads a custom slide with the default enabled flag', () => {
+    const item = { id: 'item-2', kind: 'custom-slide', title: 'Welcome' };
+    expect(parseServiceItem(item)).toEqual({
+      ok: true, value: { ...item, enabled: true, content: undefined },
+    });
+  });
+
+  it('rejects a missing title at the standalone item path', () => {
+    expect(parseServiceItem({ id: 'item-2', kind: 'custom-slide' })).toEqual({
+      ok: false,
+      problems: [{ path: 'item.title', code: FIELD_CODES.required, message: 'is required' }],
+    });
+  });
+});
+
+describe('reading service action bodies', () => {
+  it.each(['2026-09-13', 'next Sunday'])('reads schedule text: %s', (date) => {
+    expect(parseServiceSchedule({ date })).toEqual({ ok: true, value: { date } });
+  });
+
+  it.each(SERVICE_STATES)('reads the transition state %s', (state) => {
+    expect(parseServiceTransition({ state })).toEqual({ ok: true, value: { state } });
+  });
+
+  it.each([true, false])('reads archived as %s', (archived) => {
+    expect(parseServiceStatus({ archived })).toEqual({ ok: true, value: { archived } });
+  });
+
+  it.each([['item-2', 'item-1'], []])('reads ordered item IDs: %j', (...itemIds) => {
+    expect(parseServiceItemReorder({ itemIds })).toEqual({ ok: true, value: { itemIds } });
+  });
+
+  it.each([0, 5])('reads revision %s', (revision) => {
+    expect(parseServiceItemRevision({ revision })).toEqual({ ok: true, value: { revision } });
+  });
+
+  it.each([
+    { parse: parseServiceSchedule, body: {}, path: 'service.date', code: FIELD_CODES.required },
+    { parse: parseServiceTransition, body: { state: 'live' }, path: 'service.state', code: FIELD_CODES.notAllowed },
+    { parse: parseServiceStatus, body: { archived: 'true' }, path: 'service.archived', code: FIELD_CODES.notABoolean },
+    { parse: parseServiceItemReorder, body: { itemIds: 'item-1' }, path: 'service.itemIds', code: FIELD_CODES.notAList },
+    { parse: parseServiceItemReorder, body: { itemIds: ['item-1', 2] }, path: 'service.itemIds.1', code: FIELD_CODES.notText },
+    { parse: parseServiceItemRevision, body: { revision: 1.5 }, path: 'service.revision', code: FIELD_CODES.notAWholeNumber },
+    { parse: parseServiceItemRevision, body: { revision: -1 }, path: 'service.revision', code: FIELD_CODES.tooSmall },
+  ])('rejects $body at $path with $code', ({ parse, body, path, code }) => {
+    const parsed = parse(body);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => ({ path: problem.path, code: problem.code })))
+      .toEqual([{ path, code }]);
+  });
+});
 
 describe('reading a service draft', () => {
   it('reads the title, date, site, and ordered sections without requiring an id or state', () => {
