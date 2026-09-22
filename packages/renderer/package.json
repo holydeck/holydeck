@@ -25,6 +25,10 @@
       "types": "./dist/auto-fit.d.ts",
       "import": "./dist/auto-fit.js"
     },
+    "./layout-selection": {
+      "types": "./dist/layout-selection.d.ts",
+      "import": "./dist/layout-selection.js"
+    },
     "./render-model": {
       "types": "./dist/render-model.d.ts",
       "import": "./dist/render-model.js"

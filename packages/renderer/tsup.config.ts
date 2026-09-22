@@ -6,6 +6,7 @@ export default defineConfig({
     'src/readiness.ts',
     'src/measure.ts',
     'src/auto-fit.ts',
+    'src/layout-selection.ts',
     'src/render-model.ts',
     'src/renderer.ts',
     'src/surfaces.ts',
