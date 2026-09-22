@@ -7,7 +7,7 @@ import { libraryOn } from './library.js';
 import { RECORDS } from './records.js';
 import { revisionsOn } from './revisions.js';
 import { sermonFromYaml } from './sermon-yaml.js';
-import { SermonError, sermonContext, sermonsOn } from './sermons.js';
+import { SermonError, sermonContext, sermonsOn, subjectFor } from './sermons.js';
 import { slideGroupsOn } from './slide-groups.js';
 import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -304,5 +304,11 @@ describe('switching editing modes mid-edit', () => {
       { path: 'sermon', code: 'yaml.syntax', message: expect.any(String), at: { line: 2, column: 1 } },
     ]);
     expect(rows(db, REVISIONS)).toHaveLength(1);
+  });
+});
+
+describe('subjectFor', () => {
+  it('names a sermon for the audit trail', () => {
+    expect(subjectFor('sermon-1')).toBe('sermon:sermon-1');
   });
 });

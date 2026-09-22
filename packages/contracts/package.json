@@ -125,6 +125,10 @@
       "types": "./dist/songs.d.ts",
       "import": "./dist/songs.js"
     },
+    "./sermons": {
+      "types": "./dist/sermons.d.ts",
+      "import": "./dist/sermons.js"
+    },
     "./sessions": {
       "types": "./dist/sessions.d.ts",
       "import": "./dist/sessions.js"
