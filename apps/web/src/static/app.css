@@ -18,6 +18,9 @@
   --font-size-3: 1.5rem;
   --font-size-4: 2rem;
   --radius: 6px;
+  --motion-feedback: 120ms;
+  --motion-panel: 180ms;
+  --motion-max: 240ms;
   --color-surface: #0b0b0f;
   --color-surface-raised: #1a1a22;
   --color-text: #f5f5f7;
@@ -198,4 +201,17 @@ button, a { min-width: 44px; min-height: 44px; }
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
+}
+
+/* Reduced motion keeps every state change visible immediately while removing the movement that would
+   carry it there. Applying the override to generated content too prevents a later decorative loop or
+   panel transform from escaping the preference merely because it lives on a pseudo-element. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
 }
