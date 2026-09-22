@@ -107,3 +107,69 @@ test('an untitled decision is still reported, under a placeholder name', () => {
 test('this repository has no legal decision record yet, so a release is correctly blocked', () => {
   assert.equal(readLegalRecord(), undefined);
 });
+
+const exemption = (overrides = {}) => ({
+  channel: 'next',
+  grantedBy: 'Maintainer',
+  grantedAt: '2026-09-01T00:00:00.000Z',
+  expiresAt: '2099-01-01T00:00:00.000Z',
+  scope: 'next channel only',
+  signature: 'deadbeef',
+  ...overrides,
+});
+
+test('a stable-channel call behaves exactly as calling with no options at all', () => {
+  const record = { legalDecisions: [accepted()] };
+  assert.deepEqual(verifyLegalGate(record, { channel: 'stable' }), verifyLegalGate(record));
+});
+
+test('a next-channel release with no record is blocked, same as stable, under the default full policy', () => {
+  assert.deepEqual(verifyLegalGate(undefined, { channel: 'next' }), [
+    `${LEGAL_RECORD_FILE} was not found: no legal decision is recorded in this repository, and a release with none recorded cannot proceed`,
+  ]);
+});
+
+test('the prerelease-exemption policy is never active unless a caller explicitly passes it', () => {
+  const record = { prereleaseExemption: exemption() };
+  assert.deepEqual(verifyLegalGate(record, { channel: 'next' }), [
+    `${LEGAL_RECORD_FILE} has no legalDecisions array`,
+  ]);
+});
+
+test('a valid, unexpired prerelease exemption passes the next channel under the exemption policy', () => {
+  const record = { prereleaseExemption: exemption() };
+  assert.deepEqual(verifyLegalGate(record, { channel: 'next', policy: 'prerelease-exemption' }), []);
+});
+
+test('full acceptance still passes the next channel under the exemption policy, with no exemption at all', () => {
+  const record = { legalDecisions: [accepted()] };
+  assert.deepEqual(verifyLegalGate(record, { channel: 'next', policy: 'prerelease-exemption' }), []);
+});
+
+test('an expired exemption does not pass, even under the exemption policy', () => {
+  const record = { prereleaseExemption: exemption({ grantedAt: '2020-01-01T00:00:00.000Z', expiresAt: '2020-06-01T00:00:00.000Z' }) };
+  assert.deepEqual(verifyLegalGate(record, { channel: 'next', policy: 'prerelease-exemption' }), [
+    `${LEGAL_RECORD_FILE} has no legalDecisions array`,
+  ]);
+});
+
+test('an exemption granted for the wrong channel does not pass', () => {
+  const record = { prereleaseExemption: exemption({ channel: 'stable' }) };
+  assert.deepEqual(verifyLegalGate(record, { channel: 'next', policy: 'prerelease-exemption' }), [
+    `${LEGAL_RECORD_FILE} has no legalDecisions array`,
+  ]);
+});
+
+test('an exemption with no signature does not pass', () => {
+  const record = { prereleaseExemption: exemption({ signature: '' }) };
+  assert.deepEqual(verifyLegalGate(record, { channel: 'next', policy: 'prerelease-exemption' }), [
+    `${LEGAL_RECORD_FILE} has no legalDecisions array`,
+  ]);
+});
+
+test('an exemption with no scope does not pass', () => {
+  const record = { prereleaseExemption: exemption({ scope: '' }) };
+  assert.deepEqual(verifyLegalGate(record, { channel: 'next', policy: 'prerelease-exemption' }), [
+    `${LEGAL_RECORD_FILE} has no legalDecisions array`,
+  ]);
+});
