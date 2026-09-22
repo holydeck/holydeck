@@ -1,9 +1,9 @@
-import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
+import { ACCOUNTS_PATH, ONBOARDING_PATH, actorFor } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER } from '@holydeck/contracts/clients';
 import { CSRF_HEADER, SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
 import { describe, expect, it } from 'vitest';
 
-import { HarnessSignInError, OPERATOR, signInTo } from './identity.js';
+import { HarnessSignInError, OPERATOR, signInTo, signInWithControlTo } from './identity.js';
 
 import type { Fetching } from './identity.js';
 
@@ -12,6 +12,7 @@ const COOKIE = 'holydeck_session=abc123';
 
 interface Asked {
   readonly url: string;
+  readonly method: string;
   readonly headers: Record<string, string>;
   readonly body: unknown;
 }
@@ -22,6 +23,7 @@ const answering = (answers: Array<{ status: number; body?: unknown; cookie?: str
   const fetching = (async (url: unknown, init: RequestInit = {}): Promise<Response> => {
     asked.push({
       url: String(url),
+      method: init.method ?? 'GET',
       headers: (init.headers ?? {}) as Record<string, string>,
       body: init.body === undefined ? undefined : JSON.parse(String(init.body)),
     });
@@ -70,6 +72,63 @@ describe('the operator a harness run signs in as', () => {
   it('carries no cookie where the application set none, rather than sending the word undefined', async () => {
     const { fetching } = answering([{ status: 201 }, { status: 201, body: { data: { csrf: 'csrf-token' } } }]);
     await expect(signInTo(BASE, fetching)).resolves.toMatchObject({ cookie: '' });
+  });
+});
+
+describe('the operator allowed to control presentation', () => {
+  const id = 'a'.repeat(22);
+  const current = { status: 200, body: { data: { actor: actorFor(id) } } };
+
+  it('self-grants over HTTP and uses a fresh session and CSRF token after revocation', async () => {
+    const { asked, fetching } = answering([
+      ...SIGNED_IN,
+      current,
+      { status: 200 },
+      { status: 404 },
+      { status: 201, cookie: 'holydeck_session=fresh; Path=/', body: { data: { csrf: 'fresh-csrf' } } },
+      { status: 200, body: { data: { ticket: 'fresh-ticket' } } },
+    ]);
+    const session = await signInWithControlTo(BASE, fetching);
+
+    expect(asked[2]).toMatchObject({ url: `${BASE}${SESSION_PATH}`, method: 'GET', headers: { cookie: COOKIE } });
+    expect(asked[3]).toEqual({
+      url: `${BASE}${ACCOUNTS_PATH}/${id}/control-presentation`,
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        origin: BASE,
+        [CLIENT_VERSION_HEADER]: '1',
+        cookie: COOKIE,
+        [CSRF_HEADER]: 'csrf-token',
+      },
+      body: { granted: true },
+    });
+    expect(asked[5]).toMatchObject({ url: `${BASE}${SESSION_PATH}`, method: 'POST' });
+    expect(session).toMatchObject({ cookie: 'holydeck_session=fresh', csrf: 'fresh-csrf' });
+    expect(await session.ticket()).toBe('fresh-ticket');
+    expect(asked[6]?.headers).toMatchObject({ cookie: 'holydeck_session=fresh', [CSRF_HEADER]: 'fresh-csrf' });
+  });
+
+  it('reports a refused session read before attempting a grant', async () => {
+    const { asked, fetching } = answering([...SIGNED_IN, { status: 401 }]);
+    await expect(signInWithControlTo(BASE, fetching)).rejects.toThrow(
+      'the harness could not read the operator session: the application answered 401',
+    );
+    expect(asked).toHaveLength(3);
+  });
+
+  it('refuses to grant control for a session without an account actor', async () => {
+    const { asked, fetching } = answering([...SIGNED_IN, { status: 200, body: { data: { actor: 'system' } } }]);
+    await expect(signInWithControlTo(BASE, fetching)).rejects.toThrow('the harness operator session does not identify an account');
+    expect(asked).toHaveLength(3);
+  });
+
+  it('reports a refused grant without signing in again', async () => {
+    const { asked, fetching } = answering([...SIGNED_IN, current, { status: 403 }]);
+    await expect(signInWithControlTo(BASE, fetching)).rejects.toThrow(
+      'the harness could not grant presentation control: the application answered 403',
+    );
+    expect(asked).toHaveLength(4);
   });
 });
 

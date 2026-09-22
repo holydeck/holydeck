@@ -112,6 +112,34 @@ test.describe('the client a device can install and keep', () => {
     }
   });
 
+  test('activates a build-specific cache and replaces an older cached shell', async ({ page, context }) => {
+    // This same-origin document does not load the client, so no worker activates before the old cache exists.
+    await page.goto('/health');
+    await page.evaluate(async () => {
+      const old = await caches.open('holydeck-web-v1');
+      await old.put('/index.html', new Response('<h1>Old cached shell</h1>', { headers: { 'content-type': 'text/html' } }));
+      await caches.open('unrelated-cache');
+    });
+
+    await page.goto('/');
+    await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
+    const names = await page.evaluate(() => caches.keys());
+    const current = names.filter((name) => name.startsWith('holydeck-web-'));
+    expect(current).toHaveLength(1);
+    expect(current[0]).toMatch(/^holydeck-web-[a-z0-9]+$/u);
+    expect(current[0]).not.toBe('holydeck-web-dev');
+    expect(names).not.toContain('holydeck-web-v1');
+    expect(names).toContain('unrelated-cache');
+
+    await context.setOffline(true);
+    try {
+      await page.goto('/index.html');
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText('HolyDeck');
+    } finally {
+      await context.setOffline(false);
+    }
+  });
+
   test('opens the live socket the page is allowed to open', async ({ page, baseURL }) => {
     const violations: string[] = [];
     page.on('console', (message) => {

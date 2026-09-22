@@ -5,7 +5,7 @@
 // the instance it just started, sign in, and ask that session for a ticket. This is that, done once per
 // run and against the running stack, so nothing here reaches past the HTTP surface a client has.
 
-import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
+import { ACCOUNTS_PATH, ONBOARDING_PATH, accountIdIn } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { CSRF_HEADER, SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
 
@@ -86,4 +86,30 @@ export async function signInTo(baseUrl: string, fetching: Fetching = fetch): Pro
       return ticket.data.ticket;
     },
   };
+}
+
+/** Self-granting control revokes every operator session, so only the fresh sign-in may be used. */
+export async function signInWithControlTo(baseUrl: string, fetching: Fetching = fetch): Promise<SignedIn> {
+  const session = await signInTo(baseUrl, fetching);
+  const current = await fetching(`${baseUrl}${SESSION_PATH}`, {
+    headers: { cookie: session.cookie, [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) },
+  });
+  if (current.status !== 200) throw new HarnessSignInError('read the operator session', current.status);
+  const body = (await current.json()) as { data: { actor: string } };
+  const id = accountIdIn(body.data.actor);
+  if (id === undefined) throw new Error('the harness operator session does not identify an account');
+
+  const granted = await fetching(`${baseUrl}${ACCOUNTS_PATH}/${id}/control-presentation`, {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+      origin: baseUrl,
+      [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
+      cookie: session.cookie,
+      [CSRF_HEADER]: session.csrf,
+    },
+    body: JSON.stringify({ granted: true }),
+  });
+  if (granted.status !== 200) throw new HarnessSignInError('grant presentation control', granted.status);
+  return signInTo(baseUrl, fetching);
 }
