@@ -23,6 +23,7 @@ const CONTEXT = preparationContext(OPERATOR, CORRELATION);
 const EDITOR = serviceContext(OPERATOR, CORRELATION);
 const RUNS = RECORDS.presentationRuns.collection;
 const AUDIT = RECORDS.auditEvents.collection;
+const RUN_EVENTS = RECORDS.runEvents.collection;
 
 const SECTIONS: readonly ServiceSection[] = [
   { id: 'section-1', name: 'Worship', items: [{ id: 'item-1', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined }] },
@@ -91,6 +92,10 @@ const prepared = async (
 
 const rows = (db: FakeDb, collection: string): Document[] => db.rows.get(collection) ?? [];
 const auditActions = (db: FakeDb): unknown[] => rows(db, AUDIT).map((row) => row['action']);
+const runEventKinds = (db: FakeDb, runId: string): unknown[] =>
+  rows(db, RUN_EVENTS)
+    .filter((row) => row['runId'] === runId)
+    .map((row) => row['kind']);
 
 const refused = async (call: Promise<unknown>): Promise<RunError> => {
   try {
@@ -192,6 +197,77 @@ describe('starting a run', () => {
     expect(entry?.['subject']).toBe(`service:${serviceId}`);
     expect(entry?.['outcome']).toBe('allowed');
     expect(String(entry?.['detail'])).toContain('rehearsal');
+  });
+});
+
+describe('going live over an open blocker', () => {
+  const BLOCKED: Partial<ReadinessObservation> = {
+    checks: [{ name: 'Content', group: 'Content', severity: 'blocker', cause: 'nothing enabled' }],
+  };
+
+  it('refuses a live start with a blocked checklist and no override, unchanged', async () => {
+    const { runs, serviceId } = await prepared(BLOCKED);
+
+    const error = await refused(runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' }));
+
+    expect(error.kind).toBe('state');
+  });
+
+  it('refuses an override on a rehearsal start even when blocked', async () => {
+    const { runs, serviceId } = await prepared(BLOCKED);
+
+    const error = await refused(runs.start(OPERATOR_SESSION, { serviceId, mode: 'rehearsal', override: { reason: 'x' } }));
+
+    expect(error.kind).toBe('state');
+  });
+
+  it('starts live over a blocked checklist when a valid override reason is given, and records the override under the minted runId', async () => {
+    const { runs, db, serviceId } = await prepared(BLOCKED);
+
+    const started = await runs.start(OPERATOR_SESSION, {
+      serviceId,
+      mode: 'live',
+      override: { reason: 'Choir already assembled' },
+    });
+
+    expect(started.runId).toBeDefined();
+    expect(runEventKinds(db, started.runId)).toContain('readiness.override');
+  });
+
+  it('refuses an override when the checklist is outdated, even with a reason', async () => {
+    const { runs, serviceId } = await prepared({ slideLayoutRevision: 4 });
+
+    const error = await refused(runs.start(OPERATOR_SESSION, { serviceId, mode: 'live', override: { reason: 'x' } }));
+
+    expect(error.kind).toBe('state');
+  });
+
+  it('refuses an override offered when nothing is blocked', async () => {
+    const { runs, serviceId } = await prepared();
+
+    const error = await refused(runs.start(OPERATOR_SESSION, { serviceId, mode: 'live', override: { reason: 'unneeded' } }));
+
+    expect(error.kind).toBe('state');
+    expect(error.message).toContain('none is');
+  });
+
+  it('writes the run row only after the override resolves, auditing both under the Service', async () => {
+    const { runs, db, serviceId } = await prepared(BLOCKED);
+
+    await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live', override: { reason: 'Choir already assembled' } });
+
+    expect(auditActions(db)).toEqual(expect.arrayContaining(['readiness.override', 'run.start']));
+  });
+
+  it('refuses every session without Control presentation, before the override is even attempted', async () => {
+    const { runs, db, serviceId } = await prepared(BLOCKED);
+
+    const error = await refused(
+      runs.start(sessionOf(accountOf('editor')), { serviceId, mode: 'live', override: { reason: 'x' } }),
+    );
+
+    expect(error.kind).toBe('permission');
+    expect(rows(db, RUN_EVENTS)).toHaveLength(0);
   });
 });
 

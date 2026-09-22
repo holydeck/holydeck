@@ -5,7 +5,9 @@ import {
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
   PRESENTATION_CONTROL,
+  PRESENTATION_VIEW,
   SERVICES_MANAGE,
+  SERVICE_READ,
   SERVICE_TEMPLATES_MANAGE,
   SETTINGS_MANAGE,
   permissionsFor,
@@ -56,8 +58,10 @@ describe('what Control presentation is', () => {
     expect(permissionsFor(accountOf('editor', true))).toEqual([
       SERVICES_MANAGE,
       PRESENTATION_CONTROL,
+      PRESENTATION_VIEW,
+      SERVICE_READ,
     ]);
-    expect(permissionsFor(accountOf('member', true))).toEqual([PRESENTATION_CONTROL]);
+    expect(permissionsFor(accountOf('member', true))).toEqual([PRESENTATION_CONTROL, PRESENTATION_VIEW, SERVICE_READ]);
   });
 
   it('is not granted to an admin implicitly, whatever else admin carries', () => {
@@ -73,6 +77,8 @@ describe('what Control presentation is', () => {
       MEDIA_MANAGE,
       SERVICES_MANAGE,
       PRESENTATION_CONTROL,
+      PRESENTATION_VIEW,
+      SERVICE_READ,
     ]);
   });
 
@@ -81,6 +87,23 @@ describe('what Control presentation is', () => {
     const revoked = { ...held, controlPresentation: false };
     expect(permissionsFor(held)).toContain(PRESENTATION_CONTROL);
     expect(permissionsFor(revoked)).not.toContain(PRESENTATION_CONTROL);
+  });
+});
+
+// D-2: PRESENTATION_VIEW and SERVICE_READ have no standalone grant path — an account holds either one
+// only for the same reason it holds PRESENTATION_CONTROL, and loses all three together.
+describe('what PRESENTATION_VIEW and SERVICE_READ are', () => {
+  it('are granted the same way Control presentation is, never on their own', () => {
+    expect(permissionsFor(accountOf('member', true))).toEqual(expect.arrayContaining([PRESENTATION_VIEW, SERVICE_READ]));
+    expect(permissionsFor(accountOf('member', false))).not.toContain(PRESENTATION_VIEW);
+    expect(permissionsFor(accountOf('member', false))).not.toContain(SERVICE_READ);
+  });
+
+  it('are gone the moment Control presentation is revoked', () => {
+    const held = accountOf('member', true);
+    const revoked = { ...held, controlPresentation: false };
+    expect(permissionsFor(revoked)).not.toContain(PRESENTATION_VIEW);
+    expect(permissionsFor(revoked)).not.toContain(SERVICE_READ);
   });
 });
 

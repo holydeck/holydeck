@@ -23,12 +23,14 @@ import type { SessionStore } from './sessions.js';
 /**
  * What a route needs before its handler runs. `public` needs nothing; `session` needs one proved, and
  * proves it for a safe route the way `csrf.ts` already does for a mutating one; `permission` needs that
- * session's record to carry the named permission besides.
+ * session's record to carry the named permission besides; `any-permission` needs it to carry at least one
+ * of several, for a route more than one permission legitimately opens (D-3).
  */
 export type RouteNeed =
   | { readonly kind: 'public' }
   | { readonly kind: 'session' }
-  | { readonly kind: 'permission'; readonly need: string };
+  | { readonly kind: 'permission'; readonly need: string }
+  | { readonly kind: 'any-permission'; readonly needs: readonly string[] };
 
 export interface Route {
   /** Fastify's own spelling of a method, so a table of these can be replayed against the application. */
@@ -98,8 +100,14 @@ export function enforceAuthorization(app: FastifyInstance, { sessions, identity 
     if (proven === undefined) return;
     if (!mutates(request.method)) rememberProvenSession(request, proven);
 
-    if (need.kind === 'permission' && !proven.record.permissions.includes(need.need)) {
-      const detail = `this session may not ${need.need}`;
+    const detail =
+      need.kind === 'permission' && !proven.record.permissions.includes(need.need)
+        ? `this session may not ${need.need}`
+        : need.kind === 'any-permission' && !need.needs.some((permission) => proven.record.permissions.includes(permission))
+          ? `this session may not ${need.needs.join(' or ')}`
+          : undefined;
+
+    if (detail !== undefined) {
       if (identity !== undefined) {
         try {
           await identity.audit.record(auditContext(proven.record.actor, correlationFor(AUTHZ_PREFIX, request.id)), {

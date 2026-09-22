@@ -7,9 +7,11 @@ import { correlationFor } from './context.js';
 import { FORBIDDEN, provenSession } from './csrf.js';
 import { notFound } from './failures.js';
 import { PRESENTATION_CONTROL, SERVICES_MANAGE } from './roles.js';
+import { runContext } from './runs.js';
 import { PreparationError, preparationContext } from './snapshots.js';
 
 import type { RouteNeed } from './authorization.js';
+import type { RunStore } from './runs.js';
 import type { PreparationStore } from './snapshots.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -74,9 +76,12 @@ const refused = (request: FastifyRequest, reply: FastifyReply, answer: Extract<A
 
 export interface PreparationRoutesOptions {
   readonly preparation: PreparationStore | undefined;
+  /** The run a caller-supplied `runId` belongs to (D-8) — absent in a deployment with no durable run
+   *  store, where the ownership check below is skipped and this route behaves as it always has. */
+  readonly runs: Pick<RunStore, 'resume'> | undefined;
 }
 
-export function servePreparationRoutes(app: FastifyInstance, { preparation }: PreparationRoutesOptions): void {
+export function servePreparationRoutes(app: FastifyInstance, { preparation, runs }: PreparationRoutesOptions): void {
   if (preparation === undefined) {
     for (const [method, url, need] of ROUTES) {
       app.route({
@@ -119,6 +124,20 @@ export function servePreparationRoutes(app: FastifyInstance, { preparation }: Pr
   app.post(PREPARATION_OVERRIDE_PATH, { config: { need: CONTROL_PERMISSION } }, async (request, reply) => {
     const parsed = parseOverrideBody(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
+    // D-8: this route takes a caller-supplied runId with no ownership of its own — closed here rather
+    // than inside `preparation.override` itself, the same gap `runs.ts`'s own `start` closes by minting
+    // the runId it overrides under, never accepting one from a caller.
+    if (runs !== undefined) {
+      // `call`'s own preparationContext carries `snapshots.ts`'s permissions, not `presentationRuns.read`
+      // — `runContext` is `runs.ts`'s own read context, the one its `resume` actually needs to answer.
+      const readContext = runContext(provenSession(request).record.actor, correlationFor('override:', request.id));
+      const row = await runs.resume(readContext, parsed.value.runId);
+      if (row === undefined || row.serviceId !== idIn(request)) {
+        return reply
+          .code(409)
+          .send(errorEnvelope(ENTITY_CONFLICT, `${parsed.value.runId} does not belong to ${idIn(request)}`, request.id));
+      }
+    }
     const session = {
       actor: provenSession(request).record.actor,
       permissions: provenSession(request).record.permissions,

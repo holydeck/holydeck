@@ -26,6 +26,7 @@ import { mediaLibraryOn } from './media.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
+import { runsOn } from './runs.js';
 import { seedContext, seedOn } from './seed.js';
 import { servicesOn } from './services.js';
 import { serviceTemplatesOn } from './service-templates.js';
@@ -46,6 +47,7 @@ import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
+import type { RunStore } from './runs.js';
 import type { PreparationStore } from './snapshots.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
@@ -87,6 +89,9 @@ let capabilities: CapabilityStore | undefined;
 let services: ServiceStore | undefined;
 let serviceTemplates: ServiceTemplateStore | undefined;
 let preparation: PreparationStore | undefined;
+// A run's own row is kept the same way, for the same reason: a deployment with nowhere to keep one
+// cannot start, end or resume it, and its routes answer not-found the same way.
+let runs: RunStore | undefined;
 let slideLabels: SlideLabelStore | undefined;
 // The settings admin is kept apart from the durable store, but wired up alongside it: a deployment with
 // nowhere to keep accounts has nobody who could administer settings either, and its route answers
@@ -123,6 +128,7 @@ if (settings.values.mongoUrl !== '') {
   services = servicesOn(repositoryDb(store.db()), { now });
   serviceTemplates = serviceTemplatesOn(repositoryDb(store.db()), { now });
   preparation = preparationOn(repositoryDb(store.db()), { now });
+  runs = runsOn(repositoryDb(store.db()), { now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
@@ -190,6 +196,7 @@ const app = buildApp({
   services,
   serviceTemplates,
   preparation,
+  runs,
   slideLabels,
 });
 

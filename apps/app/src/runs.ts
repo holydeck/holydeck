@@ -31,11 +31,12 @@ import { permissionsFor as recordPermissions } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { SERVICE_RECORD, subjectFor } from './services.js';
-import { SNAPSHOT_PERMISSIONS, preparationOn } from './snapshots.js';
+import { PreparationError, SNAPSHOT_PERMISSIONS, preparationOn } from './snapshots.js';
 
 import type { LiveMode } from '@holydeck/contracts/live-mode';
 import type { LivePosition, LiveState } from '@holydeck/contracts/live-state';
 import type { ThemeSurface } from '@holydeck/contracts/live-theme';
+import type { RunStartBody } from '@holydeck/contracts/runs';
 import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
 import type { OperatorSession, PreparationStore, ReadinessObservation } from './snapshots.js';
@@ -108,10 +109,10 @@ export interface RunRecord {
   readonly at: string;
 }
 
-export interface StartRunRequest {
-  readonly serviceId: string;
-  readonly mode: RunMode;
-}
+/** What starts a run: `@holydeck/contracts/runs`'s own wire shape, `override` included (D-8) — a live
+ *  start over a blocked checklist is refused unless one is given, exactly the same reason and shape the
+ *  standalone override route (`preparation-routes.ts`) already takes. */
+export type StartRunRequest = RunStartBody;
 
 export interface RunStore {
   /** Starts a fresh run from a Ready prepared snapshot. Refuses with a named error from anything else,
@@ -240,7 +241,10 @@ const legacyLiveState = (runId: string, snapshotId: string, position: number): L
 export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
   const runs = repositoriesOn(db)[RUN_RECORD];
   const trail = auditOn(db, { now: options.now, ...(options.newId === undefined ? {} : { newId: options.newId }) });
-  const preparation: PreparationStore = preparationOn(db, { now: options.now });
+  const preparation: PreparationStore = preparationOn(db, {
+    now: options.now,
+    ...(options.observe === undefined ? {} : { observe: options.observe }),
+  });
   const newId = options.newId ?? ((): string => randomBytes(RUN_ID_BYTES).toString('base64url'));
   const observe = options.observe ?? ((): ReadinessObservation => ({}));
   const onRunStateChange = options.onRunStateChange ?? ((): void => {});
@@ -324,13 +328,32 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
           throw new RunError('state', `${request.serviceId} has no prepared manifest to start a run from`);
         }
         const checklist = await preparation.readiness(context, request.serviceId, await observe(context, request.serviceId));
-        if (checklist === undefined || checklist.state !== 'ready') {
-          const state = checklist?.state ?? 'not prepared';
+        const state = checklist?.state ?? 'not prepared';
+        // D-8: going live over an open blocker is this one operation, not a separate call the client
+        // must sequence against a runId it does not yet have. An override offered when nothing is
+        // blocked is refused outright — mirrors `snapshots.ts`'s own override rule for the standalone
+        // route (`snapshots.ts:508`), so the two paths never disagree about when an override belongs.
+        if (state === 'ready' && request.override !== undefined) {
+          throw new RunError('state', 'an override is accepted only when a blocker is open, and none is');
+        }
+        const overriding = state === 'blocked' && request.mode === 'live' && request.override !== undefined;
+        if (checklist === undefined || (state !== 'ready' && !overriding)) {
           throw new RunError('state', `a run starts only from a Ready prepared snapshot, and ${request.serviceId} is ${state}`);
         }
         const runId = newId();
         if ((await standing(context, runId)) !== undefined) {
           throw new RunError('conflict', `${runId} is a run another writer named first`);
+        }
+        if (overriding && request.override !== undefined) {
+          // Only after this resolves does a run row get written, so a run is never created for a blocked
+          // service without a recorded, validated override under its own minted runId (D-8).
+          try {
+            await preparation.override(session, { serviceId: request.serviceId, runId, reason: request.override.reason });
+          } catch (error) {
+            if (!(error instanceof PreparationError)) throw error;
+            if (error.kind === 'corrupt') throw error;
+            throw new RunError(error.kind === 'permission' ? 'permission' : 'state', error.message);
+          }
         }
         const started = await append(context, {
           runId,

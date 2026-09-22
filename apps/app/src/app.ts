@@ -30,6 +30,7 @@ import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { RunStore } from './runs.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { PreparationStore } from './snapshots.js';
@@ -73,6 +74,10 @@ export interface AppOptions {
   services?: ServiceStore;
   serviceTemplates?: ServiceTemplateStore;
   preparation?: PreparationStore;
+  /** Where a run's own row is kept — only as far as the override route needs, to confirm a
+   *  caller-supplied runId belongs to the Service it is addressed to (D-8). Without it, that check is
+   *  skipped, the same way every other optional store here is. */
+  runs?: Pick<RunStore, 'resume'>;
   slideLabels?: SlideLabelStore;
 }
 
@@ -100,6 +105,7 @@ export function buildApp({
   services,
   serviceTemplates,
   preparation,
+  runs,
   slideLabels,
 }: AppOptions): FastifyInstance {
   // HTTPS makes Fastify infer a specialised server, while the routes below use its common interface.
@@ -247,7 +253,7 @@ export function buildApp({
   serveOrderRoutes(app, { services, slideLabels });
   serveServiceRoutes(app, { services });
   serveServiceTemplateRoutes(app, { serviceTemplates });
-  servePreparationRoutes(app, { preparation });
+  servePreparationRoutes(app, { preparation, runs });
 
   if (web !== undefined) serveWebClient(app, web);
 
