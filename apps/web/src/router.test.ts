@@ -21,7 +21,8 @@ afterEach(() => {
 describe('matchRoute', () => {
   it.each([
     ['/', { name: 'root' }],
-    ['/sign-in?next=%2Fservices', { name: 'sign-in', next: '/services' }],
+    ['/sign-in?next=%2Fservices', { name: 'sign-in', next: '/services', notice: undefined }],
+    ['/sign-in?notice=claim-sign-in-refused', { name: 'sign-in', next: undefined, notice: 'claim-sign-in-refused' }],
     ['/welcome', { name: 'welcome' }],
     ['/services', { name: 'services' }],
     ['/services/', { name: 'services' }],
