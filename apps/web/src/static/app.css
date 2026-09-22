@@ -1,6 +1,59 @@
 :root { color-scheme: dark light; }
-body { margin: 0; font: 1rem/1.5 system-ui, sans-serif; background: #0b0b0f; color: #f5f5f7; }
-main { padding: 2rem; max-width: 40rem; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 1rem/1.5 system-ui, sans-serif;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow-wrap: anywhere;
+}
+main { min-width: 0; padding: 32px; overflow-y: auto; }
+button { font: inherit; max-width: 100%; }
+a { color: currentColor; }
+:focus { outline: 2px solid currentColor; outline-offset: 2px; }
+
+.workspace { display: grid; gap: 16px; }
+.workspace-panel { display: none; min-width: 0; }
+#order,
+.workspace-panel:target,
+.workspace-panel:has(:target) { display: block; }
+
+.workspace-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 4px;
+  padding-bottom: max(4px, env(safe-area-inset-bottom));
+}
+.workspace-tabs a { display: flex; align-items: center; justify-content: center; text-align: center; }
+body:not(:has(.workspace-panel:target, .workspace-panel :target)) .workspace-tabs a[href="#order"],
+body:has(#order:target, #order :target) .workspace-tabs a[href="#order"],
+body:has(#editor-preview:target, #editor-preview :target) .workspace-tabs a[href="#editor-preview"],
+body:has(#library:target) .workspace-tabs a[href="#library"],
+body:has(#properties:target, #properties :target) .workspace-tabs a[href="#properties"] {
+  font-weight: bold;
+}
+
+#preview-row:not([hidden]),
+.live-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+#preview-row > span { min-width: 0; }
+.skip-links ul { display: flex; flex-wrap: wrap; gap: 16px; list-style: none; padding: 0; }
+
+@media (width < 1200px) {
+  .workspace:has(> .workspace-panel:not(#order):target, > .workspace-panel:not(#order) :target) > #order {
+    display: none;
+  }
+}
+
+@media (min-width: 1200px) {
+  body { height: auto; display: block; }
+  main { overflow: visible; }
+  .workspace { grid-template-columns: 264px minmax(480px, 1fr) 336px; align-items: start; }
+  .workspace > :is(#order, #editor-preview, #properties) { display: block; }
+  .workspace > #library,
+  .workspace-tabs { display: none; }
+  .live-actions { grid-template-columns: repeat(2, minmax(96px, 1fr)); }
+}
 
 .visually-hidden {
   position: absolute;
@@ -27,5 +80,5 @@ main { padding: 2rem; max-width: 40rem; }
 }
 
 /* WCAG-style touch target minimums: 44px generally, 56px for the live transport (spec 9.5, LIVE-07). */
-button { min-width: 44px; min-height: 44px; }
-#live-controls button { min-width: 56px; min-height: 56px; }
+button, a { min-width: 44px; min-height: 44px; }
+#live-controls button { min-width: 96px; min-height: 56px; }

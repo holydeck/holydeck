@@ -1,6 +1,25 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { renderShell } from './shell.js';
+
+it('provides workspace navigation to distinct, named, focusable panels', () => {
+  const html = readFileSync(new URL('./static/index.html', import.meta.url), 'utf8');
+  const navigation = /<nav class="workspace-tabs"[^>]*>([\s\S]*?)<\/nav>/u.exec(html)?.[1] ?? '';
+  const targets = [...navigation.matchAll(/href="#([^"]+)"/gu)].map((match) => match[1]);
+  expect(targets).toEqual(['order', 'editor-preview', 'library', 'properties']);
+  for (const id of targets) {
+    const panels = [...html.matchAll(new RegExp(`<section[^>]* id="${id}"[^>]*>`, 'gu'))];
+    expect(panels).toHaveLength(1);
+    const tag = panels[0]?.[0] ?? '';
+    expect(tag).toContain('class="workspace-panel"');
+    expect(tag).toContain('tabindex="-1"');
+    const heading = /aria-labelledby="([^"]+)"/u.exec(tag)?.[1];
+    expect(heading).toBeDefined();
+    expect(html).toContain(`id="${heading}"`);
+  }
+});
 
 const documentWith = (statusPresent = true) => {
   const status = { textContent: 'Preparing the service view.' as string | null };

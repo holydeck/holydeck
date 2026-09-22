@@ -39,44 +39,55 @@
         </ul>
       </nav>
 
-      <section id="order" tabindex="-1" aria-labelledby="order-heading">
-        <h2 id="order-heading">Order</h2>
-        <p id="order-empty">No slides in this order yet.</p>
-        <ul id="order-list" hidden></ul>
-      </section>
+      <div class="workspace">
+        <section id="order" class="workspace-panel" tabindex="-1" aria-labelledby="order-heading">
+          <h2 id="order-heading">Order</h2>
+          <p id="order-empty">No slides in this order yet.</p>
+          <ul id="order-list" hidden></ul>
+        </section>
 
-      <section id="editor-preview" tabindex="-1" aria-labelledby="editor-preview-heading">
-        <h2 id="editor-preview-heading">Editor and Preview</h2>
-        <div>
-          <h3 id="editor-heading">Editor</h3>
-          <p id="editor-body">Nothing selected to edit yet.</p>
-        </div>
-        <div>
-          <h3 id="preview-heading">Preview</h3>
-          <p id="preview-empty">Nothing to preview yet.</p>
-          <p id="preview-row" hidden>
-            <span id="preview-current-label">Current</span>: <span id="preview-current"></span><br />
-            <span id="preview-next-label">Next</span>: <span id="preview-next"></span>
+        <section id="editor-preview" class="workspace-panel" tabindex="-1" aria-labelledby="editor-preview-heading">
+          <h2 id="editor-preview-heading">Editor and Preview</h2>
+          <div>
+            <h3 id="editor-heading">Editor</h3>
+            <p id="editor-body">Nothing selected to edit yet.</p>
+          </div>
+          <section id="live-controls" tabindex="-1" aria-labelledby="live-controls-heading">
+            <h2 id="live-controls-heading">Live Controls</h2>
+            <p id="connection-status"></p>
+            <h3 id="preview-heading">Preview</h3>
+            <p id="preview-empty">Nothing to preview yet.</p>
+            <p id="preview-row" hidden>
+              <span><span id="preview-current-label">Current</span>: <span id="preview-current"></span></span>
+              <span><span id="preview-next-label">Next</span>: <span id="preview-next"></span></span>
+            </p>
+            <div class="live-actions">
+              <button id="live-previous" type="button">Previous slide</button>
+              <button id="live-next" type="button">Next slide</button>
+            </div>
+            <p id="live-status" aria-live="polite"></p>
+          </section>
+        </section>
+
+        <section id="properties" class="workspace-panel" tabindex="-1" aria-labelledby="properties-heading">
+          <h2 id="properties-heading">Properties</h2>
+          <p id="properties-empty">Select a slide to see its properties.</p>
+          <p id="properties-row" hidden>
+            <span id="properties-label-heading">Label</span>: <span id="properties-value"></span>
           </p>
-        </div>
-      </section>
+        </section>
 
-      <section id="properties" tabindex="-1" aria-labelledby="properties-heading">
-        <h2 id="properties-heading">Properties</h2>
-        <p id="properties-empty">Select a slide to see its properties.</p>
-        <p id="properties-row" hidden>
-          <span id="properties-label-heading">Label</span>: <span id="properties-value"></span>
-        </p>
-      </section>
-
-      <section id="live-controls" tabindex="-1" aria-labelledby="live-controls-heading">
-        <h2 id="live-controls-heading">Live Controls</h2>
-        <p id="connection-status"></p>
-        <button id="live-previous" type="button">Previous slide</button>
-        <button id="live-next" type="button">Next slide</button>
-        <p id="live-status" aria-live="polite"></p>
-      </section>
+        <section id="library" class="workspace-panel" tabindex="-1" aria-labelledby="library-heading">
+          <h2 id="library-heading">Library</h2>
+        </section>
+      </div>
     </main>
+    <nav class="workspace-tabs" aria-label="Workspace">
+      <a href="#order">Order</a>
+      <a href="#editor-preview">Editor</a>
+      <a href="#library">Library</a>
+      <a href="#properties">Properties</a>
+    </nav>
     <script type="module" src="/main.js"></script>
   </body>
 </html>
