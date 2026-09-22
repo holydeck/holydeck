@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACCOUNTS_MANAGE,
+  CONTENT_HISTORY_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
   PRESENCE_USE,
@@ -27,7 +28,7 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin accounts, settings, Layouts, media, services, Service Templates and presence', () => {
+  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, presence and history', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
@@ -36,12 +37,17 @@ describe('what a role grants', () => {
       MEDIA_MANAGE,
       SERVICES_MANAGE,
       PRESENCE_USE,
+      CONTENT_HISTORY_MANAGE,
     ]);
   });
 
-  it('grants an editor service management and presence, but not Service Template management, by role alone', () => {
+  it('grants an editor service management, presence and history, but not Service Template management', () => {
     expect(SERVICES_MANAGE).toBe('services.manage');
-    expect(permissionsFor(accountOf('editor', false))).toEqual([SERVICES_MANAGE, PRESENCE_USE]);
+    expect(permissionsFor(accountOf('editor', false))).toEqual([
+      SERVICES_MANAGE,
+      PRESENCE_USE,
+      CONTENT_HISTORY_MANAGE,
+    ]);
     expect(permissionsFor(accountOf('editor', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
   });
 
@@ -58,6 +64,7 @@ describe('what Control presentation is', () => {
     expect(permissionsFor(accountOf('editor', true))).toEqual([
       SERVICES_MANAGE,
       PRESENCE_USE,
+      CONTENT_HISTORY_MANAGE,
       PRESENTATION_CONTROL,
     ]);
     expect(permissionsFor(accountOf('member', true))).toEqual([PRESENCE_USE, PRESENTATION_CONTROL]);
@@ -76,6 +83,7 @@ describe('what Control presentation is', () => {
       MEDIA_MANAGE,
       SERVICES_MANAGE,
       PRESENCE_USE,
+      CONTENT_HISTORY_MANAGE,
       PRESENTATION_CONTROL,
     ]);
   });

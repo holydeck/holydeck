@@ -96,6 +96,10 @@
     "./fetch-missing": {
       "types": "./dist/fetch-missing.d.ts",
       "import": "./dist/fetch-missing.js"
+    },
+    "./diff-revisions": {
+      "types": "./dist/diff-revisions.d.ts",
+      "import": "./dist/diff-revisions.js"
     }
   },
   "scripts": {

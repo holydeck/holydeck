@@ -26,6 +26,7 @@ import { mediaLibraryOn } from './media.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
+import { revisionsOn } from './revisions.js';
 import { seedContext, seedOn } from './seed.js';
 import { servicesOn } from './services.js';
 import { serviceTemplatesOn } from './service-templates.js';
@@ -46,6 +47,7 @@ import type { CapabilityStore } from './capabilities.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { PresenceStore } from './presence.js';
+import type { RevisionStore } from './revisions.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { PreparationStore } from './snapshots.js';
@@ -110,6 +112,10 @@ let shownReferences: ShownReferenceStore | undefined;
 // Who is editing what is kept the same way and for the same reason: a deployment with nowhere to
 // keep an entry has nobody here to observe, and its routes answer not-found the same way.
 let presence: PresenceStore | undefined;
+// Content history is kept the same way and for the same reason: a deployment with nowhere to keep
+// one has no earlier revision to read, compare or bring back, and its routes answer not-found the
+// same way.
+let revisions: RevisionStore | undefined;
 let stopWatchingSettings: (() => void) | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
@@ -130,6 +136,7 @@ if (settings.values.mongoUrl !== '') {
   preparation = preparationOn(repositoryDb(store.db()), { now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
+  revisions = revisionsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
   presence = presenceOn(presenceDb(store.db()), { now });
@@ -190,6 +197,7 @@ const app = buildApp({
   capabilities,
   settingsAdmin,
   slideLayouts,
+  revisions,
   media,
   translationOffsets,
   shownReferences,

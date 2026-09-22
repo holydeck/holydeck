@@ -37,6 +37,7 @@ import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
 import { PRESENCE_PATH } from './presence-routes.js';
+import { REVISION_RESTORE_PATH } from './revision-routes.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
@@ -135,6 +136,9 @@ describe('every route that changes something', () => {
       { method: 'PUT', url: LAYOUT_BOXES_PATH },
       { method: 'POST', url: `${LAYOUT_REVISIONS_PATH}/:revision` },
       { method: 'PATCH', url: `${SLIDE_LAYOUTS_PATH}/:id/status` },
+      // Restoring an earlier revision is the one change this surface makes; reading, listing and
+      // comparing are not.
+      { method: 'POST', url: REVISION_RESTORE_PATH },
       // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
       // Admin's, the same as a Slide Layout's own surface above is.
       { method: 'POST', url: MEDIA_PATH },

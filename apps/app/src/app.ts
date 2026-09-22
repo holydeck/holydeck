@@ -17,6 +17,7 @@ import { servePasskeyRoutes } from './passkey-routes.js';
 import { servePresenceRoutes } from './presence-routes.js';
 import { servePreparationRoutes } from './preparation-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
+import { serveRevisionRoutes } from './revision-routes.js';
 import { serveServiceRoutes } from './service-routes.js';
 import { serveServiceTemplateRoutes } from './service-template-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
@@ -32,6 +33,7 @@ import type { Fetching } from './corpus.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { PresenceStore } from './presence.js';
+import type { RevisionStore } from './revisions.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { PreparationStore } from './snapshots.js';
@@ -66,6 +68,8 @@ export interface AppOptions {
   settingsAdmin?: SettingsAdmin;
   /** Where Slide Layouts are kept. Without it, there is none to create, version or archive. */
   slideLayouts?: SlideLayoutStore;
+  /** Where an earlier revision of Slide Layouts and Service Templates is read, compared and restored. */
+  revisions?: RevisionStore;
   /** Where an uploaded file becomes a media asset. Without it, there is nowhere for one to be uploaded to. */
   media?: MediaLibrary;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
@@ -98,6 +102,7 @@ export function buildApp({
   capabilities,
   settingsAdmin,
   slideLayouts,
+  revisions,
   media,
   translationOffsets,
   shownReferences,
@@ -240,6 +245,10 @@ export function buildApp({
   // Behind the same permission again, by a vocabulary of its own: a Slide Layout is Admin's to create,
   // to save forward and to stop offering, and nobody else's to change.
   serveSlideLayoutRoutes(app, { slideLayouts, identity });
+
+  // Behind a permission of its own, granted to Admin and Editor: reading, comparing and restoring an
+  // earlier revision of whatever content already versions itself through `revisions.ts`.
+  serveRevisionRoutes(app, { revisions });
 
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.

@@ -51,6 +51,14 @@ export const SERVICES_MANAGE = 'services.manage';
  */
 export const PRESENCE_USE = 'presence.use';
 
+/**
+ * Reads and restores earlier revisions of any content this store already versions (spec v1c-09,
+ * COLAB-02) — today Slide Layouts and Service Templates, both Admin's own surfaces already. Spelled
+ * `contentHistory.` rather than folding into `layouts.`/`serviceTemplates.`, because history reaches
+ * across whichever content kind wrote it and is not either one's alone to administer.
+ */
+export const CONTENT_HISTORY_MANAGE = 'contentHistory.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -60,8 +68,9 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     MEDIA_MANAGE,
     SERVICES_MANAGE,
     PRESENCE_USE,
+    CONTENT_HISTORY_MANAGE,
   ],
-  editor: [SERVICES_MANAGE, PRESENCE_USE],
+  editor: [SERVICES_MANAGE, PRESENCE_USE, CONTENT_HISTORY_MANAGE],
   member: [PRESENCE_USE],
 };
 

@@ -43,6 +43,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'preparation-routes.ts': 'no harness test drives preparing a Service, its readiness checklist or an operator override over HTTP',
   'presence-routes.ts': 'no harness test enters, lists or leaves presence over HTTP',
   'reference-routes.ts': 'no harness test looks a reference up or shows one over HTTP',
+  'revision-routes.ts': 'no harness test reads, compares or restores a revision over HTTP',
   'service-routes.ts': 'no harness test drives the Service workspace lifecycle over HTTP',
   'settings-routes.ts': 'no harness test reads or changes settings over HTTP',
   'slide-layout-routes.ts': 'no harness test creates, versions or archives a Slide Layout over HTTP',

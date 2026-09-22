@@ -24,6 +24,7 @@ import {
   revisionKey,
 } from '@holydeck/contracts/revisions';
 
+import { requestContext } from './context.js';
 import { permissionsFor } from './records.js';
 import { createIndexOn, RepositoryError, repositoriesOn } from './repositories.js';
 
@@ -63,6 +64,15 @@ export class RevisionError extends Error {
     this.name = 'RevisionError';
     this.kind = kind;
   }
+}
+
+/** The context a caller reads or restores history under: only this store's own permissions. */
+export function revisionContext(actor: string, correlationId: string): RequestContext {
+  return requestContext({
+    actor,
+    permissions: Object.values(REVISION_PERMISSIONS),
+    correlationId,
+  });
 }
 
 const digestOf = (body: RevisionBody): string =>
