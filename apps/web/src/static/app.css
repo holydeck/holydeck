@@ -26,6 +26,11 @@
   --color-accent-text: #0b0b0f;
   --color-danger: #ff8a8a;
   --color-border: #3a3a46;
+  --color-warning: #FBBF24;
+  --color-complete: #4ADE80;
+  --color-offline: #38BDF8;
+  --font-tamil: "Noto Sans Tamil", "Tamil MN", "Tamil Sangam MN", "Latha", "Nirmala UI", sans-serif;
+  --font-latin: system-ui, sans-serif;
   --focus-ring: 2px solid var(--color-accent);
 }
 @media (prefers-color-scheme: light) {
@@ -38,6 +43,9 @@
     --color-accent-text: #ffffff;
     --color-danger: #b3261e;
     --color-border: #c8c8d2;
+    --color-warning: #92400E;
+    --color-complete: #166534;
+    --color-offline: #075985;
   }
 }
 * { box-sizing: border-box; }
@@ -115,6 +123,7 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 }
 
 .table-scroll { overflow-x: auto; }
+.workspace-main { max-width: none; }
 .users-table { width: 100%; border-collapse: collapse; }
 .users-table th,
 .users-table td { padding: var(--space-2); border-bottom: 1px solid var(--color-border); text-align: left; }
