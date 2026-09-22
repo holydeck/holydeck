@@ -12,6 +12,7 @@ import {
   parseServiceOutput,
   parseServiceDraft,
   parseServiceItem,
+  parseServiceItemBody,
   parseServiceItemReorder,
   parseServiceItemRevision,
   parseServiceSchedule,
@@ -44,6 +45,38 @@ const service = () => ({
       items: [{ id: 'item-3', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 9 } }],
     },
   ],
+});
+
+const text = {
+  id: 'b1', kind: 'text', layer: 0, text: 'Welcome',
+  frame: { x: 0.1, y: 0.1, width: 0.8, height: 0.3 },
+  style: { fontFamily: 'var(--font-latin)', fontWeight: 400, sizeRatio: 0.08, lineHeight: 1.2, align: 'center', verticalAlign: 'center' },
+};
+
+describe('ServiceItem.body', () => {
+  it('lets a custom slide carry boxes and a reading carry a passage', () => {
+    expect(parseServiceItem({ id: 'i', kind: 'custom-slide', title: 'Welcome', body: { kind: 'custom-slide', boxes: [text] } }).ok).toBe(true);
+    const reading = { kind: 'reading', translation: 'KJV', compare: ['TAOVBSI'], book: 'JHN', chapter: 3, verses: '16-17' };
+    expect(parseServiceItem({ id: 'r', kind: 'reading', title: 'John 3', body: reading }).ok).toBe(true);
+  });
+
+  it('refuses a body on any other kind, and a body of the wrong kind', () => {
+    expect(parseServiceItem({ id: 'i', kind: 'song', title: 'S', content: { id: 'g', revision: 1, hash: 'fnv1a-6fe1d1e9' }, body: { kind: 'custom-slide', boxes: [] } }).ok).toBe(false);
+    expect(parseServiceItem({ id: 'i', kind: 'custom-slide', title: 'W', body: { kind: 'reading' } }).ok).toBe(false);
+  });
+
+  it('refuses a frame outside the slide, a repeated box id and more than four translations', () => {
+    const outside = { ...text, frame: { x: 0.5, y: 0, width: 0.8, height: 0.2 } };
+    expect(parseServiceItemBody({ kind: 'custom-slide', boxes: [outside] }).ok).toBe(false);
+    expect(parseServiceItemBody({ kind: 'custom-slide', boxes: [text, text] }).ok).toBe(false);
+    expect(parseServiceItemBody({ kind: 'reading', translation: 'A', compare: ['B', 'C', 'D', 'E'], book: 'JHN', chapter: 3, verses: '16' }).ok).toBe(false);
+  });
+
+  it('accepts a media box with a fit the renderer knows', () => {
+    const media = { id: 'm', kind: 'media', layer: 1, mediaId: 'x', mediaKind: 'image', fit: 'stretch', intrinsicSize: { width: 1920, height: 1080 }, frame: { x: 0, y: 0, width: 1, height: 1 } };
+    expect(parseServiceItemBody({ kind: 'custom-slide', boxes: [media] }).ok).toBe(true);
+    expect(parseServiceItemBody({ kind: 'custom-slide', boxes: [{ ...media, fit: 'tile' }] }).ok).toBe(false);
+  });
 });
 
 const codes = (value: unknown) => {
