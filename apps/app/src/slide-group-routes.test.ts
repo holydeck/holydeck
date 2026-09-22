@@ -136,8 +136,13 @@ describe('slide group routes', () => {
   });
 
   test('regenerates a generated group and refuses regenerating a custom group', async () => {
-    const generated = await created(GENERATED);
-    expect((await ask('POST', `${at(SLIDE_GROUP_ID_PATH, generated)}/regenerate`, GENERATED)).statusCode).toBe(200);
+    const twoSlides: SlideGroupBody = { ...GENERATED, slides: [SLIDE_A, SLIDE_B] };
+    const generated = await created(twoSlides);
+    expect((await ask('PUT', `${slideAt(SLIDE_PATH, generated)}/background`, { background: 'crimson' })).statusCode).toBe(200);
+    const regenerated = await ask('POST', `${at(SLIDE_GROUP_ID_PATH, generated)}/regenerate`, twoSlides);
+    expect(regenerated.statusCode).toBe(200);
+    expect(regenerated.json().data.clearedOverrideSlideIds).toEqual([SLIDE_A.id]);
+    expect(regenerated.json().data.body.slides[0].background).toBeUndefined();
     const custom = await created();
     const refused = await ask('POST', `${at(SLIDE_GROUP_ID_PATH, custom)}/regenerate`, GENERATED);
     expect(refused.statusCode).toBe(409);
