@@ -153,3 +153,33 @@ export function parsePreparedSnapshot(value: unknown): Parsed<PreparedSnapshot> 
     return { id, pins, resolved, generatedSlides, immutable: true };
   });
 }
+
+export interface PreparationInputs {
+  readonly slideLayout: { readonly id: string; readonly revision: number };
+  readonly serviceTemplate: string;
+  readonly settings: string;
+  readonly media: string;
+  readonly corpus: string;
+  readonly aspectRatio: string;
+  readonly safeAreaMargins?: SafeAreaMargins;
+  readonly generatedSlides?: readonly GeneratedSlideProvenance[];
+}
+
+const parsePinnedLayout: ParseFn<{ readonly id: string; readonly revision: number }> = (value, path) =>
+  parseObject(value, path, (reader) => ({
+    id: reader.text('id'),
+    revision: reader.wholeNumber('revision', 1),
+  }));
+
+export function parsePreparationInputs(value: unknown): Parsed<PreparationInputs> {
+  return parseObject(value, 'preparation', (reader) => ({
+    slideLayout: reader.parsed('slideLayout', parsePinnedLayout, { id: '', revision: 1 }),
+    serviceTemplate: reader.text('serviceTemplate'),
+    settings: reader.text('settings'),
+    media: reader.text('media'),
+    corpus: reader.text('corpus'),
+    aspectRatio: reader.text('aspectRatio'),
+    safeAreaMargins: reader.optionalParsed('safeAreaMargins', parseSafeAreaMargins),
+    generatedSlides: reader.optionalParsedList('generatedSlides', parseGeneratedSlideProvenance),
+  }));
+}
