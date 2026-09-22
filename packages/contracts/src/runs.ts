@@ -46,7 +46,7 @@ export type RunAdditionBody = {
 
 export function parseRunAdditionBody(value: unknown): Parsed<RunAdditionBody> {
   return parseObject(value, 'run', (reader) => {
-    const saveToLibrary = reader.names.includes('saveToLibrary') ? reader.flag('saveToLibrary') : undefined;
+    const saveToLibrary = reader.optionalFlag('saveToLibrary');
     return {
       kind: reader.choice('kind', LIBRARY_KINDS),
       title: reader.text('title'),
