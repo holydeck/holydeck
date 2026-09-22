@@ -2,11 +2,15 @@
 // a refusal is caught here and turned into `{ok:false}` rather than an exception the route has to unwrap
 // itself. Extracted from `slide-layout-routes.ts` once a second domain (`service-templates.ts`) needed
 // the exact same shape with one more refusal kind — a domain keeps its own error type and the kinds it
-// throws, and only the catching itself is shared.
+// throws, and only the catching itself is shared. `problems` is optional: most domains refuse in one
+// sentence, but a schema refusal (sermons' own `SermonError`, for one) carries the located problems a
+// 422 reports field-by-field, and this shape carries them through without every caller re-deriving them.
+
+import type { Problem } from '@holydeck/contracts/problems';
 
 export type Answer<T, K extends string> =
   | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly kind: K; readonly message: string };
+  | { readonly ok: false; readonly kind: K; readonly message: string; readonly problems?: readonly Problem[] };
 
 /**
  * Runs a store call and turns a refusal `isRefusal` recognizes into `{ok:false}` rather than letting it
@@ -15,12 +19,12 @@ export type Answer<T, K extends string> =
  */
 export async function settled<T, K extends string>(
   work: () => Promise<T>,
-  isRefusal: (error: unknown) => error is Error & { readonly kind: K },
+  isRefusal: (error: unknown) => error is Error & { readonly kind: K; readonly problems?: readonly Problem[] },
 ): Promise<Answer<T, K>> {
   try {
     return { ok: true, value: await work() };
   } catch (error) {
-    if (isRefusal(error)) return { ok: false, kind: error.kind, message: error.message };
+    if (isRefusal(error)) return { ok: false, kind: error.kind, message: error.message, problems: error.problems };
     throw error;
   }
 }

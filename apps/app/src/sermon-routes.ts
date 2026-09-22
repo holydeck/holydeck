@@ -7,7 +7,7 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
-import { staleRevision } from './refusals.js';
+import { settled, staleRevision } from './refusals.js';
 import { CONTENT_EDIT } from './roles.js';
 import { SERMON_PATH, parseSermonDraft, parseSermonEdit } from './sermon-body.js';
 import { sermonStoreFilesFromCorpus } from './sermon-corpus.js';
@@ -17,6 +17,7 @@ import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
 import type { corpusClient } from './corpus.js';
 import type { Identity } from './onboarding.js';
+import type { Answer } from './refusals.js';
 import type { SermonRefusal, SermonStore } from './sermons.js';
 import type { LocatedProblem } from './sermon-yaml.js';
 import type { TranslationStoreFile } from '@holydeck/core/storage';
@@ -48,28 +49,15 @@ const expectedRevisionProblem = (asked: string | undefined): readonly LocatedPro
 }];
 const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
 
-type SermonFailure = {
-  readonly ok: false;
-  readonly kind: Exclude<SermonRefusal, 'corrupt'>;
-  readonly message: string;
-  readonly problems: readonly LocatedProblem[];
-};
-type SermonAnswer<T> = { readonly ok: true; readonly value: T } | SermonFailure;
+type SermonRefused = Exclude<SermonRefusal, 'corrupt'>;
+type SermonFailure = Extract<Answer<unknown, SermonRefused>, { readonly ok: false }>;
 
-async function settled<T>(work: () => Promise<T>): Promise<SermonAnswer<T>> {
-  try {
-    return { ok: true, value: await work() };
-  } catch (error) {
-    if (error instanceof SermonError && error.kind !== 'corrupt') {
-      return { ok: false, kind: error.kind, message: error.message, problems: error.problems };
-    }
-    throw error;
-  }
-}
+const isSermonRefusal = (error: unknown): error is SermonError & { readonly kind: SermonRefused } =>
+  error instanceof SermonError && error.kind !== 'corrupt';
 
 function refused(request: FastifyRequest, reply: FastifyReply, answer: SermonFailure): FastifyReply {
   if (answer.kind === 'schema') {
-    const problems = answer.problems.length > 0
+    const problems = answer.problems !== undefined && answer.problems.length > 0
       ? answer.problems
       : [{ path: SERMON_PATH, code: FIELD_CODES.notAnObject, message: answer.message }];
     return reply.code(422).send(validationFailure(request.id, problems));
@@ -109,7 +97,7 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
   app.post(SERMONS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const parsed = parseSermonDraft(request.body, SERMON_PATH);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
-    const answer = await settled(() => store.create(call(request), parsed.value.title, parsed.value.body));
+    const answer = await settled(() => store.create(call(request), parsed.value.title, parsed.value.body), isSermonRefusal);
     if (!answer.ok) return refused(request, reply, answer);
     await note(request, answer.value.stamp.id, 'allowed', 'created');
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
@@ -133,7 +121,7 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
     if (current === undefined) return reply.code(404).send(notFound(request));
     const stale = staleRevision(id, parsed.value.expectedRevision, current.revision);
     if (stale !== undefined) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, stale, request.id));
-    const answer = await settled(() => store.edit(context, id, parsed.value.body));
+    const answer = await settled(() => store.edit(context, id, parsed.value.body), isSermonRefusal);
     if (!answer.ok) return refused(request, reply, answer);
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     await note(request, id, 'allowed', `saved revision ${answer.value.revision}`);
@@ -162,7 +150,7 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
     if (current === undefined) return reply.code(404).send(notFound(request));
     const stale = staleRevision(id, expectedRevision, current.revision);
     if (stale !== undefined) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, stale, request.id));
-    const answer = await settled(() => store.editRaw(context, id, request.body as string));
+    const answer = await settled(() => store.editRaw(context, id, request.body as string), isSermonRefusal);
     if (!answer.ok) return refused(request, reply, answer);
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     await note(request, id, 'allowed', `saved raw revision ${answer.value.revision}`);
@@ -187,7 +175,7 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
       if (!built.ok) return reply.code(built.refusal.status).send(errorEnvelope(built.refusal.code, built.refusal.message, request.id));
       storeFiles = built.value;
     }
-    const answer = await settled(() => store.generate(context, id, { ...parsed.value, storeFiles }));
+    const answer = await settled(() => store.generate(context, id, { ...parsed.value, storeFiles }), isSermonRefusal);
     if (!answer.ok) return refused(request, reply, answer);
     await note(request, id, 'allowed', 'generated slides');
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
