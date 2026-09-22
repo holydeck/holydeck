@@ -179,7 +179,9 @@ try {
   up(DEV_FILE);
   healthy(DEV_FILE);
   const first = ledger(DEV_FILE);
-  check(`${DEV_FILE}: the migration recorded version 1 as applied`, first.rows === 2 && first.applied !== 'none', `${first.rows} ledger rows, applied at ${first.applied}`);
+  // Not an exact row count, for the same reason the DEPLOY_FILE check below already avoids one: the
+  // migration set has grown since this was written for a single migration.
+  check(`${DEV_FILE}: the migration recorded version 1 as applied`, first.rows > 0 && first.applied !== 'none', `${first.rows} ledger rows, applied at ${first.applied}`);
   markProbe(DEV_FILE, 'before-restart');
   check(`${DEV_FILE}: a record written into the stack is there`, probes(DEV_FILE) === 1);
 
@@ -188,7 +190,7 @@ try {
   up(DEV_FILE);
   healthy(DEV_FILE);
   const kept = ledger(DEV_FILE);
-  check(`${DEV_FILE}: the ledger survived the restart rather than being written again`, kept.rows === 2 && kept.applied === first.applied, `${kept.rows} rows, applied at ${kept.applied}`);
+  check(`${DEV_FILE}: the ledger survived the restart rather than being written again`, kept.rows === first.rows && kept.applied === first.applied, `${kept.rows} rows, applied at ${kept.applied}`);
   check(`${DEV_FILE}: the record written before the restart is still there`, probes(DEV_FILE) === 1);
 
   say(`\n=== ${DEV_FILE}: down with volumes, then up ===`);
@@ -196,14 +198,14 @@ try {
   up(DEV_FILE);
   healthy(DEV_FILE);
   const wiped = ledger(DEV_FILE);
-  check(`${DEV_FILE}: the migration ran against an empty database and recorded it again`, wiped.rows === 2 && wiped.applied !== first.applied, `applied at ${wiped.applied}, was ${first.applied}`);
+  check(`${DEV_FILE}: the migration ran against an empty database and recorded it again`, wiped.rows === first.rows && wiped.applied !== first.applied, `applied at ${wiped.applied}, was ${first.applied}`);
   check(`${DEV_FILE}: nothing the volumes held survived down --volumes`, probes(DEV_FILE) === 0);
 
   say(`\n=== ${TEST_FILE}: first run ===`);
   up(TEST_FILE);
   healthy(TEST_FILE);
   const testFirst = ledger(TEST_FILE);
-  check(`${TEST_FILE}: the test stack migrated its own database`, testFirst.rows === 2, `${testFirst.rows} ledger rows`);
+  check(`${TEST_FILE}: the test stack migrated its own database`, testFirst.rows > 0, `${testFirst.rows} ledger rows`);
   markProbe(TEST_FILE, 'first-run');
   check(`${TEST_FILE}: the first run wrote its record`, probes(TEST_FILE) === 1);
 
@@ -213,7 +215,7 @@ try {
   healthy(TEST_FILE);
   check(`${TEST_FILE}: the second run does not see what the first run wrote`, probes(TEST_FILE) === 0);
   const testSecond = ledger(TEST_FILE);
-  check(`${TEST_FILE}: the second run migrated an empty database of its own`, testSecond.rows === 2 && testSecond.applied !== testFirst.applied, `applied at ${testSecond.applied}, was ${testFirst.applied}`);
+  check(`${TEST_FILE}: the second run migrated an empty database of its own`, testSecond.rows === testFirst.rows && testSecond.applied !== testFirst.applied, `applied at ${testSecond.applied}, was ${testFirst.applied}`);
 
   say(`\n=== ${DEPLOY_FILE}: cold start on an empty volume set ===`);
   // The development stack is still up from the section above, and its app service publishes the same
@@ -223,9 +225,9 @@ try {
   up(DEPLOY_FILE);
   healthy(DEPLOY_FILE);
   const deployed = ledger(DEPLOY_FILE);
-  // Not an exact row count: the migration set has grown since the DEV_FILE/TEST_FILE checks above were
-  // written for a single migration, and hardcoding today's count here would only go stale the same way.
-  // What "ran against an empty database and recorded it" needs is that something was written at all.
+  // Not an exact row count: there is no prior run on this stack to compare against, and hardcoding
+  // today's migration count would only go stale as the migration set grows. What "ran against an empty
+  // database and recorded it" needs is that something was written at all.
   check(`${DEPLOY_FILE}: the migration ran against an empty database and recorded it`, deployed.rows > 0 && deployed.applied !== 'none', `${deployed.rows} ledger rows, applied at ${deployed.applied}`);
   seeded(DEPLOY_FILE);
 
