@@ -24,3 +24,16 @@ export async function settled<T, K extends string>(
     throw error;
   }
 }
+
+/**
+ * The revision half of the same shape: a mutating edit that carries an `expectedRevision` is refused
+ * before it is even attempted when that number no longer matches what the store holds, rather than
+ * asking `edit` to build a save against a payload the caller read a stale revision for. `undefined`
+ * when they still match; otherwise the 409 `ENTITY_CONFLICT` message to answer with, naming the
+ * revision actually on file so a caller can re-read it before trying again (songs CRT-03, sermons CRT-05).
+ */
+export function staleRevision(id: string, expectedRevision: number, currentRevision: number): string | undefined {
+  return expectedRevision === currentRevision
+    ? undefined
+    : `${id} is now at revision ${currentRevision}, not ${expectedRevision}`;
+}

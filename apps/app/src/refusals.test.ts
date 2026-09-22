@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { settled } from './refusals.js';
+import { settled, staleRevision } from './refusals.js';
 
 class FakeError extends Error {
   readonly kind: 'schema' | 'conflict' | 'corrupt';
@@ -33,5 +33,15 @@ describe('settled', () => {
 
   it('rethrows an error of an unrelated type outright', async () => {
     await expect(settled(() => Promise.reject(new Error('boom')), isRefusal)).rejects.toThrow('boom');
+  });
+});
+
+describe('staleRevision', () => {
+  it('answers undefined when the claimed revision still matches', () => {
+    expect(staleRevision('song-1', 3, 3)).toBeUndefined();
+  });
+
+  it('names the revision actually on file when it has moved on', () => {
+    expect(staleRevision('song-1', 3, 5)).toBe('song-1 is now at revision 5, not 3');
   });
 });

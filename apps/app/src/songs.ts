@@ -71,6 +71,8 @@ export function songContext(actor: string, correlationId: string): RequestContex
   });
 }
 
+export const subjectFor = (id: string): string => `song:${id}`;
+
 /** ADR 0004: the pinned source and Slide Layout revisions a generated slide group was projected from. */
 export type SongGeneratedFrom = {
   readonly songId: string;
