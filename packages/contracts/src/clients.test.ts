@@ -31,13 +31,13 @@ const packet = () => ({
 
 describe('the window this build serves', () => {
   it('is the current version and the one before it, and says so in a header clients can send', () => {
-    expect(CLIENT_WINDOW).toEqual({ current: 1 });
+    expect(CLIENT_WINDOW).toEqual({ current: 2, previous: 1 });
     expect(CLIENT_VERSION_HEADER).toBe('x-holydeck-client-version');
     expect(UPDATE_REQUIRED_MESSAGE).toBe('Update required');
   });
 
   it('offers one version while nothing has been released before it, and two once something has', () => {
-    expect(supportedClientVersions()).toEqual([1]);
+    expect(supportedClientVersions()).toEqual([1, 2]);
     expect(supportedClientVersions(window12)).toEqual([11, 12]);
   });
 });
@@ -47,6 +47,8 @@ describe('deciding about one client', () => {
     expect(decideClient(12, window12)).toEqual({ accepted: true, version: 12 });
     expect(decideClient('11', window12)).toEqual({ accepted: true, version: 11 });
     expect(decideClient(1)).toEqual({ accepted: true, version: 1 });
+    expect(decideClient(2)).toEqual({ accepted: true, version: 2 });
+    expect(decideClient(3).accepted).toBe(false);
   });
 
   it('tells an older client to update, with the stable code and the words the contract names', () => {
@@ -75,9 +77,9 @@ describe('deciding about one client', () => {
     expect(decision.accepted === false && decision.status).toBe(MESSAGE_CODES.find((entry) => entry.code === UPDATE_REQUIRED)?.status);
   });
 
-  it('has one version inside the window while nothing older has been released', () => {
+  it('refuses versions outside the current window', () => {
     expect(decideClient(0).accepted).toBe(false);
-    expect(decideClient(2).accepted).toBe(false);
+    expect(decideClient(3).accepted).toBe(false);
   });
 });
 

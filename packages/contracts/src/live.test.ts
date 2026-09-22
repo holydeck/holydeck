@@ -21,6 +21,8 @@ import {
 } from './live.js';
 import { FIELD_CODES } from './problems.js';
 
+const NOW = '2026-09-13T09:30:00Z';
+
 // The values recorded in contracts/fixtures/websocket.v1.json, written out here because the product
 // repository holds no phase artifacts.
 const snapshot = () => ({ kind: 'snapshot', channel: 'live-control', stateRevision: 41, sequence: 100, at: '2026-09-13T09:30:00Z' });
@@ -83,6 +85,19 @@ describe('the vocabulary a live session is limited to', () => {
 describe('frames the server sends', () => {
   it('parses the snapshot the session opens with', () => {
     expect(parseSnapshotFrame(snapshot())).toEqual({ ok: true, value: snapshot() });
+  });
+
+  it('carries an optional state payload on a snapshot and an event frame', () => {
+    const withState = { kind: 'snapshot', channel: 'audience', stateRevision: 3, sequence: 9, at: NOW, state: { view: 'audience', runId: 'r1' } };
+    expect(parseSnapshotFrame(withState)).toEqual({ ok: true, value: withState });
+    expect(parseSnapshotFrame({ ...withState, state: undefined })).toMatchObject({ ok: true });
+    const eventWithState = { kind: 'event', channel: 'audience', sequence: 9, stateRevision: 3, type: 'slide-shown', mutatesState: true, at: NOW, state: withState.state };
+    expect(parseEventFrame(eventWithState)).toEqual({ ok: true, value: eventWithState });
+  });
+
+  it('refuses a state payload that is not an object', () => {
+    const parsed = parseSnapshotFrame({ kind: 'snapshot', channel: 'audience', stateRevision: 1, sequence: 1, at: NOW, state: 'nope' });
+    expect(parsed.ok).toBe(false);
   });
 
   it('parses an event that moved the state and one that did not', () => {
@@ -148,7 +163,9 @@ describe('frames the server sends', () => {
   });
 
   it('names the four things that can become of a command and no others', () => {
-    expect(ACK_OUTCOMES).toEqual(['applied', 'duplicate', 'stale', 'unauthorized']);
+    expect(ACK_OUTCOMES).toEqual(['applied', 'duplicate', 'stale', 'unauthorized', 'invalid', 'failed']);
+    expect(ACK_OUTCOMES).toContain('invalid');
+    expect(ACK_OUTCOMES).toContain('failed');
     expect(codes({ ...ack(), outcome: 'maybe' }, parseAckFrame)).toEqual([`ack.outcome=${FIELD_CODES.notAllowed}`]);
   });
 
@@ -174,6 +191,16 @@ describe('frames the server sends', () => {
 describe('frames a client sends', () => {
   it('parses a command and the state revision it was issued against', () => {
     expect(parseCommandFrame(command())).toEqual({ ok: true, value: command() });
+  });
+
+  it('carries optional args on a command frame', () => {
+    const withArgs = { kind: 'command', channel: 'live-control', id: 'c1', idempotencyKey: 'k1', type: 'go-to', clientStateRevision: 2, args: { itemId: 'i1', slideIndex: 0 } };
+    expect(parseCommandFrame(withArgs)).toEqual({ ok: true, value: withArgs });
+  });
+
+  it('round-trips a v1-shaped frame (no state, no args) unchanged', () => {
+    const v1Snapshot = { kind: 'snapshot', channel: 'audience', stateRevision: 1, sequence: 1, at: NOW };
+    expect(parseSnapshotFrame(v1Snapshot)).toEqual({ ok: true, value: v1Snapshot });
   });
 
   it('parses a resume asking to replay from the last sequence it saw', () => {

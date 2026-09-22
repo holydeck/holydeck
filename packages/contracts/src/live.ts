@@ -92,12 +92,12 @@ export const FRAME_KINDS = ['snapshot', 'event', 'command', 'resume', 'ack', 'he
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
 /**
- * What became of a command. Four outcomes, each of which tells the client its next move without any
+ * What became of a command. Six outcomes, each of which tells the client its next move without any
  * prose to read: `applied` moved the state, `duplicate` says this command had already moved it and was
  * not applied again, `stale` says the revision it was issued against is no longer the server's, and
  * `unauthorized` says the session or command type is not permitted to publish.
  */
-export const ACK_OUTCOMES = ['applied', 'duplicate', 'stale', 'unauthorized'] as const;
+export const ACK_OUTCOMES = ['applied', 'duplicate', 'stale', 'unauthorized', 'invalid', 'failed'] as const;
 export type AckOutcome = (typeof ACK_OUTCOMES)[number];
 
 export type SnapshotFrame = {
@@ -106,6 +106,7 @@ export type SnapshotFrame = {
   readonly stateRevision: number;
   readonly sequence: number;
   readonly at: string;
+  readonly state?: unknown;
 };
 
 export type EventFrame = {
@@ -116,6 +117,7 @@ export type EventFrame = {
   readonly type: string;
   readonly mutatesState: boolean;
   readonly at: string;
+  readonly state?: unknown;
 };
 
 export type CommandFrame = {
@@ -125,6 +127,7 @@ export type CommandFrame = {
   readonly idempotencyKey: string;
   readonly type: string;
   readonly clientStateRevision: number;
+  readonly args?: unknown;
 };
 
 export type ResumeFrame = {
@@ -185,6 +188,9 @@ export function parseSnapshotFrame(value: unknown): Parsed<SnapshotFrame> {
     stateRevision: reader.wholeNumber('stateRevision'),
     sequence: reader.wholeNumber('sequence'),
     at: reader.time('at'),
+    state: reader.optionalParsed('state', (raw, path) => isRecord(raw)
+      ? { ok: true, value: raw }
+      : { ok: false, problems: [{ path, code: FIELD_CODES.notAnObject, message: 'must be an object' }] }),
   }));
 }
 
@@ -197,6 +203,9 @@ export function parseEventFrame(value: unknown): Parsed<EventFrame> {
     type: readName(reader, 'type'),
     mutatesState: reader.flag('mutatesState'),
     at: reader.time('at'),
+    state: reader.optionalParsed('state', (raw, path) => isRecord(raw)
+      ? { ok: true, value: raw }
+      : { ok: false, problems: [{ path, code: FIELD_CODES.notAnObject, message: 'must be an object' }] }),
   }));
 }
 
@@ -208,6 +217,9 @@ export function parseCommandFrame(value: unknown): Parsed<CommandFrame> {
     idempotencyKey: reader.text('idempotencyKey'),
     type: readName(reader, 'type'),
     clientStateRevision: reader.wholeNumber('clientStateRevision'),
+    args: reader.optionalParsed('args', (raw, path) => isRecord(raw)
+      ? { ok: true, value: raw }
+      : { ok: false, problems: [{ path, code: FIELD_CODES.notAnObject, message: 'must be an object' }] }),
   }));
 }
 
