@@ -62,7 +62,15 @@ export function fakeDb(): FakeDb {
           const sort = options.sort;
           if (sort !== undefined) {
             const [[field, direction]] = Object.entries(sort) as [[string, 1 | -1]];
-            found.sort((left, right) => (Number(left[field]) - Number(right[field])) * direction);
+            // Generic `<`/`>`, not `Number(...)` coercion: a sequence number compares the same either way,
+            // but an ISO timestamp (e.g. `queuedAt`) coerces to `NaN` under `Number()` and would not sort at
+            // all — the same lexicographic order the real driver compares it by, since ISO-8601 sorts as text.
+            found.sort((left, right) => {
+              const a = left[field] as string | number;
+              const b = right[field] as string | number;
+              const cmp = a === b ? 0 : a < b ? -1 : 1;
+              return cmp * direction;
+            });
           }
           return { toArray: async () => (options.limit === undefined ? found : found.slice(0, options.limit)) };
         },

@@ -66,6 +66,13 @@ export const RESTORE_MANAGE = 'restore.manage';
  */
 export const JOBS_MANAGE = 'jobs.manage';
 
+/**
+ * Reads the operational health report (OPS-09). Admin's alone, by role — the same as every other
+ * administrative surface. Spelled `operations.read` rather than `operations.manage` because this
+ * surface has nothing to change: it reports on other domains' own state and never writes any of them.
+ */
+export const OPERATIONS_READ = 'operations.read';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -77,6 +84,7 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     BACKUP_MANAGE,
     RESTORE_MANAGE,
     JOBS_MANAGE,
+    OPERATIONS_READ,
   ],
   editor: [SERVICES_MANAGE],
   member: [],

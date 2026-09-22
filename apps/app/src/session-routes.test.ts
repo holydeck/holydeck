@@ -38,6 +38,7 @@ import {
   JOBS_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
+  OPERATIONS_READ,
   PRESENTATION_CONTROL,
   RESTORE_MANAGE,
   SERVICES_MANAGE,
@@ -320,6 +321,7 @@ describe('signing in', () => {
         BACKUP_MANAGE,
         RESTORE_MANAGE,
         JOBS_MANAGE,
+        OPERATIONS_READ,
       ],
     });
     const cookie = String(response.headers['set-cookie']);
@@ -399,6 +401,7 @@ describe('signing in with a passkey', () => {
         BACKUP_MANAGE,
         RESTORE_MANAGE,
         JOBS_MANAGE,
+        OPERATIONS_READ,
       ],
     });
     const cookie = String(response.headers['set-cookie']);

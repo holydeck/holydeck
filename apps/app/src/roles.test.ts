@@ -6,6 +6,7 @@ import {
   JOBS_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
+  OPERATIONS_READ,
   PRESENTATION_CONTROL,
   RESTORE_MANAGE,
   SERVICES_MANAGE,
@@ -40,6 +41,7 @@ describe('what a role grants', () => {
       BACKUP_MANAGE,
       RESTORE_MANAGE,
       JOBS_MANAGE,
+      OPERATIONS_READ,
     ]);
   });
 
@@ -81,6 +83,7 @@ describe('what Control presentation is', () => {
       BACKUP_MANAGE,
       RESTORE_MANAGE,
       JOBS_MANAGE,
+      OPERATIONS_READ,
       PRESENTATION_CONTROL,
     ]);
   });

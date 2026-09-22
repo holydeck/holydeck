@@ -15,6 +15,7 @@ import { isUpgrade } from './live.js';
 import { guardMaintenance } from './maintenance.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
+import { serveOperationsRoutes } from './operations-routes.js';
 import { serveOrderRoutes } from './order-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
@@ -267,6 +268,18 @@ export function buildApp({
   // job kind is recorded in.
   serveJobRoutes(app, {
     queue: backups?.queue,
+    identity,
+  });
+
+  // Behind its own Admin permission: the operational health report OPS-09 defines. Reuses the backup
+  // surface's own `db`/`queue` and the media surface's own `media`, the same sources every reader above
+  // already reads from — this route only ever reports on them, never changes them.
+  serveOperationsRoutes(app, {
+    db: backups?.db,
+    queue: backups?.queue,
+    media,
+    dataDir: settings.values.dataDir,
+    now: () => new Date().toISOString(),
     identity,
   });
 
