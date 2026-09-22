@@ -46,6 +46,7 @@ const PERMISSION: RouteNeed = { kind: 'permission', need: ACCOUNTS_MANAGE };
 
 /** Every route this module serves, in the order it registers them. */
 const ROUTES = [
+  ['GET', ACCOUNTS_PATH],
   ['PATCH', CONTROL_PATH],
   ['POST', ACCOUNTS_PATH],
   ['PATCH', STATUS_PATH],
@@ -109,6 +110,17 @@ export function serveAccountRoutes(app: FastifyInstance, { identity, sessions }:
       request.log.error({ err: error }, 'a privilege change could not end that account’s open sessions');
     }
   };
+
+  // A read neither changes an account for the trail to remember nor needs the token a changed account asks for.
+  app.get(ACCOUNTS_PATH, { config: { need: PERMISSION } }, async (request, reply) =>
+    reply.send(
+      successEnvelope(
+        await identity.accounts.list(accountContext(correlationFor(ACCOUNT_PREFIX, request.id))),
+        request.id,
+        CLIENT_WINDOW.current,
+      ),
+    ),
+  );
 
   app.patch(CONTROL_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const parsed = parseControlGrant(request.body);

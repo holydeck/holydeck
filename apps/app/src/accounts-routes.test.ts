@@ -91,6 +91,36 @@ const posting = (url: string, payload: unknown, held: StartedSession = admin) =>
     payload: payload as InjectOptions['payload'],
   });
 
+const reading = (url: string, held: StartedSession = admin) =>
+  app.inject({
+    method: 'GET',
+    url,
+    headers: {
+      [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
+      host: HOST,
+      'x-forwarded-proto': 'https',
+      origin: ORIGIN,
+      cookie: sessionCookie(held.token, 60),
+    },
+  });
+
+/** The account collection keeps credentials beside public fields; neither may escape through a nested answer. */
+const privateKeyIn = (value: unknown): string | undefined => {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = privateKeyIn(entry);
+      if (found !== undefined) return found;
+    }
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) {
+      if (['credential', 'password', 'totp', 'secret', 'hash'].includes(key)) return key;
+      const found = privateKeyIn(entry);
+      if (found !== undefined) return found;
+    }
+  }
+  return undefined;
+};
+
 // The founder always takes the first identifier this fixture hands out, so every existing test that
 // names the founder by `ID` keeps naming the same account; an account this suite creates takes the next.
 let nextIds: string[];
@@ -276,13 +306,26 @@ describe('reassigning an account’s role', () => {
 });
 
 describe('who may ask any of it', () => {
-  test('every route here changes something, and so every one is behind the guard', () => {
+  test('every route here that changes something is behind the guard', () => {
     expect(mutatingRoutesOf(app)).toEqual([
       { method: 'PATCH', url: controlPath(':id') },
       { method: 'POST', url: ACCOUNTS_PATH },
       { method: 'PATCH', url: statusPath(':id') },
       { method: 'PATCH', url: rolePath(':id') },
     ]);
+  });
+
+  test('lets an administrator list accounts by name, without answering what proves them', async () => {
+    await identity.accounts.create(accountContext(CORRELATION), {
+      name: 'zara', displayName: 'Zara Patel', password: 'a-long-enough-passphrase', role: 'member',
+    });
+    await identity.accounts.create(accountContext(CORRELATION), {
+      name: 'andru', displayName: 'Andru Popescu', password: 'a-long-enough-passphrase', role: 'editor',
+    });
+    const response = await reading(ACCOUNTS_PATH);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.map((account: { readonly name: string }) => account.name)).toEqual(['andru', 'lucia', 'zara']);
+    expect(privateKeyIn(response.json())).toBeUndefined();
   });
 
   test('refuses a request that carries no session at all', async () => {
@@ -306,6 +349,25 @@ describe('who may ask any of it', () => {
       expect(response.statusCode).toBe(403);
       expect(response.json().error.code).toBe(FORBIDDEN);
     }
+  });
+
+  test('refuses the list to an editor, whose session has no administration permission', async () => {
+    const editor = await identity.accounts.create(accountContext(CORRELATION), {
+      name: 'andru', displayName: 'Andru Popescu', password: 'a-long-enough-passphrase', role: 'editor',
+    });
+    const held = await sessions.start(sessionContext(CORRELATION), { actor: actorFor(editor.id), permissions: [] });
+    const response = await reading(ACCOUNTS_PATH, held);
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe(FORBIDDEN);
+  });
+
+  test('refuses the list to a request carrying no session at all', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: ACCOUNTS_PATH,
+      headers: { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), host: HOST, origin: ORIGIN },
+    });
+    expect(response.statusCode).toBe(401);
   });
 });
 
@@ -362,6 +424,7 @@ describe('what this surface refuses to answer at all', () => {
   test('a deployment that keeps no accounts serves every path, and answers not-found from each', async () => {
     await app.close();
     app = await serving(undefined);
+    expect((await reading(ACCOUNTS_PATH)).statusCode).toBe(404);
     expect((await asking(controlPath(ID), { granted: true })).statusCode).toBe(404);
     expect((await posting(ACCOUNTS_PATH, NEW_ACCOUNT)).statusCode).toBe(404);
     expect((await asking(statusPath(ID), { disabled: true })).statusCode).toBe(404);

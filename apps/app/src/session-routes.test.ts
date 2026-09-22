@@ -11,6 +11,7 @@ import {
   clearedSessionCookie,
   cookieIn,
   isOpaqueToken,
+  parseSessionView,
   sessionCookie,
 } from '@holydeck/contracts/sessions';
 import Fastify from 'fastify';
@@ -180,6 +181,23 @@ const entries = (): Document[] => trail.rows.get('audit_events') ?? [];
 
 const tokenIn = (header: unknown): string => cookieIn(String(header), SESSION_COOKIE) ?? '';
 
+/** The session answers only a rendering summary, never the account fields that prove or secure it. */
+const privateKeyIn = (value: unknown): string | undefined => {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = privateKeyIn(entry);
+      if (found !== undefined) return found;
+    }
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) {
+      if (['credential', 'password', 'totp', 'secret', 'hash'].includes(key)) return key;
+      const found = privateKeyIn(entry);
+      if (found !== undefined) return found;
+    }
+  }
+  return undefined;
+};
+
 /** A key already registered to the claimed account, the way a prior sign-in would have left one. */
 const registered = async (options?: { readonly counter?: number }): Promise<WebAuthnDevice> => {
   const device = webauthnDevice({ rpId: HOST, origin: ORIGIN });
@@ -262,6 +280,33 @@ describe('what an operator can ask about their own session', () => {
     // The identifier is a cookie the browser sends and script cannot read. It is not in this
     // answer, and there is no route that puts it in a URL either.
     expect(response.body).not.toContain(session.token);
+  });
+
+  test('answers an account session with only the account summary a client renders', async () => {
+    const session = await store.start(sessionContext('req-0f9c2a41'), { actor: actorFor(ID), permissions: ['services.read'] });
+    const response = await asking('GET', SESSION_PATH, session);
+    expect(response.statusCode).toBe(200);
+    expect(Object.keys(response.json().data.account).sort()).toEqual([
+      'controlPresentation', 'displayName', 'id', 'name', 'role',
+    ]);
+    expect(response.json().data.account).toEqual({
+      id: ID,
+      name: CLAIM.name,
+      displayName: CLAIM.displayName,
+      role: 'admin',
+      controlPresentation: false,
+    });
+    expect(privateKeyIn(response.json())).toBeUndefined();
+    expect(parseSessionView(response.json().data).ok).toBe(true);
+  });
+
+  test('does not invent an account summary for a session actor that is not an account', async () => {
+    const session = await store.start(sessionContext('req-0f9c2a41'), { actor: 'system', permissions: ['services.read'] });
+    const response = await asking('GET', SESSION_PATH, session);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.account).toBeUndefined();
+    expect(Object.keys(response.json().data)).not.toContain('account');
+    expect(parseSessionView(response.json().data).ok).toBe(true);
   });
 
   test('is answered as a request with no session when there is none, and reading one changes nothing', async () => {

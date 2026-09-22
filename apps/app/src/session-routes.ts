@@ -12,7 +12,7 @@
 // the handle or not, which is the store's promise and not this route's; and the counter is told and the
 // entry written only after the answer has been decided, so neither can change what is answered.
 
-import { actorFor, parseSignIn } from '@holydeck/contracts/accounts';
+import { accountIdIn, actorFor, parseSignIn } from '@holydeck/contracts/accounts';
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
 import { SIGN_IN_REFUSED } from '@holydeck/contracts/sessions';
@@ -325,7 +325,25 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
   app.get(SESSION_PATH, { config: { need: SESSION } }, async (request) => {
     const proven = provenSession(request);
     const slots = await proven.sessions.slots(sessionCallFor(request), proven.token);
-    return successEnvelope({ ...proven.record, slots }, request.id, CLIENT_WINDOW.current);
+    const id = accountIdIn(proven.record.actor);
+    const account = identity === undefined || id === undefined
+      ? undefined
+      : await identity.accounts.read(accountContext(correlationFor(SIGN_IN_PREFIX, request.id)), id);
+    return successEnvelope({
+      ...proven.record,
+      slots,
+      ...(account === undefined
+        ? {}
+        : {
+            account: {
+              id: account.id,
+              name: account.name,
+              displayName: account.displayName,
+              role: account.role,
+              controlPresentation: account.controlPresentation,
+            },
+          }),
+    }, request.id, CLIENT_WINDOW.current);
   });
 
   app.delete(SESSION_PATH, { config: { need: SESSION } }, async (request, reply) => {
