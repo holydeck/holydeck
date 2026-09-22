@@ -1,15 +1,30 @@
 import { connect } from 'node:net';
+import { Writable } from 'node:stream';
 
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 
-import { serveCorpusProxyRoutes } from './corpus-proxy-routes.js';
+import { PROXY_MAX_RESPONSE_BYTES, serveCorpusProxyRoutes } from './corpus-proxy-routes.js';
 import { withSafeErrors } from './failures.js';
 
 import type { ProxyFetching } from './corpus-proxy-routes.js';
 import type { FastifyInstance } from 'fastify';
 
 const CORPUS_URL = 'http://corpus:8080';
+
+function loggingApp(fetching: ProxyFetching): { app: FastifyInstance; logLines: () => string[] } {
+  const chunks: Buffer[] = [];
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      chunks.push(chunk);
+      callback();
+    },
+  });
+  const app = Fastify({ logger: { level: 'error', stream } });
+  withSafeErrors(app, { diagnostics: false });
+  serveCorpusProxyRoutes(app, { corpusUrl: CORPUS_URL, fetching });
+  return { app, logLines: () => Buffer.concat(chunks).toString('utf8').split('\n').filter(Boolean) };
+}
 
 // Fastify's router (find-my-way) splits a path on `/` only, so a raw request line whose "abbr" segment
 // carries backslashes — never `/`, which would just be more segments and 404 the same way the existing
@@ -267,4 +282,75 @@ describe('the corpus proxy', () => {
     expect(asked).toHaveLength(0);
     await app.close();
   });
+
+  it('answers with no body when the corpus itself sends none', async () => {
+    const fetching: ProxyFetching = () => Promise.resolve(new Response(null, { status: 204 }));
+    const app = proxiedApp(fetching);
+    const response = await app.inject({ method: 'GET', url: '/corpus/health' });
+    expect(response.statusCode).toBe(204);
+    expect(response.rawPayload.length).toBe(0);
+    await app.close();
+  });
+
+  it('rate-limits repeated requests to a single proxy route', async () => {
+    const { fetching } = answering({ status: 'ok' });
+    const app = proxiedApp(fetching);
+    let last: Awaited<ReturnType<typeof app.inject>> | undefined;
+    for (let request = 0; request < 61; request += 1) {
+      last = await app.inject({ method: 'GET', url: '/corpus/health' });
+    }
+    expect(last?.statusCode).toBe(429);
+    await app.close();
+  });
+
+  it('caps how many bytes of a corpus response are forwarded, even from a single unbroken chunk', async () => {
+    const oversized = Buffer.alloc(PROXY_MAX_RESPONSE_BYTES + 1024, 'a');
+    const fetching: ProxyFetching = () => Promise.resolve(new Response(oversized, { status: 200 }));
+    const app = proxiedApp(fetching);
+    const response = await app.inject({ method: 'GET', url: '/corpus/health' });
+    expect(response.rawPayload.length).toBeLessThanOrEqual(PROXY_MAX_RESPONSE_BYTES);
+    await app.close();
+  });
+
+  it('logs a failed corpus request instead of answering 502 silently', async () => {
+    const fetching: ProxyFetching = () => Promise.reject(new Error('connect ECONNREFUSED'));
+    const { app, logLines } = loggingApp(fetching);
+    const response = await app.inject({ method: 'GET', url: '/corpus/health' });
+    expect(response.statusCode).toBe(502);
+    expect(logLines().some((line) => line.includes('corpus proxy request failed'))).toBe(true);
+    await app.close();
+  });
+
+  it(
+    'aborts a response that stalls mid-stream, not only one whose headers never arrive',
+    async () => {
+      let aborted = false;
+      const fetching: ProxyFetching = (_url, init) => {
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"partial":true'));
+            init.signal?.addEventListener('abort', () => {
+              aborted = true;
+              controller.error(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+            });
+          },
+        });
+        return Promise.resolve(new Response(stream, { status: 200 }));
+      };
+      const app = proxiedApp(fetching, CORPUS_URL, 20);
+      const outcome = await Promise.race([
+        // A stream torn down mid-response makes light-my-request reject rather than resolve; either way
+        // it means the connection did not hang, which is what this test is really checking.
+        app.inject({ method: 'GET', url: '/corpus/health' }).then(
+          () => 'settled' as const,
+          () => 'settled' as const,
+        ),
+        new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 1000)),
+      ]);
+      expect(outcome).toBe('settled');
+      expect(aborted).toBe(true);
+      if (outcome === 'settled') await app.close();
+    },
+    2000,
+  );
 });

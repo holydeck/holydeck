@@ -6,7 +6,12 @@
 // with the `-routes.ts` suffix so `route-coverage.mjs` and `role-coverage.mjs` census it the same way
 // every other route module here is censused — see research-notes.md for why that suffix is load-bearing.
 
-import { Readable } from 'node:stream';
+import { pipeline, Readable, Transform } from 'node:stream';
+import { finished } from 'node:stream/promises';
+
+import rateLimit from '@fastify/rate-limit';
+
+import { unexpectedFailure } from './failures.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -22,6 +27,16 @@ export const CORPUS_RENDER_PROXY_PATH = `${PROXY_PREFIX}/api/v1/render`;
 
 /** Long enough for a real answer, short enough that a corpus that never will does not hang a caller forever. */
 const PROXY_TIMEOUT_MS = 10_000;
+
+// Matches apps/corpus's own per-route convention (see routes/stats.ts), registered per-route rather than
+// globally so a burst against one path — say, a sermon's worth of verse lookups — never throttles the
+// others.
+const PROXY_RATE_LIMIT = { max: 60, timeWindow: '1 minute' };
+
+// Generous for a translations list, a canon, a verse range or a rendered slide payload — all JSON or plain
+// text — while still bounding how much of a misbehaving or compromised corpus's answer this application
+// ever holds in memory or forwards to a client.
+export const PROXY_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 /**
  * What this proxy asks the network with — Node's real `fetch`, or a stand-in a test hands it. A real
@@ -106,6 +121,30 @@ function upstreamQuery(request: FastifyRequest): string {
 const isAbort = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
 
+// Wraps the corpus's own response stream so a single answer can never exceed PROXY_MAX_RESPONSE_BYTES,
+// however it is chunked — including a corpus that sends the whole thing as one unbroken write. pipeline,
+// not a bare .pipe(), so an error here also tears the source stream down rather than leaving it dangling;
+// Fastify itself is what notices the resulting 'error' event and ends the client response.
+function sizeCapped(request: FastifyRequest, source: Readable): Readable {
+  let seen = 0;
+  const capped = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      seen += chunk.length;
+      if (seen > PROXY_MAX_RESPONSE_BYTES) {
+        callback(new Error(`corpus response exceeded the ${PROXY_MAX_RESPONSE_BYTES}-byte proxy cap`));
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+  pipeline(source, capped, (error) => {
+    if (error !== undefined && error !== null && !isAbort(error)) {
+      request.log.error({ err: error }, 'corpus proxy response failed');
+    }
+  });
+  return capped;
+}
+
 const BEARER_AUTHORIZATION = /^Bearer\s+\S+/iu;
 
 // Render is the one mutating route this file registers, and `csrf.ts` leaves it out of the session guard
@@ -125,6 +164,10 @@ async function proxy(
   upstreamPath: string,
 ): Promise<FastifyReply> {
   const controller = new AbortController();
+  // Cleared once the real work finishes — which, for a streamed body, is only once that stream itself
+  // ends or errors, not as soon as fetching() resolves with headers. A corpus that answers promptly and
+  // then stalls mid-body is exactly what this guards against: clearing here as soon as headers arrived
+  // would leave the timer inert for the rest of the response, letting a stalled body hang forever.
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetching(`${address}${upstreamPath}`, {
@@ -147,12 +190,19 @@ async function proxy(
     response.headers.forEach((value, name) => {
       if (isForwardableResponseHeader(name)) reply.header(name, value);
     });
-    if (response.body === null) return reply.send();
-    return reply.send(Readable.fromWeb(response.body as unknown as NodeReadableStream));
+    if (response.body === null) {
+      clearTimeout(timer);
+      return reply.send();
+    }
+    const stream = sizeCapped(request, Readable.fromWeb(response.body as unknown as NodeReadableStream));
+    void finished(stream)
+      .catch(() => undefined)
+      .finally(() => clearTimeout(timer));
+    return reply.send(stream);
   } catch (error) {
-    return reply.code(isAbort(error) ? 504 : 502).send();
-  } finally {
     clearTimeout(timer);
+    request.log.error({ err: error }, 'corpus proxy request failed');
+    return reply.code(isAbort(error) ? 504 : 502).send();
   }
 }
 
@@ -172,49 +222,77 @@ export function serveCorpusProxyRoutes(
   if (corpusUrl === '') return; // Nothing configured, nothing to proxy to — matches corpus.ts's own precedent.
   const address = corpusUrl.replace(/\/+$/u, '');
 
-  app.get(`${PROXY_PREFIX}/health`, { config: { need: PUBLIC } }, (request, reply) =>
-    proxy(request, reply, fetching, address, timeoutMs, '/health'),
-  );
-  app.get(`${PROXY_PREFIX}/api/v1/translations`, { config: { need: PUBLIC } }, (request, reply) =>
-    proxy(request, reply, fetching, address, timeoutMs, `/api/v1/translations${upstreamQuery(request)}`),
-  );
-  app.get<{ Params: { abbr: string } }>(
-    `${PROXY_PREFIX}/api/v1/translations/:abbr/canon`,
-    { config: { need: PUBLIC } },
-    (request, reply) => {
-      const { abbr } = request.params;
-      if (!isAllowedAbbr(abbr)) return reply.code(400).send();
-      // encodeURIComponent is redundant once ABBR_PATTERN has passed — nothing it allows needs escaping
-      // — and kept anyway so nothing here depends on that remaining true if the pattern ever widens.
-      return proxy(
-        request,
-        reply,
-        fetching,
-        address,
-        timeoutMs,
-        `/api/v1/translations/${encodeURIComponent(abbr)}/canon${upstreamQuery(request)}`,
-      );
-    },
-  );
-  app.get<{ Params: { abbr: string } }>(
-    `${PROXY_PREFIX}/api/v1/translations/:abbr/verses`,
-    { config: { need: PUBLIC } },
-    (request, reply) => {
-      const { abbr } = request.params;
-      if (!isAllowedAbbr(abbr)) return reply.code(400).send();
-      return proxy(
-        request,
-        reply,
-        fetching,
-        address,
-        timeoutMs,
-        `/api/v1/translations/${encodeURIComponent(abbr)}/verses${upstreamQuery(request)}`,
-      );
-    },
-  );
-  app.post(CORPUS_RENDER_PROXY_PATH, { config: { need: PUBLIC } }, (request, reply) =>
-    hasBearerAuthorization(request)
-      ? proxy(request, reply, fetching, address, timeoutMs, '/api/v1/render')
-      : reply.code(401).send(),
-  );
+  // { global: false }: opt-in per route below, the same convention apps/corpus's own routes use, so a
+  // burst against one proxied path never throttles the others. Registered before, and the routes below
+  // registered inside their own nested app.register (rather than directly on `app`), so that Fastify's
+  // plugin queue loads rate-limit's onRoute hook first — a route declared directly on `app` in the same
+  // synchronous tick as this call would otherwise finalize before that hook exists to see it.
+  void app.register(rateLimit, { global: false });
+
+  void app.register(async (scoped) => {
+    // The rate-limit plugin throws once its own limit is hit (statusCode 429, and it has already set the
+    // retry-after header on the reply). Answered bare, no body, the same as this file's own 400 and 401
+    // refusals below — never this application's usual envelope, which this file does not build for
+    // anything it answers itself. Anything else thrown here still falls back to the same hidden-500
+    // behaviour as the rest of the application.
+    scoped.setErrorHandler((error, request, reply) => {
+      if ((error as { statusCode?: unknown }).statusCode === 429) return reply.code(429).send();
+      request.log.error(error);
+      return reply.code(500).send(unexpectedFailure(request.id));
+    });
+
+    scoped.get(
+      `${PROXY_PREFIX}/health`,
+      { config: { need: PUBLIC, rateLimit: PROXY_RATE_LIMIT } },
+      (request, reply) => proxy(request, reply, fetching, address, timeoutMs, '/health'),
+    );
+    scoped.get(
+      `${PROXY_PREFIX}/api/v1/translations`,
+      { config: { need: PUBLIC, rateLimit: PROXY_RATE_LIMIT } },
+      (request, reply) =>
+        proxy(request, reply, fetching, address, timeoutMs, `/api/v1/translations${upstreamQuery(request)}`),
+    );
+    scoped.get<{ Params: { abbr: string } }>(
+      `${PROXY_PREFIX}/api/v1/translations/:abbr/canon`,
+      { config: { need: PUBLIC, rateLimit: PROXY_RATE_LIMIT } },
+      (request, reply) => {
+        const { abbr } = request.params;
+        if (!isAllowedAbbr(abbr)) return reply.code(400).send();
+        // encodeURIComponent is redundant once ABBR_PATTERN has passed — nothing it allows needs escaping
+        // — and kept anyway so nothing here depends on that remaining true if the pattern ever widens.
+        return proxy(
+          request,
+          reply,
+          fetching,
+          address,
+          timeoutMs,
+          `/api/v1/translations/${encodeURIComponent(abbr)}/canon${upstreamQuery(request)}`,
+        );
+      },
+    );
+    scoped.get<{ Params: { abbr: string } }>(
+      `${PROXY_PREFIX}/api/v1/translations/:abbr/verses`,
+      { config: { need: PUBLIC, rateLimit: PROXY_RATE_LIMIT } },
+      (request, reply) => {
+        const { abbr } = request.params;
+        if (!isAllowedAbbr(abbr)) return reply.code(400).send();
+        return proxy(
+          request,
+          reply,
+          fetching,
+          address,
+          timeoutMs,
+          `/api/v1/translations/${encodeURIComponent(abbr)}/verses${upstreamQuery(request)}`,
+        );
+      },
+    );
+    scoped.post(
+      CORPUS_RENDER_PROXY_PATH,
+      { config: { need: PUBLIC, rateLimit: PROXY_RATE_LIMIT } },
+      (request, reply) =>
+        hasBearerAuthorization(request)
+          ? proxy(request, reply, fetching, address, timeoutMs, '/api/v1/render')
+          : reply.code(401).send(),
+    );
+  });
 }
