@@ -7,7 +7,8 @@ produces:
 | Artifact | Where |
 | --- | --- |
 | `@holydeck/cli@<version>` | npmjs (with provenance) and GitHub Packages |
-| `ghcr.io/holydeck/server:<version>`, plus `:latest` when it is the newest release | GHCR (`@holydeck/corpus` is never published to a registry — it ships as this image only) |
+| `ghcr.io/holydeck/corpus:<version>`, plus `:latest` when it is the newest stable release | GHCR (`@holydeck/corpus` is never published to a registry — it ships as this image only); for one deprecation window, until the first stable release after v1.0, the same digest is also pushed as the deprecated `ghcr.io/holydeck/server:<version>` alias, plus `:latest` for stable releases |
+| `ghcr.io/holydeck/app:<version>`, plus `:latest` when it is the newest stable release | GHCR |
 | GitHub Release `v<version>` | notes taken from the `CHANGELOG.md` section |
 
 `@holydeck/core` is deliberately **not published** to any registry: it is a
@@ -73,22 +74,37 @@ machine, and you are on a clean, up-to-date `main`.
      publishing — no npm token exists anywhere in CI. npm scans the upload
      before making it available, and attaches provenance automatically.
    - **mirror-github-packages** and **docker** run next: the GitHub Packages
-     mirror and the `ghcr.io/holydeck/server` image push. The image gets the
-     `:latest` tag only when this release is the newest `v*` tag, so
+     mirror and the `ghcr.io/holydeck/corpus` and `ghcr.io/holydeck/app` image
+     pushes. The images get the `:latest` tag only when this release is the
+     newest stable release, so
      re-running an old release's job cannot point `:latest` backwards. Once
-     pushed, the image is signed keylessly with cosign; a signing failure
+     pushed, the images are signed keylessly with cosign; a signing failure
      fails the job and no later job runs. See "Verifying a release" below.
    - **github-release** creates the GitHub Release with the changelog notes.
 
    GitHub Packages, GHCR and the GitHub Release continue after npm accepts the
    upload; npmjs visibility may follow shortly after its registry scan.
 
+## Releasing to `next`
+
+Run `pnpm release:next` to cut a prerelease with `release-it --preRelease=next`. It produces a
+version shaped `yyyy.m.patch-next.N` instead of the stable `yyyy.m.patch`, and may be run from
+either `main` or `next`, the two branches allowed by `git.requireBranch`.
+
+The CLI publishes under the npm `next` dist-tag, so `npm install @holydeck/cli@next` tries the
+prerelease while a plain `npm install @holydeck/cli` never selects one. Each image gets its exact
+version tag and the moving `:next` tag for the newest prerelease build, but never `:latest`.
+
+The legal gate in `scripts/release/legal-gate.mjs` applies the same full checks to `next` as to
+`stable` under the current `NEXT_CHANNEL_POLICY = 'full'`. A second, currently disabled policy
+exists there for a possible future prerelease exemption.
+
 ## Verifying a release
 
-Both published artifacts can be verified independently of this repository,
+The published CLI and container images can be verified independently of this repository,
 with no access to CI or its logs.
 
-**The container image** is signed keylessly (Sigstore/cosign, via the
+**A container image** is signed keylessly (Sigstore/cosign, via the
 `docker` job's GitHub Actions OIDC identity — no private key exists anywhere
 for this to leak). Verify a tag's signature with:
 
@@ -96,7 +112,7 @@ for this to leak). Verify a tag's signature with:
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/holydeck/holydeck/\.github/workflows/docker-build\.yml@refs/tags/.*$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/holydeck/server:<version>
+  ghcr.io/holydeck/corpus:<version>
 ```
 
 A successful verification prints the signing certificate and its Rekor
@@ -156,8 +172,7 @@ Automated releases need one-time configuration that only a human can do:
 - GitHub: add a ruleset for tags matching `v*` that restricts creation and
   deletion to repository admins, so only a maintainer can start a release
   train.
-- GHCR: after the first image push, set the `server` package's visibility to
-  public.
+- GHCR: after the first image push, set the `corpus` and `app` packages' visibility to public.
 
 ## Migrating from the unscoped CLI package
 

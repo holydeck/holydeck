@@ -120,6 +120,23 @@ re-keying first leaves a repository nothing can open and backup runs that fail o
 quietly writing an unencrypted repository, so the failure is loud, but the snapshots already taken
 are only recoverable with the password they were written under.
 
+## Upgrading a deployment
+
+The corpus image was renamed from `ghcr.io/holydeck/server` to `ghcr.io/holydeck/corpus`. For one
+deprecation window, until the first stable release after v1.0, the same digest is also published
+under the old name. The `corpus` service in `compose.yaml` likewise retains a `server` network
+alias so existing services inside the deployment network continue to resolve it during the window.
+New deployments and upgrades should use `corpus` and must not rely on the old image or network
+aliases remaining after that window.
+
+Before upgrading, run the [deployment preflight](#deployment-preflight). Then set
+`HOLYDECK_VERSION` in `.env` or the shell environment read by `compose.yaml` to the desired tag —
+a specific version, or the moving `latest` or `next` pointer; see `.env.example` — and apply it:
+
+```sh
+docker compose up -d --pull always
+```
+
 ## Node baseline checkpoint (DEPL-03)
 
 **Decision, recorded 2026-09-21: stay on Node 24 for this release. Do not move to Node 26 yet.**

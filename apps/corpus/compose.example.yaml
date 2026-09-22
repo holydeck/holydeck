@@ -2,7 +2,7 @@
 # For hacking on the corpus itself use compose.dev.yaml in the repo root, which builds
 # the image from the working tree instead of pulling it. For the supported self-hosting
 # deployment — the application and worker alongside this corpus — see compose.yaml in the
-# repo root instead, which this file's server and mongo services are a minimal excerpt of.
+# repo root instead, which this file's corpus and mongo services are a minimal excerpt of.
 #
 # The corpus is an internal service. It is not published here, so it is reachable only from
 # this network, and it requires a credential on every API request so that reaching the port is
@@ -13,8 +13,8 @@
 # same value as HOLYDECK_CORPUS_TOKEN, and reach it from inside the network (docker compose run)
 # rather than by publishing the port.
 services:
-  server:
-    image: ghcr.io/holydeck/server:latest
+  corpus:
+    image: ghcr.io/holydeck/corpus:${HOLYDECK_VERSION:-latest}
     restart: unless-stopped
     environment:
       HOLYDECK_MONGO_URL: mongodb://mongo:27017

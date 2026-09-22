@@ -205,7 +205,16 @@ Progress and status go to stderr, leaving piped output clean.
 Every command works against the local datastore by default. Pass
 `--server-url <url>` (or set it in the config file) to use a self-hosted
 HolyDeck server instead — the server ships as a container image at
-`ghcr.io/holydeck/server`.
+`ghcr.io/holydeck/corpus`.
+
+In the supported `compose.yaml` deployment, the corpus stays inside the deployment network behind
+the application (see `MAINTENANCE.md` and the root `README.md`). Point the CLI at the application's
+`/corpus` path instead of a standalone corpus URL:
+
+```sh
+HOLYDECK_SERVER_TOKEN=<corpus-token> \
+  holydeck --server-url https://bible.example.com/corpus translations
+```
 
 A server that requires a credential of its own — the way the corpus does — takes
 it from `HOLYDECK_SERVER_TOKEN` or `serverToken` in the config file. That is for a
