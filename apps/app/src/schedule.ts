@@ -29,7 +29,7 @@ export interface DueJobsInput {
   readonly changedSinceLastBackup: boolean;
 }
 
-interface LocalParts {
+export interface LocalParts {
   readonly date: string;
   readonly minutesOfDay: number;
   readonly weekday: Weekday;
@@ -55,7 +55,7 @@ function formatterFor(timezone: string): Intl.DateTimeFormat {
   return formatter;
 }
 
-function localParts(now: Date, timezone: string): LocalParts {
+export function localParts(now: Date, timezone: string): LocalParts {
   const parts = formatterFor(timezone).formatToParts(now);
   const of = (type: string): string => parts.find((part) => part.type === type)?.value ?? '';
   return {
