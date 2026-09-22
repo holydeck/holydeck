@@ -174,7 +174,7 @@ export const parseSlideGroupBody: ParseFn<SlideGroupBody> = (value, path) =>
 const EMPTY_SLIDE_GROUP_BODY: SlideGroupBody = {
   mode: 'custom',
   enabled: true,
-  slideLayoutId: 'layout',
+  slideLayoutId: 'none',
   slides: [],
 };
 
