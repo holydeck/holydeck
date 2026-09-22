@@ -210,7 +210,7 @@ describe('the application server', () => {
     const { statusCode, body } = await served({ url: '/api/contracts', headers: current });
     expect(statusCode).toBe(200);
     expect(body).toEqual({
-      data: { clientVersions: [CLIENT_WINDOW.current], messageCodes: MESSAGE_CODES },
+      data: { clientVersions: [CLIENT_WINDOW.previous, CLIENT_WINDOW.current], messageCodes: MESSAGE_CODES },
       meta: { requestId: expect.any(String), version: CLIENT_WINDOW.current },
     });
   });
@@ -232,7 +232,11 @@ describe('the application server', () => {
         code: UPDATE_REQUIRED,
         message: UPDATE_REQUIRED_MESSAGE,
         requestId: expect.any(String),
-        fields: [{ path: CLIENT_VERSION_HEADER, code: UPDATE_REQUIRED, message: `supported versions: ${CLIENT_WINDOW.current}` }],
+        fields: [{
+          path: CLIENT_VERSION_HEADER,
+          code: UPDATE_REQUIRED,
+          message: `supported versions: ${CLIENT_WINDOW.previous}, ${CLIENT_WINDOW.current}`,
+        }],
       },
     });
   });
