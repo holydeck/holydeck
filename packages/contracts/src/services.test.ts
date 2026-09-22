@@ -9,6 +9,7 @@ import {
   joinAllowedFor,
   parseRevisionRef,
   parseService,
+  parseServiceOutput,
   parseServiceDraft,
   parseServiceItem,
   parseServiceItemReorder,
@@ -211,6 +212,34 @@ describe('joinAllowedFor', () => {
     for (const state of SERVICE_STATES.filter((candidate) => candidate !== 'presenting')) {
       expect(joinAllowedFor(state)).toBe(false);
     }
+  });
+});
+
+describe('parseServiceOutput', () => {
+  it('accepts a standard ratio, a custom ratio and margins', () => {
+    expect(parseServiceOutput({ aspectRatio: '4:3' })).toEqual({ ok: true, value: { aspectRatio: '4:3' } });
+    expect(parseServiceOutput({ aspectRatio: '21:9' }).ok).toBe(true);
+    const margins = { top: 5, right: 5, bottom: 5, left: 5, unit: 'percent' };
+    expect(parseServiceOutput({ safeAreaMargins: margins })).toEqual({ ok: true, value: { safeAreaMargins: margins } });
+  });
+
+  it('refuses a ratio that is not W:H or is outside 0.25..4', () => {
+    expect(parseServiceOutput({ aspectRatio: 'wide' }).ok).toBe(false);
+    expect(parseServiceOutput({ aspectRatio: '9:1' }).ok).toBe(false);
+  });
+
+  it('refuses a margin above 49 percent', () => {
+    const parsed = parseServiceOutput({ safeAreaMargins: { top: 50, right: 5, bottom: 5, left: 5, unit: 'percent' } });
+    expect(parsed.ok).toBe(false);
+  });
+
+  it('is carried by parseService when present and absent otherwise', () => {
+    const base = { id: 's', title: 'T', date: '2026-09-27', site: 'Main', state: 'upcoming', sections: [] };
+    expect(parseService(base)).toMatchObject({ ok: true, value: { output: undefined } });
+    expect(parseService({ ...base, output: { aspectRatio: '4:3' } })).toMatchObject({
+      ok: true,
+      value: { output: { aspectRatio: '4:3' } },
+    });
   });
 });
 

@@ -93,7 +93,7 @@ export function aspectRatioLabel({ width, height }: AspectRatio): string {
   return `${width / divisor}:${height / divisor}`;
 }
 
-const parseSafeAreaMargins: ParseFn<SafeAreaMargins> = (value, path) =>
+export const parseSafeAreaMargins: ParseFn<SafeAreaMargins> = (value, path) =>
   parseObject(value, path, (reader) => {
     const margins = {} as Record<SafeAreaEdge, number>;
     for (const edge of SAFE_AREA_EDGES) {

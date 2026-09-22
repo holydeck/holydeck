@@ -1,6 +1,7 @@
 // The domain payloads a service is written in: the service itself, its ordered sections, the items in
 // them, and the references by which an item pins one immutable revision of reusable content.
 
+import { aspectRatioOf, parseSafeAreaMargins, type SafeAreaMargins } from './snapshots.js';
 import { FIELD_CODES, type FieldReader, type ParseFn, type Parsed, parseObject } from './problems.js';
 
 export const SERVICE_STATES = ['upcoming', 'presenting', 'completed', 'archived'] as const;
@@ -64,7 +65,33 @@ export type Service = {
   readonly site: string;
   readonly state: ServiceState;
   readonly sections: readonly ServiceSection[];
+  readonly output?: ServiceOutput;
 };
+
+/** WS-11: a service may override the administrative output ratio and safe area; items never can. */
+export type ServiceOutput = {
+  readonly aspectRatio?: string;
+  readonly safeAreaMargins?: SafeAreaMargins;
+};
+
+/** Reads the output profile overrides carried by a service. */
+export function parseServiceOutput(value: unknown): Parsed<ServiceOutput> {
+  return parseObject(value, 'output', (reader) => {
+    const aspectRatio = reader.optionalText('aspectRatio');
+    if (aspectRatio !== undefined) {
+      const ratio = aspectRatioOf(aspectRatio);
+      const shape = ratio === undefined ? Number.NaN : ratio.width / ratio.height;
+      if (!(shape >= 0.25 && shape <= 4)) {
+        reader.reject('aspectRatio', FIELD_CODES.notAllowed, 'must be a ratio such as 16:9, between 1:4 and 4:1');
+      }
+    }
+    const safeAreaMargins = reader.optionalParsed('safeAreaMargins', parseSafeAreaMargins);
+    return {
+      ...(aspectRatio === undefined ? {} : { aspectRatio }),
+      ...(safeAreaMargins === undefined ? {} : { safeAreaMargins }),
+    };
+  });
+}
 
 /** A new Service: everything `create` needs, before it has an id or has ever changed state. */
 export type ServiceDraft = {
@@ -177,5 +204,6 @@ export function parseService(value: unknown): Parsed<Service> {
     ...eventFields(reader),
     state: reader.choice('state', SERVICE_STATES),
     sections: reader.parsedList('sections', sectionParser(new Set(), new Set())),
+    output: reader.optionalParsed('output', parseServiceOutput),
   }));
 }
