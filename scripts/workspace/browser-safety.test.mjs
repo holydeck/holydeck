@@ -124,6 +124,27 @@ test('a runtime dependency outside the workspace is refused, because the gate ca
   ]);
 });
 
+test('a named browser library is a runtime dependency a browser-safe workspace may take', () => {
+  const input = clean();
+  input.manifests['apps/web'] =
+    '{"name":"@holydeck/web","dependencies":{"@holydeck/contracts":"workspace:*","preact":"^10.29.8","@preact/signals":"^2.11.2"}}';
+  assert.deepEqual(verifyBrowserSafety(input), []);
+});
+
+test('a component written in TSX is read, and a .js specifier finds it', () => {
+  const input = clean();
+  input.sources['apps/web']['apps/web/src/app.tsx'] = "import { b } from './api.js';\nexport const App = () => b;\n";
+  input.sources['apps/web']['apps/web/src/main.tsx'] = "import { App } from './app.js';\nexport const m = App;\n";
+  assert.deepEqual(verifyBrowserSafety(input), []);
+});
+
+test('a Node builtin in shipped TSX is refused, and a TSX test may still use one', () => {
+  const input = clean();
+  input.sources['apps/web']['apps/web/src/app.tsx'] = "import { readFileSync } from 'node:fs';\n";
+  input.sources['apps/web']['apps/web/src/app.test.tsx'] = "import { readFileSync } from 'node:fs';\n";
+  assert.deepEqual(verifyBrowserSafety(input), ['apps/web/src/app.tsx: imports node:fs, which exists only in Node']);
+});
+
 test('a runtime dependency on a workspace nothing keeps browser-safe is refused', () => {
   const input = clean();
   input.manifests['packages/contracts'] = '{"name":"@holydeck/contracts","dependencies":{"@holydeck/core":"workspace:*"}}';

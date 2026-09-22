@@ -29,6 +29,11 @@ declare const __HOLYDECK_BUILD_ID__: string | undefined;
 const buildId = typeof __HOLYDECK_BUILD_ID__ === 'string' ? __HOLYDECK_BUILD_ID__ : 'dev';
 export const CACHE_NAME = `${CACHE_PREFIX}${buildId}`;
 
+declare const __HOLYDECK_PRECACHE__: readonly string[] | undefined;
+// The chunks the client build split out, handed to this build by `build.mjs` through the same `define`
+// as the build id above. Outside esbuild there was no client build, so there are no chunks to hold.
+const chunks: readonly string[] = typeof __HOLYDECK_PRECACHE__ === 'object' ? __HOLYDECK_PRECACHE__ : [];
+
 export const SHELL = '/index.html';
 
 export const PRECACHE = [
@@ -39,6 +44,7 @@ export const PRECACHE = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  ...chunks,
 ];
 
 export async function precache(caches: CacheStorageLike): Promise<void> {

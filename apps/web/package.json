@@ -19,12 +19,16 @@
   "dependencies": {
     "@holydeck/contracts": "workspace:*",
     "@holydeck/localization": "workspace:*",
-    "@holydeck/renderer": "workspace:*"
+    "@holydeck/renderer": "workspace:*",
+    "@preact/signals": "^2.11.2",
+    "preact": "^10.29.8"
   },
   "devDependencies": {
+    "@testing-library/preact": "^3.2.4",
     "@vitest/coverage-v8": "^5.0.0",
     "browserslist": "^4.28.9",
     "esbuild": "^0.28.2",
+    "happy-dom": "^20.14.5",
     "vitest": "^5.0.0"
   }
 }

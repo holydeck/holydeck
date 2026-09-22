@@ -41,7 +41,7 @@ export const SCANNED_ROOTS = ['apps', 'packages'];
 
 // The shipped source extensions worth reading as text. Binary files (the web app's icons, for instance)
 // cannot leak a hostname in a way this census could read, so they are never opened at all.
-const SCANNED_EXTENSIONS = ['.ts', '.html', '.css', '.md'];
+const SCANNED_EXTENSIONS = ['.ts', '.tsx', '.html', '.css', '.md'];
 
 // A file this census leaves alone because it is a test, not shipped behavior — for any extension, not
 // only `.ts`, since a `.test.html` or `.test.css` file would need the same room a `.test.ts` file gets.

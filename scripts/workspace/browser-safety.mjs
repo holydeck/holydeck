@@ -19,6 +19,11 @@ export const BROWSER_SAFE_WORKSPACES = [
   'apps/web',
 ];
 
+// Third-party packages a browser-safe workspace may take at run time. Each is a browser library by
+// construction and ships no Node builtin; naming them one by one keeps adding another an argued change
+// rather than a wildcard. Preact and its signals are the web client's component runtime (roadmap D1).
+export const BROWSER_SAFE_PACKAGES = ['preact', '@preact/signals'];
+
 // Node's own builtin list, in the bare spelling that predates the `node:` prefix. The prefixed form
 // needs no list at all, which is why it is handled separately.
 export const NODE_BUILTINS = new Set([
@@ -110,6 +115,15 @@ const resolveRelative = (file, specifier) => {
   return segments.join('/').replace(/\.js$/u, '.ts');
 };
 
+/** A test file in either source extension: it runs in Node and never reaches a browser. */
+const isTestFile = (file) => /\.test\.tsx?$/u.test(file);
+
+/** The source file a relative specifier names, which a `.js` specifier may mean as `.ts` or `.tsx`. */
+const importedFile = (files, file, specifier) => {
+  const resolved = resolveRelative(file, specifier);
+  return files[resolved] !== undefined ? resolved : files[`${resolved}x`] !== undefined ? `${resolved}x` : undefined;
+};
+
 const workspacePackageName = (dir) => `@holydeck/${dir.split('/').at(-1)}`;
 
 /**
@@ -130,14 +144,14 @@ export function verifyBrowserSafety({ sources, manifests }) {
       problems.push(`${dir}/package.json is missing`);
     } else {
       for (const name of Object.keys(JSON.parse(manifestText).dependencies ?? {})) {
-        if (!safeNames.includes(name)) {
+        if (!safeNames.includes(name) && !BROWSER_SAFE_PACKAGES.includes(name)) {
           problems.push(`${dir}/package.json depends on ${name} at run time, which is not a browser-safe workspace`);
         }
       }
     }
 
     for (const file of paths) {
-      if (file.endsWith('.test.ts')) continue;
+      if (isTestFile(file)) continue;
       for (const specifier of importsOf(files[file])) {
         const builtin = nodeOnlyImport(specifier);
         if (builtin !== undefined) {
@@ -145,7 +159,7 @@ export function verifyBrowserSafety({ sources, manifests }) {
           continue;
         }
         if (!specifier.startsWith('.')) continue;
-        if (files[resolveRelative(file, specifier)] === undefined) {
+        if (importedFile(files, file, specifier) === undefined) {
           problems.push(`${file}: imports ${specifier}, which is outside ${dir}/src`);
         }
       }
@@ -168,7 +182,7 @@ export function readRepo() {
     }
     for (const entry of entries) {
       const relative = entry.split(/[\\/]/u).join('/');
-      if (!relative.endsWith('.ts')) continue;
+      if (!/\.tsx?$/u.test(relative)) continue;
       sources[dir][`${dir}/src/${relative}`] = readFileSync(fromRepoRoot(`${dir}/src/${relative}`), 'utf8');
     }
     try {
