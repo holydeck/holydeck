@@ -76,9 +76,32 @@ const FORWARDABLE_RESPONSE_HEADERS = new Set([
 const isForwardableResponseHeader = (name: string): boolean =>
   FORWARDABLE_RESPONSE_HEADERS.has(name) || name.startsWith('x-ratelimit-');
 
-// Fastify leaves a matched route's `request.url` exactly as the client sent it, params and query string
-// included, so the corpus is asked with the same path and query it would answer for a direct call.
-const upstreamPathFor = (request: FastifyRequest): string => request.url.slice(PROXY_PREFIX.length);
+// Every translation abbreviation this build knows is short and alphanumeric (see
+// packages/core/src/translations.ts); this is deliberately generous around that, not a re-statement of
+// it, because refusing here is a routing decision, not a validity check. Anything outside this allow-list
+// is refused before it is ever concatenated into a URL, rather than trusted to carry the same meaning
+// through Fastify's router and `fetch`'s URL parser that it started with — they do not agree: find-my-way
+// splits a path on `/` only, so a segment with a literal backslash in it still matches a single `:abbr`
+// param, while `fetch` (WHATWG URL) treats a backslash as another `/` and resolves a `..` or `%2e%2e`
+// inside it, letting an abbreviation reach routes this proxy never registered.
+const ABBR_PATTERN = /^[A-Za-z0-9]{1,32}$/u;
+
+const isAllowedAbbr = (value: string): boolean => ABBR_PATTERN.test(value);
+
+// Rebuilt from Fastify's own parsed querystring rather than copied from request.url, for the same reason
+// the path below is built from request.params instead: a raw copy carries forward whatever the client
+// wrote, including anything that would mean something different once it reaches the corpus.
+function upstreamQuery(request: FastifyRequest): string {
+  const query = request.query as Record<string, unknown>;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    for (const entry of Array.isArray(value) ? value : [value]) {
+      if (entry !== undefined) params.append(key, String(entry));
+    }
+  }
+  const serialized = params.toString();
+  return serialized === '' ? '' : `?${serialized}`;
+}
 
 const isAbort = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
@@ -99,11 +122,12 @@ async function proxy(
   fetching: ProxyFetching,
   address: string,
   timeoutMs: number,
+  upstreamPath: string,
 ): Promise<FastifyReply> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetching(`${address}${upstreamPathFor(request)}`, {
+    const response = await fetching(`${address}${upstreamPath}`, {
       method: request.method,
       headers: forwardableHeaders(request.headers),
       // The one body this proxy ever forwards is render's, and Fastify has already parsed it into a
@@ -147,14 +171,50 @@ export function serveCorpusProxyRoutes(
 ): void {
   if (corpusUrl === '') return; // Nothing configured, nothing to proxy to — matches corpus.ts's own precedent.
   const address = corpusUrl.replace(/\/+$/u, '');
-  const handle = (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> =>
-    proxy(request, reply, fetching, address, timeoutMs);
-  const handleRender = async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> =>
-    hasBearerAuthorization(request) ? handle(request, reply) : reply.code(401).send();
 
-  app.get(`${PROXY_PREFIX}/health`, { config: { need: PUBLIC } }, handle);
-  app.get(`${PROXY_PREFIX}/api/v1/translations`, { config: { need: PUBLIC } }, handle);
-  app.get(`${PROXY_PREFIX}/api/v1/translations/:abbr/canon`, { config: { need: PUBLIC } }, handle);
-  app.get(`${PROXY_PREFIX}/api/v1/translations/:abbr/verses`, { config: { need: PUBLIC } }, handle);
-  app.post(CORPUS_RENDER_PROXY_PATH, { config: { need: PUBLIC } }, handleRender);
+  app.get(`${PROXY_PREFIX}/health`, { config: { need: PUBLIC } }, (request, reply) =>
+    proxy(request, reply, fetching, address, timeoutMs, '/health'),
+  );
+  app.get(`${PROXY_PREFIX}/api/v1/translations`, { config: { need: PUBLIC } }, (request, reply) =>
+    proxy(request, reply, fetching, address, timeoutMs, `/api/v1/translations${upstreamQuery(request)}`),
+  );
+  app.get<{ Params: { abbr: string } }>(
+    `${PROXY_PREFIX}/api/v1/translations/:abbr/canon`,
+    { config: { need: PUBLIC } },
+    (request, reply) => {
+      const { abbr } = request.params;
+      if (!isAllowedAbbr(abbr)) return reply.code(400).send();
+      // encodeURIComponent is redundant once ABBR_PATTERN has passed — nothing it allows needs escaping
+      // — and kept anyway so nothing here depends on that remaining true if the pattern ever widens.
+      return proxy(
+        request,
+        reply,
+        fetching,
+        address,
+        timeoutMs,
+        `/api/v1/translations/${encodeURIComponent(abbr)}/canon${upstreamQuery(request)}`,
+      );
+    },
+  );
+  app.get<{ Params: { abbr: string } }>(
+    `${PROXY_PREFIX}/api/v1/translations/:abbr/verses`,
+    { config: { need: PUBLIC } },
+    (request, reply) => {
+      const { abbr } = request.params;
+      if (!isAllowedAbbr(abbr)) return reply.code(400).send();
+      return proxy(
+        request,
+        reply,
+        fetching,
+        address,
+        timeoutMs,
+        `/api/v1/translations/${encodeURIComponent(abbr)}/verses${upstreamQuery(request)}`,
+      );
+    },
+  );
+  app.post(CORPUS_RENDER_PROXY_PATH, { config: { need: PUBLIC } }, (request, reply) =>
+    hasBearerAuthorization(request)
+      ? proxy(request, reply, fetching, address, timeoutMs, '/api/v1/render')
+      : reply.code(401).send(),
+  );
 }

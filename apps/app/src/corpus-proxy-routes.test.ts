@@ -1,3 +1,5 @@
+import { connect } from 'node:net';
+
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 
@@ -8,6 +10,31 @@ import type { ProxyFetching } from './corpus-proxy-routes.js';
 import type { FastifyInstance } from 'fastify';
 
 const CORPUS_URL = 'http://corpus:8080';
+
+// Fastify's router (find-my-way) splits a path on `/` only, so a raw request line whose "abbr" segment
+// carries backslashes — never `/`, which would just be more segments and 404 the same way the existing
+// `../../etc` test already does — still matches the single-segment `:abbr` route. light-my-request's own
+// `app.inject`, used by every other test in this file, normalizes a URL before Fastify ever sees it and
+// so cannot reproduce this: only a real socket, carrying the request line exactly as a raw client would
+// send it, does.
+function rawGet(app: FastifyInstance, requestTarget: string): Promise<{ status: number }> {
+  const address = app.server.address();
+  if (address === null || typeof address === 'string') throw new Error('server is not listening');
+  return new Promise((resolve, reject) => {
+    const socket = connect(address.port, '127.0.0.1', () => {
+      socket.write(`GET ${requestTarget} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`);
+    });
+    let data = '';
+    socket.on('data', (chunk: Buffer) => {
+      data += chunk.toString('latin1');
+    });
+    socket.on('error', reject);
+    socket.on('close', () => {
+      const status = Number(data.split(' ')[1]);
+      resolve({ status: Number.isNaN(status) ? -1 : status });
+    });
+  });
+}
 
 function proxiedApp(fetching: ProxyFetching, corpusUrl = CORPUS_URL, timeoutMs?: number): FastifyInstance {
   const app = Fastify({ logger: false });
@@ -168,6 +195,45 @@ describe('the corpus proxy', () => {
     expect(response.statusCode).toBe(404);
     expect(asked).toHaveLength(0);
     await app.close();
+  });
+
+  it('refuses %2e%2e as a translation abbreviation over a real socket, never building it into the upstream path', async () => {
+    // Not app.inject: light-my-request collapses a %2e%2e segment before Fastify's router ever sees it,
+    // landing on an unrelated 404 that would pass whether or not the fix below exists. A real socket
+    // preserves the raw request target find-my-way itself receives, which is what actually reaches
+    // request.params.abbr as `..` once Fastify decodes the matched segment.
+    const { fetching, asked } = answering({});
+    const app = proxiedApp(fetching);
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    try {
+      const response = await rawGet(app, '/corpus/api/v1/translations/%2e%2e/verses?a=1');
+      expect(response.status).toBe(400);
+      expect(asked).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses any abbreviation outside the allow-list, including one with a slash-free traversal attempt', async () => {
+    const { fetching, asked } = answering({});
+    const app = proxiedApp(fetching);
+    const response = await app.inject({ method: 'GET', url: '/corpus/api/v1/translations/..%5c..%5cadmin/canon' });
+    expect(response.statusCode).toBe(400);
+    expect(asked).toHaveLength(0);
+    await app.close();
+  });
+
+  it('refuses a raw request whose abbreviation segment carries literal backslashes, before any upstream call', async () => {
+    const { fetching, asked } = answering({});
+    const app = proxiedApp(fetching);
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    try {
+      const response = await rawGet(app, '/corpus/api/v1/translations/..\\..\\..\\admin\\x/verses?a=1');
+      expect(response.status).toBe(400);
+      expect(asked).toHaveLength(0);
+    } finally {
+      await app.close();
+    }
   });
 
   it('answers 504 when the corpus does not answer inside its timeout', async () => {
