@@ -41,12 +41,12 @@ const PERMISSION: RouteNeed = { kind: 'permission', need: CATALOGUE_MANAGE };
 const CATALOGUE_PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
 
 const ROUTES = [
-  ['GET', CONTENT_LANGUAGES_PATH],
-  ['POST', CONTENT_LANGUAGES_PATH],
-  ['GET', CONTENT_LANGUAGE_CATALOGUE_PATH],
-  ['GET', CONTENT_LANGUAGE_KEY_PATH],
-  ['PUT', CONTENT_LANGUAGE_KEY_PATH],
-  ['PATCH', CONTENT_LANGUAGE_STATUS_PATH],
+  ['GET', CONTENT_LANGUAGES_PATH, PERMISSION],
+  ['POST', CONTENT_LANGUAGES_PATH, PERMISSION],
+  ['GET', CONTENT_LANGUAGE_CATALOGUE_PATH, CATALOGUE_PERMISSION],
+  ['GET', CONTENT_LANGUAGE_KEY_PATH, PERMISSION],
+  ['PUT', CONTENT_LANGUAGE_KEY_PATH, PERMISSION],
+  ['PATCH', CONTENT_LANGUAGE_STATUS_PATH, PERMISSION],
 ] as const;
 
 const keyIn = (request: FastifyRequest): string => (request.params as { readonly key: string }).key;
@@ -64,11 +64,11 @@ export function serveContentLanguageRoutes(
   { contentLanguages, identity }: ContentLanguageRoutesOptions,
 ): void {
   if (identity === undefined) {
-    for (const [method, url] of ROUTES) {
+    for (const [method, url, need] of ROUTES) {
       app.route({
         method,
         url,
-        config: { need: PERMISSION },
+        config: { need },
         handler: (request, reply) => reply.code(404).send(notFound(request)),
       });
     }

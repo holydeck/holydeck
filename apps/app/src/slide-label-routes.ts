@@ -43,12 +43,12 @@ const PERMISSION: RouteNeed = { kind: 'permission', need: CATALOGUE_MANAGE };
 const CATALOGUE_PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
 
 const ROUTES = [
-  ['GET', SLIDE_LABELS_PATH],
-  ['POST', SLIDE_LABELS_PATH],
-  ['GET', SLIDE_LABEL_CATALOGUE_PATH],
-  ['GET', SLIDE_LABEL_ID_PATH],
-  ['PUT', SLIDE_LABEL_ID_PATH],
-  ['PATCH', SLIDE_LABEL_STATUS_PATH],
+  ['GET', SLIDE_LABELS_PATH, PERMISSION],
+  ['POST', SLIDE_LABELS_PATH, PERMISSION],
+  ['GET', SLIDE_LABEL_CATALOGUE_PATH, CATALOGUE_PERMISSION],
+  ['GET', SLIDE_LABEL_ID_PATH, PERMISSION],
+  ['PUT', SLIDE_LABEL_ID_PATH, PERMISSION],
+  ['PATCH', SLIDE_LABEL_STATUS_PATH, PERMISSION],
 ] as const;
 
 const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
@@ -77,11 +77,11 @@ export interface SlideLabelRoutesOptions {
 
 export function serveSlideLabelRoutes(app: FastifyInstance, { slideLabels, identity }: SlideLabelRoutesOptions): void {
   if (identity === undefined) {
-    for (const [method, url] of ROUTES) {
+    for (const [method, url, need] of ROUTES) {
       app.route({
         method,
         url,
-        config: { need: PERMISSION },
+        config: { need },
         handler: (request, reply) => reply.code(404).send(notFound(request)),
       });
     }

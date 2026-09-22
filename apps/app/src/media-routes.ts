@@ -60,11 +60,11 @@ const READ_PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
 
 /** Every route this module serves, in the order it registers them. */
 const ROUTES = [
-  ['GET', MEDIA_PATH],
-  ['POST', MEDIA_PATH],
-  ['GET', MEDIA_ID_PATH],
-  ['PATCH', MEDIA_STATUS_PATH],
-  ['POST', MEDIA_RETRY_PATH],
+  ['GET', MEDIA_PATH, LIST_PERMISSION],
+  ['POST', MEDIA_PATH, PERMISSION],
+  ['GET', MEDIA_ID_PATH, READ_PERMISSION],
+  ['PATCH', MEDIA_STATUS_PATH, PERMISSION],
+  ['POST', MEDIA_RETRY_PATH, PERMISSION],
 ] as const;
 
 const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
@@ -83,11 +83,11 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity }: Medi
   // A deployment with nowhere to keep an identity has nothing here to audit an upload against. Every path
   // is still served, so the guard's table remains the complete shape of the surface in every deployment.
   if (identity === undefined) {
-    for (const [method, url] of ROUTES) {
+    for (const [method, url, need] of ROUTES) {
       app.route({
         method,
         url,
-        config: { need: PERMISSION },
+        config: { need },
         handler: (request, reply) => reply.code(404).send(notFound(request)),
       });
     }

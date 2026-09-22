@@ -57,13 +57,13 @@ const LIST_PERMISSION: RouteNeed = { kind: 'any-permission', needs: [CONTENT_EDI
 
 /** Every route this module serves, in the order it registers them. */
 const ROUTES = [
-  ['GET', SLIDE_LAYOUTS_PATH],
-  ['POST', SLIDE_LAYOUTS_PATH],
-  ['GET', LAYOUT_PATH],
-  ['GET', LAYOUT_REVISIONS_PATH],
-  ['PUT', LAYOUT_BOXES_PATH],
-  ['POST', LAYOUT_REVISION_PATH],
-  ['PATCH', LAYOUT_STATUS_PATH],
+  ['GET', SLIDE_LAYOUTS_PATH, LIST_PERMISSION],
+  ['POST', SLIDE_LAYOUTS_PATH, PERMISSION],
+  ['GET', LAYOUT_PATH, PERMISSION],
+  ['GET', LAYOUT_REVISIONS_PATH, PERMISSION],
+  ['PUT', LAYOUT_BOXES_PATH, PERMISSION],
+  ['POST', LAYOUT_REVISION_PATH, PERMISSION],
+  ['PATCH', LAYOUT_STATUS_PATH, PERMISSION],
 ] as const;
 
 /** Counting from one, the same as history does. A leading zero is not an ordinal anything wrote. */
@@ -109,11 +109,11 @@ export function serveSlideLayoutRoutes(
   // A deployment with nowhere to keep an identity has nothing here to audit a change against. Every path
   // is still served, so the guard's table remains the complete shape of the surface in every deployment.
   if (identity === undefined) {
-    for (const [method, url] of ROUTES) {
+    for (const [method, url, need] of ROUTES) {
       app.route({
         method,
         url,
-        config: { need: PERMISSION },
+        config: { need },
         handler: (request, reply) => reply.code(404).send(notFound(request)),
       });
     }
