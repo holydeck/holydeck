@@ -4,7 +4,7 @@
 // `corpusClient` is a different, incompatible thing (translated, enveloped answers for this application's
 // own routes, always sent with this deployment's own corpus token) and is untouched by this file. Named
 // with the `-routes.ts` suffix so `route-coverage.mjs` and `role-coverage.mjs` census it the same way
-// every other route module here is censused — see research-notes.md for why that suffix is load-bearing.
+// every other route module here is censused — see either script for how that suffix is matched.
 
 import { pipeline, Readable, Transform } from 'node:stream';
 import { finished } from 'node:stream/promises';

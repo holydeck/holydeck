@@ -1,10 +1,11 @@
 // Proves a published CLI reaches the corpus through this deployment's own `/corpus` proxy: the same
-// origin, the same bearer token, the same routes `server-client.ts` speaks. Two of the four routes the
+// origin, the same bearer token, the same routes `server-client.ts` speaks. Two of the five routes the
 // proxy registers — `/health` and the render route — have no CLI command wired to them yet (`doctor`
 // reaches `server.health()` but also always probes bible.com, which this harness never does over the
 // real network, and no command calls `ServerClient.render()`), so those two are exercised as direct,
 // authenticated requests through the proxy instead of a spawned CLI process. `translations` and
-// `get-verses` are exercised through the real built CLI binary. See research-notes.md for why.
+// `get-verses` — which also resolves a canon lookup through `passages.ts` — are exercised through the
+// real built CLI binary instead.
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
