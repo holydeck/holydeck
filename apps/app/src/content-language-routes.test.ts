@@ -99,6 +99,14 @@ describe('content-language routes', () => {
     await creating({ ...DRAFT, key: 'ml' }); expect((await statusing('ml', false)).statusCode).toBe(409);
   });
 
+  test('refuses an edit on an archived entry, a malformed status body, and status for a missing key', async () => {
+    await creating();
+    await statusing('ta', true);
+    expect((await ask('PUT', at(CONTENT_LANGUAGE_KEY_PATH, 'ta'), { displayName: 'Tamil', script: 'Tamil', fallbackFont: 'Latha' })).statusCode).toBe(409);
+    expect((await ask('PATCH', at(CONTENT_LANGUAGE_STATUS_PATH, 'ta'), { archived: 'yes' })).statusCode).toBe(422);
+    expect((await statusing('missing', true)).statusCode).toBe(404);
+  });
+
   test('enforces both permission surfaces and a session', async () => {
     const editor = await sessions.start(sessionContext('req-editor'), { actor: ACTOR, permissions: [CONTENT_EDIT] });
     const manager = await sessions.start(sessionContext('req-manager'), { actor: ACTOR, permissions: [CATALOGUE_MANAGE] });
