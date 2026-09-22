@@ -119,6 +119,51 @@ re-keying first leaves a repository nothing can open and backup runs that fail o
 quietly writing an unencrypted repository, so the failure is loud, but the snapshots already taken
 are only recoverable with the password they were written under.
 
+## Migrating an existing deployment to Mongo authentication
+
+A deployment brought up before this deployment required MongoDB authentication has a `mongo`
+volume with no users in it at all. `compose.yaml` now always starts `mongo` expecting
+`HOLYDECK_MONGO_ROOT_PASSWORD` and `HOLYDECK_MONGO_PASSWORD` to already be real credentials, so an
+older volume has to be migrated once, out of band, before it can be brought up on the current
+compose files.
+
+1. **Back up first.** Take a fresh backup through this deployment's existing backup path before
+   touching anything — see "The backup repository password" above for what protects it, and keep
+   a copy of the pre-migration `compose.yaml`/`compose.dev.yaml` alongside it.
+2. **Stop the stack**, keeping its volumes: `docker compose down` (no `-v`).
+3. **Choose the credentials** this deployment will use going forward and export them:
+
+   ```sh
+   export HOLYDECK_MONGO_ROOT_PASSWORD=... HOLYDECK_MONGO_PASSWORD=...
+   ```
+
+4. **Run the migration script:**
+
+   ```sh
+   node scripts/ops/mongo-enable-auth.mjs
+   ```
+
+   It starts a throwaway, unauthenticated `mongod` bound to the deployment's existing
+   `mongo-data` volume, creates the root and application users from the environment above (only
+   if each is missing — it never overwrites a password already set on that volume), and stops the
+   throwaway container again. It refuses to run at all if it finds the real stack's `mongo`
+   already up against that same volume, and it never prints either password.
+5. **Restart with the updated compose files** (the ones `HOLYDECK_MONGO_ROOT_PASSWORD` and
+   `HOLYDECK_MONGO_PASSWORD` are now set for): `docker compose up -d`.
+6. **Verify authentication is enforced** — an unauthenticated connection attempt must now fail:
+
+   ```sh
+   docker compose exec mongo mongosh --quiet --eval "db.adminCommand('listDatabases')"
+   ```
+
+   That command failing is success. If it succeeds, the migration did not take effect — stop and
+   re-check step 4 before doing anything else.
+7. **Rollback**, if needed: stop the stack, restore the pre-migration `compose.yaml`/
+   `compose.dev.yaml` saved in step 1, and restore the backup taken in step 1 into the `mongo-data`
+   volume. The migration script only adds users; it never removes or modifies existing data, so a
+   rollback that never reached step 4 can skip restoring the volume and just revert the compose
+   files.
+
 ## Node baseline checkpoint (DEPL-03)
 
 **Decision, recorded 2026-09-21: stay on Node 24 for this release. Do not move to Node 26 yet.**
