@@ -15,6 +15,7 @@ import { serveOnboarding } from './onboarding.js';
 import { serveOrderRoutes } from './order-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
+import { serveServiceRoutes } from './service-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
 import { serveSettingsRoutes } from './settings-routes.js';
 import { serveSlideLayoutRoutes } from './slide-layout-routes.js';
@@ -229,6 +230,7 @@ export function buildApp({
   // the capability surface above is behind, because running a presentation is what this surface is for.
   serveReferenceRoutes(app, { corpus, shownReferences });
   serveOrderRoutes(app, { services, slideLabels });
+  serveServiceRoutes(app, { services });
 
   if (web !== undefined) serveWebClient(app, web);
 
