@@ -112,6 +112,9 @@ export const KNOWN_INTEGRATION_GAPS = {
   'song-routes.ts POST SONG_IMPORT_PATH CONTENT_EDIT': 'no harness test refuses song import without content.edit',
   'song-routes.ts GET SONG_HISTORY_PATH CONTENT_EDIT': 'no harness test refuses song history without content.edit',
   'song-routes.ts POST SONG_SLIDES_PATH CONTENT_EDIT': 'no harness test refuses song slide generation without content.edit',
+  'song-routes.ts POST SONG_SINGER_CHORDS_PATH CONTENT_EDIT': 'no harness test refuses creating song-singer chords without content.edit',
+  'song-routes.ts GET SONG_SINGER_CHORDS_PATH CONTENT_EDIT': 'no harness test refuses reading song-singer chords without content.edit',
+  'song-routes.ts PUT SONG_SINGER_CHORDS_PATH CONTENT_EDIT': 'no harness test refuses editing song-singer chords without content.edit',
   'translation-offset-routes.ts PUT SET_PATH SETTINGS_MANAGE': 'no harness test refuses translation offset changes to a non-admin',
 };
 

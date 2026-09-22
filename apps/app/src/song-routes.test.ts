@@ -14,6 +14,7 @@ import { withSafeErrors } from './failures.js';
 import { passkeysOn } from './passkeys.js';
 import { CONTENT_EDIT } from './roles.js';
 import { SONG_ID_PATH, serveSongRoutes } from './song-routes.js';
+import { songSingerChordsOn } from './song-singer-chords.js';
 import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
 import { songsOn } from './songs.js';
 import { sessionContext, sessionsOn } from './sessions.js';
@@ -28,6 +29,7 @@ import { memoryTotp } from '../test/helpers/totp.js';
 import type { Identity } from './onboarding.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SongStore } from './songs.js';
+import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 import type { FastifyInstance } from 'fastify';
@@ -45,6 +47,7 @@ let app: FastifyInstance;
 let sessions: SessionStore;
 let identity: Identity;
 let songs: SongStore;
+let chords: SongSingerChordsStore;
 let db: FakeDb;
 let layouts: SlideLayoutStore;
 let admin: StartedSession;
@@ -52,6 +55,7 @@ let tick: number;
 
 const now = (): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString();
 const at = (path: string, id: string): string => path.replace(':id', id);
+const singerAt = (songId: string, singerId: string): string => `${at(SONG_ID_PATH, songId)}/singers/${singerId}/chords`;
 const headers = (held: StartedSession = admin) => ({
   [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), host: HOST, 'x-forwarded-proto': 'https', origin: ORIGIN,
   cookie: sessionCookie(held.token, 60), [CSRF_HEADER]: held.record.csrf,
@@ -69,12 +73,16 @@ const create = (payload: unknown = { title: 'Paadal', body: BODY }, held?: Start
   ask('POST', SONGS_PATH, payload, held);
 const created = async (): Promise<string> => (await create()).json().data.stamp.id as string;
 
-const serving = async (held: Identity | undefined, store: SongStore | undefined = songs): Promise<void> => {
+const serving = async (
+  held: Identity | undefined,
+  store: SongStore | undefined = songs,
+  chordStore: SongSingerChordsStore | undefined = chords,
+): Promise<void> => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
   enforceAuthorization(app, { sessions, identity: undefined });
-  serveSongRoutes(app, { songs: store, identity: held });
+  serveSongRoutes(app, { songs: store, chords: chordStore, identity: held });
   await app.ready();
 };
 
@@ -90,6 +98,7 @@ beforeEach(async () => {
   };
   let serial = 0;
   songs = songsOn(db, { now, newId: () => `song-${(serial += 1)}` });
+  chords = songSingerChordsOn(db, { now });
   layouts = slideLayoutsOn(db, { now, newId: () => `layout-${(serial += 1)}` });
   await serving(identity);
   admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
@@ -181,6 +190,30 @@ describe('song routes', () => {
     const conflicted = await ask('POST', `${at(SONG_ID_PATH, id)}/slides`, { songRevision: 1, slideLayoutId: 'layout-99', slideLayoutRevision: 1 });
     expect(conflicted.statusCode).toBe(409);
   });
+
+  test('creates, reads, and edits one singer’s chord data', async () => {
+    const id = await created();
+    const path = singerAt(id, 'singer-1');
+    expect((await ask('POST', path, { chords: 'Am  F  C  G' })).statusCode).toBe(201);
+    expect((await ask('GET', path)).json().data.chords).toBe('Am  F  C  G');
+    expect((await ask('PUT', path, { chords: 'Dm  G  C' })).statusCode).toBe(200);
+    expect((await ask('GET', path)).json().data.chords).toBe('Dm  G  C');
+  });
+
+  test('refuses duplicate chord creation for one song and singer', async () => {
+    const path = singerAt(await created(), 'singer-1');
+    await ask('POST', path, { chords: 'Am' });
+    const refused = await ask('POST', path, { chords: 'Dm' });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.code).toBe(ENTITY_CONFLICT);
+  });
+
+  test('does not create chords through read or edit, and refuses an unknown song', async () => {
+    const id = await created();
+    expect((await ask('GET', singerAt(id, 'singer-1'))).statusCode).toBe(404);
+    expect((await ask('PUT', singerAt(id, 'singer-1'), { chords: 'Am' })).statusCode).toBe(404);
+    expect((await ask('GET', singerAt('song-99', 'singer-1'))).statusCode).toBe(404);
+  });
 });
 
 describe('song route guards', () => {
@@ -199,7 +232,8 @@ describe('song route guards', () => {
   test.each([
     ['POST', SONGS_PATH], ['GET', SONG_ID_PATH], ['PUT', SONG_ID_PATH], ['GET', `${SONG_ID_PATH}/raw`],
     ['PUT', `${SONG_ID_PATH}/raw`], ['GET', `${SONG_ID_PATH}/export`], ['POST', `${SONGS_PATH}/import`],
-    ['GET', `${SONG_ID_PATH}/history`], ['POST', `${SONG_ID_PATH}/slides`],
+    ['GET', `${SONG_ID_PATH}/history`], ['POST', `${SONG_ID_PATH}/slides`], ['POST', `${SONG_ID_PATH}/singers/:singerId/chords`],
+    ['GET', `${SONG_ID_PATH}/singers/:singerId/chords`], ['PUT', `${SONG_ID_PATH}/singers/:singerId/chords`],
   ])('answers not-found for %s %s without a store', async (method, path) => {
     await app.close();
     await serving(undefined, undefined);

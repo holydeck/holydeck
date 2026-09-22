@@ -7,6 +7,7 @@ import {
   parseSongEdit,
   parseSongGeneration,
   parseSongImportRequest,
+  parseSongSingerChordsDraft,
 } from '@holydeck/contracts/songs';
 import { FIELD_CODES } from '@holydeck/contracts/problems';
 
@@ -17,11 +18,13 @@ import { notFound } from './failures.js';
 import { settled, staleRevision } from './refusals.js';
 import { CONTENT_EDIT } from './roles.js';
 import { SongError, songContext, subjectFor } from './songs.js';
+import { SongSingerChordsError, songSingerChordsContext, subjectFor as chordSubjectFor } from './song-singer-chords.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
 import type { Identity } from './onboarding.js';
 import type { SongRefusal, SongStore } from './songs.js';
+import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { LocatedProblem } from './song-yaml.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
@@ -33,6 +36,7 @@ const SONG_EXPORT_PATH = `${SONG_ID_PATH}/export`;
 const SONG_HISTORY_PATH = `${SONG_ID_PATH}/history`;
 const SONG_SLIDES_PATH = `${SONG_ID_PATH}/slides`;
 const SONG_IMPORT_PATH = `${SONGS_PATH}/import`;
+const SONG_SINGER_CHORDS_PATH = `${SONG_ID_PATH}/singers/:singerId/chords`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
 
@@ -46,6 +50,9 @@ const ROUTES = [
   ['POST', SONG_IMPORT_PATH],
   ['GET', SONG_HISTORY_PATH],
   ['POST', SONG_SLIDES_PATH],
+  ['POST', SONG_SINGER_CHORDS_PATH],
+  ['GET', SONG_SINGER_CHORDS_PATH],
+  ['PUT', SONG_SINGER_CHORDS_PATH],
 ] as const;
 
 const ORDINAL = /^[1-9][0-9]*$/u;
@@ -57,8 +64,14 @@ const NOT_AN_ORDINAL = [
 
 const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
 
+const singerIdIn = (request: FastifyRequest): string =>
+  (request.params as { readonly id: string; readonly singerId: string }).singerId;
+
 const isRefusal = (error: unknown): error is SongError & { kind: 'state' | 'conflict' } =>
   error instanceof SongError && (error.kind === 'state' || error.kind === 'conflict');
+
+const isChordRefusal = (error: unknown): error is SongSingerChordsError & { kind: 'state' | 'conflict' } =>
+  error instanceof SongSingerChordsError && (error.kind === 'state' || error.kind === 'conflict');
 
 type TextAnswer<T> =
   | { readonly ok: true; readonly value: T }
@@ -77,10 +90,11 @@ async function settledText<T>(work: () => Promise<T>): Promise<TextAnswer<T>> {
 
 export interface SongRoutesOptions {
   readonly songs: SongStore | undefined;
+  readonly chords: SongSingerChordsStore | undefined;
   readonly identity: Identity | undefined;
 }
 
-export function serveSongRoutes(app: FastifyInstance, { songs, identity }: SongRoutesOptions): void {
+export function serveSongRoutes(app: FastifyInstance, { songs, chords, identity }: SongRoutesOptions): void {
   if (identity === undefined) {
     for (const [method, url] of ROUTES) {
       app.route({ method, url, config: { need: PERMISSION }, handler: (request, reply) => reply.code(404).send(notFound(request)) });
@@ -89,6 +103,7 @@ export function serveSongRoutes(app: FastifyInstance, { songs, identity }: SongR
   }
 
   const store = songs as SongStore;
+  const chordsStore = chords as SongSingerChordsStore;
   const call = (request: FastifyRequest) =>
     songContext(provenSession(request).record.actor, correlationFor(SONG_PREFIX, request.id));
   const note = async (request: FastifyRequest, id: string, outcome: AuditOutcome, detail: string): Promise<void> => {
@@ -99,6 +114,22 @@ export function serveSongRoutes(app: FastifyInstance, { songs, identity }: SongR
       );
     } catch (error: unknown) {
       request.log.error({ err: error }, 'the song trail refused an entry');
+    }
+  };
+  const noteChord = async (
+    request: FastifyRequest,
+    songId: string,
+    singerId: string,
+    outcome: AuditOutcome,
+    detail: string,
+  ): Promise<void> => {
+    try {
+      await identity.audit.record(
+        auditContext(provenSession(request).record.actor, correlationFor(SONG_PREFIX, request.id)),
+        { action: 'content.change', subject: chordSubjectFor(songId, singerId), outcome, detail },
+      );
+    } catch (error: unknown) {
+      request.log.error({ err: error }, 'the song-singer chord trail refused an entry');
     }
   };
 
@@ -197,6 +228,48 @@ export function serveSongRoutes(app: FastifyInstance, { songs, identity }: SongR
     const answer = await settled(() => store.generate(call(request), id, parsed.value), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     await note(request, id, 'allowed', 'generated slides');
+    return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  app.post(SONG_SINGER_CHORDS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const parsed = parseSongSingerChordsDraft(request.body, 'songSingerChords');
+    if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
+    const songId = idIn(request);
+    const singerId = singerIdIn(request);
+    if ((await store.current(call(request), songId)) === undefined) return reply.code(404).send(notFound(request));
+    const answer = await settled(
+      () => chordsStore.create(songSingerChordsContext(provenSession(request).record.actor, correlationFor(SONG_PREFIX, request.id)), songId, singerId, parsed.value),
+      isChordRefusal,
+    );
+    if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
+    await noteChord(request, songId, singerId, 'allowed', 'created');
+    return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  app.get(SONG_SINGER_CHORDS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const songId = idIn(request);
+    const singerId = singerIdIn(request);
+    if ((await store.current(call(request), songId)) === undefined) return reply.code(404).send(notFound(request));
+    const value = await chordsStore.get(
+      songSingerChordsContext(provenSession(request).record.actor, correlationFor(SONG_PREFIX, request.id)), songId, singerId,
+    );
+    if (value === undefined) return reply.code(404).send(notFound(request));
+    return reply.send(successEnvelope(value, request.id, CLIENT_WINDOW.current));
+  });
+
+  app.put(SONG_SINGER_CHORDS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const parsed = parseSongSingerChordsDraft(request.body, 'songSingerChords');
+    if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
+    const songId = idIn(request);
+    const singerId = singerIdIn(request);
+    if ((await store.current(call(request), songId)) === undefined) return reply.code(404).send(notFound(request));
+    const answer = await settled(
+      () => chordsStore.edit(songSingerChordsContext(provenSession(request).record.actor, correlationFor(SONG_PREFIX, request.id)), songId, singerId, parsed.value),
+      isChordRefusal,
+    );
+    if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
+    if (answer.value === undefined) return reply.code(404).send(notFound(request));
+    await noteChord(request, songId, singerId, 'allowed', 'edited');
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 }

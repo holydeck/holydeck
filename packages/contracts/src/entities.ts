@@ -46,6 +46,7 @@ export const ENTITY_KINDS = [
   'slideLabel',
   'slideLayout',
   'song',
+  'songSingerChords',
 ] as const;
 
 export type EntityKind = (typeof ENTITY_KINDS)[number];
@@ -163,6 +164,15 @@ export const ENTITY_POLICIES: Readonly<Record<EntityKind, EntityPolicy>> = Objec
     graceDays: undefined,
     portable: true,
     requirement: 'SONG-01 with DELT-01',
+  },
+  songSingerChords: {
+    kind: 'songSingerChords',
+    schemaVersion: 1,
+    archive: 'hidden',
+    deletion: 'never',
+    graceDays: undefined,
+    portable: false,
+    requirement: 'CRT-13',
   },
 });
 

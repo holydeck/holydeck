@@ -58,6 +58,7 @@ import { SLIDE_LABEL_ID_PATH, SLIDE_LABEL_STATUS_PATH } from './slide-label-rout
 import { slideLabelsOn } from './slide-labels.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
 import { SONG_ID_PATH } from './song-routes.js';
+import { songSingerChordsOn } from './song-singer-chords.js';
 import { songsOn } from './songs.js';
 import { totpsOn } from './totp.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
@@ -197,6 +198,8 @@ describe('every route that changes something', () => {
       { method: 'PUT', url: `${SONG_ID_PATH}/raw` },
       { method: 'POST', url: `${SONGS_PATH}/import` },
       { method: 'POST', url: `${SONG_ID_PATH}/slides` },
+      { method: 'POST', url: `${SONG_ID_PATH}/singers/:singerId/chords` },
+      { method: 'PUT', url: `${SONG_ID_PATH}/singers/:singerId/chords` },
       // A Sermon changes the same way a Song does, behind the same permission.
       { method: 'POST', url: SERMONS_PATH },
       { method: 'PUT', url: SERMON_ID_PATH },
@@ -281,6 +284,7 @@ describe('the content surfaces this spec wires, with every store present', () =>
       fetching: refusing,
       identity,
       songs: songsOn(db, { now }),
+      chords: songSingerChordsOn(db, { now }),
       sermons: sermonsOn(db, { now }),
       slideGroups: slideGroupsOn(db, { now }),
       library: libraryOn(db, { now }),
@@ -296,6 +300,7 @@ describe('the content surfaces this spec wires, with every store present', () =>
       [`PUT ${SONG_ID_PATH}/raw`]: contentEdit,
       [`POST ${SONGS_PATH}/import`]: contentEdit,
       [`POST ${SONG_ID_PATH}/slides`]: contentEdit,
+      [`POST ${SONG_ID_PATH}/singers/:singerId/chords`]: contentEdit,
       [`POST ${SERMONS_PATH}`]: contentEdit,
       [`PUT ${SERMON_ID_PATH}`]: contentEdit,
       [`PUT ${SERMON_ID_PATH}/raw`]: contentEdit,

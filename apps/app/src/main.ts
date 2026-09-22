@@ -40,6 +40,7 @@ import { slideLayoutsOn } from './slide-layouts.js';
 import { slideLabelsOn } from './slide-labels.js';
 import { shownReferenceDb, shownReferencesOn } from './shown-references.js';
 import { songsOn } from './songs.js';
+import { songSingerChordsOn } from './song-singer-chords.js';
 import { totpDb, totpsOn } from './totp.js';
 import { translationOffsetDb, translationOffsetsOn } from './translation-offsets.js';
 import { loadSettings, settingsPath } from './settings.js';
@@ -60,6 +61,7 @@ import type { SlideLabelStore } from './slide-labels.js';
 import type { SessionStore } from './sessions.js';
 import type { ShownReferenceStore } from './shown-references.js';
 import type { SongStore } from './songs.js';
+import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 
 checkReleasedContracts();
@@ -116,6 +118,7 @@ let shownReferences: ShownReferenceStore | undefined;
 // deployment with nowhere to keep one has none to create, edit or generate slides from, and its routes
 // answer not-found the same way.
 let songs: SongStore | undefined;
+let chords: SongSingerChordsStore | undefined;
 let sermons: SermonStore | undefined;
 let slideGroups: SlideGroupStore | undefined;
 // Every Song and Sermon indexed together, read from the same store either was written to: a deployment
@@ -146,6 +149,7 @@ if (settings.values.mongoUrl !== '') {
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
   songs = songsOn(repositoryDb(store.db()), { now });
+  chords = songSingerChordsOn(repositoryDb(store.db()), { now });
   sermons = sermonsOn(repositoryDb(store.db()), { now });
   slideGroups = slideGroupsOn(repositoryDb(store.db()), { now });
   library = libraryOn(repositoryDb(store.db()), { now });
@@ -208,6 +212,7 @@ const app = buildApp({
   serviceTemplates,
   slideLabels,
   songs,
+  chords,
   sermons,
   slideGroups,
   library,

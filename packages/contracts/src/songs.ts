@@ -361,12 +361,18 @@ export const parseSongGeneration: ParseFn<SongGeneration> = (value, path) =>
     return { songRevision, slideLayoutId, slideLayoutRevision, ...(slideGroupId === undefined ? {} : { slideGroupId }) };
   });
 
+export type SongSingerChordsDraft = { readonly chords: string };
+
+export const parseSongSingerChordsDraft: ParseFn<SongSingerChordsDraft> = (value, path) =>
+  parseObject(value, path, (reader) => ({ chords: reader.text('chords') }));
+
 /**
  * How a song travels between one HolyDeck and another. No migration step is declared because no earlier
  * version of this file shape was ever written; a step is added here the first time the shape changes.
  *
- * Nothing is left out of the file: everything a song holds is the song, and the singer and chord
- * relationships §12.4 keeps out of a portable export are relationships this schema does not carry at all.
+ * The singer chord relationships §12.4 keeps out live in their own store: neither this `SongBody` nor
+ * `SONG_PORTABLE` names them, and their entity policy is not portable. The export therefore leaves them
+ * out by construction, rather than by pretending the shape does not exist.
  */
 export const SONG_PORTABLE = portableSchema('song', SONG_SCHEMA_VERSION, []);
 

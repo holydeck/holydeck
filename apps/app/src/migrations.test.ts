@@ -112,6 +112,7 @@ describe('the shipped migrations', () => {
       'sign_in_attempts',
       'slide_labels',
       'slide_layouts',
+      'song_singer_chords',
       'totp_credentials',
     ]);
 

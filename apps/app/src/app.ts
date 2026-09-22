@@ -49,6 +49,7 @@ import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
 import type { ShownReferenceStore } from './shown-references.js';
 import type { SongStore } from './songs.js';
+import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 import type { WebAsset } from './static.js';
 
@@ -83,6 +84,7 @@ export interface AppOptions {
   slideLabels?: SlideLabelStore;
   /** Where a Song is kept. Without it, there is none to create, edit, export or generate slides from. */
   songs?: SongStore;
+  chords?: SongSingerChordsStore;
   /** Where a Sermon is kept. Without it, there is none to create, edit or generate slides from. */
   sermons?: SermonStore;
   /** Where a Slide Group is kept. Without it, there is none to create, edit or regenerate. */
@@ -117,6 +119,7 @@ export function buildApp({
   serviceTemplates,
   slideLabels,
   songs,
+  chords,
   sermons,
   slideGroups,
   library,
@@ -267,7 +270,7 @@ export function buildApp({
   // The content surfaces content-routes spec adds: each behind `content.edit`, the one permission an
   // Editor holds and an Admin's Layout/Label/Language vocabulary above is deliberately not — this is
   // what an Editor builds a service's content with, not what an Admin administers the catalogue with.
-  serveSongRoutes(app, { songs, identity });
+  serveSongRoutes(app, { songs, chords, identity });
   serveSermonRoutes(app, { sermons, identity });
   serveSlideGroupRoutes(app, { slideGroups, identity });
   serveLibraryRoutes(app, { library, identity });
