@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { MEDIA_PATH } from './media-routes.js';
+import { PREPARATION_OVERRIDE_PATH, PREPARATION_PREPARE_PATH } from './preparation-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
 import {
   SERVICE_DUPLICATE_PATH,
@@ -157,6 +158,11 @@ describe('every route that changes something', () => {
       { method: 'POST', url: SERVICE_ITEM_REVISE_PATH },
       // A Service Template is Admin's by a permission of its own: creating one changes what New Service offers.
       { method: 'POST', url: SERVICE_TEMPLATE_PATH },
+      // Preparation's own surface: preparing a Service into a manifest is Admin's or an Editor's, the
+      // same permission Editing one already takes; overriding a readiness blocker is Control presentation's
+      // alone, the one route in this module gated by a different permission than the rest.
+      { method: 'POST', url: PREPARATION_PREPARE_PATH },
+      { method: 'POST', url: PREPARATION_OVERRIDE_PATH },
     ]);
   });
 

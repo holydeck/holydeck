@@ -14,6 +14,7 @@ import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveOrderRoutes } from './order-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
+import { servePreparationRoutes } from './preparation-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
 import { serveServiceRoutes } from './service-routes.js';
 import { serveServiceTemplateRoutes } from './service-template-routes.js';
@@ -31,6 +32,7 @@ import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
+import type { PreparationStore } from './snapshots.js';
 import type { SlideLabelStore } from './slide-labels.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
@@ -70,6 +72,7 @@ export interface AppOptions {
   shownReferences?: ShownReferenceStore;
   services?: ServiceStore;
   serviceTemplates?: ServiceTemplateStore;
+  preparation?: PreparationStore;
   slideLabels?: SlideLabelStore;
 }
 
@@ -96,6 +99,7 @@ export function buildApp({
   shownReferences,
   services,
   serviceTemplates,
+  preparation,
   slideLabels,
 }: AppOptions): FastifyInstance {
   // HTTPS makes Fastify infer a specialised server, while the routes below use its common interface.
@@ -243,6 +247,7 @@ export function buildApp({
   serveOrderRoutes(app, { services, slideLabels });
   serveServiceRoutes(app, { services });
   serveServiceTemplateRoutes(app, { serviceTemplates });
+  servePreparationRoutes(app, { preparation });
 
   if (web !== undefined) serveWebClient(app, web);
 

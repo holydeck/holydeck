@@ -29,6 +29,7 @@ import { repositoryDb } from './repositories.js';
 import { seedContext, seedOn } from './seed.js';
 import { servicesOn } from './services.js';
 import { serviceTemplatesOn } from './service-templates.js';
+import { preparationOn } from './snapshots.js';
 import { sessionDb, sessionsOn } from './sessions.js';
 import { passkeyDb, passkeysOn } from './passkeys.js';
 import { settingsAdminOn } from './settings-admin.js';
@@ -45,6 +46,7 @@ import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
+import type { PreparationStore } from './snapshots.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SlideLabelStore } from './slide-labels.js';
@@ -84,6 +86,7 @@ let capabilities: CapabilityStore | undefined;
 // Presenting state (spec 9.3, T81): a deployment with nowhere to keep a Service has no state to gate on.
 let services: ServiceStore | undefined;
 let serviceTemplates: ServiceTemplateStore | undefined;
+let preparation: PreparationStore | undefined;
 let slideLabels: SlideLabelStore | undefined;
 // The settings admin is kept apart from the durable store, but wired up alongside it: a deployment with
 // nowhere to keep accounts has nobody who could administer settings either, and its route answers
@@ -119,6 +122,7 @@ if (settings.values.mongoUrl !== '') {
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
   services = servicesOn(repositoryDb(store.db()), { now });
   serviceTemplates = serviceTemplatesOn(repositoryDb(store.db()), { now });
+  preparation = preparationOn(repositoryDb(store.db()), { now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
@@ -185,6 +189,7 @@ const app = buildApp({
   shownReferences,
   services,
   serviceTemplates,
+  preparation,
   slideLabels,
 });
 
