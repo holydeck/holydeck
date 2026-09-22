@@ -39,7 +39,12 @@ describe('the route to page switch', () => {
 
   it.each([
     ['/services', 'Services'],
-    ['/services/s1', 'Service s1'],
+    ['/services/s1', 'Service'],
+    ['/services/new', 'New Service'],
+    ['/services/s1/live', 'Service s1'],
+    ['/services/s1/readiness', 'Readiness'],
+    ['/library', 'Library'],
+    ['/media', 'Media'],
     ['/admin/users', 'Users'],
     ['/nowhere', 'Page not found'],
   ])('renders %s inside the shell', async (path, heading) => {

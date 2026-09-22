@@ -55,20 +55,37 @@ describe('the navigation shell', () => {
     expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('href')).toBe('/admin/users');
   });
 
-  it('marks the current section and keeps the library out of the tab order', () => {
+  it('marks the current section and links to the library', () => {
     session.value = signedIn(['accounts.manage']);
     currentPath.value = '/services/s1';
     render(<AppShell><p>page</p></AppShell>);
     expect(screen.getByRole('link', { name: 'Services' }).getAttribute('aria-current')).toBe('page');
     expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('aria-current')).toBeNull();
-    const library = screen.getByText('Library');
-    expect(library.getAttribute('aria-disabled')).toBe('true');
-    expect(library.hasAttribute('href')).toBe(false);
+    expect(screen.getByRole('link', { name: 'Library' }).getAttribute('href')).toBe('/library');
+    expect(screen.getByRole('link', { name: 'Library' }).getAttribute('aria-current')).toBeNull();
 
     act(() => {
       currentPath.value = '/admin/users';
     });
     expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('aria-current')).toBe('page');
+  });
+
+  it('marks the library current while on it', () => {
+    session.value = signedIn(['accounts.manage']);
+    currentPath.value = '/library';
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByRole('link', { name: 'Library' }).getAttribute('aria-current')).toBe('page');
+  });
+
+  it('shows the Media link only to a session that can manage media', () => {
+    session.value = signedIn(['accounts.manage']);
+    const view = render(<AppShell><p>page</p></AppShell>);
+    expect(screen.queryByRole('link', { name: 'Media' })).toBeNull();
+    view.unmount();
+
+    session.value = signedIn(['accounts.manage', 'media.manage']);
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByRole('link', { name: 'Media' }).getAttribute('href')).toBe('/media');
   });
 
   it('omits the account line for a session with no account behind it, and sign-out when it is not wired', () => {
