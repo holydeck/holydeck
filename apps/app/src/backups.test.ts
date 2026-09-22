@@ -33,12 +33,6 @@ const CORRELATION = 'req-0f9c2a41';
 
 const CONTEXT = backupContext('system', CORRELATION);
 
-// CRT-13 introduces this relationship before v1c-10 owns its backup/restore round trip. Keeping the
-// deferral here rather than in `backups.ts` leaves the shipped archive unchanged until that work lands.
-const DEFERRED_BACKUP_RECORDS: readonly ExcludedRecord[] = [
-  { record: 'songSingerChords', because: 'CRT-13 defers its backup and restore round trip to v1c-10' },
-];
-
 const NO_PERMISSION = requestContext({ actor: 'system', permissions: [], correlationId: CORRELATION });
 
 interface FakeMongoDb extends BackupDb {
@@ -205,11 +199,11 @@ describe('the census of what a backup carries', () => {
   const problemsAmong = (
     records: readonly RecordName[],
     contents: readonly MongoContent[],
-    excluded: readonly ExcludedRecord[] = DEFERRED_BACKUP_RECORDS,
+    excluded: readonly ExcludedRecord[],
   ): readonly string[] => censusProblems({ records, contents, excluded });
 
   it('accounts for every record class this deployment ships, one way or the other', () => {
-    expect(problemsAmong(RECORD_NAMES, MONGO_CONTENTS)).toEqual([]);
+    expect(censusProblems()).toEqual([]);
   });
 
   it('carries the schema ledger, without which a restored archive says nothing about its own shape', () => {
@@ -218,7 +212,7 @@ describe('the census of what a backup carries', () => {
 
   it('carries every class by default, which is why nothing is excluded today', () => {
     expect(EXCLUDED_RECORDS).toEqual([]);
-    expect(MONGO_CONTENTS).toHaveLength(RECORD_NAMES.length - DEFERRED_BACKUP_RECORDS.length);
+    expect(MONGO_CONTENTS).toHaveLength(RECORD_NAMES.length);
   });
 
   it('inventories each class under its own name, so a dump file can be matched back to a collection', () => {
@@ -230,27 +224,27 @@ describe('the census of what a backup carries', () => {
 
   it('reports a class that is carried by nothing and excused by nothing, which is how one stops being lost', () => {
     const forgotten = MONGO_CONTENTS.filter((content) => content.record !== 'slideLayouts');
-    expect(problemsAmong(RECORD_NAMES, forgotten)).toEqual([
+    expect(problemsAmong(RECORD_NAMES, forgotten, [])).toEqual([
       'slideLayouts: no backup carries it and nothing says why — inventory it or exclude it with a reason',
     ]);
   });
 
   it('reports a class that is carried and excused at once, because only one of the two can be acted on', () => {
     expect(
-      problemsAmong(RECORD_NAMES, MONGO_CONTENTS, [...DEFERRED_BACKUP_RECORDS, { record: 'runEvents', because: 'they are noisy' }]),
+      problemsAmong(RECORD_NAMES, MONGO_CONTENTS, [{ record: 'runEvents', because: 'they are noisy' }]),
     ).toEqual(['runEvents: is inventoried and excluded at once, which cannot both be true']);
   });
 
   it('reports an exclusion that gives no reason, which is the whole of what an exclusion has to give', () => {
     const kept = MONGO_CONTENTS.filter((content) => content.record !== 'runEvents');
-    expect(problemsAmong(RECORD_NAMES, kept, [...DEFERRED_BACKUP_RECORDS, { record: 'runEvents', because: '  ' }])).toEqual([
+    expect(problemsAmong(RECORD_NAMES, kept, [{ record: 'runEvents', because: '  ' }])).toEqual([
       'runEvents: is excluded without saying why',
     ]);
   });
 
   it('reports a class inventoried twice, and two classes sharing one manifest name', () => {
     const doubled = [...MONGO_CONTENTS, { record: 'services', class: 'services' } as const];
-    expect(problemsAmong(RECORD_NAMES, doubled)).toEqual([
+    expect(problemsAmong(RECORD_NAMES, doubled, [])).toEqual([
       'one record class is inventoried more than once',
       'two classes are inventoried under one manifest name',
     ]);
@@ -260,7 +254,7 @@ describe('the census of what a backup carries', () => {
     const renamed = MONGO_CONTENTS.map((content) =>
       content.record === 'runEvents' ? { record: content.record, class: 'events' } : content,
     );
-    expect(problemsAmong(RECORD_NAMES, renamed)).toEqual([
+    expect(problemsAmong(RECORD_NAMES, renamed, [])).toEqual([
       'runEvents: is inventoried as events rather than run-events, which a restore reads by',
     ]);
   });
@@ -269,7 +263,7 @@ describe('the census of what a backup carries', () => {
     const clashing = MONGO_CONTENTS.map((content) =>
       content.record === 'mediaAssets' ? { record: content.record, class: 'media' } : content,
     );
-    expect(problemsAmong(RECORD_NAMES, clashing)).toEqual([
+    expect(problemsAmong(RECORD_NAMES, clashing, [])).toEqual([
       'mediaAssets: is inventoried as media rather than media-assets, which a restore reads by',
       'media: is inventoried under a name the file half already uses',
     ]);

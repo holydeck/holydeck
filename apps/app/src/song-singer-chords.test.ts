@@ -68,4 +68,12 @@ describe('song-singer chords', () => {
     db.rows.set(CHORDS, [{ ...row, chords: 7 }]);
     expect((await refused(chords.get(CONTEXT, 'song-1', 'singer-1'))).kind).toBe('corrupt');
   });
+
+  it('refuses a row holding a stamp it cannot read', async () => {
+    const { db, chords } = store();
+    await chords.create(CONTEXT, 'song-1', 'singer-1', { chords: 'Am' });
+    const [row] = rows(db);
+    db.rows.set(CHORDS, [{ ...row, stamp: { id: 'song-1:singer-1' } }]);
+    expect((await refused(chords.get(CONTEXT, 'song-1', 'singer-1'))).kind).toBe('corrupt');
+  });
 });
