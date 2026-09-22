@@ -6,6 +6,7 @@ import {
   isResolved,
   isShelved,
   outstandingIn,
+  parseConflictResolution,
   parseShelfEntry,
   shelfKey,
 } from './collaboration.js';
@@ -141,5 +142,32 @@ describe('which conflicts are still outstanding', () => {
   it('is decided by the shelf as a whole, so a note settles only the row it names', () => {
     const entries = [read(shelved()), read(shelved({ sequence: 2 })), read(resolved({ sequence: 3, resolves: 2 }))];
     expect(outstandingIn(entries).map((entry) => entry.sequence)).toEqual([1]);
+  });
+});
+
+describe('parseConflictResolution', () => {
+  it('accepts keep-mine with no resolvedBody', () => {
+    const result = parseConflictResolution({ strategy: 'keep-mine' });
+    expect(result).toEqual({ ok: true, value: { strategy: 'keep-mine' } });
+  });
+
+  it('accepts combine with a resolvedBody', () => {
+    const result = parseConflictResolution({ strategy: 'combine', resolvedBody: { title: 'Merged' } });
+    expect(result).toEqual({ ok: true, value: { strategy: 'combine', resolvedBody: { title: 'Merged' } } });
+  });
+
+  it('rejects combine with no resolvedBody', () => {
+    const result = parseConflictResolution({ strategy: 'combine' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects keep-theirs with a resolvedBody present', () => {
+    const result = parseConflictResolution({ strategy: 'keep-theirs', resolvedBody: {} });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects an unknown strategy', () => {
+    const result = parseConflictResolution({ strategy: 'guess' });
+    expect(result.ok).toBe(false);
   });
 });

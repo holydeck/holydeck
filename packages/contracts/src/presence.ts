@@ -10,7 +10,7 @@
 // apart by; `expiresAt` is when the entry stops counting and is the only one a reader compares against,
 // so a reader never has to know how long a lease is to know whether one is still good.
 
-import { FIELD_CODES, type FieldReader, type ParseFn, parseObject } from './problems.js';
+import { FIELD_CODES, type FieldReader, type Parsed, type ParseFn, parseObject } from './problems.js';
 
 /** Every field a presence entry carries, in the order a record reads. */
 export const PRESENCE_FIELDS = ['contentId', 'actor', 'enteredAt', 'heartbeatAt', 'expiresAt'] as const;
@@ -60,3 +60,12 @@ export const parsePresenceEntry: ParseFn<PresenceEntry> = (value, path) =>
     heartbeatAt: reader.time('heartbeatAt'),
     expiresAt: reader.time('expiresAt'),
   }));
+
+/** What an editor names when entering: enough to find their one lease without claiming any write. */
+export interface PresenceEnterInput {
+  readonly contentId: string;
+}
+
+/** Reads an enter request through the same key rule the store relies on when it refreshes an entry. */
+export const parsePresenceEnter: ParseFn<PresenceEnterInput> & ((value: unknown) => Parsed<PresenceEnterInput>) = (value, path: string = 'params') =>
+  parseObject(value, path, (reader) => ({ contentId: keyPart(reader, 'contentId') }));

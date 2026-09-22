@@ -8,7 +8,7 @@
 // not compute it the same way. What travels is the address format and the bytes it is taken over.
 
 import { canonicalJson } from './canonical.js';
-import { FIELD_CODES, isRecord, type Parsed, parseObject } from './problems.js';
+import { FIELD_CODES, isRecord, type Parsed, type Problem, parseObject } from './problems.js';
 
 /** How a revision came to exist (specification §8.3). A restore is a checkpoint: it is what a person did. */
 export const REVISION_ORIGINS = ['autosave', 'manual-checkpoint'] as const;
@@ -115,4 +115,46 @@ export function historyProblems(revisions: readonly RevisionRecord[]): string[] 
     previous = revision;
   }
   return problems;
+}
+
+/** The two places in history a comparison reads, always ordinals a stored revision can actually have. */
+export interface RevisionCompareQuery {
+  readonly from: number;
+  readonly to: number;
+}
+
+/** Reads an ordinal from the query text without admitting a partial number as a history position. */
+function wholeNumberQueryField(
+  query: Readonly<Record<string, string | undefined>>,
+  name: string,
+  path: string,
+  problems: Problem[],
+): number | undefined {
+  const raw = query[name];
+  const trimmed = raw?.trim() ?? '';
+  if (trimmed === '') {
+    problems.push({ path: `${path}.${name}`, code: FIELD_CODES.required, message: 'is required' });
+    return undefined;
+  }
+  if (!/^[1-9][0-9]*$/u.test(trimmed)) {
+    problems.push({
+      path: `${path}.${name}`,
+      code: FIELD_CODES.notAWholeNumber,
+      message: 'must be a whole number of at least 1',
+    });
+    return undefined;
+  }
+  return Number(trimmed);
+}
+
+/** Reads a comparison as two existing-style ordinals, so a route never has to interpret query text itself. */
+export function parseRevisionCompareQuery(
+  query: Readonly<Record<string, string | undefined>>,
+  path = 'query',
+): Parsed<RevisionCompareQuery> {
+  const problems: Problem[] = [];
+  const from = wholeNumberQueryField(query, 'from', path, problems);
+  const to = wholeNumberQueryField(query, 'to', path, problems);
+  if (problems.length > 0 || from === undefined || to === undefined) return { ok: false, problems };
+  return { ok: true, value: { from, to } };
 }
