@@ -8,10 +8,12 @@
 
 import { backupProducerOn } from './backup-producer.js';
 import { mediaIngestOn } from './media-ingest.js';
+import { restoreApplyOn } from './restore-apply-handler.js';
 import { restoreRehearsalOn } from './restore-rehearsal.js';
 
 import type { BackupProducerOptions } from './backup-producer.js';
 import type { MediaIngestOptions } from './media-ingest.js';
+import type { RestoreApplyHandlerOptions } from './restore-apply-handler.js';
 import type { RestoreRehearsalOptions } from './restore-rehearsal.js';
 import type { Handler } from './runner.js';
 
@@ -33,23 +35,32 @@ const unconfiguredRestoreRun: Handler = async () => {
   throw new Error('restore rehearsal has not been configured');
 };
 
+const unconfiguredRestoreApply: Handler = async () => {
+  throw new Error('restore-apply has not been configured');
+};
+
 /** The kinds this build registers before the entry point supplies their deployment dependencies. */
 export const HANDLERS: Handlers = Object.freeze({
   'media-ingest': unconfiguredMediaIngest,
   'backup-run': unconfiguredBackupRun,
   'restore-run': unconfiguredRestoreRun,
+  'restore-apply': unconfiguredRestoreApply,
 });
 
-export function handlersOn(
-  mediaIngest: MediaIngestOptions,
-  backupProducer: BackupProducerOptions,
-  restoreRehearsal: RestoreRehearsalOptions,
-): Handlers {
+export interface HandlersOptions {
+  readonly mediaIngest: MediaIngestOptions;
+  readonly backupProducer: BackupProducerOptions;
+  readonly restoreRehearsal: RestoreRehearsalOptions;
+  readonly restoreApply: RestoreApplyHandlerOptions;
+}
+
+export function handlersOn(options: HandlersOptions): Handlers {
   return Object.freeze({
     ...HANDLERS,
-    'media-ingest': mediaIngestOn(mediaIngest),
-    'backup-run': backupProducerOn(backupProducer),
-    'restore-run': restoreRehearsalOn(restoreRehearsal),
+    'media-ingest': mediaIngestOn(options.mediaIngest),
+    'backup-run': backupProducerOn(options.backupProducer),
+    'restore-run': restoreRehearsalOn(options.restoreRehearsal),
+    'restore-apply': restoreApplyOn(options.restoreApply),
   });
 }
 

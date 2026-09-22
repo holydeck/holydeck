@@ -9,6 +9,7 @@ import { capabilityDb, capabilitiesOn } from '@holydeck/app/capabilities';
 import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
 import { SCHEMA_VERSION } from '@holydeck/app/migrations';
 import { queueDb, queueOn, schedulerContext, workerContext } from '@holydeck/app/queue';
+import { maintenanceDb, maintenanceOn } from '@holydeck/app/maintenance';
 import { repositoriesOn, repositoryDb } from '@holydeck/app/repositories';
 import { rehearsalDatabaseName, restoreContext, restoreDb } from '@holydeck/app/restores';
 import { sessionDb, sessionsOn } from '@holydeck/app/sessions';
@@ -144,15 +145,18 @@ if (work.runs === 'nothing') {
   // is not a price a rehearsal ever gets to charge.
   const rehearsal = store.db(rehearsalDatabaseName(store.db().databaseName));
   const schedulerState = schedulerStateOn(schedulerStateDb(store.db()));
-  const handlers = handlersOn(
-    {
+  // The same lease `apps/app`'s `guardMaintenance` reads: both processes read and write the one
+  // `maintenance` collection in the production database, so a job held here is a hold the app sees too.
+  const maintenance = maintenanceOn(maintenanceDb(store.db()));
+  const handlers = handlersOn({
+    mediaIngest: {
       context: mediaContext('system', name),
       media: mediaLibraryOn(repositoryDb(store.db()), { now, queue, mediaRoot: settings.values.mediaRoot, ...mediaStorage }),
       storage: mediaStorage,
       mediaRoot: settings.values.mediaRoot,
       poster: ffmpegPosterGenerator(),
     },
-    {
+    backupProducer: {
       context: backupContext('system', name),
       schedulerState,
       archive: backupDb(store, store.db()),
@@ -164,7 +168,7 @@ if (work.runs === 'nothing') {
       now,
       report: (line) => void process.stdout.write(`${line}\n`),
     },
-    {
+    restoreRehearsal: {
       context: restoreContext('system', name),
       db: repositoryDb(store.db()),
       target: restoreDb(rehearsal),
@@ -175,7 +179,20 @@ if (work.runs === 'nothing') {
       now,
       schedulerState,
     },
-  );
+    restoreApply: {
+      context: restoreContext('system', name),
+      db: repositoryDb(store.db()),
+      target: restoreDb(store.db()),
+      sessions: sessionsOn(sessionDb(store.db()), { now }),
+      capabilities: capabilitiesOn(capabilityDb(store.db()), { now }),
+      maintenance,
+      restic,
+      settingsPath: path,
+      mediaRoot: settings.values.mediaRoot,
+      now,
+      report: (line) => void process.stdout.write(`${line}\n`),
+    },
+  });
   const runner = runnerOn({
     queue,
     context: workerContext(name),
