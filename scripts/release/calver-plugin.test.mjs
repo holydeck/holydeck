@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { latestCalverTag, listVersionTags } from './calver-plugin.mjs';
+import { incrementedVersion, latestCalverTag, listVersionTags } from './calver-plugin.mjs';
+
+const at = (iso) => new Date(iso);
 
 test('latestCalverTag picks the numerically newest stable tag', () => {
   assert.equal(
@@ -34,4 +36,24 @@ test('listVersionTags strips prefixes and blank lines', () => {
       { encoding: 'utf8' },
     ],
   ]);
+});
+
+test('a stable release after only prerelease tags of that base drops the suffix, not the patch bumped again', () => {
+  const tags = ['2026.9.0', '2026.10.0-next.1', '2026.10.0-next.2'];
+  assert.equal(incrementedVersion(tags, false, at('2026-10-21T10:00:00Z')), '2026.10.0');
+});
+
+test('a stable release after a stable tag of the same month increments the patch as usual', () => {
+  const tags = ['2026.10.0'];
+  assert.equal(incrementedVersion(tags, false, at('2026-10-21T10:00:00Z')), '2026.10.1');
+});
+
+test('a prerelease increments the existing prerelease number on the same base', () => {
+  const tags = ['2026.10.0-next.1', '2026.10.0-next.2'];
+  assert.equal(incrementedVersion(tags, true, at('2026-10-21T10:00:00Z')), '2026.10.0-next.3');
+});
+
+test('a prerelease with no earlier prerelease on this base starts at .1', () => {
+  const tags = ['2026.9.0'];
+  assert.equal(incrementedVersion(tags, true, at('2026-10-21T10:00:00Z')), '2026.10.0-next.1');
 });

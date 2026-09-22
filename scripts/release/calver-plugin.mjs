@@ -33,25 +33,32 @@ export function listVersionTags(exec = execFileSync) {
     .map((tag) => tag.replace(/^v/, ''));
 }
 
+// The one place both getIncrementedVersion* hooks used to diverge, and the one place a stable release's
+// base version comes from: the latest *stable* tag, never release-it's own `latestVersion` — which, right
+// after a `-next.N` prerelease, names that prerelease tag, and nextCalver has no way to tell that base
+// apart from an already-released one, bumping the patch a second time for a version that was never
+// actually released. Exported standalone so this rule is tested directly, without a release-it Plugin to
+// instantiate around it.
+export function incrementedVersion(tags, isPreReleaseNext, now = new Date()) {
+  const latestStable = latestCalverTag(tags, { prerelease: false });
+  if (isPreReleaseNext) {
+    const latestPrerelease = latestCalverTag(tags, { prerelease: true });
+    return nextPrerelease(latestStable, latestPrerelease, now);
+  }
+  return nextCalver(latestStable, now);
+}
+
 class CalverPlugin extends Plugin {
-  getIncrementedVersion({ latestVersion }) {
-    if (this.config.options.version.isPreRelease === true && this.config.options.version.preReleaseId === 'next') {
-      const tags = listVersionTags();
-      const latestStable = latestCalverTag(tags, { prerelease: false });
-      const latestPrerelease = latestCalverTag(tags, { prerelease: true });
-      return nextPrerelease(latestStable, latestPrerelease);
-    }
-    return nextCalver(latestVersion);
+  isPreReleaseNext() {
+    return this.config.options.version.isPreRelease === true && this.config.options.version.preReleaseId === 'next';
   }
 
-  getIncrementedVersionCI({ latestVersion }) {
-    if (this.config.options.version.isPreRelease === true && this.config.options.version.preReleaseId === 'next') {
-      const tags = listVersionTags();
-      const latestStable = latestCalverTag(tags, { prerelease: false });
-      const latestPrerelease = latestCalverTag(tags, { prerelease: true });
-      return nextPrerelease(latestStable, latestPrerelease);
-    }
-    return nextCalver(latestVersion);
+  getIncrementedVersion() {
+    return incrementedVersion(listVersionTags(), this.isPreReleaseNext());
+  }
+
+  getIncrementedVersionCI() {
+    return incrementedVersion(listVersionTags(), this.isPreReleaseNext());
   }
 }
 
