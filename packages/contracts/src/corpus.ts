@@ -237,6 +237,9 @@ export const CORPUS_ROUTES: readonly CorpusRoute[] = [
   { route: 'GET /api/v1/translations/:abbr/canon', preserved: true, since: '2026-09-13' },
   { route: 'GET /api/v1/translations/:abbr/verses', preserved: true, since: '2026-09-13' },
   { route: 'GET /api/v1/translations/:abbr/search', preserved: true, since: '2026-09-16' },
+  // Reached only through the CLI proxy (REL-09), never through corpusClient — this application still
+  // calls it, under the caller's own bearer token rather than this deployment's, so it is named here too.
+  { route: 'POST /api/v1/render', preserved: true, since: '2026-09-22' },
 ];
 
 export const CORPUS_UNEXPECTED = 'corpus.unexpected_error';

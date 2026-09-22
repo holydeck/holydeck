@@ -7,6 +7,7 @@ import { serveAccountRoutes } from './accounts-routes.js';
 import { enforceAuthorization } from './authorization.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
+import { serveCorpusProxyRoutes } from './corpus-proxy-routes.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
@@ -236,6 +237,10 @@ export function buildApp({
   serveOrderRoutes(app, { services, slideLabels });
   serveServiceRoutes(app, { services });
   serveServiceTemplateRoutes(app, { serviceTemplates });
+
+  // The CLI's own way into the library (REL-09): unauthenticated by this application, so it is registered
+  // public and last among the routes this server names for itself, next to the other corpus-backed ones.
+  serveCorpusProxyRoutes(app, { corpusUrl: settings.values.corpusUrl });
 
   if (web !== undefined) serveWebClient(app, web);
 

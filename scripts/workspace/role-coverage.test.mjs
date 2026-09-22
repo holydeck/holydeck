@@ -156,7 +156,7 @@ test('in-process route tests cannot be claimed as harness integration evidence',
 
 test('the repository itself accounts for every permission registration it ships', () => {
   const repo = readRoles();
-  assert.equal(Object.keys(repo.routeSources).length, 15);
+  assert.equal(Object.keys(repo.routeSources).length, 16);
   assert.equal(permissionRoutesIn(repo.routeSources).routes.length, 41);
   assert.deepEqual(verifyRoleCoverage(repo), []);
   assert.equal(verifyRoleCoverage(repo, { tested: {}, gaps: {} }).length, 41);

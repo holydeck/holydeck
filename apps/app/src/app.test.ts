@@ -37,6 +37,7 @@ import { SETTINGS_PATH } from './settings-routes.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
+import { CORPUS_RENDER_PROXY_PATH } from './corpus-proxy-routes.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
 import { DEFAULT_SETTINGS, type LoadedSettings } from './settings.js';
 
@@ -66,6 +67,13 @@ const settings: LoadedSettings = {
 const withCorpus: LoadedSettings = {
   ...settings,
   values: { ...settings.values, corpusUrl: 'http://corpus:8080', corpusToken: 'a'.repeat(24) },
+};
+
+// A loopback address nothing listens on: the connection is refused at once, never left pending, so a test
+// proving the proxy is registered never depends on this process reaching an actual corpus.
+const withUnreachableCorpus: LoadedSettings = {
+  ...settings,
+  values: { ...settings.values, corpusUrl: 'http://127.0.0.1:1', corpusToken: 'a'.repeat(24) },
 };
 
 // A deployment without a library must never reach one, so the default fetch in these tests refuses.
@@ -160,8 +168,8 @@ describe('every route that changes something', () => {
 
   // An exception the guard declares is only sound if it names a route this application registers: a path
   // in `UNGUARDED` that nothing serves is dead text, and one that serves something else is a hole.
-  it('is behind it except the two declared, which are registered and answered without a session', async () => {
-    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`, `POST ${SESSION_PATH}`]);
+  it('is behind it except the three declared, which are registered and answered without a session', async () => {
+    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`, `POST ${SESSION_PATH}`, `POST ${CORPUS_RENDER_PROXY_PATH}`]);
     const app = buildApp({ settings, logger: false, fetching: refusing });
     // Neither is 401 for want of a session: the guard is on neither. The claim is not-found because this
     // deployment was handed no accounts to claim, and signing in is refused in the words every refused
@@ -172,6 +180,14 @@ describe('every route that changes something', () => {
     expect(signIn.statusCode).toBe(401);
     expect(signIn.json().error.code).toBe(SIGN_IN_REFUSED);
     await app.close();
+
+    // The third is proven the same way: not 401 for want of a session, this time because the guard's
+    // exemption let the request reach the proxy at all, which is what turns an unreachable corpus into a
+    // 502 of this proxy's own making rather than the 401 a session-gated route would have answered first.
+    const proxied = buildApp({ settings: withUnreachableCorpus, logger: false, fetching: refusing });
+    const render = await proxied.inject({ method: 'POST', url: CORPUS_RENDER_PROXY_PATH, headers: current });
+    expect(render.statusCode).toBe(502);
+    await proxied.close();
   });
 
   it('refuses a request that carries no session, whichever route it is', async () => {

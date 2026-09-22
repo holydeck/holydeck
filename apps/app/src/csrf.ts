@@ -23,6 +23,7 @@ import {
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 import { correlationFor } from './context.js';
+import { CORPUS_RENDER_PROXY_PATH } from './corpus-proxy-routes.js';
 import { unexpectedFailure } from './failures.js';
 import { SessionError } from './sessions.js';
 import { sessionContext } from './sessions.js';
@@ -43,14 +44,21 @@ const SIGN_IN_MESSAGE = 'Sign in again to continue.';
 const REFUSED_MESSAGE = 'The request could not be accepted.';
 
 /**
- * The mutating routes that may be reached without a session, written as `METHOD /path`. Both are changes
- * that cannot carry a session, for the same reason read twice: claiming a fresh instance is the request
- * that creates the first account there could ever be a session for, and signing in is the request that
- * opens one. The claim closes for good once it has been used and answers not-found from then on; signing
- * in stays open because it has to, which is why it is the one route with a gate that counts what it is
- * sent. Anything else added here is a hole.
+ * The mutating routes that may be reached without a session, written as `METHOD /path`. The first two are
+ * changes that cannot carry a session, for the same reason read twice: claiming a fresh instance is the
+ * request that creates the first account there could ever be a session for, and signing in is the request
+ * that opens one. The claim closes for good once it has been used and answers not-found from then on;
+ * signing in stays open because it has to, which is why it is the one route with a gate that counts what
+ * it is sent. The third is different in kind, not merely another exception of the same shape: it carries
+ * no session to prove because it is not this application's own change at all, only a render request
+ * forwarded to the corpus under the caller's own bearer token — this application never reads its body or
+ * writes anything because of it. Anything else added here is a hole.
  */
-export const UNGUARDED: readonly string[] = Object.freeze([`POST ${ONBOARDING_PATH}`, `POST ${SESSION_PATH}`]);
+export const UNGUARDED: readonly string[] = Object.freeze([
+  `POST ${ONBOARDING_PATH}`,
+  `POST ${SESSION_PATH}`,
+  `POST ${CORPUS_RENDER_PROXY_PATH}`,
+]);
 
 /** What the guard proved, for the route that asked for it. A route reads this; nothing else may set it. */
 export interface Guarded {
