@@ -44,9 +44,15 @@ test.describe('the shell a device opens', () => {
     });
     // Nothing sideways to scroll: a presenter on a phone should never have to pan to read a line.
     expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewport);
-    // And the reading column is capped rather than stretched, on whichever screen is wide enough.
-    const cap = 40 * layout.fontSize;
-    expect(layout.mainWidth).toBeLessThanOrEqual(Math.min(layout.viewport, cap) + 1);
+    // Below the desktop breakpoint the reading column is capped rather than stretched; at and above
+    // 1200px, ui-contract.md's three-panel workspace (264/480min/336, 32px gutter, 16px gaps) needs the
+    // full width, so the cap lifts there instead.
+    if (layout.viewport < 1200) {
+      const cap = 40 * layout.fontSize;
+      expect(layout.mainWidth).toBeLessThanOrEqual(Math.min(layout.viewport, cap) + 1);
+    } else {
+      expect(layout.mainWidth).toBeLessThanOrEqual(layout.viewport + 1);
+    }
   });
 
   test('takes the kind of input the screen it is on has', async ({ page }, testInfo) => {

@@ -8,7 +8,7 @@ body {
   grid-template-rows: minmax(0, 1fr) auto;
   overflow-wrap: anywhere;
 }
-main { min-width: 0; padding: 32px; overflow-y: auto; }
+main { min-width: 0; max-width: 40rem; padding: 32px; overflow-y: auto; }
 button { font: inherit; max-width: 100%; }
 a { color: currentColor; }
 :focus { outline: 2px solid currentColor; outline-offset: 2px; }
@@ -47,7 +47,7 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 
 @media (min-width: 1200px) {
   body { height: auto; display: block; }
-  main { overflow: visible; }
+  main { overflow: visible; max-width: none; }
   .workspace { grid-template-columns: 264px minmax(480px, 1fr) 336px; align-items: start; }
   .workspace > :is(#order, #editor-preview, #properties) { display: block; }
   .workspace > #library,
