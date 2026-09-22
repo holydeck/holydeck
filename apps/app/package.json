@@ -68,6 +68,10 @@
     "./audit": {
       "types": "./dist/audit.d.ts",
       "import": "./dist/audit.js"
+    },
+    "./maintenance": {
+      "types": "./dist/maintenance.d.ts",
+      "import": "./dist/maintenance.js"
     }
   },
   "scripts": {
