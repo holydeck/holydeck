@@ -182,10 +182,16 @@ describe('every route that changes something', () => {
     await app.close();
 
     // The third is proven the same way: not 401 for want of a session, this time because the guard's
-    // exemption let the request reach the proxy at all, which is what turns an unreachable corpus into a
-    // 502 of this proxy's own making rather than the 401 a session-gated route would have answered first.
+    // exemption let a request carrying its own bearer token reach the proxy at all, which is what turns an
+    // unreachable corpus into a 502 of this proxy's own making rather than the 401 a session-gated route
+    // would have answered first. Without that bearer token the proxy itself refuses it with 401 before
+    // reaching the corpus at all — corpus-proxy-routes.test.ts covers that case directly.
     const proxied = buildApp({ settings: withUnreachableCorpus, logger: false, fetching: refusing });
-    const render = await proxied.inject({ method: 'POST', url: CORPUS_RENDER_PROXY_PATH, headers: current });
+    const render = await proxied.inject({
+      method: 'POST',
+      url: CORPUS_RENDER_PROXY_PATH,
+      headers: { ...current, authorization: 'Bearer client-token' },
+    });
     expect(render.statusCode).toBe(502);
     await proxied.close();
   });

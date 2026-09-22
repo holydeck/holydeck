@@ -38,27 +38,43 @@ export interface CorpusProxyOptions {
   readonly timeoutMs?: number;
 }
 
-// Meaningful only to the hop that set it, or already stale by the time this file can act on it —
-// `content-encoding` included, because `fetch` has already transparently decoded the body by the time a
-// handler here ever sees it, which makes the corpus's own header wrong to repeat to this proxy's caller.
-const HOP_BY_HOP = new Set([
-  'connection',
-  'content-encoding',
-  'content-length',
-  'host',
-  'keep-alive',
-  'transfer-encoding',
-  'upgrade',
+// An allowlist, not a drop-list: this application's own session cookie, CSRF headers and forwarded-for
+// chain must never reach the corpus, and a drop-list is only ever as safe as the last header anyone
+// remembered to add to it. Anything not named here is dropped, including every header added after this
+// was written.
+const FORWARDABLE_REQUEST_HEADERS = new Set([
+  'authorization',
+  'accept',
+  'accept-language',
+  'content-type',
+  'if-none-match',
+  'if-modified-since',
+  'user-agent',
 ]);
 
 function forwardableHeaders(source: FastifyRequest['headers']): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(source)) {
-    if (value === undefined || HOP_BY_HOP.has(name)) continue;
+    if (value === undefined || !FORWARDABLE_REQUEST_HEADERS.has(name)) continue;
     headers[name] = Array.isArray(value) ? value.join(', ') : value;
   }
   return headers;
 }
+
+// Also an allowlist: the corpus's own `set-cookie`, CSP, HSTS, CORS or `location` headers must never land
+// on this application's origin, where a browser would read them as this deployment's own and a `set-cookie`
+// could overwrite or shadow the `__Host-` session cookie. `x-ratelimit-*` is a family, not a fixed name.
+const FORWARDABLE_RESPONSE_HEADERS = new Set([
+  'content-type',
+  'cache-control',
+  'etag',
+  'last-modified',
+  'vary',
+  'retry-after',
+]);
+
+const isForwardableResponseHeader = (name: string): boolean =>
+  FORWARDABLE_RESPONSE_HEADERS.has(name) || name.startsWith('x-ratelimit-');
 
 // Fastify leaves a matched route's `request.url` exactly as the client sent it, params and query string
 // included, so the corpus is asked with the same path and query it would answer for a direct call.
@@ -66,6 +82,16 @@ const upstreamPathFor = (request: FastifyRequest): string => request.url.slice(P
 
 const isAbort = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+
+const BEARER_AUTHORIZATION = /^Bearer\s+\S+/iu;
+
+// Render is the one mutating route this file registers, and `csrf.ts` leaves it out of the session guard
+// entirely — so this check is render's only defense, not a second layer on top of one. A cross-site page
+// can make a browser send this application's session cookie, but it cannot make the browser send an
+// `authorization` header, so requiring one here is what stands in for the CSRF guard this route cannot
+// carry. Checked, and refused, before any upstream call.
+const hasBearerAuthorization = (request: FastifyRequest): boolean =>
+  BEARER_AUTHORIZATION.test(String(request.headers.authorization ?? ''));
 
 async function proxy(
   request: FastifyRequest,
@@ -88,7 +114,7 @@ async function proxy(
     });
     reply.code(response.status);
     response.headers.forEach((value, name) => {
-      if (!HOP_BY_HOP.has(name)) reply.header(name, value);
+      if (isForwardableResponseHeader(name)) reply.header(name, value);
     });
     if (response.body === null) return reply.send();
     return reply.send(Readable.fromWeb(response.body as unknown as NodeReadableStream));
@@ -116,10 +142,12 @@ export function serveCorpusProxyRoutes(
   const address = corpusUrl.replace(/\/+$/u, '');
   const handle = (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> =>
     proxy(request, reply, fetching, address, timeoutMs);
+  const handleRender = async (request: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> =>
+    hasBearerAuthorization(request) ? handle(request, reply) : reply.code(401).send();
 
   app.get(`${PROXY_PREFIX}/health`, { config: { need: PUBLIC } }, handle);
   app.get(`${PROXY_PREFIX}/api/v1/translations`, { config: { need: PUBLIC } }, handle);
   app.get(`${PROXY_PREFIX}/api/v1/translations/:abbr/canon`, { config: { need: PUBLIC } }, handle);
   app.get(`${PROXY_PREFIX}/api/v1/translations/:abbr/verses`, { config: { need: PUBLIC } }, handle);
-  app.post(CORPUS_RENDER_PROXY_PATH, { config: { need: PUBLIC } }, handle);
+  app.post(CORPUS_RENDER_PROXY_PATH, { config: { need: PUBLIC } }, handleRender);
 }

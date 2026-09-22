@@ -52,7 +52,11 @@ const REFUSED_MESSAGE = 'The request could not be accepted.';
  * it is sent. The third is different in kind, not merely another exception of the same shape: it carries
  * no session to prove because it is not this application's own change at all, only a render request
  * forwarded to the corpus under the caller's own bearer token — this application never reads its body or
- * writes anything because of it. Anything else added here is a hole.
+ * writes anything because of it. Leaving it out of this guard does not leave it unguarded:
+ * `corpus-proxy-routes.ts` refuses it with 401, before any upstream call, unless the request carries its
+ * own `Authorization: Bearer ...` header — a header no cross-site page can make a browser attach the way
+ * it attaches a cookie, which is what stands in for the origin and CSRF-token checks this route cannot
+ * carry. Anything else added here is a hole.
  */
 export const UNGUARDED: readonly string[] = Object.freeze([
   `POST ${ONBOARDING_PATH}`,

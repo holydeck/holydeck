@@ -57,6 +57,43 @@ describe('the corpus proxy', () => {
     await app.close();
   });
 
+  it('never forwards the session cookie, CSRF header or forwarded-for chain to the corpus', async () => {
+    const { fetching, asked } = answering({});
+    const app = proxiedApp(fetching);
+    await app.inject({
+      method: 'GET',
+      url: '/corpus/health',
+      headers: {
+        authorization: 'Bearer client-token',
+        cookie: '__Host-session=secret',
+        'x-csrf-token': 'token',
+        'x-forwarded-for': '203.0.113.1',
+      },
+    });
+    const headers = asked[0]?.init.headers as Record<string, string>;
+    expect(headers['cookie']).toBeUndefined();
+    expect(headers['x-csrf-token']).toBeUndefined();
+    expect(headers['x-forwarded-for']).toBeUndefined();
+    expect(headers['authorization']).toBe('Bearer client-token');
+    await app.close();
+  });
+
+  it('never forwards a set-cookie or other header outside the response allowlist from the corpus', async () => {
+    const { fetching } = answering({ status: 'ok' }, {
+      headers: {
+        'set-cookie': '__Host-session=hijacked; Path=/',
+        'content-security-policy': "default-src 'none'",
+        'x-ratelimit-remaining': '10',
+      },
+    });
+    const app = proxiedApp(fetching);
+    const response = await app.inject({ method: 'GET', url: '/corpus/health' });
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(response.headers['content-security-policy']).toBeUndefined();
+    expect(response.headers['x-ratelimit-remaining']).toBe('10');
+    await app.close();
+  });
+
   it('forwards a translation abbreviation and query string through to the canon and verses routes', async () => {
     const { fetching, asked } = answering({});
     const app = proxiedApp(fetching);
@@ -79,6 +116,33 @@ describe('the corpus proxy', () => {
     expect(response.statusCode).toBe(201);
     expect(response.json()).toEqual({ slide: 'rendered' });
     expect(asked[0]?.init.body).toBe(JSON.stringify({ reference: 'JHN.3.16' }));
+    await app.close();
+  });
+
+  it('refuses a render request without a bearer authorization header, before any upstream call', async () => {
+    const { fetching, asked } = answering({});
+    const app = proxiedApp(fetching);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/corpus/api/v1/render',
+      payload: { reference: 'JHN.3.16' },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(asked).toHaveLength(0);
+    await app.close();
+  });
+
+  it('refuses a render request carrying a session cookie but no bearer authorization', async () => {
+    const { fetching, asked } = answering({});
+    const app = proxiedApp(fetching);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/corpus/api/v1/render',
+      payload: { reference: 'JHN.3.16' },
+      headers: { cookie: '__Host-session=secret' },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(asked).toHaveLength(0);
     await app.close();
   });
 
