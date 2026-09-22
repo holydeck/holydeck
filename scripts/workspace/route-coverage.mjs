@@ -20,6 +20,7 @@ export const ROUTES_DIR = 'apps/app/src';
 // exist, so a deleted or renamed test file is a census failure rather than a claim nobody rechecks.
 export const ROUTE_INTEGRATION_TESTS = {
   'session-routes.ts': 'tests/harness/integration/surfaces.test.ts',
+  'corpus-proxy-routes.ts': 'tests/harness/integration/cli-corpus-proxy.test.ts',
   'app.ts GET /health': 'tests/harness/integration/surfaces.test.ts',
   'app.ts GET /api/v1/translations': 'tests/harness/integration/surfaces.test.ts',
   'live.ts GET LIVE_PATH': 'tests/harness/integration/surfaces.test.ts',
@@ -35,7 +36,6 @@ export const KNOWN_INTEGRATION_GAPS = {
   'live.ts GET LIVE_CONNECTIONS_PATH': 'no harness test reads live connection counts over HTTP',
   'accounts-routes.ts': 'no harness test drives the admin account lifecycle over HTTP',
   'capability-routes.ts': 'no harness test issues or revokes a guest or output capability over HTTP',
-  'corpus-proxy-routes.ts': 'no harness test proxies a CLI request to a real corpus process over HTTP',
   'media-routes.ts': 'no harness test uploads a file over HTTP',
   'order-routes.ts': 'no harness test reads the running order over HTTP',
   'passkey-routes.ts':
