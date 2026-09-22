@@ -7,6 +7,8 @@ body {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   overflow-wrap: anywhere;
+  background: #0b0b0f;
+  color: #f5f5f7;
 }
 main { min-width: 0; max-width: 40rem; padding: 32px; overflow-y: auto; }
 button { font: inherit; max-width: 100%; }

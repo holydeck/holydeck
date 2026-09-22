@@ -28,6 +28,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'capability-routes.ts DELETE REVOKE_PATH PRESENTATION_CONTROL': 'no harness test refuses capability revocation without Control presentation',
   'live.ts GET LIVE_CONNECTIONS_PATH PRESENTATION_CONTROL': 'no harness test refuses live connection counts without Control presentation',
   'media-routes.ts POST MEDIA_PATH MEDIA_MANAGE': 'no harness test refuses media uploads to a non-admin',
+  'order-routes.ts GET ORDER_PATH PRESENTATION_CONTROL': 'no harness test refuses the running order without Control presentation',
   'reference-routes.ts GET LOOKUP_PATH PRESENTATION_CONTROL': 'no harness test refuses reference lookup without Control presentation',
   'reference-routes.ts POST SHOWN_REFERENCES_PATH PRESENTATION_CONTROL': 'no harness test refuses showing references without Control presentation',
   'reference-routes.ts GET SHOWN_REFERENCES_PATH PRESENTATION_CONTROL': 'no harness test refuses reference history without Control presentation',
