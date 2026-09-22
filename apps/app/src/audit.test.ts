@@ -146,7 +146,8 @@ describe('the context the trail is written under', () => {
       'service.item.duplicate',
       'service.item.reorder',
       'service.item.revise',
-      'presentation.run',
+      'run.start',
+      'run.end',
       'readiness.override',
       'backup.run',
       'restore.run',
@@ -189,7 +190,7 @@ describe('the actions reserved for a surface not yet built', () => {
     const db = fakeDb();
     const trail = trailOn(db, ['r1', 'r2', 'r3', 'r4']);
     const context = auditContext('system', CORRELATION);
-    const reserved = ['content.change', 'presentation.run', 'backup.run', 'restore.run'] as const;
+    const reserved = ['content.change', 'backup.run', 'restore.run'] as const;
     for (const action of reserved) {
       await expect(trail.record(context, { action, subject: 'reserved', outcome: 'allowed' })).resolves.toBeTruthy();
     }

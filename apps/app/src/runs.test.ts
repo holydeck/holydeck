@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { RECORDS } from './records.js';
 import { PRESENTATION_CONTROL, permissionsFor } from './roles.js';
-import { RUN_ACTION, RUN_MODES, RUN_PHASES, RunError, runContext, runsOn } from './runs.js';
+import { RUN_MODES, RUN_PHASES, RunError, runContext, runsOn } from './runs.js';
 import { preparationContext, preparationOn } from './snapshots.js';
 import { serviceContext, servicesOn } from './services.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -90,6 +90,7 @@ const prepared = async (
 };
 
 const rows = (db: FakeDb, collection: string): Document[] => db.rows.get(collection) ?? [];
+const auditActions = (db: FakeDb): unknown[] => rows(db, AUDIT).map((row) => row['action']);
 
 const refused = async (call: Promise<unknown>): Promise<RunError> => {
   try {
@@ -181,16 +182,97 @@ describe('starting a run', () => {
     }
   });
 
-  it('writes one audit entry naming the mode, under the reserved presentation.run action', async () => {
+  it('writes one audit entry naming the mode, under the run.start action', async () => {
     const { db, runs, serviceId } = await prepared();
 
     await runs.start(OPERATOR_SESSION, { serviceId, mode: 'rehearsal' });
 
-    const [entry] = rows(db, AUDIT).filter((row) => row['action'] === RUN_ACTION);
+    const [entry] = rows(db, AUDIT).filter((row) => row['action'] === 'run.start');
     expect(entry?.['actor']).toBe(OPERATOR);
     expect(entry?.['subject']).toBe(`service:${serviceId}`);
     expect(entry?.['outcome']).toBe('allowed');
     expect(String(entry?.['detail'])).toContain('rehearsal');
+  });
+});
+
+describe('authoritative live state', () => {
+  it('seeds a fresh run with an initial LiveState and stateRevision 0', async () => {
+    const { runs, serviceId } = await prepared();
+
+    const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+
+    expect(started.stateRevision).toBe(0);
+    expect(started.live.mode).toBe('live');
+  });
+
+  it('advances the state and increments the revision on a matching expected revision', async () => {
+    const { runs, serviceId } = await prepared();
+    const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+
+    const next = { ...started.live, selected: { itemId: 'item-2', slideIndex: 0 } };
+    const advanced = await runs.advance(READ_CONTEXT, started.runId, 0, next);
+
+    expect(advanced).not.toBe('stale');
+    if (advanced !== 'stale' && advanced !== undefined) expect(advanced.stateRevision).toBe(1);
+  });
+
+  it('reports stale on a revision that has already moved', async () => {
+    const { runs, serviceId } = await prepared();
+    const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+
+    await runs.advance(READ_CONTEXT, started.runId, 0, started.live);
+    const result = await runs.advance(READ_CONTEXT, started.runId, 0, started.live);
+
+    expect(result).toBe('stale');
+  });
+
+  it('audits run.start and run.end, not the retired presentation.run action', async () => {
+    const { runs, db, serviceId } = await prepared();
+
+    const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+    await runs.end(OPERATOR_SESSION, started.runId);
+
+    expect(auditActions(db)).toEqual(expect.arrayContaining(['run.start', 'run.end']));
+    expect(auditActions(db)).not.toContain('presentation.run');
+  });
+
+  it('answers nothing from advance for a run this code has never heard of', async () => {
+    const { runs } = await prepared();
+
+    expect(await runs.advance(READ_CONTEXT, 'run-missing', 0, {
+      runId: 'run-missing',
+      snapshotId: 'snap',
+      mode: 'live',
+      public: { itemId: 'item-1', slideIndex: 0 },
+      selected: { itemId: 'item-1', slideIndex: 0 },
+      themes: { audience: 'a', stage: 's', singer: 'g', operator: 'o' },
+      additionsRevision: 0,
+    })).toBeUndefined();
+  });
+
+  it('derives position and a default live state for a run row written before this field existed', async () => {
+    const db = fakeDb();
+    const runs = runsOn(db, { now: () => new Date(START).toISOString() });
+    db.rows.set(RUNS, [{
+      _id: 'run-legacy#1',
+      runId: 'run-legacy',
+      sequence: 1,
+      at: new Date(START).toISOString(),
+      actor: OPERATOR,
+      correlationId: CORRELATION,
+      serviceId: 's',
+      snapshotId: 'snap',
+      phase: 'active',
+      mode: 'live',
+      position: 3,
+    }]);
+
+    const resumed = await runs.resume(READ_CONTEXT, 'run-legacy');
+
+    expect(resumed?.position).toBe(3);
+    expect(resumed?.stateRevision).toBe(0);
+    expect(resumed?.live.mode).toBe('live');
+    expect(resumed?.live.public).toEqual({ itemId: '', slideIndex: 3 });
   });
 });
 

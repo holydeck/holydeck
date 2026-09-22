@@ -148,7 +148,11 @@ export const RECORDS = {
       snapshotId: 'required',
       phase: 'required',
       mode: 'required',
-      position: 'required',
+      // Superseded by `live`/`stateRevision` (spec Design §4): optional so a row written before this
+      // pair existed still reads back, and no longer written by a fresh append either.
+      position: 'optional',
+      live: 'optional',
+      stateRevision: 'optional',
     },
   },
   // Spec BACK-02: one row per restore rehearsal, holding the whole manifest a restore is what completes —
