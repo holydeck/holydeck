@@ -8,4 +8,5 @@ playwright-report/
 .DS_Store
 .env
 .env.*
+!.env.example
 .worktrees/

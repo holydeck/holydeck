@@ -39,8 +39,8 @@ services:
       timeout: 5s
       retries: 12
 
-  server:
-    image: ghcr.io/holydeck/server:latest
+  corpus:
+    image: ghcr.io/holydeck/corpus:${HOLYDECK_VERSION:-latest}
     restart: unless-stopped
     environment:
       HOLYDECK_MONGO_URL: mongodb://mongo:27017
@@ -54,15 +54,17 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    networks:
+      default:
+        aliases:
+          - server
     # Health is declared in apps/corpus/Dockerfile, the same image this pulls, so nothing here repeats it.
 
   # Runs once, before anything serves: T19 made the application refuse a database whose schema version is
   # not the one it was built for, and this is what moves it there. Re-running it is a no-op, so every
   # `up` goes through it and every `up` records that it did.
   migrate:
-    build:
-      context: .
-      dockerfile: apps/app/Dockerfile
+    image: ghcr.io/holydeck/app:${HOLYDECK_VERSION:-latest}
     command: ["node", "/srv/app/dist/migrate.js"]
     environment:
       HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
@@ -76,14 +78,12 @@ services:
   # The application and the worker are the same image with different commands, the same as
   # compose.dev.yaml. Reachable on every interface, because the devices it serves are not this host.
   app:
-    build:
-      context: .
-      dockerfile: apps/app/Dockerfile
+    image: ghcr.io/holydeck/app:${HOLYDECK_VERSION:-latest}
     restart: unless-stopped
     environment:
       HOLYDECK_PORT: "3100"
       # The application reads the corpus over this network and never publishes it onwards.
-      HOLYDECK_CORPUS_URL: http://server:3000
+      HOLYDECK_CORPUS_URL: http://corpus:3000
       HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:?set a long random value before starting}
       HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
     ports:
@@ -91,7 +91,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      server:
+      corpus:
         condition: service_healthy
     volumes:
       - holydeck-data:/data/holydeck
@@ -103,9 +103,7 @@ services:
       retries: 6
 
   worker:
-    build:
-      context: .
-      dockerfile: apps/app/Dockerfile
+    image: ghcr.io/holydeck/app:${HOLYDECK_VERSION:-latest}
     command: ["node", "/srv/worker/dist/main.js"]
     restart: unless-stopped
     environment:
