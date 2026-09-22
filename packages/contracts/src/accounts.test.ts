@@ -18,6 +18,7 @@ import {
   parseControlGrant,
   parseCreateAccount,
   parseInstanceClaim,
+  parseOnboardingOffer,
   parseRoleAssignment,
   parseSignIn,
   passwordProblem,
@@ -160,6 +161,17 @@ describe('claiming an instance', () => {
   it('is offered at one path, which a client asks for before it shows a form', () => {
     expect(ONBOARDING_PATH).toBe('/api/v1/onboarding');
     expect(onboardingOffer()).toEqual({ role: 'admin', name: ACCOUNT_NAME, password: PASSWORD });
+  });
+
+  it('reads the first-run rules the server offers before it shows the claim form', () => {
+    expect(parseOnboardingOffer(onboardingOffer())).toEqual({ ok: true, value: onboardingOffer() });
+  });
+
+  it('refuses an offer whose nested bounds leave out either limit', () => {
+    const parsed = parseOnboardingOffer({ ...onboardingOffer(), password: { minimum: PASSWORD.minimum } });
+    expect(!parsed.ok && parsed.problems.map((problem) => `${problem.path}=${problem.code}`)).toEqual([
+      `onboardingOffer.password.maximum=${FIELD_CODES.required}`,
+    ]);
   });
 
   it('takes a handle, a name to show, and a password, and settles the shape of each', () => {

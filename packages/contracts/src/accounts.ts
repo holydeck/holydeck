@@ -255,6 +255,18 @@ export interface OnboardingOffer {
   readonly password: Bounds;
 }
 
+const parseBounds = (value: unknown, path: string): Parsed<Bounds> =>
+  parseObject(value, path, (reader) => ({ minimum: reader.wholeNumber('minimum'), maximum: reader.wholeNumber('maximum') }));
+
+/** Reads the server's first-run rules before a client renders the claim form from them. */
+export function parseOnboardingOffer(value: unknown): Parsed<OnboardingOffer> {
+  return parseObject(value, 'onboardingOffer', (reader) => ({
+    role: reader.choice('role', ACCOUNT_ROLES),
+    name: reader.parsed('name', parseBounds, { minimum: 0, maximum: 0 }),
+    password: reader.parsed('password', parseBounds, { minimum: 0, maximum: 0 }),
+  }));
+}
+
 /** What a client is told before it shows the form, so the rules it enforces are the server's own. */
 export const onboardingOffer = (): OnboardingOffer =>
   Object.freeze({ role: 'admin' as const, name: ACCOUNT_NAME, password: PASSWORD });
