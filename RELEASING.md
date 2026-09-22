@@ -173,6 +173,13 @@ Automated releases need one-time configuration that only a human can do:
   deletion to repository admins, so only a maintainer can start a release
   train.
 - GHCR: after the first image push, set the `corpus` and `app` packages' visibility to public.
+- GitHub: add a ruleset for the `next` branch (required for `pnpm release:next`'s tag to have
+  somewhere protected to be pushed from) requiring the same status checks as `main`'s:
+  `verify`, `docker / images (corpus)`, `docker / images (app)` — the exact names `ci.yml`
+  produces, `docker` from that workflow's own job id and `images (<name>)` from
+  `docker-build.yml`'s pinned matrix job name. If either job is ever renamed again, or the
+  matrix's `name` values change, update the ruleset's required checks to match before merging
+  that change, or a stale required-check name blocks every future PR silently.
 
 ## Migrating from the unscoped CLI package
 

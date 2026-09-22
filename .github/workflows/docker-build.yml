@@ -23,6 +23,14 @@ on:
 # full set for a real push and signature.
 jobs:
   images:
+    # Pinned to the one matrix field that names this build's identity, not left to GitHub's
+    # default of listing every matrix field in the check name: `dockerfile`, `description` and
+    # `aliases` are implementation details that have changed before (this job itself was renamed
+    # from `build` to `images` and gained its matrix in the same change) and will again, and each
+    # of those changes would otherwise silently rewrite the required-status-check name a branch
+    # ruleset pins by exact string — see RELEASING.md's maintainer setup checklist for the
+    # resulting names this repository's rulesets require.
+    name: images (${{ matrix.name }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
