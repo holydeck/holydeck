@@ -18,6 +18,9 @@
   --font-size-3: 1.5rem;
   --font-size-4: 2rem;
   --radius: 6px;
+  --motion-feedback: 120ms;
+  --motion-panel: 180ms;
+  --motion-max: 240ms;
   --color-surface: #0b0b0f;
   --color-surface-raised: #1a1a22;
   --color-text: #f5f5f7;
@@ -49,15 +52,15 @@ body {
   background: var(--color-surface);
   color: var(--color-text);
 }
-#app { display: flex; flex-direction: column; height: 100dvh; }
-main { flex: 1; min-width: 0; min-height: 0; max-width: 40rem; padding: var(--space-6); overflow-y: auto; }
-button { font: inherit; max-width: 100%; }
+#app { display: flex; flex-direction: column; block-size: 100dvh; }
+main { flex: 1; min-inline-size: 0; min-block-size: 0; max-inline-size: 40rem; padding: var(--space-6); overflow-y: auto; }
+button { font: inherit; max-inline-size: 100%; }
 a { color: currentColor; }
 :focus { outline: 2px solid currentColor; outline-offset: 2px; }
 :focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 
 .workspace { display: grid; gap: 16px; }
-.workspace-panel { display: none; min-width: 0; }
+.workspace-panel { display: none; min-inline-size: 0; }
 #order,
 .workspace-panel:target,
 .workspace-panel:has(:target) { display: block; }
@@ -66,10 +69,10 @@ a { color: currentColor; }
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   position: sticky;
-  bottom: 0;
+  inset-block-end: 0;
   background: var(--color-surface);
   padding: 4px;
-  padding-bottom: max(4px, env(safe-area-inset-bottom));
+  padding-block-end: max(4px, env(safe-area-inset-bottom));
 }
 .workspace-tabs a { display: flex; align-items: center; justify-content: center; text-align: center; }
 body:not(:has(.workspace-panel:target, .workspace-panel :target)) .workspace-tabs a[href="#order"],
@@ -82,7 +85,7 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 
 #preview-row:not([hidden]),
 .live-actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-#preview-row > span { min-width: 0; }
+#preview-row > span { min-inline-size: 0; }
 .skip-links ul { display: flex; flex-wrap: wrap; gap: 16px; list-style: none; padding: 0; }
 
 @media (width < 1200px) {
@@ -92,9 +95,9 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 }
 
 @media (min-width: 1200px) {
-  #app { height: auto; }
+  #app { block-size: auto; }
   main { overflow: visible; }
-  main:has(.workspace) { max-width: none; }
+  main:has(.workspace) { max-inline-size: none; }
   .workspace { grid-template-columns: 264px minmax(480px, 1fr) 336px; align-items: start; }
   .workspace > :is(#order, #editor-preview, #properties) { display: block; }
   .workspace > #library,
@@ -104,8 +107,8 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 
 .visually-hidden {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  inline-size: 1px;
+  block-size: 1px;
   margin: -1px;
   padding: 0;
   overflow: hidden;
@@ -115,17 +118,17 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 }
 
 .table-scroll { overflow-x: auto; }
-.users-table { width: 100%; border-collapse: collapse; }
+.users-table { inline-size: 100%; border-collapse: collapse; }
 .users-table th,
-.users-table td { padding: var(--space-2); border-bottom: 1px solid var(--color-border); text-align: left; }
-.form-field { margin-bottom: var(--space-3); }
+.users-table td { padding: var(--space-2); border-block-end: 1px solid var(--color-border); text-align: start; }
+.form-field { margin-block-end: var(--space-3); }
 .form-error { color: var(--color-danger); }
 
 /* Off-screen until focused, so a sighted keyboard user sees the link land exactly where Tab put it. */
 .skip-link {
   position: absolute;
-  left: -9999px;
-  top: 0;
+  inset-inline-start: -9999px;
+  inset-block-start: 0;
 }
 .skip-link:focus {
   position: static;
@@ -134,8 +137,8 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 }
 
 /* WCAG-style touch target minimums: 44px generally, 56px for the live transport (spec 9.5, LIVE-07). */
-button, a { min-width: 44px; min-height: 44px; }
-#live-controls button { min-width: 96px; min-height: 56px; }
+button, a { min-inline-size: 44px; min-block-size: 44px; }
+#live-controls button { min-inline-size: 96px; min-block-size: 56px; }
 
 /* The navigation shell (SHELL-03). Wraps on a phone rather than hiding anything behind a menu button:
    three sections fit, and a menu would add a step to every navigation. */
@@ -146,10 +149,10 @@ button, a { min-width: 44px; min-height: 44px; }
   gap: var(--space-2) var(--space-4);
   padding: var(--space-2) var(--space-4);
   background: var(--color-surface-raised);
-  border-bottom: 1px solid var(--color-border);
+  border-block-end: 1px solid var(--color-border);
 }
 .app-name { margin: 0; font-weight: 700; font-size: var(--font-size-2); }
-.app-account { margin: 0 0 0 auto; display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--color-text-muted); }
+.app-account { margin: 0; margin-inline-start: auto; display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--color-text-muted); }
 .app-role {
   padding: 0 var(--space-2);
   border: 1px solid var(--color-border);
@@ -162,7 +165,7 @@ button, a { min-width: 44px; min-height: 44px; }
   margin: 0;
   padding: var(--space-2) var(--space-4);
   list-style: none;
-  border-bottom: 1px solid var(--color-border);
+  border-block-end: 1px solid var(--color-border);
 }
 .app-nav a { display: inline-flex; align-items: center; padding: 0 var(--space-3); border-radius: var(--radius); }
 .app-nav a[aria-current="page"] { background: var(--color-accent); color: var(--color-accent-text); }
@@ -192,10 +195,52 @@ button, a { min-width: 44px; min-height: 44px; }
   background: color-mix(in srgb, var(--color-surface) 75%, transparent);
 }
 [role="alertdialog"] {
-  width: 100%;
-  max-width: 32rem;
+  inline-size: 100%;
+  max-inline-size: 32rem;
   padding: var(--space-5);
   background: var(--color-surface-raised);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
+}
+
+/* A clipped label always travels with its disclosure control: ellipsis is a compact default, never the
+   only route to the full value. Expansion restores ordinary wrapping in the same place so revealing a
+   long name neither depends on hover nor moves focus to a separate surface. */
+.truncated-text { display: inline-grid; min-inline-size: 0; max-inline-size: 100%; }
+.truncated-text-content {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.truncated-text-content-expanded {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.truncated-text-toggle { display: inline-flex; margin-block-start: var(--space-1); }
+
+/* Narrow controls grow vertically instead of hiding translated or user-provided text. The minimum is
+   repeated inside the query because this is the contract that must survive any wider-screen restyle. */
+@media (max-width: 767px) {
+  button,
+  nav a {
+    min-block-size: 44px;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+}
+
+/* Reduced motion keeps every state change visible immediately while removing the movement that would
+   carry it there. Applying the override to generated content too prevents a later decorative loop or
+   panel transform from escaping the preference merely because it lives on a pseudo-element. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
 }

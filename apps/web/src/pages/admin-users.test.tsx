@@ -3,7 +3,7 @@
 // changing requests tied to the account contract rather than to an implementation detail of the table.
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/preact';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ACCOUNTS_PATH, type AccountRecord } from '@holydeck/contracts/accounts';
 import { errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
@@ -13,6 +13,7 @@ import type { FetchLike } from '../api.js';
 
 import { App } from '../app.js';
 import { resetAppState, session } from '../app-state.js';
+import { DRAFT_PREFIX } from '../drafts.js';
 import { setFetching } from '../request.js';
 import { currentPath } from '../router.js';
 import { AdminUsersPage } from './admin-users.js';
@@ -64,7 +65,12 @@ const renderPage = async (): Promise<void> => {
 describe('AdminUsersPage', () => {
   beforeEach(() => {
     resetAppState();
+    sessionStorage.clear();
     session.value = signedIn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('renders account facts and keeps self-refused controls off the signed-in row', async () => {
@@ -86,6 +92,7 @@ describe('AdminUsersPage', () => {
     });
     setFetching(fetching);
     await renderPage();
+    sessionStorage.setItem(`${DRAFT_PREFIX}another-form`, JSON.stringify({ name: 'Elsewhere' }));
 
     fireEvent.input(screen.getByLabelText('Handle'), { target: { value: 'maria' } });
     fireEvent.input(screen.getByLabelText('Display name'), { target: { value: 'Maria Example' } });
@@ -103,6 +110,26 @@ describe('AdminUsersPage', () => {
       name: 'maria', displayName: 'Maria Example', password: 'a secure password', role: 'editor',
     });
     expect(document.getElementById('announce-polite')?.textContent).toBe('Account Maria Example created.');
+    expect(sessionStorage.getItem(`${DRAFT_PREFIX}admin-users:create`)).toBeNull();
+    expect(sessionStorage.getItem(`${DRAFT_PREFIX}another-form`)).toBe('{"name":"Elsewhere"}');
+  });
+
+  it('restores the create form draft after the page remounts', async () => {
+    setFetching(async () => list());
+    currentPath.value = '/admin/users';
+    const first = render(<App />);
+    await screen.findByRole('table');
+    fireEvent.input(screen.getByLabelText('Handle'), { target: { value: 'maria' } });
+    fireEvent.input(screen.getByLabelText('Display name'), { target: { value: 'Maria Example' } });
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'member' } });
+    first.unmount();
+
+    await renderPage();
+
+    expect((screen.getByLabelText('Handle') as HTMLInputElement).value).toBe('maria');
+    expect((screen.getByLabelText('Display name') as HTMLInputElement).value).toBe('Maria Example');
+    expect((screen.getByLabelText('Password') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Role') as HTMLSelectElement).value).toBe('member');
   });
 
   it('puts a creation field refusal on its named input', async () => {
@@ -152,6 +179,22 @@ describe('AdminUsersPage', () => {
     expect(JSON.parse(fetching.mock.calls[1]?.[1].body ?? '{}')).toEqual({ disabled: true });
   });
 
+  it('encodes account ids in status and presentation requests', async () => {
+    const encode = vi.spyOn(globalThis, 'encodeURIComponent').mockReturnValue('escaped-account-id');
+    const fetching = vi.fn<FetchLike>(async (_path, init) => init.method === 'PATCH' ? reply(200, successEnvelope({}, 'request-update')) : list());
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disable Ruth Example' }));
+    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(3));
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Ruth Example to control presentation' }));
+    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(5));
+
+    expect(fetching.mock.calls[1]?.[0]).toBe(`${ACCOUNTS_PATH}/escaped-account-id/status`);
+    expect(fetching.mock.calls[3]?.[0]).toBe(`${ACCOUNTS_PATH}/escaped-account-id/control-presentation`);
+    expect(encode).toHaveBeenCalledWith(ruth.id);
+  });
+
   it('grants and revokes presentation control', async () => {
     const fetching = vi.fn<FetchLike>(async (_path, init) => init.method === 'PATCH' ? reply(200, successEnvelope({}, 'request-control')) : list());
     setFetching(fetching);
@@ -183,6 +226,14 @@ describe('AdminUsersPage', () => {
     render(<AdminUsersPage />);
 
     expect((await screen.findByRole('alert')).textContent).toBe('The accounts could not be loaded.');
+  });
+
+  it('keeps valid rows while reporting malformed rows as a failed load', async () => {
+    setFetching(async () => reply(200, successEnvelope([ruth, { id: 'invalid' }], 'request-list')));
+    render(<AdminUsersPage />);
+
+    expect(await screen.findByText('ruth')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toBe('The accounts could not be loaded.');
   });
 
   it('renders not found and makes no request without account administration permission', () => {

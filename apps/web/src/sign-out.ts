@@ -5,6 +5,7 @@
 import { SESSION_EXPIRED, SESSION_PATH } from '@holydeck/contracts/sessions';
 
 import { csrf, session } from './app-state.js';
+import { clearAllDrafts } from './drafts.js';
 import { t } from './i18n.js';
 import { request } from './request.js';
 import { navigate } from './router.js';
@@ -13,6 +14,7 @@ import { say } from './status.js';
 /** Ends the current session, or reports that the server could not establish that it did. */
 export async function signOut(): Promise<void> {
   const result = await request(SESSION_PATH, { method: 'DELETE', csrf: csrf() ?? '' });
+  clearAllDrafts();
   if (result.ok || result.code === SESSION_EXPIRED) {
     session.value = null;
     navigate('/sign-in', { replace: true });

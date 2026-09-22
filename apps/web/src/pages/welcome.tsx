@@ -12,6 +12,7 @@ import { FormField } from '../components/form-field.js';
 import { fieldErrors } from '../form-errors.js';
 import { t } from '../i18n.js';
 import { boot, request } from '../request.js';
+import { navigate } from '../router.js';
 
 import type { JSX } from 'preact';
 
@@ -102,7 +103,11 @@ export function WelcomePage(): JSX.Element {
       }
 
       const credentials: SignIn = { name: draft.name, password: draft.password };
-      await request(SESSION_PATH, { method: 'POST', csrf: '', body: credentials });
+      const signedIn = await request(SESSION_PATH, { method: 'POST', csrf: '', body: credentials });
+      if (!signedIn.ok) {
+        navigate('/sign-in?notice=claim-sign-in-refused', { replace: true });
+        return;
+      }
       await boot();
     } finally {
       setSubmitting(false);

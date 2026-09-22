@@ -17,6 +17,7 @@ import { useEffect, useState } from 'preact/hooks';
 
 import { can, csrf, session } from '../app-state.js';
 import { FormField } from '../components/form-field.js';
+import { useDraft } from '../drafts.js';
 import { fieldErrors } from '../form-errors.js';
 import { t } from '../i18n.js';
 import { NotFoundPage } from './not-found.js';
@@ -63,12 +64,17 @@ const focusFirst = (errors: Partial<Record<FieldName, string>>): void => {
   if (field !== undefined) document.getElementById(`users-${field}`)?.focus();
 };
 
-const parsedAccounts = (value: unknown): AccountRecord[] => Array.isArray(value)
-  ? value.flatMap((row) => {
+const parsedAccounts = (value: unknown): { readonly accounts: AccountRecord[]; readonly failed: boolean } => {
+  if (!Array.isArray(value)) return { accounts: [], failed: true };
+  let failed = false;
+  const accounts = value.flatMap((row) => {
     const parsed = parseAccountRecord(row);
-    return parsed.ok ? [parsed.value] : [];
-  }).sort((left, right) => left.name.localeCompare(right.name))
-  : [];
+    if (parsed.ok) return [parsed.value];
+    failed = true;
+    return [];
+  }).sort((left, right) => left.name.localeCompare(right.name));
+  return { accounts, failed };
+};
 
 /** The permitted account list, its administration actions, and the form that creates another account. */
 export function AdminUsersPage(): JSX.Element {
@@ -77,7 +83,7 @@ export function AdminUsersPage(): JSX.Element {
   const [accounts, setAccounts] = useState<readonly AccountRecord[]>([]);
   const [loading, setLoading] = useState(permitted);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [draft, setDraft, clearDraft] = useDraft('admin-users:create', emptyDraft());
   const [errors, setErrors] = useState<Partial<Record<FieldName, string>>>({});
   const [other, setOther] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
@@ -91,7 +97,9 @@ export function AdminUsersPage(): JSX.Element {
       setLoadFailed(true);
       setAccounts([]);
     } else {
-      setAccounts(parsedAccounts(result.data));
+      const parsed = parsedAccounts(result.data);
+      setAccounts(parsed.accounts);
+      setLoadFailed(parsed.failed);
     }
     setLoading(false);
   };
@@ -103,7 +111,7 @@ export function AdminUsersPage(): JSX.Element {
   if (!permitted) return <NotFoundPage />;
 
   const change = (field: FieldName) => (value: string): void => {
-    setDraft((current) => ({ ...current, [field]: value }));
+    setDraft({ ...draft, [field]: value });
     setErrors((current) => ({ ...current, [field]: undefined }));
     setOther(undefined);
   };
@@ -153,7 +161,7 @@ export function AdminUsersPage(): JSX.Element {
         return;
       }
       const displayName = draft.displayName;
-      setDraft(emptyDraft());
+      clearDraft();
       await load();
       say('polite', t('users.announce.created', { name: displayName }));
     } finally {
@@ -211,7 +219,7 @@ export function AdminUsersPage(): JSX.Element {
                         {own ? null : (
                           <button
                             type="button"
-                            onClick={() => void update(account, `${ACCOUNTS_PATH}/${account.id}/status`, { disabled: !account.disabled })}
+                            onClick={() => void update(account, `${ACCOUNTS_PATH}/${encodeURIComponent(account.id)}/status`, { disabled: !account.disabled })}
                           >
                             {t(account.disabled ? 'users.action.restore' : 'users.action.disable', { name: account.displayName })}
                           </button>
@@ -220,7 +228,7 @@ export function AdminUsersPage(): JSX.Element {
                           type="button"
                           onClick={() => void update(
                             account,
-                            `${ACCOUNTS_PATH}/${account.id}/control-presentation`,
+                            `${ACCOUNTS_PATH}/${encodeURIComponent(account.id)}/control-presentation`,
                             { granted: !account.controlPresentation },
                           )}
                         >
@@ -275,7 +283,7 @@ export function AdminUsersPage(): JSX.Element {
         />
         <div class="form-field">
           <label for="users-role">{t('users.column.role')}</label>
-          <select id="users-role" value={draft.role} onChange={(event) => setDraft((current) => ({ ...current, role: event.currentTarget.value as AccountRole }))}>
+          <select id="users-role" value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.currentTarget.value as AccountRole })}>
             {ACCOUNT_ROLES.map((role) => <option value={role}>{t(`app.role.${role}`)}</option>)}
           </select>
         </div>

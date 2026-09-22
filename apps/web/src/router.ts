@@ -8,7 +8,7 @@ import { computed, signal, type ReadonlySignal, type Signal } from '@preact/sign
 /** Every page the web application can render from a same-origin path. */
 export type Route =
   | { readonly name: 'root' }
-  | { readonly name: 'sign-in'; readonly next: string | undefined }
+  | { readonly name: 'sign-in'; readonly next: string | undefined; readonly notice: 'claim-sign-in-refused' | undefined }
   | { readonly name: 'welcome' }
   | { readonly name: 'services' }
   | { readonly name: 'service'; readonly id: string }
@@ -45,7 +45,14 @@ export function matchRoute(pathWithSearch: string): Route {
   const search = question === -1 ? '' : withoutFragment.slice(question + 1);
 
   if (pathname === '/') return { name: 'root' };
-  if (pathname === '/sign-in') return { name: 'sign-in', next: safeNext(new URLSearchParams(search).get('next')) };
+  if (pathname === '/sign-in') {
+    const parameters = new URLSearchParams(search);
+    return {
+      name: 'sign-in',
+      next: safeNext(parameters.get('next')),
+      notice: parameters.get('notice') === 'claim-sign-in-refused' ? 'claim-sign-in-refused' : undefined,
+    };
+  }
   if (pathname === '/welcome') return { name: 'welcome' };
   if (pathname === '/services' || pathname === '/services/') return { name: 'services' };
   if (pathname === '/admin/users') return { name: 'admin-users' };
