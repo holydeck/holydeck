@@ -68,6 +68,8 @@ export interface LibraryRecord {
 
 export interface LibraryFilter {
   readonly kind?: LibraryKind;
+  readonly q?: string;
+  readonly archived?: boolean;
 }
 
 export interface LibraryStore {
@@ -181,7 +183,12 @@ export function libraryOn(db: RepositoryDb, options: LibraryOptions): LibrarySto
           if (current === undefined || current.sequence < row.sequence) byId.set(contentId, row);
         }
         const standing = [...byId.values()].map((row) => ({ stamp: row.stamp, title: row.title }));
-        return filter?.kind === undefined ? standing : standing.filter((row) => row.stamp.kind === filter.kind);
+        return standing.filter((row) => {
+          if (filter?.kind !== undefined && row.stamp.kind !== filter.kind) return false;
+          if (filter?.archived !== true && row.stamp.archivedAt !== undefined) return false;
+          if (filter?.q !== undefined && !row.title.toLowerCase().includes(filter.q.toLowerCase())) return false;
+          return true;
+        });
       }),
   };
 }

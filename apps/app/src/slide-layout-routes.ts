@@ -25,7 +25,7 @@ import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
 import { settled } from './refusals.js';
-import { LAYOUTS_MANAGE } from './roles.js';
+import { CONTENT_EDIT, LAYOUTS_MANAGE } from './roles.js';
 import { SlideLayoutError, slideLayoutContext, subjectFor } from './slide-layouts.js';
 
 import type { AuditOutcome } from './audit.js';
@@ -53,9 +53,11 @@ const LAYOUT_REVISION_PATH = `${LAYOUT_REVISIONS_PATH}/:revision`;
 const LAYOUT_STATUS_PATH = `${LAYOUT_PATH}/status`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: LAYOUTS_MANAGE };
+const LIST_PERMISSION: RouteNeed = { kind: 'any-permission', needs: [CONTENT_EDIT, LAYOUTS_MANAGE] };
 
 /** Every route this module serves, in the order it registers them. */
 const ROUTES = [
+  ['GET', SLIDE_LAYOUTS_PATH],
   ['POST', SLIDE_LAYOUTS_PATH],
   ['GET', LAYOUT_PATH],
   ['GET', LAYOUT_REVISIONS_PATH],
@@ -124,6 +126,15 @@ export function serveSlideLayoutRoutes(
 
   const call = (request: FastifyRequest) =>
     slideLayoutContext(provenSession(request).record.actor, correlationFor(LAYOUT_PREFIX, request.id));
+
+  app.get(SLIDE_LAYOUTS_PATH, { config: { need: LIST_PERMISSION } }, async (request, reply) => {
+    const all = await layouts.list(call(request));
+    const held = provenSession(request).record.permissions;
+    const asked = (request.query as { readonly archived?: string }).archived === 'true';
+    const showArchived = held.includes(LAYOUTS_MANAGE) && asked;
+    const items = showArchived ? all : all.filter((row) => row.stamp.archivedAt === undefined);
+    return reply.send(successEnvelope(items, request.id, CLIENT_WINDOW.current));
+  });
 
   /**
    * Written after the change, and logged rather than answered when the trail refuses it: a Layout that was
