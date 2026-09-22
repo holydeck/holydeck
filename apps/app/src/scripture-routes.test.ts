@@ -6,7 +6,7 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { enforceAuthorization } from './authorization.js';
-import { LIBRARY_UNAVAILABLE, corpusClient } from './corpus.js';
+import { LIBRARY_UNAVAILABLE, LIBRARY_UNEXPECTED, corpusClient } from './corpus.js';
 import { withSafeErrors } from './failures.js';
 import { CONTENT_EDIT, PRESENTATION_CONTROL, SETTINGS_MANAGE } from './roles.js';
 import { serveScriptureSearchRoutes } from './scripture-routes.js';
@@ -93,6 +93,19 @@ describe('searching the scripture this deployment holds', () => {
   test('refuses the whole search when one translation cannot be searched', async () => {
     const watched = watching(translations, 'WEB');
     await app.close(); await serving(watched.client);
+    const response = await asking();
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error).toMatchObject({ code: LIBRARY_UNAVAILABLE.code, message: LIBRARY_UNAVAILABLE.message });
+    expect(response.json().data).toBeUndefined();
+  });
+
+  test.each(['search', 'translations'] as const)('maps an unexpected %s refusal to library unavailable', async (method) => {
+    const watched = watching();
+    await app.close();
+    await serving({
+      ...watched.client,
+      [method]: () => Promise.resolve({ ok: false, refusal: LIBRARY_UNEXPECTED } as const),
+    });
     const response = await asking();
     expect(response.statusCode).toBe(503);
     expect(response.json().error).toMatchObject({ code: LIBRARY_UNAVAILABLE.code, message: LIBRARY_UNAVAILABLE.message });

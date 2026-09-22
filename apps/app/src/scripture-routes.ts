@@ -11,7 +11,7 @@ import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import { SCRIPTURE_SEARCH_PATH, parseScriptureSearchQuery } from '@holydeck/contracts/scripture';
 
-import { searchScripture } from './corpus.js';
+import { LIBRARY_UNAVAILABLE, searchScripture } from './corpus.js';
 import { CONTENT_EDIT, PRESENTATION_CONTROL } from './roles.js';
 
 import type { RouteNeed } from './authorization.js';
@@ -32,7 +32,7 @@ export function serveScriptureSearchRoutes(app: FastifyInstance, { corpus }: Scr
     const parsed = parseScriptureSearchQuery(request.query);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const result = await searchScripture(corpus, parsed.value.q);
-    if (!result.ok) return refused(reply, request.id, result.refusal);
+    if (!result.ok) return refused(reply, request.id, LIBRARY_UNAVAILABLE);
     return reply.send(successEnvelope(result.value, request.id, CLIENT_WINDOW.current));
   });
 }
