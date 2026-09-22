@@ -4,18 +4,36 @@ import { join } from 'node:path';
 
 import { ACCOUNTS_PATH, ONBOARDING_PATH } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE } from '@holydeck/contracts/clients';
+import { CONTENT_LANGUAGES_PATH } from '@holydeck/contracts/content-languages';
 import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { SLIDE_LAYOUTS_PATH } from '@holydeck/contracts/layouts';
+import { LIBRARY_PATH } from '@holydeck/contracts/library';
+import { SCRIPTURE_SEARCH_PATH } from '@holydeck/contracts/scripture';
+import { SERMONS_PATH } from '@holydeck/contracts/sermons';
 import { SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
+import { SLIDE_GROUPS_PATH } from '@holydeck/contracts/slide-groups';
+import { SLIDE_LABELS_PATH } from '@holydeck/contracts/slide-labels';
+import { SONGS_PATH } from '@holydeck/contracts/songs';
 import { TOTP_PATH, TOTP_RECOVERY_PATH, TOTP_VERIFICATION_PATH } from '@holydeck/contracts/totp';
 import { TRANSLATION_OFFSETS_PATH } from '@holydeck/contracts/translation-offsets';
 import { PASSKEY_OPTIONS_PATH, PASSKEY_PATH } from '@holydeck/contracts/webauthn';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { accountsOn } from './accounts.js';
 import { VERSIONED_PREFIX, buildApp } from './app.js';
+import { attemptsOn } from './attempts.js';
+import { auditOn } from './audit.js';
+import { needsOf } from './authorization.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
+import { CONTENT_LANGUAGE_KEY_PATH, CONTENT_LANGUAGE_STATUS_PATH } from './content-language-routes.js';
+import { contentLanguagesOn } from './content-languages.js';
+import { libraryOn } from './library.js';
 import { MEDIA_PATH } from './media-routes.js';
+import { passkeysOn } from './passkeys.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
+import { CATALOGUE_MANAGE, CONTENT_EDIT, PRESENTATION_CONTROL } from './roles.js';
+import { SERMON_ID_PATH } from './sermon-routes.js';
+import { sermonsOn } from './sermons.js';
 import {
   SERVICE_DUPLICATE_PATH,
   SERVICE_ID_PATH,
@@ -34,13 +52,27 @@ import {
 import { SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
+import { SLIDE_GROUP_ID_PATH, SLIDE_PATH } from './slide-group-routes.js';
+import { slideGroupsOn } from './slide-groups.js';
+import { SLIDE_LABEL_ID_PATH, SLIDE_LABEL_STATUS_PATH } from './slide-label-routes.js';
+import { slideLabelsOn } from './slide-labels.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
+import { SONG_ID_PATH } from './song-routes.js';
+import { songsOn } from './songs.js';
+import { totpsOn } from './totp.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
 import { DEFAULT_SETTINGS, type LoadedSettings } from './settings.js';
+import { fakeDb } from '../test/helpers/fake-db.js';
+import { memoryAccounts } from '../test/helpers/accounts.js';
+import { memoryAttempts } from '../test/helpers/attempts.js';
+import { memoryPasskeys } from '../test/helpers/passkeys.js';
+import { memoryTotp } from '../test/helpers/totp.js';
 
+import type { RouteNeed } from './authorization.js';
 import type { InjectOptions } from 'fastify';
+import type { Identity } from './onboarding.js';
 import type { WebAsset } from './static.js';
 
 const sources: LoadedSettings['sources'] = {
@@ -158,6 +190,44 @@ describe('every route that changes something', () => {
       { method: 'POST', url: SERVICE_ITEM_REVISE_PATH },
       // A Service Template is Admin's by a permission of its own: creating one changes what New Service offers.
       { method: 'POST', url: SERVICE_TEMPLATE_PATH },
+      // The content surfaces this spec adds: behind `content.edit`, the one permission an Editor holds.
+      // Creating a Song, editing it or its raw YAML, importing one and generating its slides all change it.
+      { method: 'POST', url: SONGS_PATH },
+      { method: 'PUT', url: SONG_ID_PATH },
+      { method: 'PUT', url: `${SONG_ID_PATH}/raw` },
+      { method: 'POST', url: `${SONGS_PATH}/import` },
+      { method: 'POST', url: `${SONG_ID_PATH}/slides` },
+      // A Sermon changes the same way a Song does, behind the same permission.
+      { method: 'POST', url: SERMONS_PATH },
+      { method: 'PUT', url: SERMON_ID_PATH },
+      { method: 'PUT', url: `${SERMON_ID_PATH}/raw` },
+      { method: 'POST', url: `${SERMON_ID_PATH}/slides` },
+      // A Slide Group and the slides within it change behind the same permission again: creating one,
+      // editing it, duplicating it, enabling or disabling it, regenerating it, reordering its slides, and
+      // every per-slide change — enable, duplicate, a layout or background override, and a language
+      // block's duplication or reordering — are all an Editor's.
+      { method: 'POST', url: SLIDE_GROUPS_PATH },
+      { method: 'PUT', url: SLIDE_GROUP_ID_PATH },
+      { method: 'POST', url: `${SLIDE_GROUP_ID_PATH}/duplicate` },
+      { method: 'PATCH', url: `${SLIDE_GROUP_ID_PATH}/status` },
+      { method: 'POST', url: `${SLIDE_GROUP_ID_PATH}/regenerate` },
+      { method: 'PUT', url: `${SLIDE_GROUP_ID_PATH}/slide-order` },
+      { method: 'PATCH', url: SLIDE_PATH },
+      { method: 'POST', url: `${SLIDE_PATH}/duplicate` },
+      { method: 'PUT', url: `${SLIDE_PATH}/layout` },
+      { method: 'DELETE', url: `${SLIDE_PATH}/layout` },
+      { method: 'PUT', url: `${SLIDE_PATH}/background` },
+      { method: 'DELETE', url: `${SLIDE_PATH}/background` },
+      { method: 'POST', url: `${SLIDE_PATH}/language-blocks/:blockId/duplicate` },
+      { method: 'PUT', url: `${SLIDE_PATH}/language-block-order` },
+      // Behind the same permission as the Slide Layout and media surfaces above: administering the
+      // content-language registry and the slide-label catalogue is Admin's, the same vocabulary again.
+      { method: 'POST', url: CONTENT_LANGUAGES_PATH },
+      { method: 'PUT', url: CONTENT_LANGUAGE_KEY_PATH },
+      { method: 'PATCH', url: CONTENT_LANGUAGE_STATUS_PATH },
+      { method: 'POST', url: SLIDE_LABELS_PATH },
+      { method: 'PUT', url: SLIDE_LABEL_ID_PATH },
+      { method: 'PATCH', url: SLIDE_LABEL_STATUS_PATH },
     ]);
   });
 
@@ -186,6 +256,62 @@ describe('every route that changes something', () => {
       const method = route.method as InjectOptions['method'];
       const response = await app.inject({ method, url: route.url, headers: current });
       expect(response.statusCode, `${route.method} ${route.url}`).toBe(401);
+    }
+    await app.close();
+  });
+});
+
+// CRT-12: a deployment with every content store present is the wiring this spec adds, not the fallback
+// branch above (already exercised with every store absent) — this is the one place that would catch a
+// store threaded to the wrong `serve*Routes` call, because `needsOf` only sees what actually registered.
+describe('the content surfaces this spec wires, with every store present', () => {
+  it('registers every new route with its declared need', async () => {
+    const now = (): string => new Date().toISOString();
+    const db = fakeDb();
+    const identity: Identity = {
+      accounts: accountsOn(memoryAccounts().db, { now }),
+      audit: auditOn(db, { now }),
+      attempts: attemptsOn(memoryAttempts().db, { now }),
+      totp: totpsOn(memoryTotp().db, { now }),
+      passkeys: passkeysOn(memoryPasskeys().db, { now }),
+    };
+    const app = buildApp({
+      settings,
+      logger: false,
+      fetching: refusing,
+      identity,
+      songs: songsOn(db, { now }),
+      sermons: sermonsOn(db, { now }),
+      slideGroups: slideGroupsOn(db, { now }),
+      library: libraryOn(db, { now }),
+      contentLanguages: contentLanguagesOn(db, { now }),
+      slideLabels: slideLabelsOn(db, { now }),
+    });
+    const needs = needsOf(app);
+    const contentEdit: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
+    const catalogueManage: RouteNeed = { kind: 'permission', need: CATALOGUE_MANAGE };
+    const expected: Record<string, RouteNeed> = {
+      [`POST ${SONGS_PATH}`]: contentEdit,
+      [`PUT ${SONG_ID_PATH}`]: contentEdit,
+      [`PUT ${SONG_ID_PATH}/raw`]: contentEdit,
+      [`POST ${SONGS_PATH}/import`]: contentEdit,
+      [`POST ${SONG_ID_PATH}/slides`]: contentEdit,
+      [`POST ${SERMONS_PATH}`]: contentEdit,
+      [`PUT ${SERMON_ID_PATH}`]: contentEdit,
+      [`PUT ${SERMON_ID_PATH}/raw`]: contentEdit,
+      [`POST ${SERMON_ID_PATH}/slides`]: contentEdit,
+      [`POST ${SLIDE_GROUPS_PATH}`]: contentEdit,
+      [`PUT ${SLIDE_GROUP_ID_PATH}`]: contentEdit,
+      [`PATCH ${SLIDE_PATH}`]: contentEdit,
+      [`GET ${LIBRARY_PATH}`]: contentEdit,
+      [`GET ${SCRIPTURE_SEARCH_PATH}`]: { kind: 'any-permission', needs: [CONTENT_EDIT, PRESENTATION_CONTROL] },
+      [`POST ${CONTENT_LANGUAGES_PATH}`]: catalogueManage,
+      [`PATCH ${CONTENT_LANGUAGE_STATUS_PATH}`]: catalogueManage,
+      [`POST ${SLIDE_LABELS_PATH}`]: catalogueManage,
+      [`PATCH ${SLIDE_LABEL_STATUS_PATH}`]: catalogueManage,
+    };
+    for (const [key, need] of Object.entries(expected)) {
+      expect(needs.get(key), key).toEqual(need);
     }
     await app.close();
   });

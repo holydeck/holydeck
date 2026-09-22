@@ -6,37 +6,49 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import { serveAccountRoutes } from './accounts-routes.js';
 import { enforceAuthorization } from './authorization.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
+import { serveContentLanguageRoutes } from './content-language-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
+import { serveLibraryRoutes } from './library-routes.js';
 import { isUpgrade } from './live.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveOrderRoutes } from './order-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
+import { serveScriptureSearchRoutes } from './scripture-routes.js';
+import { serveSermonRoutes } from './sermon-routes.js';
 import { serveServiceRoutes } from './service-routes.js';
 import { serveServiceTemplateRoutes } from './service-template-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
 import { serveSettingsRoutes } from './settings-routes.js';
+import { serveSlideGroupRoutes } from './slide-group-routes.js';
+import { serveSlideLabelRoutes } from './slide-label-routes.js';
 import { serveSlideLayoutRoutes } from './slide-layout-routes.js';
+import { serveSongRoutes } from './song-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
 import { serveTranslationOffsetRoutes } from './translation-offset-routes.js';
 import { serveWebClient, withSecurityHeaders } from './static.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
+import type { ContentLanguageStore } from './content-languages.js';
 import type { Fetching } from './corpus.js';
+import type { LibraryStore } from './library.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { SermonStore } from './sermons.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
+import type { SlideGroupStore } from './slide-groups.js';
 import type { SlideLabelStore } from './slide-labels.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SessionStore } from './sessions.js';
 import type { LoadedSettings } from './settings.js';
 import type { ShownReferenceStore } from './shown-references.js';
+import type { SongStore } from './songs.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 import type { WebAsset } from './static.js';
 
@@ -69,6 +81,16 @@ export interface AppOptions {
   services?: ServiceStore;
   serviceTemplates?: ServiceTemplateStore;
   slideLabels?: SlideLabelStore;
+  /** Where a Song is kept. Without it, there is none to create, edit, export or generate slides from. */
+  songs?: SongStore;
+  /** Where a Sermon is kept. Without it, there is none to create, edit or generate slides from. */
+  sermons?: SermonStore;
+  /** Where a Slide Group is kept. Without it, there is none to create, edit or regenerate. */
+  slideGroups?: SlideGroupStore;
+  /** Where every Song and Sermon is indexed together. Without it, there is nothing here to list. */
+  library?: LibraryStore;
+  /** Where the content-language registry is kept. Without it, there is none to create, edit or archive. */
+  contentLanguages?: ContentLanguageStore;
 }
 
 /**
@@ -94,6 +116,11 @@ export function buildApp({
   services,
   serviceTemplates,
   slideLabels,
+  songs,
+  sermons,
+  slideGroups,
+  library,
+  contentLanguages,
 }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
@@ -236,6 +263,20 @@ export function buildApp({
   serveOrderRoutes(app, { services, slideLabels });
   serveServiceRoutes(app, { services });
   serveServiceTemplateRoutes(app, { serviceTemplates });
+
+  // The content surfaces content-routes spec adds: each behind `content.edit`, the one permission an
+  // Editor holds and an Admin's Layout/Label/Language vocabulary above is deliberately not — this is
+  // what an Editor builds a service's content with, not what an Admin administers the catalogue with.
+  serveSongRoutes(app, { songs, identity });
+  serveSermonRoutes(app, { sermons, identity });
+  serveSlideGroupRoutes(app, { slideGroups, identity });
+  serveLibraryRoutes(app, { library, identity });
+  serveScriptureSearchRoutes(app, { corpus });
+
+  // Behind the same permission as the Slide Layout and media surfaces above: administering the
+  // content-language registry and the slide-label catalogue is Admin's, the same vocabulary again.
+  serveContentLanguageRoutes(app, { contentLanguages, identity });
+  serveSlideLabelRoutes(app, { slideLabels, identity });
 
   if (web !== undefined) serveWebClient(app, web);
 
