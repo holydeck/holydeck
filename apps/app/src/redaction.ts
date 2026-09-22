@@ -106,6 +106,7 @@ export function secretsIn(settings: Settings): readonly string[] {
   // environment into whatever the worker logs — so this one is read off the settings like the rest.
   if (settings.resticPassword !== '') secrets.push(settings.resticPassword);
   if (settings.corpusToken !== '') secrets.push(settings.corpusToken);
+  if (settings.anthropicApiKey !== '') secrets.push(settings.anthropicApiKey);
   const stored = passwordIn(settings.mongoUrl);
   if (stored !== undefined) secrets.push(stored);
   return Object.freeze(secrets);

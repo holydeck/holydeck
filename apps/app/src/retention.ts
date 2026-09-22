@@ -51,7 +51,7 @@ const POLICIES: Record<RetentionClass, Omit<RetentionPolicy, 'class'>> = {
   'prepared-snapshot': { retentionDays: 3650, protected: true },
   'run-event': { retentionDays: 3650, protected: true },
   'autosave-revision': { retentionDays: 30, protected: false },
-  'audit-entry': { retentionDays: 400, protected: false },
+  'audit-entry': { retentionDays: 365, protected: false },
 };
 
 export const RETENTION_POLICIES: readonly RetentionPolicy[] = Object.freeze(
@@ -78,11 +78,25 @@ export class RetentionError extends Error {
   }
 }
 
+const CLASS_OVERRIDE_KEY: Readonly<Partial<Record<RetentionClass, keyof RetentionOverrides>>> = {
+  'audit-entry': 'auditRetentionDays',
+  'autosave-revision': 'autosaveRetentionDays',
+};
+
+/** Settings-driven overrides for the two retention classes an admin can tune (spec v1c-09,
+ *  COLAB-04, COLAB-11). */
+export interface RetentionOverrides {
+  readonly auditRetentionDays?: number;
+  readonly autosaveRetentionDays?: number;
+}
+
 /** The declared window for a class, or a named refusal — never a silent policy of "anything goes". */
-export function policyFor(retentionClass: string): RetentionPolicy {
+export function policyFor(retentionClass: string, overrides: RetentionOverrides = {}): RetentionPolicy {
   const policy = POLICY_BY_CLASS.get(retentionClass);
   if (policy === undefined) throw new RetentionError('no-policy', `${retentionClass} has no declared retention window`);
-  return policy;
+  const overrideKey = CLASS_OVERRIDE_KEY[policy.class];
+  const overrideDays = overrideKey === undefined ? undefined : overrides[overrideKey];
+  return overrideDays === undefined ? policy : { ...policy, retentionDays: overrideDays };
 }
 
 export interface RetentionCandidate {

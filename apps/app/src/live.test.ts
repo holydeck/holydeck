@@ -50,6 +50,10 @@ const settings: LoadedSettings = {
     mongoUrl: 'default',
     timezone: 'default',
     developmentDiagnostics: 'default',
+    auditRetentionDays: 'default',
+    autosaveRetentionDays: 'default',
+    sermonAiEnabled: 'default',
+    anthropicApiKey: 'default',
   },
   path: '/data/holydeck/config/settings.yaml',
 };

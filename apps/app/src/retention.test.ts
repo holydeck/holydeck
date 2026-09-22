@@ -57,6 +57,28 @@ describe('RETENTION_POLICIES', () => {
   });
 });
 
+describe('policyFor', () => {
+  it('returns the static default with no overrides given', () => {
+    expect(policyFor('audit-entry').retentionDays).toBe(365);
+  });
+
+  it('applies an auditRetentionDays override', () => {
+    expect(policyFor('audit-entry', { auditRetentionDays: 90 }).retentionDays).toBe(90);
+  });
+
+  it('applies an autosaveRetentionDays override', () => {
+    expect(policyFor('autosave-revision', { autosaveRetentionDays: 7 }).retentionDays).toBe(7);
+  });
+
+  it('ignores an override for a class that has none', () => {
+    expect(policyFor('manual-checkpoint', { auditRetentionDays: 90 }).retentionDays).toBe(3650);
+  });
+
+  it('still throws no-policy for an unmapped class', () => {
+    expect(() => policyFor('not-a-class', { auditRetentionDays: 90 })).toThrow();
+  });
+});
+
 describe('a referenced or historical entity cannot be destructively removed', () => {
   it('refuses a protected class with a named error, whatever its age', () => {
     const error = thrown(() => guardRemoval(candidate({ class: 'prepared-snapshot', ageDays: 9000 })));

@@ -48,6 +48,10 @@ describe('precedence', () => {
       mongoUrl: 'default',
       timezone: 'default',
       developmentDiagnostics: 'default',
+      auditRetentionDays: 'default',
+      autosaveRetentionDays: 'default',
+      sermonAiEnabled: 'default',
+      anthropicApiKey: 'default',
     });
     expect(loaded.path).toBe(CANONICAL_SETTINGS_PATH);
   });
@@ -71,6 +75,10 @@ describe('precedence', () => {
       mongoUrl: 'default',
       timezone: 'default',
       developmentDiagnostics: 'default',
+      auditRetentionDays: 'default',
+      autosaveRetentionDays: 'default',
+      sermonAiEnabled: 'default',
+      anthropicApiKey: 'default',
     });
   });
 
@@ -97,6 +105,10 @@ describe('precedence', () => {
       HOLYDECK_MONGO_URL: 'mongodb://mongo:27017/holydeck',
       HOLYDECK_TIMEZONE: 'Asia/Tokyo',
       HOLYDECK_DEVELOPMENT_DIAGNOSTICS: 'true',
+      HOLYDECK_AUDIT_RETENTION_DAYS: '90',
+      HOLYDECK_AUTOSAVE_RETENTION_DAYS: '7',
+      HOLYDECK_SERMON_AI_ENABLED: 'true',
+      HOLYDECK_ANTHROPIC_API_KEY: 'sk-ant-example-key',
     });
     expect(loaded.values).toEqual({
       port: 8080,
@@ -112,8 +124,12 @@ describe('precedence', () => {
       mongoUrl: 'mongodb://mongo:27017/holydeck',
       timezone: 'Asia/Tokyo',
       developmentDiagnostics: true,
+      auditRetentionDays: 90,
+      autosaveRetentionDays: 7,
+      sermonAiEnabled: true,
+      anthropicApiKey: 'sk-ant-example-key',
     });
-    expect(Object.values(loaded.sources)).toEqual(Array(13).fill('env'));
+    expect(Object.values(loaded.sources)).toEqual(Array(17).fill('env'));
   });
 });
 
@@ -222,7 +238,8 @@ describe('the media root and the Restic repository accept a filesystem path only
   it('has no backend-selection field: the settings schema names nothing an object-storage address could fill', () => {
     expect(Object.keys(DEFAULT_SETTINGS)).toEqual([
       'port', 'dataDir', 'mediaRoot', 'resticRepository', 'resticPassword', 'locale', 'corpusUrl', 'corpusToken',
-      'tlsCertFile', 'tlsKeyFile', 'mongoUrl', 'timezone', 'developmentDiagnostics',
+      'tlsCertFile', 'tlsKeyFile', 'mongoUrl', 'timezone', 'developmentDiagnostics', 'auditRetentionDays',
+      'autosaveRetentionDays', 'sermonAiEnabled', 'anthropicApiKey',
     ]);
   });
 
@@ -327,6 +344,56 @@ describe('developer diagnostics are off unless the deployment itself turns them 
   it('is not a secret, so a backup carries it unredacted and an operator can see what a deployment set', () => {
     expect(SETTINGS_SECRET_FIELDS).not.toContain('developmentDiagnostics');
     expect(redactSettingsText('developmentDiagnostics: true\n')).toBe('developmentDiagnostics: true\n');
+  });
+});
+
+describe('retention windows', () => {
+  it('defaults audit entries to 365 days and lets the environment override it', () => {
+    expect(load().values.auditRetentionDays).toBe(365);
+    const loaded = load(undefined, { HOLYDECK_AUDIT_RETENTION_DAYS: '90' });
+    expect(loaded.values.auditRetentionDays).toBe(90);
+    expect(loaded.sources.auditRetentionDays).toBe('env');
+  });
+
+  it('refuses audit retention outside 30 to 3650 days', () => {
+    expect(problemsOf(undefined, { HOLYDECK_AUDIT_RETENTION_DAYS: '29' })).toEqual([
+      'HOLYDECK_AUDIT_RETENTION_DAYS: expected a whole number between 30 and 3650, got "29"',
+    ]);
+  });
+
+  it('defaults superseded autosaves to 30 days and lets the environment override it', () => {
+    expect(load().values.autosaveRetentionDays).toBe(30);
+    const loaded = load(undefined, { HOLYDECK_AUTOSAVE_RETENTION_DAYS: '7' });
+    expect(loaded.values.autosaveRetentionDays).toBe(7);
+    expect(loaded.sources.autosaveRetentionDays).toBe('env');
+  });
+
+  it('refuses autosave retention outside 1 to 365 days', () => {
+    expect(problemsOf(undefined, { HOLYDECK_AUTOSAVE_RETENTION_DAYS: '366' })).toEqual([
+      'HOLYDECK_AUTOSAVE_RETENTION_DAYS: expected a whole number between 1 and 365, got "366"',
+    ]);
+  });
+});
+
+describe('the sermon-AI integration', () => {
+  it('is disabled by default and reads either explicit environment flag', () => {
+    expect(load().values.sermonAiEnabled).toBe(false);
+    expect(load(undefined, { HOLYDECK_SERMON_AI_ENABLED: 'true' }).values.sermonAiEnabled).toBe(true);
+    expect(load(undefined, { HOLYDECK_SERMON_AI_ENABLED: 'false' }).values.sermonAiEnabled).toBe(false);
+  });
+
+  it('refuses a flag other than true or false', () => {
+    expect(problemsOf(undefined, { HOLYDECK_SERMON_AI_ENABLED: 'yes' })).toEqual([
+      'HOLYDECK_SERMON_AI_ENABLED: expected true or false, got "yes"',
+    ]);
+  });
+
+  it('has an empty API key until the deployment supplies one, and treats it as secret', () => {
+    expect(load().values.anthropicApiKey).toBe('');
+    expect(load(undefined, { HOLYDECK_ANTHROPIC_API_KEY: 'sk-ant-example-key' }).values.anthropicApiKey).toBe(
+      'sk-ant-example-key',
+    );
+    expect(SETTINGS_SECRET_FIELDS).toContain('anthropicApiKey');
   });
 });
 
@@ -527,7 +594,7 @@ describe('the password the backup repository is encrypted under', () => {
 // written back out somewhere new — and the one place its credential-bearing fields must not survive.
 describe('redacting the settings file for a backup', () => {
   it('names exactly the fields this file holds a credential in', () => {
-    expect(SETTINGS_SECRET_FIELDS).toEqual(['resticPassword', 'corpusToken', 'mongoUrl']);
+    expect(SETTINGS_SECRET_FIELDS).toEqual(['resticPassword', 'corpusToken', 'mongoUrl', 'anthropicApiKey']);
   });
 
   // The one secret that is redacted out of the very archive it unlocks. Keeping it would put the key

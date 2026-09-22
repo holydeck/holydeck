@@ -60,6 +60,10 @@ const sources: LoadedSettings['sources'] = {
   mongoUrl: 'default',
   timezone: 'default',
   developmentDiagnostics: 'default',
+  auditRetentionDays: 'default',
+  autosaveRetentionDays: 'default',
+  sermonAiEnabled: 'default',
+  anthropicApiKey: 'default',
 };
 
 const settings: LoadedSettings = {
