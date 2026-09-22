@@ -33,7 +33,7 @@ import {
   SERVICE_STATUS_PATH,
   SERVICE_TRANSITION_PATH,
 } from './service-routes.js';
-import { SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
+import { SERVICE_TEMPLATE_INSTANTIATE_PATH, SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
@@ -163,6 +163,7 @@ describe('every route that changes something', () => {
       { method: 'PUT', url: WORKSPACE_POSITION_PATH },
       // A Service Template is Admin's by a permission of its own: creating one changes what New Service offers.
       { method: 'POST', url: SERVICE_TEMPLATE_PATH },
+      { method: 'POST', url: SERVICE_TEMPLATE_INSTANTIATE_PATH },
     ]);
   });
 

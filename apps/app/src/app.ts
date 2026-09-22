@@ -253,7 +253,7 @@ export function buildApp({
   serveOutputDefaultsRoutes(app);
   serveServiceRoutes(app, { services });
   serveWorkspacePositionRoutes(app, { workspacePositions, services, contentExists });
-  serveServiceTemplateRoutes(app, { serviceTemplates });
+  serveServiceTemplateRoutes(app, { serviceTemplates, services });
 
   if (web !== undefined) serveWebClient(app, web);
 

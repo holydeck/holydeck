@@ -5,16 +5,18 @@ import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { buildApp } from './app.js';
-import { SERVICE_TEMPLATES_MANAGE, SETTINGS_MANAGE } from './roles.js';
-import { SERVICE_TEMPLATE_ID_PATH, SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
+import { SERVICES_MANAGE, SERVICE_TEMPLATES_MANAGE, SETTINGS_MANAGE } from './roles.js';
+import { SERVICE_TEMPLATE_ID_PATH, SERVICE_TEMPLATE_INSTANTIATE_PATH, SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
 import { ServiceTemplateError, serviceTemplateContext, serviceTemplatesOn } from './service-templates.js';
+import { servicesOn } from './services.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { loadSettings } from './settings.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 
-import type { ServiceTemplateDraft } from '@holydeck/contracts/service-templates';
+import type { ServiceTemplateDraft, TemplateInstantiation } from '@holydeck/contracts/service-templates';
 import type { ServiceTemplateStore } from './service-templates.js';
+import type { ServiceStore } from './services.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { FastifyInstance } from 'fastify';
 
@@ -32,20 +34,38 @@ const DRAFT: ServiceTemplateDraft = {
   },
 };
 const WIRE_DRAFT = { name: DRAFT.name, ...DRAFT.body };
+const INSTANTIATION: TemplateInstantiation = {
+  title: 'Sunday Morning', date: '2026-09-27', site: 'Main Hall',
+  fills: [{ entryId: 'entry-typed', title: 'Response', content: undefined }],
+};
+const INSTANTIATION_DRAFT: ServiceTemplateDraft = {
+  name: 'Sunday service',
+  body: {
+    sections: [{
+      id: 'section-1', name: 'Welcome', entries: [
+        { id: 'entry-fixed', slot: 'fixed', itemKind: 'custom-slide', title: 'Welcome', content: undefined },
+        { id: 'entry-typed', slot: 'typed', itemKind: 'custom-slide', required: true },
+      ],
+    }],
+  },
+};
 const templatePath = (id: string): string => SERVICE_TEMPLATE_ID_PATH.replace(':id', id);
+const instantiatePath = (id: string): string => SERVICE_TEMPLATE_INSTANTIATE_PATH.replace(':id', id);
 
 let app: FastifyInstance;
 let templates: ServiceTemplateStore;
+let services: ServiceStore;
 let sessions: SessionStore;
 let operator: StartedSession;
 
-const building = async (serviceTemplates: ServiceTemplateStore | undefined): Promise<void> => {
+const building = async (serviceTemplates: ServiceTemplateStore | undefined, heldServices?: ServiceStore): Promise<void> => {
   app = buildApp({
     settings: loadSettings({ env: {} }),
     logger: false,
     fetching: () => Promise.reject(new Error('this route must not ask the corpus')),
     sessions,
     ...(serviceTemplates === undefined ? {} : { serviceTemplates }),
+    ...(heldServices === undefined ? {} : { services: heldServices }),
   });
   await app.ready();
 };
@@ -68,12 +88,13 @@ const asking = (method: 'GET' | 'POST', url: string, payload?: unknown, held: St
 beforeEach(async () => {
   let serial = 0;
   templates = serviceTemplatesOn(fakeDb(), { now: () => NOW, newId: () => `template-${++serial}` });
+  services = servicesOn(fakeDb(), { now: () => NOW, newId: () => 'service-1' });
   sessions = sessionsOn(memorySessions().db, { now: () => NOW });
   operator = await sessions.start(sessionContext(CORRELATION), {
     actor: OPERATOR,
-    permissions: [SERVICE_TEMPLATES_MANAGE],
+    permissions: [SERVICE_TEMPLATES_MANAGE, SERVICES_MANAGE],
   });
-  await building(templates);
+  await building(templates, services);
 });
 
 afterEach(async () => {
@@ -125,9 +146,50 @@ describe('Service Template routes', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  test('instantiates fixed and filled typed entries into a Service', async () => {
+    const template = await templates.create(serviceTemplateContext(OPERATOR, CORRELATION), INSTANTIATION_DRAFT);
+    const response = await asking('POST', instantiatePath(template.id), INSTANTIATION);
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data).toMatchObject({ title: INSTANTIATION.title });
+    expect(response.json().data.sections[0].items).toMatchObject([
+      { id: 'entry-fixed', title: 'Welcome' },
+      { id: 'entry-typed', title: 'Response' },
+    ]);
+  });
+
+  test('refuses a required typed entry left unfilled', async () => {
+    const template = await templates.create(serviceTemplateContext(OPERATOR, CORRELATION), INSTANTIATION_DRAFT);
+    const response = await asking('POST', instantiatePath(template.id), { ...INSTANTIATION, fills: [] });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.fields?.[0]).toMatchObject({ path: 'fills.entry-typed', code: 'field.required' });
+  });
+
+  test('returns 404 when instantiating an unknown template', async () => {
+    expect((await asking('POST', instantiatePath('unknown'), INSTANTIATION)).statusCode).toBe(404);
+  });
+
+  test('allows an editor with services.manage but not serviceTemplates.manage to instantiate', async () => {
+    const servicesEditor = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [SERVICES_MANAGE] });
+    const template = await templates.create(serviceTemplateContext(OPERATOR, CORRELATION), INSTANTIATION_DRAFT);
+    expect((await asking('POST', instantiatePath(template.id), INSTANTIATION, servicesEditor)).statusCode).toBe(201);
+  });
+
+  test('refuses instantiation without services.manage', async () => {
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [SETTINGS_MANAGE] });
+    expect((await asking('POST', instantiatePath('template-1'), INSTANTIATION, editor)).statusCode).toBe(403);
+  });
+
+  test('returns 404 when Services are not configured', async () => {
+    const template = await templates.create(serviceTemplateContext(OPERATOR, CORRELATION), INSTANTIATION_DRAFT);
+    await app.close();
+    await building(templates);
+    expect((await asking('POST', instantiatePath(template.id), INSTANTIATION)).statusCode).toBe(404);
+  });
+
   test.each([
     ['POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT],
     ['GET', templatePath('template-1'), undefined],
+    ['POST', instantiatePath('template-1'), INSTANTIATION],
   ] as const)('serves a gated 404 fallback for %s %s without a store', async (method, url, payload) => {
     await app.close();
     await building(undefined);
