@@ -15,8 +15,10 @@ import { Component } from 'preact';
 import { ACCOUNT_ROLES, type AccountRole } from '@holydeck/contracts/accounts';
 
 import { can, session } from '../app-state.js';
+import { ExpiryBanner } from './expiry-banner.js';
 import { t } from '../i18n.js';
 import { route, type Route } from '../router.js';
+import { UpdateDialog } from './update-dialog.js';
 
 import type { ComponentChildren, JSX } from 'preact';
 
@@ -103,7 +105,9 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
           </ul>
         </nav>
       )}
+      <ExpiryBanner />
       <main id="main" tabindex={-1}>{children}</main>
+      <UpdateDialog />
       <LiveRegions />
     </>
   );

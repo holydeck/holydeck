@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { can, csrf, locale, onboarding, resetAppState, session, updateRequired } from './app-state.js';
+import {
+  can,
+  csrf,
+  expiryWarning,
+  lastAnsweredAt,
+  locale,
+  onboarding,
+  resetAppState,
+  session,
+  updateRequired,
+} from './app-state.js';
 
 import type { SessionView } from '@holydeck/contracts/sessions';
 
@@ -33,11 +43,15 @@ describe('application state', () => {
     onboarding.value = 'claimed';
     locale.value = 'de';
     updateRequired.value = true;
+    lastAnsweredAt.value = 1;
+    expiryWarning.value = { minutes: 5 };
 
     resetAppState();
 
     expect(session.value).toBeUndefined();
     expect(onboarding.value).toBeUndefined();
     expect(updateRequired.value).toBe(false);
+    expect(lastAnsweredAt.value).toBeUndefined();
+    expect(expiryWarning.value).toBeUndefined();
   });
 });

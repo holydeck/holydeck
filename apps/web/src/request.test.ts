@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { onboardingOffer } from '@holydeck/contracts/accounts';
 import { UPDATE_REQUIRED, errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
@@ -8,7 +8,7 @@ import { SESSION_EXPIRED, SESSION_PATH } from '@holydeck/contracts/sessions';
 
 import type { FetchLike } from './api.js';
 
-import { resetAppState, session, updateRequired } from './app-state.js';
+import { lastAnsweredAt, resetAppState, session, updateRequired } from './app-state.js';
 import { boot, request, setFetching } from './request.js';
 import { currentPath } from './router.js';
 
@@ -33,8 +33,14 @@ const resetRoute = (path = '/'): void => {
 };
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-09-13T10:00:00.000Z'));
   resetAppState();
   resetRoute();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('boot', () => {
@@ -179,5 +185,13 @@ describe('request', () => {
       method: 'POST',
       headers: expect.objectContaining({ 'x-holydeck-csrf': SESSION.csrf }),
     }));
+  });
+
+  it('records when a successful request was answered', async () => {
+    setFetching(async () => reply(200, successEnvelope({ saved: true }, 'request-6')));
+
+    await request('/api/v1/anything');
+
+    expect(lastAnsweredAt.value).toBe(Date.now());
   });
 });

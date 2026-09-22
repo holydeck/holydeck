@@ -8,7 +8,7 @@ import { NOT_FOUND } from '@holydeck/contracts/http';
 import { SESSION_EXPIRED, SESSION_PATH, parseSessionView } from '@holydeck/contracts/sessions';
 
 import { ask, needsUpdate, type ApiResult, type Change, type FetchLike, type ResponseLike } from './api.js';
-import { onboarding, session, updateRequired } from './app-state.js';
+import { lastAnsweredAt, onboarding, session, updateRequired } from './app-state.js';
 import { currentPath, navigate, route, safeNext, signInPathFor } from './router.js';
 
 const defaultFetching: FetchLike = (url, init) =>
@@ -27,6 +27,7 @@ export function setFetching(next: FetchLike): void {
  */
 export async function request(path: string, change?: Change): Promise<ApiResult<unknown>> {
   const result = await ask(path, fetching, change);
+  if (result.ok) lastAnsweredAt.value = Date.now();
   if (!result.ok && result.code === SESSION_EXPIRED) {
     session.value = null;
     if (route.value.name !== 'sign-in' && route.value.name !== 'welcome') {

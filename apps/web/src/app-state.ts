@@ -21,6 +21,12 @@ export const locale: Signal<Locale> = signal(initialLocale());
 /** Whether the server refused this client because its released contract window is now too old. */
 export const updateRequired: Signal<boolean> = signal(false);
 
+/** When the server last answered an ordinary application request successfully, if it has answered one. */
+export const lastAnsweredAt: Signal<number | undefined> = signal(undefined);
+
+/** The remaining minutes shown while a signed-in session is close enough to expiry to need attention. */
+export const expiryWarning: Signal<{ readonly minutes: number } | undefined> = signal(undefined);
+
 /** The session token a changing request must return to the server, or nothing before a session exists. */
 export function csrf(): string | undefined {
   return session.value?.csrf;
@@ -37,4 +43,6 @@ export function resetAppState(): void {
   onboarding.value = undefined;
   locale.value = initialLocale();
   updateRequired.value = false;
+  lastAnsweredAt.value = undefined;
+  expiryWarning.value = undefined;
 }
