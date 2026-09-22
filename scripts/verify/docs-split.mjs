@@ -164,7 +164,9 @@ export function readCommitMessages() {
   const parts = output.split('\x00');
   const commitMessages = {};
   for (let index = 0; index + 1 < parts.length; index += 2) {
-    commitMessages[parts[index]] = parts[index + 1];
+    // git inserts its own blank-line separator between formatted entries, which lands here as a leading
+    // "\n" on every hash but the first — trimmed off so every commit's message is keyed by its real SHA.
+    commitMessages[parts[index].trim()] = parts[index + 1];
   }
   return commitMessages;
 }
