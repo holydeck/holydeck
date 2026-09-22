@@ -52,6 +52,8 @@ const sources: LoadedSettings['sources'] = {
   locale: 'file',
   corpusUrl: 'default',
   corpusToken: 'default',
+  tlsCertFile: 'default',
+  tlsKeyFile: 'default',
   mongoUrl: 'default',
   timezone: 'default',
   developmentDiagnostics: 'default',

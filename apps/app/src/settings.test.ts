@@ -43,6 +43,8 @@ describe('precedence', () => {
       locale: 'default',
       corpusUrl: 'default',
       corpusToken: 'default',
+      tlsCertFile: 'default',
+      tlsKeyFile: 'default',
       mongoUrl: 'default',
       timezone: 'default',
       developmentDiagnostics: 'default',
@@ -64,6 +66,8 @@ describe('precedence', () => {
       locale: 'file',
       corpusUrl: 'default',
       corpusToken: 'default',
+      tlsCertFile: 'default',
+      tlsKeyFile: 'default',
       mongoUrl: 'default',
       timezone: 'default',
       developmentDiagnostics: 'default',
@@ -88,6 +92,8 @@ describe('precedence', () => {
       HOLYDECK_LOCALE: 'ta',
       HOLYDECK_CORPUS_URL: 'http://corpus:8080',
       HOLYDECK_CORPUS_TOKEN: 'c'.repeat(24),
+      HOLYDECK_TLS_CERT_FILE: '/etc/holydeck/tls/cert.pem',
+      HOLYDECK_TLS_KEY_FILE: '/etc/holydeck/tls/key.pem',
       HOLYDECK_MONGO_URL: 'mongodb://mongo:27017/holydeck',
       HOLYDECK_TIMEZONE: 'Asia/Tokyo',
       HOLYDECK_DEVELOPMENT_DIAGNOSTICS: 'true',
@@ -101,11 +107,13 @@ describe('precedence', () => {
       locale: 'ta',
       corpusUrl: 'http://corpus:8080',
       corpusToken: 'c'.repeat(24),
+      tlsCertFile: '/etc/holydeck/tls/cert.pem',
+      tlsKeyFile: '/etc/holydeck/tls/key.pem',
       mongoUrl: 'mongodb://mongo:27017/holydeck',
       timezone: 'Asia/Tokyo',
       developmentDiagnostics: true,
     });
-    expect(Object.values(loaded.sources)).toEqual(Array(11).fill('env'));
+    expect(Object.values(loaded.sources)).toEqual(Array(13).fill('env'));
   });
 });
 
@@ -214,7 +222,7 @@ describe('the media root and the Restic repository accept a filesystem path only
   it('has no backend-selection field: the settings schema names nothing an object-storage address could fill', () => {
     expect(Object.keys(DEFAULT_SETTINGS)).toEqual([
       'port', 'dataDir', 'mediaRoot', 'resticRepository', 'resticPassword', 'locale', 'corpusUrl', 'corpusToken',
-      'mongoUrl', 'timezone', 'developmentDiagnostics',
+      'tlsCertFile', 'tlsKeyFile', 'mongoUrl', 'timezone', 'developmentDiagnostics',
     ]);
   });
 
@@ -377,6 +385,40 @@ describe('the library this deployment reads scripture from', () => {
   it('refuses an address with no credential, and a credential with no address', () => {
     expect(problemsOf(undefined, { HOLYDECK_CORPUS_URL: 'http://corpus:8080' })).toEqual([both]);
     expect(problemsOf(undefined, { HOLYDECK_CORPUS_TOKEN: token })).toEqual([both]);
+  });
+});
+
+describe('the certificate and key for an application serving HTTPS itself', () => {
+  const both = 'tlsCertFile and tlsKeyFile: set both or neither, so the server never starts half-configured for HTTPS';
+
+  it('defaults to plain HTTP, which is what a deployment behind a terminating proxy needs', () => {
+    const loaded = load();
+    expect(loaded.values.tlsCertFile).toBe('');
+    expect(loaded.values.tlsKeyFile).toBe('');
+    expect(SETTINGS_SECRET_FIELDS).not.toContain('tlsCertFile');
+    expect(SETTINGS_SECRET_FIELDS).not.toContain('tlsKeyFile');
+  });
+
+  it('reads a certificate and key pair from the environment together', () => {
+    const loaded = load(undefined, {
+      HOLYDECK_TLS_CERT_FILE: '/etc/holydeck/tls/cert.pem',
+      HOLYDECK_TLS_KEY_FILE: '/etc/holydeck/tls/key.pem',
+    });
+    expect(loaded.values.tlsCertFile).toBe('/etc/holydeck/tls/cert.pem');
+    expect(loaded.values.tlsKeyFile).toBe('/etc/holydeck/tls/key.pem');
+    expect(loaded.sources.tlsCertFile).toBe('env');
+    expect(loaded.sources.tlsKeyFile).toBe('env');
+  });
+
+  it('refuses a relative path instead of guessing where the deployment mounted its certificate', () => {
+    expect(problemsOf('tlsCertFile: tls/cert.pem\ntlsKeyFile: /etc/holydeck/tls/key.pem\n')).toEqual([
+      'tlsCertFile: expected an absolute path, got "tls/cert.pem"',
+    ]);
+  });
+
+  it('refuses either half of a pair, so it cannot start HTTPS with an incomplete identity', () => {
+    expect(problemsOf(undefined, { HOLYDECK_TLS_CERT_FILE: '/etc/holydeck/tls/cert.pem' })).toEqual([both]);
+    expect(problemsOf(undefined, { HOLYDECK_TLS_KEY_FILE: '/etc/holydeck/tls/key.pem' })).toEqual([both]);
   });
 });
 

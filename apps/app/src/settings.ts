@@ -31,6 +31,10 @@ export interface Settings {
   corpusUrl: string;
   /** The credential the corpus requires. Empty only alongside an empty address. */
   corpusToken: string;
+  /** PEM certificate chain the server answers HTTPS with. Empty means plain HTTP, the usual case behind a reverse proxy that terminates TLS. */
+  tlsCertFile: string;
+  /** PEM private key the server answers HTTPS with. Empty means plain HTTP, the usual case behind a reverse proxy that terminates TLS. */
+  tlsKeyFile: string;
   /** Where the durable records live. Empty means this deployment keeps none yet. */
   mongoUrl: string;
   /** The installation's IANA time zone. Round-trips through this loader; no scheduling reads it yet. */
@@ -53,6 +57,8 @@ export const DEFAULT_SETTINGS: Settings = {
   locale: 'en',
   corpusUrl: '',
   corpusToken: '',
+  tlsCertFile: '',
+  tlsKeyFile: '',
   mongoUrl: '',
   timezone: 'Europe/Zurich',
   developmentDiagnostics: false,
@@ -108,6 +114,8 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   locale: 'HOLYDECK_LOCALE',
   corpusUrl: 'HOLYDECK_CORPUS_URL',
   corpusToken: 'HOLYDECK_CORPUS_TOKEN',
+  tlsCertFile: 'HOLYDECK_TLS_CERT_FILE',
+  tlsKeyFile: 'HOLYDECK_TLS_KEY_FILE',
   mongoUrl: 'HOLYDECK_MONGO_URL',
   timezone: 'HOLYDECK_TIMEZONE',
   developmentDiagnostics: 'HOLYDECK_DEVELOPMENT_DIAGNOSTICS',
@@ -149,6 +157,11 @@ const parseAbsolutePath = (raw: unknown): Parsed<string> => {
     return { ok: false, problem: `expected an absolute path, got ${JSON.stringify(raw)}` };
   }
   return { ok: true, value: raw };
+};
+
+const parseOptionalAbsolutePath = (raw: unknown): Parsed<string> => {
+  if (raw === '') return { ok: true, value: '' };
+  return parseAbsolutePath(raw);
 };
 
 const parseLocale = (raw: unknown): Parsed<Locale> => {
@@ -334,6 +347,15 @@ export function loadSettings(input: {
     problems.push('corpusUrl and corpusToken: set both or neither, so the library is never read without a credential');
   }
 
+  const tlsProblems = problems.length;
+  const tlsCertFile = resolve('tlsCertFile', DEFAULT_SETTINGS.tlsCertFile, parseOptionalAbsolutePath, layers);
+  const tlsKeyFile = resolve('tlsKeyFile', DEFAULT_SETTINGS.tlsKeyFile, parseOptionalAbsolutePath, layers);
+  // Only worth saying when both were readable: a rejected path already said what to fix, and adding
+  // "set both" to it would read as a second, separate mistake.
+  if (problems.length === tlsProblems && (tlsCertFile.value === '') !== (tlsKeyFile.value === '')) {
+    problems.push('tlsCertFile and tlsKeyFile: set both or neither, so the server never starts half-configured for HTTPS');
+  }
+
   const mongoUrl = resolve('mongoUrl', DEFAULT_SETTINGS.mongoUrl, parseMongoUrl, layers);
   const timezone = resolve('timezone', DEFAULT_SETTINGS.timezone, parseTimezone, layers);
   const developmentDiagnostics = resolve(
@@ -355,6 +377,8 @@ export function loadSettings(input: {
       locale: locale.value,
       corpusUrl: corpusUrl.value,
       corpusToken: corpusToken.value,
+      tlsCertFile: tlsCertFile.value,
+      tlsKeyFile: tlsKeyFile.value,
       mongoUrl: mongoUrl.value,
       timezone: timezone.value,
       developmentDiagnostics: developmentDiagnostics.value,
@@ -368,6 +392,8 @@ export function loadSettings(input: {
       locale: locale.source,
       corpusUrl: corpusUrl.source,
       corpusToken: corpusToken.source,
+      tlsCertFile: tlsCertFile.source,
+      tlsKeyFile: tlsKeyFile.source,
       mongoUrl: mongoUrl.source,
       timezone: timezone.source,
       developmentDiagnostics: developmentDiagnostics.source,

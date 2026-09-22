@@ -46,6 +46,8 @@ export interface AppOptions {
   settings: LoadedSettings;
   /** Explicit rather than defaulted: a service that silently stops logging is hard to notice. */
   logger: FastifyServerOptions['logger'];
+  /** A certificate and key to answer HTTPS with; absent for plain HTTP behind a terminating proxy. */
+  https?: { readonly cert: Buffer | string; readonly key: Buffer | string };
   /** Explicit rather than the global one, so nothing here can reach a network a caller did not hand it. */
   fetching: Fetching;
   /** The built web client, when this deployment has one to serve. */
@@ -81,6 +83,7 @@ export const VERSIONED_PREFIX = '/api/';
 export function buildApp({
   settings,
   logger,
+  https,
   fetching,
   web,
   sessions,
@@ -95,7 +98,8 @@ export function buildApp({
   serviceTemplates,
   slideLabels,
 }: AppOptions): FastifyInstance {
-  const app = Fastify({ logger });
+  // HTTPS makes Fastify infer a specialised server, while the routes below use its common interface.
+  const app = Fastify({ logger, ...(https === undefined ? {} : { https }) }) as unknown as FastifyInstance;
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
 
   withSecurityHeaders(app);

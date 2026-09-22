@@ -43,6 +43,12 @@ always` (or a new image tag) is how an operator restarts deliberately to pick up
 Run the deployment preflight first — a restart onto a broken configuration is still a broken
 configuration.
 
+## Serving HTTPS directly
+
+`HOLYDECK_TLS_CERT_FILE=/etc/holydeck/tls/cert.pem` is optional and names the PEM certificate chain when the application serves HTTPS directly.
+`HOLYDECK_TLS_KEY_FILE=/etc/holydeck/tls/key.pem` is optional and names that certificate chain's PEM private key when the application serves HTTPS directly.
+Set both variables or neither: leaving them empty keeps the usual plain HTTP listener behind a reverse proxy that terminates TLS.
+
 ## Rolling back a migration
 
 ```sh

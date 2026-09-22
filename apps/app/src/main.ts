@@ -162,11 +162,17 @@ if (settings.values.mongoUrl !== '') {
 // Shipped in the same image as this service, at the same relative path the repository has.
 const web = readWebBuild(fileURLToPath(new URL('../../web/dist/', import.meta.url)));
 
+// Both or neither is already enforced by the settings loader; reading here fails start-up loudly on a path that is not a readable file.
+const https = settings.values.tlsCertFile === ''
+  ? undefined
+  : { cert: readFileSync(settings.values.tlsCertFile), key: readFileSync(settings.values.tlsKeyFile) };
+
 const app = buildApp({
   settings,
   // Every secret this deployment was configured with is replaced wherever it appears in a log line: a
   // connection string reaches a log through an error message far more often than through a log call.
   logger: redactingLogger(process.env.HOLYDECK_LOG_LEVEL ?? 'info', redactorFor(secretsIn(settings.values))),
+  https,
   fetching: fetch,
   web,
   sessions,
