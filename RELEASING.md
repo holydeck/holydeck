@@ -87,9 +87,12 @@ machine, and you are on a clean, up-to-date `main`.
 
 ## Releasing to `next`
 
-Run `pnpm release:next` to cut a prerelease with `release-it --preRelease=next`. It produces a
-version shaped `yyyy.m.patch-next.N` instead of the stable `yyyy.m.patch`, and may be run from
-either `main` or `next`, the two branches allowed by `git.requireBranch`.
+Run `pnpm release:next` from the `next` branch to cut a prerelease with `release-it
+--preRelease=next`. It produces a version shaped `yyyy.m.patch-next.N` instead of the stable
+`yyyy.m.patch`. A `scripts/release/guard-branch.mjs` check ahead of release-it refuses to run
+from any other branch, matching what `release.yml`'s "Check the tag is on the right branch" step
+independently enforces on the pushed tag: a stable tag must be reachable from `main`, a next tag
+from `next`. `pnpm release` carries the same guard for `main`.
 
 The CLI publishes under the npm `next` dist-tag, so `npm install @holydeck/cli@next` tries the
 prerelease while a plain `npm install @holydeck/cli` never selects one. Each image gets its exact
