@@ -89,6 +89,12 @@ describe('library routes', () => {
     expect((await ask(`${LIBRARY_PATH}?q=missing`)).json().data).toEqual([]);
   });
 
+  test('rejects an unrecognised kind filter', async () => {
+    const response = await ask(`${LIBRARY_PATH}?kind=bogus`);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.fields).toEqual([expect.objectContaining({ path: 'library.kind' })]);
+  });
+
   test('excludes archived rows by default and includes them when asked', async () => {
     const archived = await created('song', 'Archived Grace');
     const collection = RECORDS.contentLibrary.collection;
