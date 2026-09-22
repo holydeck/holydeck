@@ -160,12 +160,21 @@ export function permissionRoutesIn(routeSources) {
       const guard = need !== undefined && ts.isIdentifier(need) ? constants.get(need.text) : need;
       const kind = property(guard, 'kind');
       const permission = property(guard, 'need');
+      const needs = property(guard, 'needs');
       let signature;
       if (kind !== undefined && ts.isStringLiteral(kind) && ['public', 'session'].includes(kind.text)) {
         signature = kind.text;
       } else if (kind !== undefined && ts.isStringLiteral(kind) && kind.text === 'permission' &&
                  permission !== undefined && (ts.isIdentifier(permission) || ts.isStringLiteral(permission))) {
         signature = permission.getText(tree);
+        routes.push(`${route} ${signature}`);
+      } else if (kind !== undefined && ts.isStringLiteral(kind) && kind.text === 'any-permission' &&
+                 needs !== undefined && ts.isArrayLiteralExpression(needs) &&
+                 needs.elements.every((element) => ts.isIdentifier(element) || ts.isStringLiteral(element))) {
+        // Joined with `|` rather than kept as a list, so the same route asked for a different pair of
+        // permissions — or the same pair in a different order — is a route this census no longer knows,
+        // the same way any other weakened guard becomes one.
+        signature = needs.elements.map((element) => element.getText(tree)).join('|');
         routes.push(`${route} ${signature}`);
       } else {
         problems.push(`${route} has no recognizable authorization guard`);

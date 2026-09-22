@@ -622,6 +622,8 @@ describe('the Operator override', () => {
       SERVICE_TEMPLATES_MANAGE,
       'media.manage',
       'services.manage',
+      'content.edit',
+      'catalogue.manage',
     ]);
   });
 

@@ -24,6 +24,7 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
+import { settled } from './refusals.js';
 import { LAYOUTS_MANAGE } from './roles.js';
 import { SlideLayoutError, slideLayoutContext, subjectFor } from './slide-layouts.js';
 
@@ -83,24 +84,14 @@ const listed = (record: RevisionRecord) => ({
   origin: record.origin,
 });
 
-type Answer<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly message: string };
-
 /**
  * The two refusals a caller can do something about — the state moved under them, or another writer got
  * there first — told apart from the two nobody can. A schema refusal cannot reach here, because every
  * payload below was graded before the store saw it; a corrupt record is this server's own fault. Both of
  * those stay thrown, and are answered as faults rather than as something the caller should correct.
  */
-async function settled<T>(work: () => Promise<T>): Promise<Answer<T>> {
-  try {
-    return { ok: true, value: await work() };
-  } catch (error) {
-    if (error instanceof SlideLayoutError && (error.kind === 'state' || error.kind === 'conflict')) {
-      return { ok: false, message: error.message };
-    }
-    throw error;
-  }
-}
+const isRefusal = (error: unknown): error is SlideLayoutError & { kind: 'state' | 'conflict' } =>
+  error instanceof SlideLayoutError && (error.kind === 'state' || error.kind === 'conflict');
 
 export interface SlideLayoutRoutesOptions {
   /** Absent whenever `identity` is, per `main.ts`'s wiring — never independently, from this module's view. */
@@ -158,7 +149,7 @@ export function serveSlideLayoutRoutes(
   app.post(SLIDE_LAYOUTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const parsed = parseSlideLayoutDraft(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
-    const answer = await settled(() => layouts.create(call(request), parsed.value));
+    const answer = await settled(() => layouts.create(call(request), parsed.value), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     await note(request, answer.value.stamp.id, 'allowed', 'created');
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
@@ -189,7 +180,7 @@ export function serveSlideLayoutRoutes(
     const parsed = parseSlideLayoutBody(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
-    const answer = await settled(() => layouts.version(call(request), id, parsed.value));
+    const answer = await settled(() => layouts.version(call(request), id, parsed.value), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     // A save that changed nothing is not a change, and the trail is a record of changes.
@@ -201,7 +192,7 @@ export function serveSlideLayoutRoutes(
     const revision = ordinalIn((request.params as { readonly revision: string }).revision);
     if (revision === undefined) return reply.code(422).send(validationFailure(request.id, NOT_AN_ORDINAL));
     const id = idIn(request);
-    const answer = await settled(() => layouts.restoreVersion(call(request), id, revision));
+    const answer = await settled(() => layouts.restoreVersion(call(request), id, revision), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     const restored = answer.value;
@@ -216,8 +207,9 @@ export function serveSlideLayoutRoutes(
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
     const context = call(request);
-    const answer = await settled(() =>
-      parsed.value.archived ? layouts.archive(context, id) : layouts.unarchive(context, id),
+    const answer = await settled(
+      () => (parsed.value.archived ? layouts.archive(context, id) : layouts.unarchive(context, id)),
+      isRefusal,
     );
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));

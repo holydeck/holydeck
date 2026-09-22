@@ -42,6 +42,35 @@ test('scans multiline and inline guards while ignoring comments, strings and unu
   assert.deepEqual(scan, { routes: [route], problems: [] });
 });
 
+const anyRoute = 'example-routes.ts GET PATH FIRST|SECOND';
+const anySource = `
+  const NEED: RouteNeed = { kind: 'any-permission', needs: [FIRST, SECOND] };
+  app.get(PATH, { config: { need: NEED } }, async () => {});
+`;
+const anyGapped = { tested: {}, gaps: { [anyRoute]: 'no harness negative case yet' } };
+
+test('recognizes an any-permission guard and joins its needs for the census signature', () => {
+  assert.deepEqual(permissionRoutesIn({ 'example-routes.ts': anySource }), { routes: [anyRoute], problems: [] });
+  assert.deepEqual(
+    verifyRoleCoverage({ routeSources: { 'example-routes.ts': anySource }, readTest: () => undefined }, anyGapped),
+    [],
+  );
+});
+
+test('an any-permission guard with an unresolvable needs array fails closed', () => {
+  const broken = anySource.replace('needs: [FIRST, SECOND]', 'needs: computed()');
+  assert.ok(permissionRoutesIn({ 'example-routes.ts': broken }).problems
+    .some((problem) => problem.includes('has no recognizable authorization guard')));
+});
+
+test('narrowing an any-permission guard’s needs cannot hide behind an existing known gap', () => {
+  const narrowed = anySource.replace('needs: [FIRST, SECOND]', 'needs: [FIRST]');
+  const problems = verifyRoleCoverage(
+    { routeSources: { 'example-routes.ts': narrowed }, readTest: () => undefined }, anyGapped,
+  );
+  assert.ok(problems.some((problem) => problem.includes('is a known integration gap that is not a permission route on disk')));
+});
+
 test('excludes public and session routes, including a file with mixed kinds', () => {
   const scan = permissionRoutesIn({ 'example-routes.ts': `${source}
     const PUBLIC: RouteNeed = { kind: 'public' };

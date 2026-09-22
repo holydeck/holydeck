@@ -38,6 +38,7 @@ const version = { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) };
 const PUBLIC: RouteNeed = { kind: 'public' };
 const SESSION: RouteNeed = { kind: 'session' };
 const permission = (need: string): RouteNeed => ({ kind: 'permission', need });
+const anyPermission = (needs: readonly string[]): RouteNeed => ({ kind: 'any-permission', needs });
 
 /** Built fresh per test that needs one: only `audit` is asked of it here, the rest stays unused. */
 const identityWith = (trail: FakeDb): Identity => ({
@@ -71,6 +72,11 @@ const serving = async (sessions: SessionStore | undefined, identity?: Identity):
   built.patch(
     '/api/v1/admin-only',
     { config: { need: permission('accounts.manage') } },
+    (request) => ({ actor: provenSession(request).record.actor }),
+  );
+  built.get(
+    '/api/v1/either-side',
+    { config: { need: anyPermission(['content.edit', 'presentation.control']) } },
     (request) => ({ actor: provenSession(request).record.actor }),
   );
 
@@ -175,6 +181,38 @@ describe('a route declared permission', () => {
   });
 });
 
+describe('a route declared any-permission', () => {
+  test('is reached by a session carrying the first of the named permissions', async () => {
+    const session = await signedIn(['content.edit']);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/either-side',
+      headers: withSession(session),
+    });
+    expect(response.statusCode).toBe(200);
+  });
+
+  test('is reached by a session carrying the second of the named permissions instead', async () => {
+    const session = await signedIn(['presentation.control']);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/either-side',
+      headers: withSession(session),
+    });
+    expect(response.statusCode).toBe(200);
+  });
+
+  test('refuses a session carrying neither named permission', async () => {
+    const session = await signedIn(['accounts.manage']);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/either-side',
+      headers: withSession(session),
+    });
+    expect(response.statusCode).toBe(403);
+  });
+});
+
 describe('a permission refusal, with an identity to audit against', () => {
   let trail: FakeDb;
 
@@ -254,6 +292,8 @@ describe('what this check declares', () => {
         ['HEAD /api/v1/mine', SESSION],
         ['POST /api/v1/change', SESSION],
         ['PATCH /api/v1/admin-only', permission('accounts.manage')],
+        ['GET /api/v1/either-side', anyPermission(['content.edit', 'presentation.control'])],
+        ['HEAD /api/v1/either-side', anyPermission(['content.edit', 'presentation.control'])],
       ]),
     );
   });
