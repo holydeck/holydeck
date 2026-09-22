@@ -39,7 +39,7 @@ interface OverrideBody {
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/u;
 
 const parseOverrideBody = (value: unknown): Parsed<OverrideBody> =>
-  parseObject(value, '', (reader) => {
+  parseObject(value, 'override', (reader) => {
     const runId = reader.text('runId');
     if (!RUN_ID.test(runId)) reader.reject('runId', FIELD_CODES.notAllowed, 'must be 1 to 64 letters, digits, hyphens or underscores');
     return { runId, reason: reader.text('reason') };

@@ -224,7 +224,7 @@ describe('Preparation routes', () => {
 
     expect(response.statusCode).toBe(422);
     expect(response.json().error.code).toBe(VALIDATION_FAILED);
-    expect(response.json().error.fields).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'runId' })]));
+    expect(response.json().error.fields).toEqual(expect.arrayContaining([expect.objectContaining({ path: expect.stringMatching(/runId$/u) })]));
     expect(override).not.toHaveBeenCalled();
   });
 
