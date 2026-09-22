@@ -2,10 +2,10 @@
 // so nothing on screen claims a save succeeded before the server has actually answered it.
 
 import { NOT_FOUND } from '@holydeck/contracts/http';
-import { effect, signal, type Signal } from '@preact/signals';
+import { computed, effect, signal, type ReadonlySignal, type Signal } from '@preact/signals';
 
 import { API } from '../api-routes.js';
-import { csrf } from '../app-state.js';
+import { can, csrf } from '../app-state.js';
 import { NETWORK_UNREACHABLE, type ApiResult, type Change, type Refused } from '../api.js';
 import { request } from '../request.js';
 import { readServiceView, type ServiceView } from '../workspace/service-data.js';
@@ -21,6 +21,13 @@ export const drift: Signal<readonly { itemId: string; latestRevision: number }[]
 export const rightTab: Signal<'properties' | 'library'> = signal(readRightTab());
 export const bulkSelection: Signal<ReadonlySet<string>> = signal(new Set());
 export const pending: Signal<ReadonlySet<string>> = signal(new Set());
+
+/** Whether the workspace must refuse every edit: the service is closed, the client is offline, or the
+ *  session was never granted permission to change one in the first place. */
+export const isReadOnly: ReadonlySignal<boolean> = computed(() => {
+  const state = service.value?.state;
+  return state === 'completed' || state === 'archived' || saveState.value === 'offline' || !can('services.manage');
+});
 
 const RIGHT_TAB_KEY = 'holydeck.workspace.rightTab';
 
@@ -60,6 +67,19 @@ export async function loadService(id: string): Promise<void> {
   service.value = undefined;
   loadRefusal.value = answer;
   loadState.value = answer.code === NOT_FOUND ? 'missing' : 'error';
+}
+
+/** Re-fetches the service in the background, without ever moving `loadState` away from `'loaded'` — unlike
+ *  `loadService`, a caller such as `useConnection`'s reconnect handler can use this without unmounting
+ *  whatever is currently on screen. Leaves `service` untouched on failure and reports whether it worked. */
+export async function refreshService(id: string): Promise<boolean> {
+  const answer = await request(API.service(id));
+  if (!answer.ok) return false;
+  const view = readServiceView(answer.data);
+  if (view === undefined) return false;
+  service.value = view;
+  await refreshDrift();
+  return true;
 }
 
 export async function mutate(path: string, change: Omit<Change, 'csrf'>, pendingId?: string): Promise<ApiResult<ServiceView>> {

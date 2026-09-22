@@ -93,6 +93,21 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 #preview-row > span { min-width: 0; }
 .skip-links ul { display: flex; flex-wrap: wrap; gap: 16px; list-style: none; padding: 0; }
 
+.service-workspace { display: grid; gap: 16px; }
+.service-workspace-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  position: sticky;
+  bottom: 0;
+  background: var(--color-surface);
+  padding: 4px;
+  padding-bottom: max(4px, env(safe-area-inset-bottom));
+}
+
+@media (min-width: 1200px) {
+  .service-workspace { grid-template-columns: 264px minmax(480px, 1fr) 336px; align-items: start; }
+}
+
 @media (width < 1200px) {
   .workspace:has(> .workspace-panel:not(#order):target, > .workspace-panel:not(#order) :target) > #order {
     display: none;
