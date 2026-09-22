@@ -77,6 +77,10 @@
       "types": "./dist/media.d.ts",
       "import": "./dist/media.js"
     },
+    "./order": {
+      "types": "./dist/order.d.ts",
+      "import": "./dist/order.js"
+    },
     "./palette": {
       "types": "./dist/palette.d.ts",
       "import": "./dist/palette.js"

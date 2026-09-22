@@ -19,6 +19,7 @@ export default defineConfig({
     'src/layouts.ts',
     'src/library.ts',
     'src/media.ts',
+    'src/order.ts',
     'src/palette.ts',
     'src/portable.ts',
     'src/presence.ts',

@@ -12,6 +12,7 @@ import { notFound, withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
+import { serveOrderRoutes } from './order-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
@@ -26,6 +27,8 @@ import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { ServiceStore } from './services.js';
+import type { SlideLabelStore } from './slide-labels.js';
 import type { SettingsAdmin } from './settings-admin.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SessionStore } from './sessions.js';
@@ -60,6 +63,8 @@ export interface AppOptions {
   translationOffsets?: TranslationOffsetStore;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
   shownReferences?: ShownReferenceStore;
+  services?: ServiceStore;
+  slideLabels?: SlideLabelStore;
 }
 
 /**
@@ -82,6 +87,8 @@ export function buildApp({
   media,
   translationOffsets,
   shownReferences,
+  services,
+  slideLabels,
 }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
@@ -221,6 +228,7 @@ export function buildApp({
   // the only read of a passage this server writes down. Behind Control presentation, the same permission
   // the capability surface above is behind, because running a presentation is what this surface is for.
   serveReferenceRoutes(app, { corpus, shownReferences });
+  serveOrderRoutes(app, { services, slideLabels });
 
   if (web !== undefined) serveWebClient(app, web);
 
