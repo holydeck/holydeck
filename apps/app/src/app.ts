@@ -11,11 +11,13 @@ import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } fro
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
 import { isUpgrade } from './live.js';
+import { guardMaintenance } from './maintenance.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveOrderRoutes } from './order-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
+import { serveRestoreRoutes } from './restore-routes.js';
 import { serveServiceRoutes } from './service-routes.js';
 import { serveServiceTemplateRoutes } from './service-template-routes.js';
 import { serveSessionRoutes } from './session-routes.js';
@@ -28,6 +30,7 @@ import { serveWebClient, withSecurityHeaders } from './static.js';
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
+import type { MaintenanceStore } from './maintenance.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { Queue } from './queue.js';
@@ -68,6 +71,8 @@ export interface AppOptions {
   /** Where a backup is recorded and where an on-demand run is queued. Without both, there is
    * nothing here to trigger or list. */
   backups?: { readonly db: RepositoryDb; readonly queue: Queue };
+  /** The restore-apply lease `guardMaintenance` reads. Without it, no request is ever refused for one. */
+  readonly maintenance?: MaintenanceStore;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
   translationOffsets?: TranslationOffsetStore;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
@@ -96,6 +101,7 @@ export function buildApp({
   slideLayouts,
   media,
   backups,
+  maintenance,
   translationOffsets,
   shownReferences,
   services,
@@ -134,6 +140,10 @@ export function buildApp({
   // Installed before the first route is registered, which is what makes `mutatingRoutesOf` the whole
   // list of the routes that change something: a route registered above this line would be missing from it.
   guardMutations(app, { sessions });
+
+  // Installed beside the guard above, the same reach: a restore mid-apply refuses every mutation until
+  // its lease is released, whichever route below would otherwise have handled it.
+  guardMaintenance(app, { maintenance });
 
   // Installed right after: a mutating route's session is already proved by the guard above by the time
   // this asks for it, and every route registered from here down is one this check was on for.
@@ -238,6 +248,16 @@ export function buildApp({
     queue: backups?.queue,
     now: () => new Date().toISOString(),
     timezone: settings.values.timezone,
+    identity,
+  });
+
+  // Behind the same permission as the backup surface, by its own vocabulary: applying a recorded backup
+  // to production. Reuses the backup surface's own `db`/`queue` — a restore-apply job is the same kind
+  // of queued work a backup run is, kept in the same repositories.
+  serveRestoreRoutes(app, {
+    db: backups?.db,
+    queue: backups?.queue,
+    now: () => new Date().toISOString(),
     identity,
   });
 

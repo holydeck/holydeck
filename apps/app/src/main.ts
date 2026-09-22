@@ -21,6 +21,7 @@ import {
 import { systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
 import { serveLive } from './live.js';
+import { maintenanceDb, maintenanceOn } from './maintenance.js';
 import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
 import { queueDb, queueOn } from './queue.js';
@@ -41,6 +42,7 @@ import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
+import type { MaintenanceStore } from './maintenance.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { Queue } from './queue.js';
@@ -98,6 +100,9 @@ let slideLayouts: SlideLayoutStore | undefined;
 // keep one has nothing here to upload to, and its route answers not-found the same way.
 let media: MediaLibrary | undefined;
 let backups: { readonly db: RepositoryDb; readonly queue: Queue } | undefined;
+// The restore-apply lease is kept the same way: a deployment with nowhere to keep one has no worker
+// applying a restore to it either, so `guardMaintenance` has nothing it could ever find held.
+let maintenance: MaintenanceStore | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
@@ -145,6 +150,7 @@ if (settings.values.mongoUrl !== '') {
     },
   });
   backups = { db: repositoryDb(store.db()), queue };
+  maintenance = maintenanceOn(maintenanceDb(store.db()));
   settingsAdmin = settingsAdminOn(settings, {
     readFile: (path) => readFile(path, 'utf8'),
     writeFile,
@@ -181,6 +187,7 @@ const app = buildApp({
   slideLayouts,
   media,
   backups,
+  maintenance,
   translationOffsets,
   shownReferences,
   services,

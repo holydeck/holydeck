@@ -17,6 +17,7 @@ import { BACKUPS_PATH } from './backup-routes.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
+import { RESTORES_PATH } from './restore-routes.js';
 import {
   SERVICE_DUPLICATE_PATH,
   SERVICE_ID_PATH,
@@ -142,6 +143,8 @@ describe('every route that changes something', () => {
       // And triggering an on-demand backup: listing what has run is not a change, asking for a new one is,
       // which is why only the POST side of the backup surface is on this list.
       { method: 'POST', url: BACKUPS_PATH },
+      // Behind the same permission as the backup surface: applying a recorded backup to production.
+      { method: 'POST', url: RESTORES_PATH },
       // Behind the same permission once more: configuring a translation's offset is Admin's alone,
       // reading every one configured is not, which is why only this one route is on this list at all.
       { method: 'PUT', url: `${TRANSLATION_OFFSETS_PATH}/:abbr` },
