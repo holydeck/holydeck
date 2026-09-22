@@ -77,6 +77,11 @@ export const MESSAGE_CODES: readonly MessageCode[] = [
   // it was still being read rather than after. 413 carries HTTP semantics 422 does not, so its own code.
   { code: 'media.too_large', status: 413, stable: true, since: 1 },
   { code: UNEXPECTED_ERROR, status: 500, stable: true, since: 1 },
+  { code: 'run.not_ready', status: 409, stable: true, since: 2 },
+  { code: 'run.snapshot_outdated', status: 409, stable: true, since: 2 },
+  { code: 'run.already_active', status: 409, stable: true, since: 2 },
+  { code: 'run.ended', status: 409, stable: true, since: 2 },
+  { code: 'theme.contrast', status: 422, stable: true, since: 2 },
 ];
 
 /** Codes withdrawn from the registry. A released code is deprecated in documentation, never removed. */

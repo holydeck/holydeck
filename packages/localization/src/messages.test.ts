@@ -70,6 +70,24 @@ describe('the catalogs', () => {
 });
 
 describe('translating', () => {
+  it('names run and theme outcomes in every shipped locale', () => {
+    const keys = [
+      'error.run.not_ready',
+      'error.run.snapshot_outdated',
+      'error.run.already_active',
+      'error.run.ended',
+      'error.theme.contrast',
+      'live.run.started',
+      'live.run.ended',
+      'live.mode.paused',
+      'live.mode.standby',
+      'live.mode.live',
+    ] as const;
+    for (const locale of LOCALES) {
+      for (const key of keys) expect(translate(locale, key)).not.toBe('');
+    }
+  });
+
   it('renders the copy of the locale it was asked for', () => {
     expect(translate('en', 'shell.preparing')).toBe('Preparing the service view.');
     expect(translate('de', 'shell.preparing')).toBe('Die Gottesdienstansicht wird vorbereitet.');

@@ -101,6 +101,10 @@
       "types": "./dist/revisions.d.ts",
       "import": "./dist/revisions.js"
     },
+    "./runs": {
+      "types": "./dist/runs.d.ts",
+      "import": "./dist/runs.js"
+    },
     "./service-templates": {
       "types": "./dist/service-templates.d.ts",
       "import": "./dist/service-templates.js"

@@ -179,6 +179,16 @@ const en = {
   'users.announce.updated': 'Account {name} updated.',
   'users.refused': 'The change was refused: {message}',
   'users.loadFailed': 'The accounts could not be loaded.',
+  'error.run.not_ready': 'This service is not ready to start.',
+  'error.run.snapshot_outdated': 'This service changed after it was prepared. Prepare it again before starting.',
+  'error.run.already_active': 'This service already has an active run.',
+  'error.run.ended': 'This run has already ended.',
+  'error.theme.contrast': 'This theme does not meet the required contrast.',
+  'live.run.started': 'Live run started.',
+  'live.run.ended': 'Live run ended.',
+  'live.mode.paused': 'Live mode paused.',
+  'live.mode.standby': 'Standing by.',
+  'live.mode.live': 'Live mode is on.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -354,6 +364,16 @@ const de: Catalog = {
   'users.announce.updated': 'Konto {name} aktualisiert.',
   'users.refused': 'Die Änderung wurde abgelehnt: {message}',
   'users.loadFailed': 'Die Konten konnten nicht geladen werden.',
+  'error.run.not_ready': 'Dieser Gottesdienst ist noch nicht bereit zum Starten.',
+  'error.run.snapshot_outdated': 'Dieser Gottesdienst wurde nach der Vorbereitung geändert. Bereiten Sie ihn vor dem Start erneut vor.',
+  'error.run.already_active': 'Dieser Gottesdienst hat bereits einen aktiven Durchlauf.',
+  'error.run.ended': 'Dieser Durchlauf ist bereits beendet.',
+  'error.theme.contrast': 'Dieses Design erfüllt den erforderlichen Kontrast nicht.',
+  'live.run.started': 'Live-Durchlauf gestartet.',
+  'live.run.ended': 'Live-Durchlauf beendet.',
+  'live.mode.paused': 'Live-Modus pausiert.',
+  'live.mode.standby': 'Bereit.',
+  'live.mode.live': 'Live-Modus ist aktiv.',
 };
 
 const ta: Catalog = {
@@ -523,6 +543,16 @@ const ta: Catalog = {
   'users.announce.updated': '{name} கணக்கு புதுப்பிக்கப்பட்டது.',
   'users.refused': 'மாற்றம் மறுக்கப்பட்டது: {message}',
   'users.loadFailed': 'கணக்குகளை ஏற்ற முடியவில்லை.',
+  'error.run.not_ready': 'இந்த வழிபாடு தொடங்கத் தயாராக இல்லை.',
+  'error.run.snapshot_outdated': 'தயாரித்த பிறகு இந்த வழிபாடு மாற்றப்பட்டது. தொடங்குவதற்கு முன் மீண்டும் தயாரிக்கவும்.',
+  'error.run.already_active': 'இந்த வழிபாட்டில் ஏற்கனவே செயலில் உள்ள ஓட்டம் உள்ளது.',
+  'error.run.ended': 'இந்த ஓட்டம் ஏற்கனவே முடிந்துவிட்டது.',
+  'error.theme.contrast': 'இந்த தீம் தேவையான மாறுபாட்டைப் பூர்த்தி செய்யவில்லை.',
+  'live.run.started': 'நேரலை ஓட்டம் தொடங்கப்பட்டது.',
+  'live.run.ended': 'நேரலை ஓட்டம் முடிந்தது.',
+  'live.mode.paused': 'நேரலை பயன்முறை இடைநிறுத்தப்பட்டது.',
+  'live.mode.standby': 'காத்திருக்கிறது.',
+  'live.mode.live': 'நேரலை பயன்முறை செயலில் உள்ளது.',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */

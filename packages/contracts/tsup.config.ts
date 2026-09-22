@@ -24,6 +24,7 @@ export default defineConfig({
     'src/portable.ts',
     'src/presence.ts',
     'src/revisions.ts',
+    'src/runs.ts',
     'src/service-templates.ts',
     'src/sessions.ts',
     'src/snapshots.ts',

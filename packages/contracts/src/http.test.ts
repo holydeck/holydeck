@@ -71,6 +71,11 @@ describe('the released message codes', () => {
       ['corpus.unexpected_error', 500],
       ['media.too_large', 413],
       ['server.unexpected_error', 500],
+      ['run.not_ready', 409],
+      ['run.snapshot_outdated', 409],
+      ['run.already_active', 409],
+      ['run.ended', 409],
+      ['theme.contrast', 422],
     ]);
     expect([VALIDATION_FAILED, UPDATE_REQUIRED, STALE_STATE_REVISION, ENTITY_CONFLICT]).toEqual([
       'request.validation_failed',

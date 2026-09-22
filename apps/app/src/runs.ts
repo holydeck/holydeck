@@ -21,6 +21,8 @@
 
 import { randomBytes } from 'node:crypto';
 
+import { RUN_MODES, type RunMode } from '@holydeck/contracts/runs';
+
 import { auditOn } from './audit.js';
 import { requestContext } from './context.js';
 import { permissionsFor as recordPermissions } from './records.js';
@@ -40,8 +42,8 @@ export const RUN_PERMISSIONS = recordPermissions(RUN_RECORD);
  *  way `services.ts`'s `restamp` files archive and unarchive under one action. */
 export const RUN_ACTION = 'presentation.run';
 
-export const RUN_MODES = ['rehearsal', 'live'] as const;
-export type RunMode = (typeof RUN_MODES)[number];
+export { RUN_MODES };
+export type { RunMode };
 
 export const RUN_PHASES = ['active', 'ended'] as const;
 export type RunPhase = (typeof RUN_PHASES)[number];
