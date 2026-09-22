@@ -1,3 +1,6 @@
+// The static styles are shipped without a runtime stylesheet layer, so their accessibility contracts
+// are checked at the artifact boundary: every CSS file is scanned exactly as the browser receives it.
+
 import { readFileSync, readdirSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
@@ -6,6 +9,7 @@ const staticDirectory = new URL('./static/', import.meta.url);
 const stylesheets = readdirSync(staticDirectory)
   .filter((name) => name.endsWith('.css'))
   .map((name) => ({ name, source: readFileSync(new URL(name, staticDirectory), 'utf8') }));
+const appStyles = stylesheets.find(({ name }) => name === 'app.css')?.source ?? '';
 
 const durationInMilliseconds = (value: string): number => {
   const match = /^(\d+(?:\.\d+)?)(ms|s)$/u.exec(value);
@@ -52,5 +56,22 @@ describe('the shipped stylesheets', () => {
     expect(source).toMatch(/animation\s*:\s*none\s*!important/u);
     expect(source).toMatch(/transition\s*:\s*none\s*!important/u);
     expect(source).toMatch(/transform\s*:\s*none\s*!important/u);
+  });
+
+  it('uses logical declarations instead of physical inline spacing and positions', () => {
+    const declarations = appStyles.replace(/\/\*[\s\S]*?\*\//gu, '');
+    expect(declarations).not.toMatch(
+      /(?:^|[;{])\s*(?:margin-left|margin-right|padding-left|padding-right|left|right)\s*:/u,
+    );
+  });
+
+  it('lets buttons and navigation controls wrap at 767px without shrinking below 44px', () => {
+    const narrow = /@media\s*\(max-width:\s*767px\)\s*\{([\s\S]*?)\n\}/u.exec(appStyles)?.[1] ?? '';
+    expect(narrow).toMatch(/button,\s*nav a\s*\{/u);
+    expect(narrow).toMatch(/white-space:\s*normal/u);
+    expect(narrow).toMatch(/overflow-wrap:\s*anywhere/u);
+    expect(narrow).toMatch(/overflow:\s*visible/u);
+    expect(narrow).toMatch(/min-block-size:\s*44px/u);
+    expect(narrow).not.toMatch(/text-overflow|white-space:\s*nowrap|overflow:\s*hidden/u);
   });
 });
