@@ -21,12 +21,15 @@ const queries = (await readFile(new URL('.browserslistrc', root), 'utf8'))
 
 const target = esbuildTargets(browserslist(queries));
 
+const buildId = Date.now().toString(36);
+
 // Emptied rather than removed: in the development stack this directory is a mount the application
 // reads the client from, and a mount point cannot be unlinked from inside the container.
 await mkdir(dist, { recursive: true });
 for (const entry of await readdir(dist)) await rm(new URL(entry, dist), { recursive: true, force: true });
 
 const options = {
+  define: { __HOLYDECK_BUILD_ID__: JSON.stringify(buildId) },
   entryPoints: ['src/main.ts', 'src/service-worker.ts'],
   outdir: 'dist',
   bundle: true,

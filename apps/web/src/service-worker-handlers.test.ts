@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CACHE_NAME,
+  CACHE_PREFIX,
   type ResponseLike,
   PRECACHE,
   dropOtherCaches,
@@ -41,6 +42,35 @@ describe('installing', () => {
 });
 
 describe('activating', () => {
+  it('uses the dev cache when no build identifier is injected', () => {
+    expect(CACHE_NAME).toBe(`${CACHE_PREFIX}dev`);
+  });
+
+  it('drops the previous build cache when a new build activates', async () => {
+    try {
+      vi.stubGlobal('__HOLYDECK_BUILD_ID__', 'build-one');
+      vi.resetModules();
+      const oldBuild = await import('./service-worker-handlers.js');
+
+      vi.stubGlobal('__HOLYDECK_BUILD_ID__', 'build-two');
+      vi.resetModules();
+      const newBuild = await import('./service-worker-handlers.js');
+      const { storage } = fakeCaches({}, [
+        oldBuild.CACHE_NAME,
+        newBuild.CACHE_NAME,
+        'someone-elses-cache',
+      ]);
+
+      expect(oldBuild.CACHE_NAME).toBe(`${CACHE_PREFIX}build-one`);
+      expect(newBuild.CACHE_NAME).toBe(`${CACHE_PREFIX}build-two`);
+      await expect(newBuild.dropOtherCaches(storage)).resolves.toEqual([oldBuild.CACHE_NAME]);
+      expect(storage.delete).toHaveBeenCalledExactlyOnceWith(oldBuild.CACHE_NAME);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
   it('deletes its own older caches and leaves everything else alone', async () => {
     const { storage } = fakeCaches({}, [CACHE_NAME, 'holydeck-web-v0', 'someone-elses-cache']);
 

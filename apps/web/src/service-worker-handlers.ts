@@ -22,9 +22,12 @@ export interface CacheStorageLike {
 
 export const CACHE_PREFIX = 'holydeck-web-';
 
-// Revisioning the cache per build is owned by the cache-revisioning work; until then the name is
-// bumped by hand, and activating deletes every earlier one.
-export const CACHE_NAME = `${CACHE_PREFIX}v1`;
+declare const __HOLYDECK_BUILD_ID__: string | undefined;
+// esbuild's `define` substitutes this identifier with a literal at build time; outside esbuild
+// (vitest, tsc) `typeof` on an unbound identifier evaluates to 'undefined' without throwing, so
+// the fallback below is what tests and type-checking see.
+const buildId = typeof __HOLYDECK_BUILD_ID__ === 'string' ? __HOLYDECK_BUILD_ID__ : 'dev';
+export const CACHE_NAME = `${CACHE_PREFIX}${buildId}`;
 
 export const SHELL = '/index.html';
 
