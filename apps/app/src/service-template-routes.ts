@@ -5,7 +5,7 @@ import { parseServiceTemplateDraft } from '@holydeck/contracts/service-templates
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
-import { SERVICE_TEMPLATES_MANAGE } from './roles.js';
+import { SERVICES_MANAGE, SERVICE_TEMPLATES_MANAGE } from './roles.js';
 import { ServiceTemplateError, serviceTemplateContext } from './service-templates.js';
 
 import type { RouteNeed } from './authorization.js';
@@ -16,11 +16,14 @@ export const SERVICE_TEMPLATE_PATH = '/api/v1/service-templates';
 export const SERVICE_TEMPLATE_ID_PATH = `${SERVICE_TEMPLATE_PATH}/:id`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: SERVICE_TEMPLATES_MANAGE };
+// The list alone is readable with `services.manage`, so an Editor building a New Service can offer
+// Templates without also holding the Admin-only reach to define one.
+const LIST_PERMISSION: RouteNeed = { kind: 'permission', need: SERVICES_MANAGE };
 
 const ROUTES = [
-  ['POST', SERVICE_TEMPLATE_PATH],
-  ['GET', SERVICE_TEMPLATE_PATH],
-  ['GET', SERVICE_TEMPLATE_ID_PATH],
+  ['POST', SERVICE_TEMPLATE_PATH, PERMISSION],
+  ['GET', SERVICE_TEMPLATE_PATH, LIST_PERMISSION],
+  ['GET', SERVICE_TEMPLATE_ID_PATH, PERMISSION],
 ] as const;
 
 type Answer<T> =
@@ -53,11 +56,11 @@ export function serveServiceTemplateRoutes(
   { serviceTemplates }: ServiceTemplateRoutesOptions,
 ): void {
   if (serviceTemplates === undefined) {
-    for (const [method, url] of ROUTES) {
+    for (const [method, url, need] of ROUTES) {
       app.route({
         method,
         url,
-        config: { need: PERMISSION },
+        config: { need },
         handler: (request, reply) => reply.code(404).send(notFound(request)),
       });
     }
@@ -76,7 +79,7 @@ export function serveServiceTemplateRoutes(
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
-  app.get(SERVICE_TEMPLATE_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.get(SERVICE_TEMPLATE_PATH, { config: { need: LIST_PERMISSION } }, async (request, reply) => {
     const answer = await settled(() => serviceTemplates.list(call(request)));
     if (!answer.ok) return refused(request, reply, answer);
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
