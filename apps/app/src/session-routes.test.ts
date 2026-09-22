@@ -37,6 +37,7 @@ import {
   ACCOUNTS_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
+  PRESENCE_USE,
   PRESENTATION_CONTROL,
   SERVICES_MANAGE,
   SERVICE_TEMPLATES_MANAGE,
@@ -359,6 +360,7 @@ describe('signing in', () => {
         SERVICE_TEMPLATES_MANAGE,
         MEDIA_MANAGE,
         SERVICES_MANAGE,
+        PRESENCE_USE,
       ],
     });
     const cookie = String(response.headers['set-cookie']);
@@ -435,6 +437,7 @@ describe('signing in with a passkey', () => {
         SERVICE_TEMPLATES_MANAGE,
         MEDIA_MANAGE,
         SERVICES_MANAGE,
+        PRESENCE_USE,
       ],
     });
     const cookie = String(response.headers['set-cookie']);

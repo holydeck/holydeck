@@ -45,6 +45,12 @@ export const MEDIA_MANAGE = 'media.manage';
  */
 export const SERVICES_MANAGE = 'services.manage';
 
+/**
+ * Enters, lists and leaves presence on a piece of content being edited (spec v1c-09, COLAB-01).
+ * Granted to every role, including Member — presence is informational, not a change of reach.
+ */
+export const PRESENCE_USE = 'presence.use';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -53,9 +59,10 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     SERVICE_TEMPLATES_MANAGE,
     MEDIA_MANAGE,
     SERVICES_MANAGE,
+    PRESENCE_USE,
   ],
-  editor: [SERVICES_MANAGE],
-  member: [],
+  editor: [SERVICES_MANAGE, PRESENCE_USE],
+  member: [PRESENCE_USE],
 };
 
 /**

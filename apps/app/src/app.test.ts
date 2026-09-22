@@ -36,6 +36,7 @@ import { SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
+import { PRESENCE_PATH } from './presence-routes.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
@@ -109,6 +110,10 @@ describe('every route that changes something', () => {
       { method: 'POST', url: PASSKEY_PATH },
       { method: 'PATCH', url: `${PASSKEY_PATH}/:id` },
       { method: 'DELETE', url: `${PASSKEY_PATH}/:id` },
+      // Presence is gated by presence.use, but every role holds it, so nothing here narrows who may enter
+      // or leave — it is counted purely because entering and leaving are both changes.
+      { method: 'POST', url: PRESENCE_PATH },
+      { method: 'DELETE', url: PRESENCE_PATH },
       // The first route a permission gates, and not merely a proved session — still counted here, because
       // the guard it is behind is asked before the permission is.
       { method: 'PATCH', url: `${ACCOUNTS_PATH}/:id/control-presentation` },

@@ -4,6 +4,7 @@ import {
   ACCOUNTS_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
+  PRESENCE_USE,
   PRESENTATION_CONTROL,
   SERVICES_MANAGE,
   SERVICE_TEMPLATES_MANAGE,
@@ -26,7 +27,7 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin accounts, settings, Layouts, media, services and Service Templates', () => {
+  it('grants an admin accounts, settings, Layouts, media, services, Service Templates and presence', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
@@ -34,17 +35,18 @@ describe('what a role grants', () => {
       SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
+      PRESENCE_USE,
     ]);
   });
 
-  it('grants an editor service management, but not Service Template management, by role alone', () => {
+  it('grants an editor service management and presence, but not Service Template management, by role alone', () => {
     expect(SERVICES_MANAGE).toBe('services.manage');
-    expect(permissionsFor(accountOf('editor', false))).toEqual([SERVICES_MANAGE]);
+    expect(permissionsFor(accountOf('editor', false))).toEqual([SERVICES_MANAGE, PRESENCE_USE]);
     expect(permissionsFor(accountOf('editor', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
   });
 
-  it('grants a member nothing by role alone', () => {
-    expect(permissionsFor(accountOf('member', false))).toEqual([]);
+  it('grants a member presence by role alone', () => {
+    expect(permissionsFor(accountOf('member', false))).toEqual([PRESENCE_USE]);
     expect(permissionsFor(accountOf('member', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
   });
 });
@@ -55,9 +57,10 @@ describe('what Control presentation is', () => {
   it('is independent of role: granted to an editor or a member, it is theirs', () => {
     expect(permissionsFor(accountOf('editor', true))).toEqual([
       SERVICES_MANAGE,
+      PRESENCE_USE,
       PRESENTATION_CONTROL,
     ]);
-    expect(permissionsFor(accountOf('member', true))).toEqual([PRESENTATION_CONTROL]);
+    expect(permissionsFor(accountOf('member', true))).toEqual([PRESENCE_USE, PRESENTATION_CONTROL]);
   });
 
   it('is not granted to an admin implicitly, whatever else admin carries', () => {
@@ -72,6 +75,7 @@ describe('what Control presentation is', () => {
       SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
+      PRESENCE_USE,
       PRESENTATION_CONTROL,
     ]);
   });

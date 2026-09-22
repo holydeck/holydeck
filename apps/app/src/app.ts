@@ -14,6 +14,7 @@ import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveOrderRoutes } from './order-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
+import { servePresenceRoutes } from './presence-routes.js';
 import { servePreparationRoutes } from './preparation-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
 import { serveServiceRoutes } from './service-routes.js';
@@ -30,6 +31,7 @@ import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { PresenceStore } from './presence.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { PreparationStore } from './snapshots.js';
@@ -70,6 +72,8 @@ export interface AppOptions {
   translationOffsets?: TranslationOffsetStore;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
   shownReferences?: ShownReferenceStore;
+  /** Where who is editing what is kept. Without it, there is nobody here to observe. */
+  presence?: PresenceStore;
   services?: ServiceStore;
   serviceTemplates?: ServiceTemplateStore;
   preparation?: PreparationStore;
@@ -97,6 +101,7 @@ export function buildApp({
   media,
   translationOffsets,
   shownReferences,
+  presence,
   services,
   serviceTemplates,
   preparation,
@@ -215,6 +220,10 @@ export function buildApp({
   // is already signed in, which is what lets this surface say plainly what a sign-in never may.
   serveTotpRoutes(app, { identity });
   servePasskeyRoutes(app, { identity });
+
+  // Presence is gated by a permission like everything below, but one every role is granted — Member
+  // included — so nothing here narrows who may say they are editing something.
+  servePresenceRoutes(app, { presence });
 
   // The first route this server asks a permission of, and not merely a proved session: administering
   // another account is Admin's alone, by the roles this server enforces.

@@ -632,6 +632,7 @@ describe('the Operator override', () => {
       SERVICE_TEMPLATES_MANAGE,
       'media.manage',
       'services.manage',
+      'presence.use',
     ]);
   });
 

@@ -32,6 +32,7 @@ import { serviceTemplatesOn } from './service-templates.js';
 import { preparationOn } from './snapshots.js';
 import { sessionDb, sessionsOn } from './sessions.js';
 import { passkeyDb, passkeysOn } from './passkeys.js';
+import { presenceDb, presenceOn } from './presence.js';
 import { settingsAdminOn } from './settings-admin.js';
 import { slideLayoutsOn } from './slide-layouts.js';
 import { slideLabelsOn } from './slide-labels.js';
@@ -44,6 +45,7 @@ import { readWebBuild } from './static.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { PresenceStore } from './presence.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { PreparationStore } from './snapshots.js';
@@ -105,6 +107,9 @@ let translationOffsets: TranslationOffsetStore | undefined;
 // write it down may show nothing, because a passage displayed without its revision recorded is the one
 // thing BIBL-04 rules out, and its routes answer not-found the same way.
 let shownReferences: ShownReferenceStore | undefined;
+// Who is editing what is kept the same way and for the same reason: a deployment with nowhere to
+// keep an entry has nobody here to observe, and its routes answer not-found the same way.
+let presence: PresenceStore | undefined;
 let stopWatchingSettings: (() => void) | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
@@ -127,6 +132,7 @@ if (settings.values.mongoUrl !== '') {
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
+  presence = presenceOn(presenceDb(store.db()), { now });
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
   // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
   await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
@@ -187,6 +193,7 @@ const app = buildApp({
   media,
   translationOffsets,
   shownReferences,
+  presence,
   services,
   serviceTemplates,
   preparation,
