@@ -64,8 +64,19 @@ const NOT_AN_ORDINAL = [
 
 const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
 
+// A path param, not the stamp this song was actually found by, so it is escaped before landing in a
+// quoted header value rather than trusted to already be free of '"', '\' and control characters.
+const attachmentName = (id: string): string => `${id.replace(/["\\\r\n]/gu, '_')}.json`;
+
 const singerIdIn = (request: FastifyRequest): string =>
   (request.params as { readonly id: string; readonly singerId: string }).singerId;
+
+// `song-singer-chords.ts`'s `idFor` joins songId and singerId with `:` to make one identity for the
+// pair; a singerId carrying that separator could otherwise misread as a different pair's identity.
+const SINGER_ID_PROBLEM = [
+  { path: 'singerId', code: FIELD_CODES.notAllowed, message: 'must not be empty or contain \':\'' },
+];
+const singerIdInvalid = (singerId: string): boolean => singerId.length === 0 || singerId.includes(':');
 
 const isRefusal = (error: unknown): error is SongError & { kind: 'state' | 'conflict' } =>
   error instanceof SongError && (error.kind === 'state' || error.kind === 'conflict');
@@ -199,7 +210,7 @@ export function serveSongRoutes(app: FastifyInstance, { songs, chords, identity 
     const id = idIn(request);
     const text = await store.exportPortable(call(request), id, revision);
     if (text === undefined) return reply.code(404).send(notFound(request));
-    return reply.header('content-disposition', `attachment; filename="${id}.json"`).type('application/json').send(text);
+    return reply.header('content-disposition', `attachment; filename="${attachmentName(id)}"`).type('application/json').send(text);
   });
 
   app.post(SONG_IMPORT_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
@@ -236,6 +247,7 @@ export function serveSongRoutes(app: FastifyInstance, { songs, chords, identity 
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const songId = idIn(request);
     const singerId = singerIdIn(request);
+    if (singerIdInvalid(singerId)) return reply.code(422).send(validationFailure(request.id, SINGER_ID_PROBLEM));
     if ((await store.current(call(request), songId)) === undefined) return reply.code(404).send(notFound(request));
     const answer = await settled(
       () => chordsStore.create(songSingerChordsContext(provenSession(request).record.actor, correlationFor(SONG_PREFIX, request.id)), songId, singerId, parsed.value),
@@ -249,6 +261,7 @@ export function serveSongRoutes(app: FastifyInstance, { songs, chords, identity 
   app.get(SONG_SINGER_CHORDS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const songId = idIn(request);
     const singerId = singerIdIn(request);
+    if (singerIdInvalid(singerId)) return reply.code(422).send(validationFailure(request.id, SINGER_ID_PROBLEM));
     if ((await store.current(call(request), songId)) === undefined) return reply.code(404).send(notFound(request));
     const value = await chordsStore.get(
       songSingerChordsContext(provenSession(request).record.actor, correlationFor(SONG_PREFIX, request.id)), songId, singerId,
@@ -262,6 +275,7 @@ export function serveSongRoutes(app: FastifyInstance, { songs, chords, identity 
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const songId = idIn(request);
     const singerId = singerIdIn(request);
+    if (singerIdInvalid(singerId)) return reply.code(422).send(validationFailure(request.id, SINGER_ID_PROBLEM));
     if ((await store.current(call(request), songId)) === undefined) return reply.code(404).send(notFound(request));
     const answer = await settled(
       () => chordsStore.edit(songSingerChordsContext(provenSession(request).record.actor, correlationFor(SONG_PREFIX, request.id)), songId, singerId, parsed.value),

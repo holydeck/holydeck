@@ -144,6 +144,14 @@ describe('song routes', () => {
     expect(refused.json().error.fields).not.toHaveLength(0);
   });
 
+  test('keeps the raw YAML round trip byte-identical', async () => {
+    const id = await created();
+    const raw = (await ask('GET', `${at(SONG_ID_PATH, id)}/raw`)).body;
+    await ask('PUT', `${at(SONG_ID_PATH, id)}/raw`, raw, admin, { 'content-type': 'text/plain' });
+    const replayed = (await ask('GET', `${at(SONG_ID_PATH, id)}/raw`)).body;
+    expect(replayed).toBe(raw);
+  });
+
   test('refuses a non-text body when editing raw YAML', async () => {
     const id = await created();
     const refused = await ask('PUT', `${at(SONG_ID_PATH, id)}/raw`, { not: 'text' });
@@ -155,6 +163,14 @@ describe('song routes', () => {
     const response = await ask('GET', `${at(SONG_ID_PATH, id)}/export`);
     expect(response.headers['content-disposition']).toBe(`attachment; filename="${id}.json"`);
     expect((await ask('GET', `${at(SONG_ID_PATH, id)}/export?revision=no`)).statusCode).toBe(422);
+  });
+
+  test('omits singer chords from the portable export', async () => {
+    const id = await created();
+    await ask('POST', singerAt(id, 'singer-1'), { chords: 'Am  F  C  G' });
+    const exported = (await ask('GET', `${at(SONG_ID_PATH, id)}/export`)).body;
+    expect(exported).not.toContain('Am  F  C  G');
+    expect(exported).not.toContain('singer-1');
   });
 
   test('imports portable bytes and refuses malformed bytes', async () => {
