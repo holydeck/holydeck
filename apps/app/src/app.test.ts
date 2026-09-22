@@ -37,6 +37,7 @@ import { SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
+import { WORKSPACE_POSITION_PATH } from './workspace-position-routes.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
@@ -159,6 +160,7 @@ describe('every route that changes something', () => {
       { method: 'POST', url: SERVICE_ITEM_DUPLICATE_PATH },
       { method: 'POST', url: SERVICE_ITEMS_REORDER_PATH },
       { method: 'POST', url: SERVICE_ITEM_REVISE_PATH },
+      { method: 'PUT', url: WORKSPACE_POSITION_PATH },
       // A Service Template is Admin's by a permission of its own: creating one changes what New Service offers.
       { method: 'POST', url: SERVICE_TEMPLATE_PATH },
     ]);

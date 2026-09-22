@@ -24,6 +24,7 @@ import { serveSlideLayoutRoutes } from './slide-layout-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
 import { serveTranslationOffsetRoutes } from './translation-offset-routes.js';
 import { serveWebClient, shellFallback, withSecurityHeaders } from './static.js';
+import { serveWorkspacePositionRoutes } from './workspace-position-routes.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
@@ -40,6 +41,7 @@ import type { LoadedSettings } from './settings.js';
 import type { ShownReferenceStore } from './shown-references.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 import type { WebAsset } from './static.js';
+import type { WorkspacePositionStore } from './workspace-positions.js';
 
 const PUBLIC: RouteNeed = { kind: 'public' };
 
@@ -67,6 +69,10 @@ export interface AppOptions {
   media?: MediaLibrary;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
   translationOffsets?: TranslationOffsetStore;
+  /** Where an account's last workspace position is kept. Without it, there is none to read or save. */
+  workspacePositions?: WorkspacePositionStore;
+  /** Checks whether a library content record remains available to its owner. */
+  contentExists?: (context: unknown, id: string) => Promise<boolean>;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
   shownReferences?: ShownReferenceStore;
   services?: ServiceStore;
@@ -94,6 +100,8 @@ export function buildApp({
   slideLayouts,
   media,
   translationOffsets,
+  workspacePositions,
+  contentExists,
   shownReferences,
   services,
   serviceTemplates,
@@ -244,6 +252,7 @@ export function buildApp({
   serveOrderRoutes(app, { services, slideLabels });
   serveOutputDefaultsRoutes(app);
   serveServiceRoutes(app, { services });
+  serveWorkspacePositionRoutes(app, { workspacePositions, services, contentExists });
   serveServiceTemplateRoutes(app, { serviceTemplates });
 
   if (web !== undefined) serveWebClient(app, web);

@@ -48,6 +48,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'service-template-routes.ts': 'no harness test creates or previews a Service Template over HTTP',
   'totp-routes.ts': 'no harness test drives TOTP setup or verification over HTTP',
   'translation-offset-routes.ts': 'no harness test reads or configures a translation offset over HTTP',
+  'workspace-position-routes.ts': 'no harness test reads or writes a workspace position over HTTP',
 };
 
 /**

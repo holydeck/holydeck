@@ -34,6 +34,7 @@ export default defineConfig({
     'src/songs.ts',
     'src/totp.ts',
     'src/translation-offsets.ts',
+    'src/workspace.ts',
     'src/webauthn.ts',
   ],
   format: ['esm'],

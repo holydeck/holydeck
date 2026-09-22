@@ -23,6 +23,7 @@ import { probeCorpusIsClosed } from './corpus.js';
 import { serveLive } from './live.js';
 import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
+import { libraryOn } from './library.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
@@ -37,6 +38,7 @@ import { slideLabelsOn } from './slide-labels.js';
 import { shownReferenceDb, shownReferencesOn } from './shown-references.js';
 import { totpDb, totpsOn } from './totp.js';
 import { translationOffsetDb, translationOffsetsOn } from './translation-offsets.js';
+import { workspacePositionDb, workspacePositionsOn } from './workspace-positions.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
@@ -51,6 +53,7 @@ import type { SlideLabelStore } from './slide-labels.js';
 import type { SessionStore } from './sessions.js';
 import type { ShownReferenceStore } from './shown-references.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
+import type { WorkspacePositionStore } from './workspace-positions.js';
 
 checkReleasedContracts();
 
@@ -98,6 +101,8 @@ let media: MediaLibrary | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
+let workspacePositions: WorkspacePositionStore | undefined;
+let contentExists: ((context: unknown, id: string) => Promise<boolean>) | undefined;
 // What an operator showed is recorded the same way and for the same reason: a deployment with nowhere to
 // write it down may show nothing, because a passage displayed without its revision recorded is the one
 // thing BIBL-04 rules out, and its routes answer not-found the same way.
@@ -122,6 +127,9 @@ if (settings.values.mongoUrl !== '') {
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
+  workspacePositions = workspacePositionsOn(workspacePositionDb(store.db()), { now });
+  const library = libraryOn(repositoryDb(store.db()), { now });
+  contentExists = async (context, id) => (await library.get(context, id)) !== undefined;
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
   // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
@@ -182,6 +190,8 @@ const app = buildApp({
   slideLayouts,
   media,
   translationOffsets,
+  workspacePositions,
+  contentExists,
   shownReferences,
   services,
   serviceTemplates,
