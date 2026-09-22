@@ -128,8 +128,11 @@ describe('every route that changes something', () => {
       { method: 'POST', url: `${LAYOUT_REVISIONS_PATH}/:revision` },
       { method: 'PATCH', url: `${SLIDE_LAYOUTS_PATH}/:id/status` },
       // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
-      // Admin's, the same as a Slide Layout's own surface above is.
+      // Admin's, the same as a Slide Layout's own surface above is. Archiving, restoring and retrying a
+      // failed item are the same permission's, the way a Slide Layout's own status route is.
       { method: 'POST', url: MEDIA_PATH },
+      { method: 'PATCH', url: `${MEDIA_PATH}/:id/status` },
+      { method: 'POST', url: `${MEDIA_PATH}/:id/retry` },
       // Behind the same permission once more: configuring a translation's offset is Admin's alone,
       // reading every one configured is not, which is why only this one route is on this list at all.
       { method: 'PUT', url: `${TRANSLATION_OFFSETS_PATH}/:abbr` },
