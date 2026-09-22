@@ -6,10 +6,6 @@
 // catalogue's ten number keys. Every boundary and shortcut rule is `control-state.ts`'s, reused here
 // rather than recomputed.
 //
-// `data` starts empty in production — no order-reading route exists yet, only T52 and T82 do, which is
-// all this task depends on — so every element below renders its honest empty state instead of assuming
-// data that has not been wired yet.
-//
 // Output-surface launching (`output-launch.ts`) is deliberately not wired into Live Controls: its own
 // header scopes screen placement and arrangement to a separate task (LIVE-16), and nothing in this
 // task's brief asks for it here.

@@ -94,6 +94,12 @@ const en = {
   'control.live.previous': 'Previous slide',
   'control.live.next': 'Next slide',
   'control.status.showing': 'Now showing {label}.',
+  'control.connection.authorizing': 'Checking live access…',
+  'control.connection.connecting': 'Connecting to the live service…',
+  'control.connection.synchronised': 'Connected to the live service.',
+  'control.connection.resuming': 'Restoring the live connection…',
+  'control.connection.degraded': 'Live connection interrupted.',
+  'control.connection.closed': 'Live connection closed.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -184,6 +190,12 @@ const de: Catalog = {
   'control.live.previous': 'Vorherige Folie',
   'control.live.next': 'Nächste Folie',
   'control.status.showing': 'Zeigt jetzt {label}.',
+  'control.connection.authorizing': 'Live-Zugriff wird geprüft…',
+  'control.connection.connecting': 'Verbindung zum laufenden Gottesdienst wird hergestellt…',
+  'control.connection.synchronised': 'Mit dem laufenden Gottesdienst verbunden.',
+  'control.connection.resuming': 'Live-Verbindung wird wiederhergestellt…',
+  'control.connection.degraded': 'Live-Verbindung unterbrochen.',
+  'control.connection.closed': 'Live-Verbindung geschlossen.',
 };
 
 const ta: Catalog = {
@@ -268,6 +280,12 @@ const ta: Catalog = {
   'control.live.previous': 'முந்தைய ஸ்லைடு',
   'control.live.next': 'அடுத்த ஸ்லைடு',
   'control.status.showing': 'இப்போது {label} காட்டப்படுகிறது.',
+  'control.connection.authorizing': 'நேரலை அணுகல் சரிபார்க்கப்படுகிறது…',
+  'control.connection.connecting': 'நேரலை வழிபாட்டுடன் இணைக்கப்படுகிறது…',
+  'control.connection.synchronised': 'நேரலை வழிபாட்டுடன் இணைக்கப்பட்டுள்ளது.',
+  'control.connection.resuming': 'நேரலை இணைப்பு மீட்டமைக்கப்படுகிறது…',
+  'control.connection.degraded': 'நேரலை இணைப்பு தடைப்பட்டது.',
+  'control.connection.closed': 'நேரலை இணைப்பு மூடப்பட்டது.',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */

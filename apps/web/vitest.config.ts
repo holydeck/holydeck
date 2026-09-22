@@ -9,9 +9,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      // Two entry files are excluded: both are wiring that only a real browser can execute, and both
-      // delegate immediately to the handlers below, which are covered.
-      exclude: ['src/**/*.test.ts', 'src/main.ts', 'src/service-worker.ts'],
+      // The service worker entry delegates to the covered handlers and requires a worker context.
+      exclude: ['src/**/*.test.ts', 'src/service-worker.ts'],
       thresholds: coverageFloor,
     },
   },
