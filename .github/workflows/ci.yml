@@ -80,3 +80,24 @@ jobs:
     uses: ./.github/workflows/docker-build.yml
     with:
       push: false
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # scripts/workspace/compose.mjs (pnpm run verify:compose, part of the gate every machine runs) checks
+      # this repository's own invariants by parsing the YAML by hand; it cannot catch anything Compose
+      # itself would reject, such as bad ${VAR} interpolation or invalid healthcheck syntax. `docker
+      # compose config` is the real parser, so it belongs here instead of in the gate: it needs the Docker
+      # Compose CLI, which is a machine's state, not a repository's, and gate.mjs already keeps that class
+      # of check (see verify:stack there) out of what a laptop with Docker off must pass. compose.yaml's
+      # HOLYDECK_CORPUS_TOKEN has no default, deliberately, so a real deploy cannot start silently
+      # unconfigured — so only this one file needs a throwaway value to resolve here.
+      - name: Validate the compose files against the real Docker Compose CLI
+        run: |
+          docker compose -f compose.dev.yaml config --quiet
+          docker compose -f compose.test.yaml config --quiet
+          HOLYDECK_CORPUS_TOKEN=ci-placeholder-token docker compose -f compose.yaml config --quiet
