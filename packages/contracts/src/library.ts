@@ -60,7 +60,15 @@ export function parseLibraryFilter(query: unknown, path = 'library'): Parsed<Lib
   }
   const rawQ = source['q'];
   const q = typeof rawQ === 'string' && rawQ !== '' ? rawQ : undefined;
-  const archived = source['archived'] === 'true';
+  const rawArchived = source['archived'];
+  if (rawArchived !== undefined && rawArchived !== 'true' && rawArchived !== 'false') {
+    problems.push({
+      path: `${path}.archived`,
+      code: FIELD_CODES.notAllowed,
+      message: 'must be one of true, false',
+    });
+  }
+  const archived = rawArchived === 'true';
   if (problems.length > 0) return { ok: false, problems };
   return { ok: true, value: { ...(kind === undefined ? {} : { kind }), ...(q === undefined ? {} : { q }), archived } };
 }

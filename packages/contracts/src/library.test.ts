@@ -27,10 +27,17 @@ describe('reading library filters', () => {
     expect(parseLibraryFilter({ q: '' })).toEqual({ ok: true, value: { archived: false } });
   });
 
-  it('reads archived only from the true query string', () => {
+  it('reads archived from valid boolean query strings and defaults to false', () => {
     expect(parseLibraryFilter({ archived: 'true' })).toEqual({ ok: true, value: { archived: true } });
+    expect(parseLibraryFilter({ archived: 'false' })).toEqual({ ok: true, value: { archived: false } });
     expect(parseLibraryFilter({})).toEqual({ ok: true, value: { archived: false } });
-    expect(parseLibraryFilter({ archived: '1' })).toEqual({ ok: true, value: { archived: false } });
+  });
+
+  it.each(['yes', '1', 'TRUE', ''])('refuses the malformed archived query value %j', (archived) => {
+    expect(parseLibraryFilter({ archived }, 'filter')).toEqual({
+      ok: false,
+      problems: [{ path: 'filter.archived', code: FIELD_CODES.notAllowed, message: 'must be one of true, false' }],
+    });
   });
 });
 
