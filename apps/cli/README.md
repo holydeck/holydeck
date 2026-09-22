@@ -207,6 +207,14 @@ Every command works against the local datastore by default. Pass
 HolyDeck server instead — the server ships as a container image at
 `ghcr.io/holydeck/corpus`.
 
+That image serves every route, render included, with no credential check at all when
+`HOLYDECK_CORPUS_TOKEN` is not set — the same tokenless mode that lets the CLI reach a corpus it
+spawned itself for the local datastore, which never leaves the machine. The supported
+`compose.yaml` deployment always sets it (`docker compose` refuses to start otherwise). Running
+the image any other way — by hand, in a different compose file, in a Kubernetes manifest — and
+reaching a network beyond localhost without setting it yourself leaves sync, search and render
+open to anyone who can reach the port.
+
 In the supported `compose.yaml` deployment, the corpus stays inside the deployment network behind
 the application (see `MAINTENANCE.md` and the root `README.md`). Point the CLI at the application's
 `/corpus` path instead of a standalone corpus URL, using a client token — never the deployment's own
