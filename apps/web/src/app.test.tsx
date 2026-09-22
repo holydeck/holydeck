@@ -15,7 +15,7 @@ import { currentPath } from './router.js';
 
 import type { SessionView } from '@holydeck/contracts/sessions';
 
-const signedIn = { csrf: 'c'.repeat(43), permissions: [], slots: [] } as unknown as SessionView;
+const signedIn = { csrf: 'c'.repeat(43), permissions: ['accounts.manage'], slots: [] } as unknown as SessionView;
 
 const at = (path: string): void => {
   currentPath.value = path;

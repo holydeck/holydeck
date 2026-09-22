@@ -19,7 +19,7 @@ import { currentPath, matchRoute } from '../router.js';
 
 const signedIn = {
   actor: 'account:GLkQ5wEtQEy5PfN2Zr9m7A',
-  permissions: ['services.read'],
+  permissions: ['services.read', 'accounts.manage'],
   startedAt: '2026-09-13T09:30:00.000Z',
   lastSeenAt: '2026-09-13T09:30:00.000Z',
   expiresAt: '2026-09-14T09:30:00.000Z',
