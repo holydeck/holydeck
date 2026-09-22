@@ -22,9 +22,12 @@
 # holydeck-data named volume, under the same /data/holydeck root the settings mount sits in. MongoDB's own
 # records live in mongo-data. Both survive `down`; only `down -v` discards them.
 #
-# The corpus is internal: nothing here publishes its port, and the application is the only client that
-# reaches it, over the token below. Generate one long, random value per deployment with
-# `openssl rand -hex 32`; do not reuse the example in compose.dev.yaml.
+# The corpus itself publishes no port: the application is the only container that reaches it directly,
+# over the token below. The application does reverse-proxy a handful of read and render routes onwards,
+# at /corpus/* on its own public port (REL-09) — callers there present a separate, narrower-scoped
+# client token (HOLYDECK_CORPUS_CLIENT_TOKENS below), never this one. Generate the token below as one
+# long, random value per deployment with `openssl rand -hex 32`; do not reuse the example in
+# compose.dev.yaml.
 name: holydeck
 
 services:
@@ -47,6 +50,11 @@ services:
       HOLYDECK_MONGO_DB: holydeck
       # Long and random, kept out of this file. Generate one with: openssl rand -hex 32
       HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:?set a long random value before starting}
+      # Optional, comma-separated tokens for CLI users reaching the corpus through the application's
+      # /corpus proxy (see apps/cli/README.md). Each is scoped to the read/render routes the proxy
+      # exposes and never accepted on sync or admin routes, unlike HOLYDECK_CORPUS_TOKEN above. Leave
+      # unset to issue none.
+      HOLYDECK_CORPUS_CLIENT_TOKENS: ${HOLYDECK_CORPUS_CLIENT_TOKENS:-}
       # bible.com answers plain HTTP clients with a JavaScript challenge. Set this to fetch
       # through the Chromium the image ships, which runs that challenge once per sync.
       HOLYDECK_BROWSER_FETCH: "true"
@@ -82,7 +90,8 @@ services:
     restart: unless-stopped
     environment:
       HOLYDECK_PORT: "3100"
-      # The application reads the corpus over this network and never publishes it onwards.
+      # The application reads the corpus over this network, and reverse-proxies a handful of read and
+      # render routes onwards at /corpus/* (REL-09) — the rest of the corpus's API stays unreachable.
       HOLYDECK_CORPUS_URL: http://corpus:3000
       HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:?set a long random value before starting}
       HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck

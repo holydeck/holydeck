@@ -42,6 +42,7 @@ const app = buildApp({
   version,
   logger: { level: config.logLevel },
   ...(config.apiToken === undefined ? {} : { apiToken: config.apiToken }),
+  clientTokens: config.clientTokens,
 });
 
 const recovered = await jobs.recoverInterrupted();

@@ -209,17 +209,20 @@ HolyDeck server instead — the server ships as a container image at
 
 In the supported `compose.yaml` deployment, the corpus stays inside the deployment network behind
 the application (see `MAINTENANCE.md` and the root `README.md`). Point the CLI at the application's
-`/corpus` path instead of a standalone corpus URL:
+`/corpus` path instead of a standalone corpus URL, using a client token — never the deployment's own
+`HOLYDECK_CORPUS_TOKEN`, which reaches sync and admin routes a CLI user has no reason to hold:
 
 ```sh
-HOLYDECK_SERVER_TOKEN=<corpus-token> \
+HOLYDECK_SERVER_TOKEN=<corpus-client-token> \
   holydeck --server-url https://bible.example.com/corpus translations
 ```
 
-A server that requires a credential of its own — the way the corpus does — takes
-it from `HOLYDECK_SERVER_TOKEN` or `serverToken` in the config file. That is for a
-development stack or a scheduled job; a person should log in instead, and a stored
-login always wins over the configured credential.
+Set `HOLYDECK_CORPUS_CLIENT_TOKENS` (comma-separated, one per issued credential) on the corpus
+service to mint client tokens; each one is valid only for the read and render routes the proxy
+exposes. A server that requires a credential of its own — the way the corpus does — takes it from
+`HOLYDECK_SERVER_TOKEN` or `serverToken` in the config file. That is for a development stack or a
+scheduled job; a person should log in instead, and a stored login always wins over the configured
+credential.
 
 If the server is protected by an OpenID Connect provider, log in once before
 using it:

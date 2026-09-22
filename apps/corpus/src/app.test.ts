@@ -209,3 +209,62 @@ describe('the internal API token gate', () => {
     expect(response.statusCode).toBe(200);
   });
 });
+
+describe('the client-token scope', () => {
+  const token = 'g'.repeat(24);
+  const clientToken = 'k'.repeat(24);
+  let scoped: ReturnType<typeof buildApp>;
+
+  beforeAll(async () => {
+    scoped = buildApp({
+      store: ctx.store,
+      fetcher: ctx.fetcher,
+      jobs: ctx.jobs,
+      version: '0.0.0-test',
+      apiToken: token,
+      clientTokens: [clientToken],
+    });
+    await scoped.ready();
+  });
+
+  afterAll(async () => {
+    await scoped.close();
+  });
+
+  it('serves the read routes the proxy exposes to a client token', async () => {
+    for (const url of [
+      '/api/v1/translations',
+      '/api/v1/translations/KJV/canon',
+      '/api/v1/translations/KJV/verses?book=PSA&chapter=117&verses=1',
+    ]) {
+      const response = await scoped.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: corpusAuthorization(clientToken) },
+      });
+      expect(response.statusCode, url).toBe(200);
+    }
+  });
+
+  it('refuses a client token on sync, stats and search, which stay scoped to the service token', async () => {
+    for (const url of ['/api/v1/stats', '/api/v1/translations/KJV/search?q=love']) {
+      const response = await scoped.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: corpusAuthorization(clientToken) },
+      });
+      expect(response.statusCode, url).toBe(401);
+    }
+  });
+
+  it('still serves every scoped route to the service token itself', async () => {
+    for (const url of ['/api/v1/translations', '/api/v1/stats']) {
+      const response = await scoped.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: corpusAuthorization(token) },
+      });
+      expect(response.statusCode, url).toBe(200);
+    }
+  });
+});
