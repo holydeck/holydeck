@@ -24,7 +24,7 @@ import { RepositoryError, repositoriesOn } from './repositories.js';
 import { REVISION_RECORD, revisionsOn } from './revisions.js';
 
 import type { EntityStamp } from '@holydeck/contracts/entities';
-import type { RevisionRef, ServiceDraft, ServiceItem, ServiceOutput, ServiceSection, ServiceState } from '@holydeck/contracts/services';
+import type { RevisionRef, ServiceDraft, ServiceItem, ServiceItemBody, ServiceOutput, ServiceSection, ServiceState } from '@holydeck/contracts/services';
 
 import type { AuditAction } from './audit.js';
 import type { RequestContext } from './context.js';
@@ -114,6 +114,8 @@ export interface ServiceStore {
   enableItem(context: unknown, id: string, itemId: string): Promise<ServiceRecord | undefined>;
   /** A disabled item stays in the Service; only presentation order (a later task) skips it. */
   disableItem(context: unknown, id: string, itemId: string): Promise<ServiceRecord | undefined>;
+  /** Replaces the inline canvas or passage of a custom-slide or reading item. */
+  setItemBody(context: unknown, id: string, itemId: string, body: ServiceItemBody): Promise<ServiceRecord | undefined>;
   /** A fresh id and a copy placed right after the original, in the same section. Its RevisionRef, if
    *  any, is copied verbatim — never the content it points to. */
   duplicateItem(context: unknown, id: string, itemId: string): Promise<ServiceRecord | undefined>;
@@ -506,6 +508,18 @@ export function servicesOn(db: RepositoryDb, options: ServiceOptions): ServiceSt
       own(() =>
         mutateItems(context, id, 'service.item.disable', 'Disabled a Service item', (sections) =>
           withChangedItem(sections, itemId, (item) => ({ ...item, enabled: false })),
+        ),
+      ),
+
+    setItemBody: (context, id, itemId, body) =>
+      own(() =>
+        mutateItems(context, id, 'service.item.body', `Edited the body of ${itemId}`, (sections) =>
+          withChangedItem(sections, itemId, (item) => {
+            if (item.kind !== body.kind) {
+              throw new ServiceError('schema', `${body.kind} does not match ${itemId}'s kind of ${item.kind}`);
+            }
+            return { ...item, body };
+          }),
         ),
       ),
 

@@ -3,6 +3,7 @@ import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } fr
 import {
   parseServiceDraft,
   parseServiceItem,
+  parseServiceItemBody,
   parseServiceItemReorder,
   parseServiceItemRevision,
   parseServiceOutput,
@@ -32,6 +33,7 @@ export const SERVICE_STATUS_PATH = `${SERVICE_ID_PATH}/status`;
 export const SERVICE_OUTPUT_PATH = `${SERVICE_ID_PATH}/output`;
 export const SERVICE_ITEMS_PATH = `${SERVICE_ID_PATH}/sections/:sectionId/items`;
 export const SERVICE_ITEM_PATH = `${SERVICE_ID_PATH}/items/:itemId`;
+export const SERVICE_ITEM_BODY_PATH = `${SERVICE_ITEM_PATH}/body`;
 export const SERVICE_ITEM_ENABLE_PATH = `${SERVICE_ITEM_PATH}/enable`;
 export const SERVICE_ITEM_DISABLE_PATH = `${SERVICE_ITEM_PATH}/disable`;
 export const SERVICE_ITEM_DUPLICATE_PATH = `${SERVICE_ITEM_PATH}/duplicate`;
@@ -53,6 +55,7 @@ const ROUTES = [
   ['PATCH', SERVICE_STATUS_PATH],
   ['PATCH', SERVICE_OUTPUT_PATH],
   ['POST', SERVICE_ITEMS_PATH],
+  ['PUT', SERVICE_ITEM_BODY_PATH],
   ['DELETE', SERVICE_ITEM_PATH],
   ['POST', SERVICE_ITEM_ENABLE_PATH],
   ['POST', SERVICE_ITEM_DISABLE_PATH],
@@ -201,6 +204,17 @@ export function serveServiceRoutes(app: FastifyInstance, { services }: ServiceRo
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const answer = await settled(() =>
       services.addItem(call(request), idIn(request), sectionIdIn(request), parsed.value),
+    );
+    if (!answer.ok) return refused(request, reply, answer);
+    if (answer.value === undefined) return reply.code(404).send(notFound(request));
+    return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  app.put(SERVICE_ITEM_BODY_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const parsed = parseServiceItemBody(request.body);
+    if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
+    const answer = await settled(() =>
+      services.setItemBody(call(request), idIn(request), itemIdIn(request), parsed.value),
     );
     if (!answer.ok) return refused(request, reply, answer);
     if (answer.value === undefined) return reply.code(404).send(notFound(request));

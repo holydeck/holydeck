@@ -19,6 +19,7 @@ import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
 import {
   SERVICE_DUPLICATE_PATH,
   SERVICE_ID_PATH,
+  SERVICE_ITEM_BODY_PATH,
   SERVICE_ITEMS_PATH,
   SERVICE_ITEMS_REORDER_PATH,
   SERVICE_ITEM_DISABLE_PATH,
@@ -151,6 +152,7 @@ describe('every route that changes something', () => {
       { method: 'PATCH', url: SERVICE_STATUS_PATH },
       { method: 'PATCH', url: SERVICE_OUTPUT_PATH },
       { method: 'POST', url: SERVICE_ITEMS_PATH },
+      { method: 'PUT', url: SERVICE_ITEM_BODY_PATH },
       { method: 'DELETE', url: SERVICE_ITEM_PATH },
       { method: 'POST', url: SERVICE_ITEM_ENABLE_PATH },
       { method: 'POST', url: SERVICE_ITEM_DISABLE_PATH },

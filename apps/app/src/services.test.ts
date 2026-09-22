@@ -283,6 +283,53 @@ describe('setting a Service output profile', () => {
   });
 });
 
+describe('setting a Service item body', () => {
+  it('sets a custom-slide body and audits the edit', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const body = { kind: 'custom-slide', boxes: [] } as const;
+    const set = await services.setItemBody(ADMIN, created.stamp.id, 'item-1', body);
+    expect(set?.sections[0]?.items[1]?.body).toEqual(body);
+    expect(actions(db)).toEqual(['service.create', 'service.item.body']);
+  });
+
+  it('refuses a body whose kind does not match its item', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const error = await refused(services.setItemBody(ADMIN, created.stamp.id, 'item-1', {
+      kind: 'reading', translation: 'NIV', compare: [], book: 'John', chapter: 1, verses: '1',
+    }));
+    expect(error.kind).toBe('schema');
+    expect(error.message).toContain('does not match');
+    expect(rows(db, STAMPS)).toHaveLength(1);
+    expect(actions(db)).toEqual(['service.create']);
+  });
+
+  it('refuses an unknown item id the same way every other item verb does', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const error = await refused(services.setItemBody(ADMIN, created.stamp.id, 'item-404', {
+      kind: 'custom-slide', boxes: [],
+    }));
+    expect(error.kind).toBe('schema');
+    expect(error.message).toContain('does not name an item in this Service');
+    expect(rows(db, STAMPS)).toHaveLength(1);
+    expect(actions(db)).toEqual(['service.create']);
+  });
+
+  it('refuses a body edit once completed', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    await services.transition(ADMIN, created.stamp.id, 'presenting');
+    await services.transition(ADMIN, created.stamp.id, 'completed');
+    expect((await refused(services.setItemBody(ADMIN, created.stamp.id, 'item-1', {
+      kind: 'custom-slide', boxes: [],
+    }))).kind).toBe('state');
+    expect(rows(db, STAMPS)).toHaveLength(3);
+    expect(actions(db)).toEqual(['service.create', 'service.transition', 'service.transition']);
+  });
+});
+
 describe('transitioning a Service through its lifecycle', () => {
   it('advances upcoming through presenting and completed to archived, auditing every step', async () => {
     const { db, services } = store();
@@ -531,7 +578,7 @@ describe('archiving a Service and bringing it back', () => {
 describe('reading and refusing Service changes', () => {
   it.each([
     'duplicate', 'schedule', 'transition', 'edit', 'archive', 'unarchive',
-    'addItem', 'removeItem', 'enableItem', 'disableItem', 'duplicateItem', 'reorderItems',
+    'addItem', 'removeItem', 'enableItem', 'disableItem', 'setItemBody', 'duplicateItem', 'reorderItems',
   ] as const)(
     'refuses %s without audit permission before writing a service row', async (change) => {
       const { db, services } = store();
@@ -550,6 +597,7 @@ describe('reading and refusing Service changes', () => {
         removeItem: () => services.removeItem(writer, id, 'item-3'),
         enableItem: () => services.enableItem(writer, id, 'item-3'),
         disableItem: () => services.disableItem(writer, id, 'item-3'),
+        setItemBody: () => services.setItemBody(writer, id, 'item-1', { kind: 'custom-slide', boxes: [] }),
         duplicateItem: () => services.duplicateItem(writer, id, 'item-3'),
         reorderItems: () => services.reorderItems(writer, id, 'section-2', ['item-1', 'item-3']),
         archive: () => services.archive(writer, id),
@@ -576,6 +624,7 @@ describe('reading and refusing Service changes', () => {
     expect(await services.removeItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
     expect(await services.enableItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
     expect(await services.disableItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
+    expect(await services.setItemBody(ADMIN, 'service-404', 'item-1', { kind: 'custom-slide', boxes: [] })).toBeUndefined();
     expect(await services.duplicateItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
     expect(await services.reorderItems(ADMIN, 'service-404', 'section-2', [])).toBeUndefined();
     expect(await services.archive(ADMIN, 'service-404')).toBeUndefined();
