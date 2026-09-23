@@ -2,11 +2,9 @@
 // builds a `RenderModelInput`. Pure — spec 04's rehearsal reuses it exactly this way — so every surface
 // (this preview, spec 04's offline rehearsal, later the live output) draws from the same box geometry.
 //
-// Phase A wires this from `ExactPreview` for reading, custom-slide and media items only; the slide-group
-// and reading-with-a-real-layout branches below exist and are fully tested here because the shape is
-// already known (Slide Layout's contracts types), but nothing calls them with a real layout until Tasks
-// 21/22 fetch one. Until then `ExactPreview` always passes `layout: undefined` for a reading, and never
-// builds a `slide-group` source at all — `preview.later` covers that kind (see ExactPreview.tsx).
+// `ExactPreview` builds a `slide-group` source for song and slide-group items from the pinned group
+// revision and its Slide Layout (Task 22), and reading, custom-slide and media sources from their own
+// content. A reading still passes `layout: undefined` and falls back to `fallbackLayout`.
 
 import { aspectRatioOf, type SafeAreaMargins as ServiceSafeArea } from '@holydeck/contracts/snapshots';
 import type { LayoutBox, TextBoxStyle } from '@holydeck/contracts/layouts';

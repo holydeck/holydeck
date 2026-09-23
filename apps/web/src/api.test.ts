@@ -3,7 +3,7 @@ import { UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { CSRF_HEADER } from '@holydeck/contracts/sessions';
 import { describe, expect, it, vi } from 'vitest';
 
-import { NETWORK_UNREACHABLE, UNREADABLE_RESPONSE, ask, needsUpdate } from './api.js';
+import { NETWORK_UNREACHABLE, UNREADABLE_RESPONSE, ask, askText, needsUpdate } from './api.js';
 
 const answering = (status: number, body: unknown) =>
   vi.fn(async () => ({ status, json: async () => body }));
@@ -159,6 +159,44 @@ describe('asking the application to change something', () => {
       requestId: 'req-8',
       fields: [],
     });
+  });
+});
+
+describe('sending and reading raw text', () => {
+  it('sends a text change as plain text rather than JSON', async () => {
+    const fetching = answering(200, { data: {}, meta: { requestId: 'req-9' } });
+    await ask('/api/v1/songs/s/raw', fetching, { method: 'PUT', csrf: 'c', text: 'title: x\n' });
+    expect(fetching).toHaveBeenCalledWith('/api/v1/songs/s/raw', {
+      method: 'PUT',
+      headers: { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), [CSRF_HEADER]: 'c', 'content-type': 'text/plain' },
+      body: 'title: x\n',
+    });
+  });
+
+  it('reads a successful raw answer as its text', async () => {
+    const fetching = vi.fn(async () => ({ status: 200, json: async () => ({}), text: async () => 'title: x\n' }));
+    expect(await askText('/raw', fetching)).toEqual({ ok: true, data: 'title: x\n', requestId: '', version: undefined, dropped: undefined });
+  });
+
+  it('reads a refused raw read as its error envelope', async () => {
+    const body = { error: { code: 'request.not_found', message: 'gone', requestId: 'req-10' } };
+    expect(await askText('/raw', answering(404, body))).toEqual({ ok: false, code: 'request.not_found', message: 'gone', requestId: 'req-10', fields: [] });
+    expect(await askText('/raw', answering(404, { nope: true }))).toMatchObject({ ok: false, code: UNREADABLE_RESPONSE });
+  });
+
+  it('says a raw answer without text, or one that fails to read, is unreadable', async () => {
+    expect(await askText('/raw', answering(200, {}))).toMatchObject({ ok: false, code: UNREADABLE_RESPONSE });
+    const broken = vi.fn(async () => ({ status: 200, json: async () => ({}), text: async () => { throw new Error('cut'); } }));
+    expect(await askText('/raw', broken)).toMatchObject({ ok: false, code: UNREADABLE_RESPONSE, message: 'cut' });
+    const odd = vi.fn(async () => ({ status: 200, json: async () => ({}), text: async () => { throw 'odd'; } }));
+    expect(await askText('/raw', odd)).toMatchObject({ ok: false, code: UNREADABLE_RESPONSE, message: 'odd' });
+  });
+
+  it('reports an unreachable network for a raw read', async () => {
+    const down = vi.fn(async () => { throw new TypeError('offline'); });
+    expect(await askText('/raw', down)).toMatchObject({ ok: false, code: NETWORK_UNREACHABLE, message: 'offline' });
+    const odd = vi.fn(async () => { throw 'odd'; });
+    expect(await askText('/raw', odd)).toMatchObject({ ok: false, code: NETWORK_UNREACHABLE, message: 'odd' });
   });
 });
 

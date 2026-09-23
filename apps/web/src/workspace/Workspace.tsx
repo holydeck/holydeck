@@ -15,6 +15,7 @@ import type { ComponentChildren, JSX } from 'preact';
 
 import { CustomSlideCanvas } from '../editors/CustomSlideCanvas.js';
 import { ReadingEditor } from '../editors/ReadingEditor.js';
+import { SongItemEditor } from '../editors/SongItemEditor.js';
 import { t } from '../i18n.js';
 import { ExactPreview } from '../preview/ExactPreview.js';
 import {
@@ -122,6 +123,7 @@ function EditorCenter(): JSX.Element {
     <>
       {kind === 'reading' ? <ReadingEditor key={itemId} itemId={itemId} /> : null}
       {kind === 'custom-slide' ? <CustomSlideCanvas key={itemId} itemId={itemId} /> : null}
+      {kind === 'song' ? <SongItemEditor key={itemId} itemId={itemId} /> : null}
       <ExactPreview key={itemId} itemId={itemId} />
     </>
   );

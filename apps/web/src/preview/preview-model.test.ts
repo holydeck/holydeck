@@ -88,6 +88,52 @@ describe('previewSourceFor', () => {
     const blank: ServiceItem = { id: 'i3', kind: 'custom-slide', title: 'Blank', enabled: true, content: undefined };
     await expect(previewSourceFor(blank)).resolves.toEqual({ kind: 'custom-slide', body: { kind: 'custom-slide', boxes: [] } });
   });
+
+  describe('a song or slide group item', () => {
+    const groupBody = (slideLayoutRevision?: number) => ({
+      mode: 'generated', enabled: true, slideLayoutId: 'L1',
+      ...(slideLayoutRevision === undefined ? {} : { generatedFrom: { songId: 'song1', songRevision: 2, slideLayoutId: 'L1', slideLayoutRevision } }),
+      slides: [{ id: 's1', enabled: true, label: 'Verse 1', languageBlocks: [{ id: 'b1', languageKey: 'ta', text: 'கர்த்தர்' }] }],
+    });
+    const record = (title: string, body: unknown) => ({ stamp: { id: 'g1', updatedAt: '2026-09-20T00:00:00.000Z' }, title, body });
+    const song = (content?: ServiceItem['content']): ServiceItem => ({ id: 'i4', kind: 'song', title: 'Song', enabled: true, content });
+    const boxes = [{
+      id: 'lyric', kind: 'text', importance: 'required', frame: { x: 0.1, y: 0.2, width: 0.8, height: 0.5 },
+      binding: { mode: 'keyed', contentKind: 'song', contentKey: 'lyricLine', languageKey: 'ta' },
+      style: { fontFamily: 'Inter', fontWeight: 600, sizeRatio: 0.08, lineHeight: 1.25, align: 'center', verticalAlign: 'center' },
+    }];
+    const layout = reply(200, successEnvelope({ stamp: {}, name: 'Lyrics', revision: 3, body: { boxes } }, 'r'));
+
+    it('draws the pinned group revision with the Layout revision it was generated with', async () => {
+      setFetching(fetchingWith({
+        'GET /api/v1/slide-groups/g1/history': reply(200, successEnvelope([record('Old', groupBody(3)), record('New', { ...groupBody(3), slides: [] })], 'r')),
+        'GET /api/v1/slide-layouts/L1?revision=3': layout,
+      }));
+      await expect(previewSourceFor(song({ id: 'g1', revision: 1, hash: undefined }))).resolves.toEqual({
+        kind: 'slide-group',
+        group: { id: 'g1', revision: 1, slides: [{ id: 's1', enabled: true, blocks: [{ language: 'ta', text: 'கர்த்தர்' }] }] },
+        layout: { boxes },
+      });
+    });
+
+    it("uses a hand-made group's newest Layout, and refuses a missing group or an unreadable Layout", async () => {
+      const slideGroup: ServiceItem = { ...song({ id: 'g1', revision: 1, hash: undefined }), kind: 'slide-group' };
+      setFetching(fetchingWith({
+        'GET /api/v1/slide-groups/g1/history': reply(200, successEnvelope([record('Hand', groupBody())], 'r')),
+        'GET /api/v1/slide-layouts/L1': layout,
+      }));
+      await expect(previewSourceFor(slideGroup)).resolves.toMatchObject({ kind: 'slide-group', layout: { boxes } });
+
+      expect(await codeOf(previewSourceFor(song()))).toBe('preview.group_missing');
+      expect(await codeOf(previewSourceFor(song({ id: 'g1', revision: 5, hash: undefined })))).toBe('preview.group_missing');
+
+      setFetching(fetchingWith({
+        'GET /api/v1/slide-groups/g1/history': reply(200, successEnvelope([record('Hand', groupBody())], 'r')),
+        'GET /api/v1/slide-layouts/L1': reply(200, successEnvelope({ body: { boxes: 'no' } }, 'r')),
+      }));
+      expect(await codeOf(previewSourceFor(slideGroup))).toBe('client.unreadable_response');
+    });
+  });
 });
 
 describe('placeholderRatio', () => {

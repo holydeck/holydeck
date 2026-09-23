@@ -4,12 +4,14 @@
 // reading, the manifest and pixel size of a media item — and `render-input.ts` stays the one pure place a
 // `RenderModelInput` is built.
 //
-// Phase A prepares reading, custom-slide and media items. Songs, sermons and slide groups answer `'later'`
-// until Tasks 21/22 fetch the slide group and its layout; the caller shows `preview.later` for them.
+// Reading, custom-slide and media items are prepared from their own body or content; a song or slide group
+// item is prepared from the slide group revision it pins (P-6) and that group's Slide Layout. Sermons still
+// answer `'later'`; the caller shows `preview.later` for them.
 
 import { parseCorpusVerses } from '@holydeck/contracts/corpus';
+import { parseSlideLayoutBody } from '@holydeck/contracts/layouts';
 import { isRecord } from '@holydeck/contracts/problems';
-import type { ServiceItem } from '@holydeck/contracts/services';
+import type { RevisionRef, ServiceItem } from '@holydeck/contracts/services';
 import { prepareRenderModel, type PreparedRenderModel } from '@holydeck/renderer/render-model';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
@@ -18,9 +20,10 @@ import { request } from '../request.js';
 import { saveState, service } from '../state/workspace-store.js';
 import { loadOutputDefaults, outputDefaults, resolvedOutput, type OutputDefaults } from '../workspace/output-defaults.js';
 import { findItem, type ServiceView } from '../workspace/service-data.js';
+import { readSlideGroup } from '../workspace/tabs/song-sources.js';
 import { domMeasurer } from './dom-measurer.js';
 import { intrinsicSizeOf } from './media-size.js';
-import { renderInputFor, type PreviewSource } from './render-input.js';
+import { renderInputFor, type LayoutBody, type PreviewSource } from './render-input.js';
 
 /** The code a failed preparation shows in its disclosure: a server refusal's own code, or a local one. */
 export class PreviewError extends Error {
@@ -69,6 +72,24 @@ async function mediaKindOf(mediaId: string): Promise<'image' | 'video'> {
   throw new PreviewError('preview.media_unsupported');
 }
 
+/** The pinned revision of a slide group, read from its history — whose place in the list is its ordinal. */
+async function pinnedGroup(ref: RevisionRef) {
+  const data = await answered(API.contentHistory('slideGroup', ref.id));
+  const record: unknown = Array.isArray(data) ? data[ref.revision - 1] : undefined;
+  const group = readSlideGroup(record);
+  if (group === undefined) throw new PreviewError('preview.group_missing');
+  return group;
+}
+
+/** The group's Slide Layout: the revision a generation pinned, else the Layout's newest. */
+async function groupLayout(layoutId: string, generatedFrom: Readonly<Record<string, unknown>> | undefined): Promise<LayoutBody> {
+  const pinned = generatedFrom?.['slideLayoutRevision'];
+  const data = await answered(API.slideLayout(layoutId, typeof pinned === 'number' ? pinned : undefined));
+  const parsed = parseSlideLayoutBody(isRecord(data) ? data['body'] : undefined);
+  if (!parsed.ok) throw new PreviewError('client.unreadable_response');
+  return parsed.value;
+}
+
 /** The item's source for `renderInputFor`, or `'later'` for a kind Phase A does not prepare yet. */
 export async function previewSourceFor(item: ServiceItem): Promise<PreviewSource | 'later'> {
   switch (item.kind) {
@@ -96,6 +117,25 @@ export async function previewSourceFor(item: ServiceItem): Promise<PreviewSource
         throw new PreviewError('media.derivative_missing');
       }
       return { kind: 'media', mediaId, mediaKind, intrinsicSize };
+    }
+    case 'song':
+    case 'slide-group': {
+      if (item.content === undefined) throw new PreviewError('preview.group_missing');
+      const group = await pinnedGroup(item.content);
+      const layout = await groupLayout(group.body.slideLayoutId, group.body.generatedFrom);
+      return {
+        kind: 'slide-group',
+        group: {
+          id: group.id,
+          revision: item.content.revision,
+          slides: group.body.slides.map((slide) => ({
+            id: slide.id,
+            enabled: slide.enabled,
+            blocks: slide.languageBlocks.map((block) => ({ language: block.languageKey, text: block.text })),
+          })),
+        },
+        layout,
+      };
     }
     default:
       return 'later';

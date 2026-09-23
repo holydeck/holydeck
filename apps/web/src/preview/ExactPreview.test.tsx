@@ -53,7 +53,25 @@ const reading: ServiceItem = {
   body: { kind: 'reading', translation: 'KJV', compare: [], book: 'JHN', chapter: 3, verses: '16' },
 };
 
-const song: ServiceItem = { id: 'i3', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'song1', revision: 1, hash: undefined } };
+const song: ServiceItem = { id: 'i3', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: 'g1', revision: 1, hash: undefined } };
+const sermon: ServiceItem = { id: 'i4', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon1', revision: 1, hash: undefined } };
+const GROUP = {
+  stamp: { id: 'g1', updatedAt: 'u' }, title: 'Amazing Grace',
+  body: {
+    mode: 'custom', enabled: true, slideLayoutId: 'L1',
+    slides: [{ id: 's1', enabled: true, label: 'Verse 1', languageBlocks: [{ id: 'b1', languageKey: 'ta-Latn', text: 'Amazing grace' }] }],
+  },
+};
+const LAYOUT = {
+  stamp: { id: 'L1' }, name: 'Lyrics', revision: 2,
+  body: {
+    boxes: [{
+      id: 'lyric', kind: 'text', importance: 'required', frame: { x: 0.1, y: 0.2, width: 0.8, height: 0.5 },
+      binding: { mode: 'keyed', contentKind: 'song', contentKey: 'lyricLine', languageKey: 'ta-Latn' },
+      style: { fontFamily: 'Inter', fontWeight: 600, sizeRatio: 0.08, lineHeight: 1.25, align: 'center', verticalAlign: 'center' },
+    }],
+  },
+};
 
 const viewWith = (items: ServiceItem[]): ServiceView => ({
   id: 's1', title: 'Sunday', date: '2026-09-27', site: 'Main Hall', state: 'upcoming', revision: 'r0',
@@ -137,11 +155,24 @@ describe('ExactPreview', () => {
     expect(calls.length).toBe(before);
   });
 
-  it('says a later update brings previews for kinds it does not draw yet', async () => {
+  it('draws a song item from its pinned slide group and that group\'s Slide Layout', async () => {
     service.value = viewWith([song]);
-    setFetching(fakeFetch({ 'GET /api/v1/output-defaults': reply(200, successEnvelope(DEFAULTS, 'r-d')) }));
+    setFetching(fakeFetch({
+      'GET /api/v1/output-defaults': reply(200, successEnvelope(DEFAULTS, 'r-d')),
+      [`GET ${API.contentHistory('slideGroup', 'g1')}`]: reply(200, successEnvelope([GROUP], 'r-h')),
+      [`GET ${API.slideLayout('L1')}`]: reply(200, successEnvelope(LAYOUT, 'r-l')),
+    }));
 
     render(<ExactPreview itemId="i3" />);
+
+    expect(await screen.findByRole('img', { name: 'Preview of Amazing Grace' })).toBeTruthy();
+  });
+
+  it('says a later update brings previews for kinds it does not draw yet', async () => {
+    service.value = viewWith([sermon]);
+    setFetching(fakeFetch({ 'GET /api/v1/output-defaults': reply(200, successEnvelope(DEFAULTS, 'r-d')) }));
+
+    render(<ExactPreview itemId="i4" />);
 
     expect(await screen.findByText('A preview for this kind of item appears in a later update.')).toBeTruthy();
   });

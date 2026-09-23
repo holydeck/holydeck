@@ -31,6 +31,7 @@ describe('AddPanel', () => {
 
     fireEvent.keyDown(document.activeElement as Element, { key: 'Enter' });
     expect(selected()).toBe('Song');
+    expect(document.getElementById('add-panel-song')?.querySelector('[role="status"], [role="alert"], .song-tab')).not.toBeNull();
     expect(document.getElementById('add-panel-song')?.hidden).toBe(false);
 
     fireEvent.keyDown(document.activeElement as Element, { key: 'End' });

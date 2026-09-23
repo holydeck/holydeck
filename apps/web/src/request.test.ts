@@ -9,7 +9,7 @@ import { SESSION_EXPIRED, SESSION_PATH } from '@holydeck/contracts/sessions';
 import type { FetchLike } from './api.js';
 
 import { lastAnsweredAt, resetAppState, session, updateRequired } from './app-state.js';
-import { boot, request, setFetching } from './request.js';
+import { boot, request, requestText, setFetching } from './request.js';
 import { currentPath } from './router.js';
 
 const SESSION = {
@@ -167,6 +167,15 @@ describe('request', () => {
 
     expect(result.ok ? undefined : result.code).toBe(UPDATE_REQUIRED);
     expect(updateRequired.value).toBe(true);
+  });
+
+  it('reads raw text through the same transport and the same refusals', async () => {
+    setFetching(async () => ({ status: 200, json: async () => ({}), text: async () => 'title: x\n' }));
+    expect(await requestText('/api/v1/songs/s/raw')).toMatchObject({ ok: true, data: 'title: x\n' });
+    resetRoute('/services/example');
+    setFetching(async () => refused(401, SESSION_EXPIRED));
+    expect(await requestText('/api/v1/songs/s/raw')).toMatchObject({ ok: false, code: SESSION_EXPIRED });
+    expect(currentPath.value).toBe('/sign-in?next=%2Fservices%2Fexample');
   });
 
   it('passes an ordinary refusal through unchanged', async () => {

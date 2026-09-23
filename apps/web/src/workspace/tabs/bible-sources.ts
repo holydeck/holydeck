@@ -46,7 +46,7 @@ const inside = <T>(key: string, parse: (value: unknown) => Parsed<T>) => (data: 
   parse(isRecord(data) ? data[key] : undefined);
 
 /** Reads one source again whenever `path` changes, and on `retry`; an undefined path reads nothing. */
-function useSource<T>(path: string | undefined, parse: (data: unknown) => Parsed<T>): [Loaded<T>, () => void] {
+export function useSource<T>(path: string | undefined, parse: (data: unknown) => Parsed<T>): [Loaded<T>, () => void] {
   const [state, setState] = useState<Loaded<T>>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
