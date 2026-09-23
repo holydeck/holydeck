@@ -412,8 +412,8 @@ export function buildApp({
   // Their own permission again, the same Admin's tier as the Slide Layout and media surfaces above but not
   // the same permission: administering the content-language registry and the slide-label catalogue is
   // gated behind `catalogue.manage`, read there behind `content.edit` the same as an Editor's other surfaces.
-  serveContentLanguageRoutes(app, { contentLanguages, identity, songs, slideGroups, library });
-  serveSlideLabelRoutes(app, { slideLabels, identity });
+  serveContentLanguageRoutes(app, { contentLanguages, identity, songs, slideGroups, library, sermons });
+  serveSlideLabelRoutes(app, { slideLabels, identity, songs, slideGroups, library, sermons });
 
   // Behind `services.manage`, the same as the sermon import preview: bringing a PowerPoint deck in is a
   // service integration rather than content editing, even though what it ends in is a Song.

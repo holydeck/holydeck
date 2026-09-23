@@ -138,9 +138,9 @@ describe('content-language routes', () => {
 
   test('counts a real referencing song, zero when nothing references it, and not-found for an unknown key', async () => {
     await creating();
-    expect((await ask('GET', at(CONTENT_LANGUAGE_DEPENDENTS_PATH, 'ta'))).json().data).toEqual({ count: 0, approximate: true });
+    expect((await ask('GET', at(CONTENT_LANGUAGE_DEPENDENTS_PATH, 'ta'))).json().data).toEqual({ count: 0, approximate: false });
     await songs.create(songContext(ACTOR, 'song-corr'), 'Test Song', SONG_BODY);
-    expect((await ask('GET', at(CONTENT_LANGUAGE_DEPENDENTS_PATH, 'ta'))).json().data).toEqual({ count: 1, approximate: true });
+    expect((await ask('GET', at(CONTENT_LANGUAGE_DEPENDENTS_PATH, 'ta'))).json().data).toEqual({ count: 1, approximate: false });
     expect((await ask('GET', at(CONTENT_LANGUAGE_DEPENDENTS_PATH, 'missing'))).statusCode).toBe(404);
   });
 
@@ -148,5 +148,22 @@ describe('content-language routes', () => {
     await app.close(); await serving(undefined, undefined);
     const url = at(path, 'ta');
     expect((await ask(method, url, method === 'POST' ? DRAFT : method === 'PUT' ? { displayName: 'Tamil', script: 'Tamil', fallbackFont: 'Latha' } : method === 'PATCH' ? { archived: true } : undefined)).statusCode).toBe(404);
+  });
+
+  test('never counts a song that merely spells a key somewhere in its text', async () => {
+    await creating({ ...DRAFT, key: 'ml', displayName: 'Malayalam', script: 'Malayalam' });
+    await songs.create(songContext(ACTOR, 'song-corr'), 'Test Song', {
+      ...SONG_BODY,
+      titles: { tamil: 'பாடல்', romanized: 'Psalm in html' },
+    });
+    expect((await ask('GET', at(CONTENT_LANGUAGE_DEPENDENTS_PATH, 'ml'))).json().data).toEqual({ count: 0, approximate: false });
+  });
+
+  test('lists each language with how many items use it', async () => {
+    await creating();
+    await creating({ ...DRAFT, key: 'ml', displayName: 'Malayalam', script: 'Malayalam' });
+    await songs.create(songContext(ACTOR, 'song-corr'), 'Test Song', SONG_BODY);
+    const listed = (await ask('GET', CONTENT_LANGUAGES_PATH)).json().data as { stamp: { id: string }; usage: number }[];
+    expect(Object.fromEntries(listed.map((row) => [row.stamp.id, row.usage]))).toEqual({ ta: 1, ml: 0 });
   });
 });

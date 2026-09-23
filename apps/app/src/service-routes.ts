@@ -280,11 +280,13 @@ export function serveServiceRoutes(app: FastifyInstance, { services }: ServiceRo
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
-  // Nothing downstream references a Service by id — always zero is the honest answer, not a stub.
+  // Nothing downstream references a Service by id — a template made `fromService` copies its entries and
+  // keeps no link back, and a run's history names its service only as a record of what was shown, which
+  // archiving cannot break — so zero is the exact answer, not a guess.
   app.get(SERVICE_DEPENDENTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const answer = await settled(() => services.current(call(request), idIn(request)));
     if (!answer.ok) return refused(request, reply, answer);
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
-    return reply.send(successEnvelope({ count: 0, approximate: true }, request.id, CLIENT_WINDOW.current));
+    return reply.send(successEnvelope({ count: 0, approximate: false }, request.id, CLIENT_WINDOW.current));
   });
 }

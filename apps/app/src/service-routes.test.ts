@@ -287,7 +287,7 @@ describe('service workspace routes', () => {
     await creating();
     const response = await asking('GET', `${ROOT}/dependents`);
     expect(response.statusCode).toBe(200);
-    expect(response.json().data).toEqual({ count: 0, approximate: true });
+    expect(response.json().data).toEqual({ count: 0, approximate: false });
   });
 
   test.each(ROUTES)('gates %s %s before calling the store', async (method, url, payload) => {

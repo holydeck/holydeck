@@ -4,6 +4,10 @@
 // `/catalogue` is gated narrower than the rest — `content.edit`, not `catalogue.manage` — because it is
 // what a language picker reads from, not what the registry is administered through.
 //
+// The administered list carries each language's usage — how many current songs, sermons and slide
+// groups name it — read by `content-usage.ts` from the fields that hold a language key, never from a
+// body's text. The dependents route answers the same count for one key, exactly.
+//
 // Archiving a language in use is not refused here: the store itself has no such rule (see its own
 // header comment), by design — every language block already keyed to an archived language keeps
 // resolving, so there is nothing here for an in-use check to protect.
@@ -21,11 +25,9 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
-import { libraryContext } from './library.js';
+import { contentUsage } from './content-usage.js';
 import { settled } from './refusals.js';
 import { CATALOGUE_MANAGE, CONTENT_EDIT } from './roles.js';
-import { slideGroupContext } from './slide-groups.js';
-import { songContext } from './songs.js';
 import { ContentLanguageError, contentLanguageContext, subjectFor } from './content-languages.js';
 
 import type { AuditOutcome } from './audit.js';
@@ -33,6 +35,7 @@ import type { RouteNeed } from './authorization.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { LibraryStore } from './library.js';
 import type { Identity } from './onboarding.js';
+import type { SermonStore } from './sermons.js';
 import type { SlideGroupStore } from './slide-groups.js';
 import type { SongStore } from './songs.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -65,15 +68,24 @@ const isRefusal = (error: unknown): error is ContentLanguageError & { kind: 'sta
 export interface ContentLanguageRoutesOptions {
   readonly contentLanguages: ContentLanguageStore | undefined;
   readonly identity: Identity | undefined;
-  /** Absent whenever `identity` is, per `main.ts`'s wiring — used only for the dependents scan below. */
+  /** Absent whenever `identity` is, per `main.ts`'s wiring — used only for the usage counts below. */
   readonly songs: SongStore | undefined;
   readonly slideGroups: SlideGroupStore | undefined;
   readonly library: LibraryStore | undefined;
+  /** Absent in a deployment without sermons, whose usage then counts none. */
+  readonly sermons?: SermonStore | undefined;
 }
 
 export function serveContentLanguageRoutes(
   app: FastifyInstance,
-  { contentLanguages, identity, songs: songsOption, slideGroups: slideGroupsOption, library: libraryOption }: ContentLanguageRoutesOptions,
+  {
+    contentLanguages,
+    identity,
+    songs: songsOption,
+    slideGroups: slideGroupsOption,
+    library: libraryOption,
+    sermons,
+  }: ContentLanguageRoutesOptions,
 ): void {
   if (identity === undefined) {
     for (const [method, url, need] of ROUTES) {
@@ -90,6 +102,12 @@ export function serveContentLanguageRoutes(
   const songs = songsOption as SongStore;
   const slideGroups = slideGroupsOption as SlideGroupStore;
   const library = libraryOption as LibraryStore;
+  const usageFor = (request: FastifyRequest) =>
+    contentUsage(
+      { library, songs, slideGroups, sermons },
+      provenSession(request).record.actor,
+      correlationFor(CONTENT_LANGUAGE_PREFIX, request.id),
+    );
   const call = (request: FastifyRequest) =>
     contentLanguageContext(provenSession(request).record.actor, correlationFor(CONTENT_LANGUAGE_PREFIX, request.id));
 
@@ -105,8 +123,9 @@ export function serveContentLanguageRoutes(
   };
 
   app.get(CONTENT_LANGUAGES_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
-    const items = await languages.list(call(request));
-    return reply.send(successEnvelope(items, request.id, CLIENT_WINDOW.current));
+    const [items, usage] = await Promise.all([languages.list(call(request)), usageFor(request)]);
+    const counted = items.map((item) => ({ ...item, usage: usage.languages.get(item.stamp.id) ?? 0 }));
+    return reply.send(successEnvelope(counted, request.id, CLIENT_WINDOW.current));
   });
 
   app.post(CONTENT_LANGUAGES_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
@@ -156,24 +175,12 @@ export function serveContentLanguageRoutes(
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
-  // An approximate count, not an audited action: a substring scan over every song's and slide group's
-  // body, the same crude-but-honest shape `media-routes.ts` and `slide-layout-routes.ts` use for theirs.
+  // A count, not an audited action: how many current items name this key (see `content-usage.ts`).
   app.get(CONTENT_LANGUAGE_DEPENDENTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const key = keyIn(request);
     const found = await languages.get(call(request), key);
     if (found === undefined) return reply.code(404).send(notFound(request));
-    const actor = provenSession(request).record.actor;
-    const correlationId = correlationFor(CONTENT_LANGUAGE_PREFIX, request.id);
-    const [songRows, groupRows] = await Promise.all([
-      library.list(libraryContext(actor, correlationId), { kind: 'song' }),
-      library.list(libraryContext(actor, correlationId), { kind: 'slideGroup' }),
-    ]);
-    const [songRecords, groupRecords] = await Promise.all([
-      Promise.all(songRows.map((row) => songs.current(songContext(actor, correlationId), row.stamp.id))),
-      Promise.all(groupRows.map((row) => slideGroups.current(slideGroupContext(actor, correlationId), row.stamp.id))),
-    ]);
-    const bodies = [...songRecords, ...groupRecords].filter((r): r is NonNullable<typeof r> => r !== undefined);
-    const count = bodies.filter((record) => JSON.stringify(record.body).includes(key)).length;
-    return reply.send(successEnvelope({ count, approximate: true }, request.id, CLIENT_WINDOW.current));
+    const count = (await usageFor(request)).languages.get(key) ?? 0;
+    return reply.send(successEnvelope({ count, approximate: false }, request.id, CLIENT_WINDOW.current));
   });
 }
