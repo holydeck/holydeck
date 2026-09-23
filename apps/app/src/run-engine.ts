@@ -11,7 +11,7 @@ import { enterStandby, pause, resume, returnToLivePosition, select, takeSelected
 import { projectFor } from '@holydeck/contracts/live-state';
 import { DEFAULT_THEMES, THEME_SURFACES } from '@holydeck/contracts/live-theme';
 
-import { requestContext, systemContext } from './context.js';
+import { correlationFor, requestContext, systemContext } from './context.js';
 import { LIVE_EVENT_TYPES, publishRunStateChanged } from './live-events.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { adjacentPosition } from './run-deck.js';
@@ -184,7 +184,10 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
       const session: OperatorSession = {
         actor: member.identity ?? 'live-control',
         permissions: [PRESENTATION_CONTROL],
-        correlationId: `live:${member.identity ?? 'anonymous'}:${frame.id}`,
+        // A member's identity and a client-chosen frame id are both unbounded in practice; `correlationFor`
+        // is the same guard every other route builds one through, so a long real-world identity plus a
+        // client's own id can never overflow `context.ts`'s 64-character limit and crash the command path.
+        correlationId: correlationFor('live:', `${member.identity ?? 'anonymous'}:${frame.id}`),
       };
       const context = runContext(session.actor, session.correlationId);
       const run = await options.runs.resume(context, runId);

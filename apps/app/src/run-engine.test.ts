@@ -189,6 +189,20 @@ describe('run-engine command ordering', () => {
     expect(hub.publishToCalls.find((c) => c.channel === 'audience')?.state).not.toHaveProperty('selected');
   });
 
+  // A real identity (a session actor) and a client's own frame id are both unbounded in practice; without
+  // `correlationFor`'s guard, `live:${identity}:${frame.id}` overflows `context.ts`'s 64-character limit
+  // and `requestContext` throws, crashing the whole process (every connected view, not just this command).
+  it('bounds a long identity and frame id into a valid correlation id instead of throwing', async () => {
+    const { engine, runEvents } = await started();
+    const identity = 'account:'.padEnd(40, '0');
+    const longMember: LiveMember = { channel: LIVE_CONTROL_CHANNEL, grant: grantFor(SESSION.permissions), identity };
+    const longFrame = { ...frame('go-to', SECOND), id: 'x'.repeat(40) };
+    await expect(engine.command(longMember, longFrame)).resolves.toEqual({ outcome: 'applied' });
+    const usedContext = runEvents.record.mock.calls.at(-1)?.[0];
+    expect(usedContext?.correlationId.length).toBeLessThanOrEqual(64);
+    expect(usedContext?.correlationId).toMatch(/^live:[A-Za-z0-9:_-]{4,59}$/u);
+  });
+
   it.each([
     ['go-to', null], ['select', { itemId: 'x', slideIndex: -1 }], ['select', { itemId: 'x', slideIndex: 0.5 }],
     ['go-to', { itemId: 3, slideIndex: 0 }], ['go-to', { itemId: 'x', slideIndex: '0' }],
