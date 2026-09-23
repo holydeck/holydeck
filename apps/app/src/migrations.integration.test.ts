@@ -77,7 +77,7 @@ describe('migrating a real database', () => {
 
   // A replayed idempotency key is one job rather than two only because the database refuses the second
   // write, so the index that refuses it is worth seeing built against a real one.
-  test('builds the indexes the job queue is claimed by, and keeps its key unique', async () => {
+  test('builds the indexes the job queue is claimed by, and keeps its key unique', { timeout: 20_000 }, async () => {
     await migrate(db, CONTEXT, { now: clock });
 
     expect(await indexNames('jobs')).toEqual(['_id_', 'job_claim', 'job_key']);
@@ -85,7 +85,7 @@ describe('migrating a real database', () => {
     expect(key?.unique).toBe(true);
   });
 
-  test('is the same the second time it runs', async () => {
+  test('is the same the second time it runs', { timeout: 20_000 }, async () => {
     await migrate(db, CONTEXT, { now: clock });
     await migrate(db, CONTEXT, { now: clock });
 
@@ -93,7 +93,7 @@ describe('migrating a real database', () => {
     expect(await schemaStatus(db, CONTEXT)).toMatchObject({ recorded: SCHEMA_VERSION, pending: [] });
   });
 
-  test('refuses a second claim on a version, which is what keeps two runners apart', async () => {
+  test('refuses a second claim on a version, which is what keeps two runners apart', { timeout: 20_000 }, async () => {
     await migrate(db, CONTEXT, { now: clock });
     const claim = {
       _id: 'v1.up.1.start',
@@ -111,7 +111,7 @@ describe('migrating a real database', () => {
     });
   });
 
-  test('leaves the recorded version where it was when a migration fails, and recovers on rollback', async () => {
+  test('leaves the recorded version where it was when a migration fails, and recovers on rollback', { timeout: 20_000 }, async () => {
     const migrations: readonly SchemaMigration[] = [
       {
         version: 1,
@@ -143,7 +143,7 @@ describe('migrating a real database', () => {
     expect(written).toMatch(/\S/u);
   });
 
-  test('undoes the shipped migrations and leaves the collections it found', async () => {
+  test('undoes the shipped migrations and leaves the collections it found', { timeout: 30_000 }, async () => {
     await migrate(db, CONTEXT, { now: clock });
     expect(await rollback(db, CONTEXT, { now: clock })).toMatchObject({ recorded: SCHEMA_VERSION - 1 });
     expect(await indexNames('audit_events')).toEqual(['_id_', 'audit_time']);
