@@ -13,7 +13,7 @@ import { serveContentLanguageRoutes } from './content-language-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
-import { serveIntegrationRoutes } from './integration-routes.js';
+import { serveIntegrationRoutes, sermonAiSwitch } from './integration-routes.js';
 import { serveLibraryRoutes } from './library-routes.js';
 import { isUpgrade } from './live.js';
 import { serveMediaDeliveryRoutes } from './media-delivery-routes.js';
@@ -352,7 +352,7 @@ export function buildApp({
 
   // Its own permission, Admin's alone: viewing and toggling a third-party integration is administering
   // this deployment, the same reach as the settings file above but not the same permission.
-  serveIntegrationRoutes(app, { settingsAdmin, identity });
+  serveIntegrationRoutes(app, { settingsAdmin, identity, anthropicApiKey });
 
   // Behind the same permission again, by a vocabulary of its own: a Slide Layout is Admin's to create,
   // to save forward and to stop offering, and nobody else's to change.
@@ -400,7 +400,11 @@ export function buildApp({
   // what an Admin administers the catalogue with. Scripture search sits beside them but is reachable by
   // either `content.edit` or `presentation.control`, since Control presentation searches mid-service too.
   serveSongRoutes(app, { songs, chords, identity });
-  serveSermonRoutes(app, { sermons, corpus, identity, anthropicApiKey });
+  // The integrations page's switch, read per preview so a change there applies without a restart.
+  const sermonAi = settingsAdmin === undefined
+    ? undefined
+    : () => sermonAiSwitch(settingsAdmin.current().values, anthropicApiKey);
+  serveSermonRoutes(app, { sermons, corpus, identity, anthropicApiKey, sermonAi });
   serveSlideGroupRoutes(app, { slideGroups, identity });
   serveLibraryRoutes(app, { library, identity });
   serveScriptureSearchRoutes(app, { corpus });

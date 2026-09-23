@@ -184,6 +184,7 @@ describe('the context the trail is written under', () => {
       'content.conflict.resolve',
       'content.revision.restore',
       'integration.call',
+      'integration.enable',
       'integration.disable',
     ]);
   });

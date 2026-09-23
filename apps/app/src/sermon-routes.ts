@@ -5,7 +5,7 @@ import { SERMON_IMPORT_PREVIEW_PATH, parseSermonImportRequest } from '@holydeck/
 import { SERMONS_PATH, parseSermonGenerationRequest } from '@holydeck/contracts/sermons';
 import { generateSermonFromText } from '@holydeck/core/sermon-ai';
 
-import { auditContext } from './audit.js';
+import { auditContext, integrationCallAudit } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
@@ -18,6 +18,7 @@ import { SermonError, sermonContext, subjectFor } from './sermons.js';
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
 import type { corpusClient } from './corpus.js';
+import type { SermonAiSwitch } from './integration-routes.js';
 import type { Identity } from './onboarding.js';
 import type { Answer } from './refusals.js';
 import type { SermonRefusal, SermonStore } from './sermons.js';
@@ -79,11 +80,17 @@ export interface SermonRoutesOptions {
   readonly anthropicApiKey?: string | undefined;
   /** Test-only override for the resolver's HTTP client; production never sets this (core defaults to real fetch). */
   readonly httpPost?: HttpPost | undefined;
+  /**
+   * The integrations page's switch, read on every preview (spec v1c-09, COLAB-12). Given, it replaces
+   * `anthropicApiKey`: a configured resolver switched off answers 409 integration.disabled, while a
+   * deployment with no resolver at all keeps the deterministic preview it always had.
+   */
+  readonly sermonAi?: (() => SermonAiSwitch) | undefined;
 }
 
 export function serveSermonRoutes(
   app: FastifyInstance,
-  { sermons, corpus, identity, anthropicApiKey, httpPost }: SermonRoutesOptions,
+  { sermons, corpus, identity, anthropicApiKey, httpPost, sermonAi }: SermonRoutesOptions,
 ): void {
   if (identity === undefined) {
     for (const [method, url, need] of ROUTES) {
@@ -202,6 +209,12 @@ export function serveSermonRoutes(
     const parsed = parseSermonImportRequest(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const actor = provenSession(request).record.actor;
+    // Read before the throttle counts anything: a refused preview never called out, so it costs no turn.
+    const resolver = sermonAi?.();
+    if (resolver !== undefined && resolver.apiKey !== '' && !resolver.enabled) {
+      const message = 'the sermon AI integration is switched off in Administration';
+      return reply.code(409).send(errorEnvelope('integration.disabled', message, request.id));
+    }
     const now = Date.now();
     pruneExpiredPreviewWindows(now);
     const window = previewLimiter.get(actor);
@@ -216,21 +229,12 @@ export function serveSermonRoutes(
     const generated = await generateSermonFromText(parsed.value.text, {
       translations: [...parsed.value.translations],
       now: new Date(),
-      apiKey: anthropicApiKey,
+      apiKey: resolver === undefined ? anthropicApiKey : resolver.apiKey || undefined,
       httpPost,
       onIntegrationCall: async (call) => {
         try {
-          await identity.audit.record(
-            auditContext(actor, correlationFor(SERMON_PREFIX, request.id)),
-            {
-              action: 'integration.call',
-              subject: call.subject,
-              outcome: call.outcome,
-              detail: call.detail,
-              requestTokens: call.requestTokens,
-              responseTokens: call.responseTokens,
-            },
-          );
+          // Provider, operation, tokens, duration and outcome only: never the text that was sent or came back.
+          await integrationCallAudit(identity.audit, actor, correlationFor(SERMON_PREFIX, request.id))(call);
         } catch (error) {
           request.log.error({ err: error }, 'the resolver trail refused an entry');
         }

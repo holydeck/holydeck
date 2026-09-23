@@ -27,6 +27,8 @@ interface IntegrationView {
   readonly enabled: boolean;
   readonly lastCallAt: string | null;
   readonly callsInLast30Days: number;
+  /** The deployment environment holds the switch; the server refuses to move it, so the page does not offer to. */
+  readonly lockedByEnvironment: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
@@ -48,6 +50,8 @@ const parsedIntegration = (value: unknown): IntegrationView | undefined => {
     enabled: value['enabled'],
     lastCallAt: value['lastCallAt'],
     callsInLast30Days: value['callsInLast30Days'],
+    // Read loosely: a server from before the field existed never locked anything.
+    lockedByEnvironment: value['lockedByEnvironment'] === true,
   };
 };
 
@@ -144,12 +148,13 @@ export function AdminIntegrationsPage(): JSX.Element {
                     <td>
                       <button
                         type="button"
-                        disabled={busy || (!integration.enabled && !integration.configured)}
+                        disabled={busy || integration.lockedByEnvironment || (!integration.enabled && !integration.configured)}
                         onClick={() => void toggle(integration)}
                       >
                         {t(integration.enabled ? 'integrations.action.disable' : 'integrations.action.enable', { name })}
                       </button>
                       {integration.configured ? null : <p>{t('integrations.hint.notConfigured')}</p>}
+                      {integration.lockedByEnvironment ? <p>{t('integrations.hint.lockedByEnvironment')}</p> : null}
                     </td>
                   </tr>
                 );

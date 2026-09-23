@@ -124,6 +124,7 @@ export const AUDIT_ACTIONS = [
   'content.revision.restore',
   // A third-party integration reached, and given up: the sermon-AI surface's own two entries, spec v1c-09.
   'integration.call',
+  'integration.enable',
   'integration.disable',
 ] as const;
 
@@ -206,6 +207,7 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'content.conflict.resolve': 'content',
   'content.revision.restore': 'content',
   'integration.call': 'integration',
+  'integration.enable': 'integration',
   'integration.disable': 'integration',
 };
 
@@ -343,6 +345,7 @@ export const AUDIT_DETAIL_REDACTION: Readonly<Record<AuditAction, 'verbatim' | '
   'content.conflict.resolve': 'verbatim',
   'content.revision.restore': 'verbatim',
   'integration.call': 'verbatim',
+  'integration.enable': 'verbatim',
   'integration.disable': 'verbatim',
 };
 
@@ -438,10 +441,8 @@ export function auditReadContext(actor: string, correlationId: string): RequestC
 
 /**
  * Adapts sermon-ai.ts's (spec v1c-08, package @holydeck/core) onIntegrationCall callback shape onto this
- * file's own AuditTrail.record(), so a future HTTP call site only has to pass this closure through, not
- * build an AuditEntry by hand. No caller wires this into a live sermon-ai invocation yet in this app —
- * that lands with spec v1c-08's own app-layer task — this file only has to provide the adapter and prove
- * it against a fake trail.
+ * file's own AuditTrail.record(), so a call site only has to pass this closure through, not build an
+ * AuditEntry by hand. The sermon import preview in sermon-routes.ts is the one caller today.
  */
 export function integrationCallAudit(
   trail: AuditTrail,

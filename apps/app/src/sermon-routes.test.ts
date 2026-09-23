@@ -29,6 +29,7 @@ import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
+import type { SermonAiSwitch } from './integration-routes.js';
 import type { HttpPost } from '@holydeck/core/anthropic';
 import type { Fetching } from './corpus.js';
 import type { Identity } from './onboarding.js';
@@ -119,6 +120,7 @@ const serving = async (
   fetching: Fetching = answeringCorpus(),
   anthropicApiKey?: string,
   httpPost?: HttpPost,
+  sermonAi?: () => SermonAiSwitch,
 ): Promise<void> => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
@@ -130,6 +132,7 @@ const serving = async (
     identity: held,
     anthropicApiKey,
     httpPost,
+    sermonAi,
   });
   await app.ready();
 };
@@ -335,6 +338,38 @@ describe('POST /api/v1/sermons/import/preview', () => {
     expect(entry?.['requestTokens']).toBe(512);
     expect(entry?.['responseTokens']).toBe(64);
     for (const row of events) expect(String(row['detail'] ?? '')).not.toContain('Xyzzy 1:1');
+  });
+
+  test('answers 409 integration.disabled when a configured resolver is switched off, and calls nothing', async () => {
+    await app.close();
+    let posted = 0;
+    await serving(identity, sermons, answeringCorpus(), undefined, async () => {
+      posted += 1;
+      return { status: 500, body: '{}' };
+    }, () => ({ apiKey: 'test-key', enabled: false }));
+    const response = await preview({ text: 'Xyzzy 1:1\nHosea 4:6', translations: ['ta'] });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe('integration.disabled');
+    expect(posted).toBe(0);
+  });
+
+  test('keeps the deterministic preview when there is no resolver to switch off at all', async () => {
+    await app.close();
+    await serving(identity, sermons, answeringCorpus(), undefined, undefined, () => ({ apiKey: '', enabled: false }));
+    const response = await preview({ text: 'John 3:16', translations: ['ta'] });
+    expect(response.statusCode).toBe(200);
+  });
+
+  test('calls the resolver with the switch\'s key once it is on, and times the call in the trail', async () => {
+    await app.close();
+    await serving(identity, sermons, answeringCorpus(), undefined, async () => ({
+      status: 200,
+      body: JSON.stringify({ content: [{ type: 'tool_use', id: 'toolu_test', name: RESOLVE_TOOL_NAME, input: { resolutions: [] } }], usage: { input_tokens: 1, output_tokens: 1 } }),
+    }), () => ({ apiKey: 'test-key', enabled: true }));
+    const response = await preview({ text: 'Xyzzy 1:1\nHosea 4:6', translations: ['ta'] });
+    expect(response.statusCode).toBe(200);
+    const entry = (db.rows.get('audit_events') ?? []).find((row) => row['action'] === 'integration.call');
+    expect(typeof entry?.['durationMs']).toBe('number');
   });
 
   test('refuses the 11th preview in a minute for the same account with 429 sermon.import_rate_limited', async () => {

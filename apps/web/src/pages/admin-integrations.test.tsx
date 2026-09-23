@@ -33,6 +33,7 @@ const signedIn = (permissions = ['integrations.manage']): SessionView => ({
 
 const integration = (overrides: Partial<{
   id: string; configured: boolean; enabled: boolean; lastCallAt: string | null; callsInLast30Days: number;
+  lockedByEnvironment: boolean;
 }> = {}) => ({
   id: 'sermon-ai', configured: true, enabled: false, lastCallAt: null, callsInLast30Days: 0, ...overrides,
 });
@@ -65,6 +66,15 @@ describe('AdminIntegrationsPage', () => {
 
     expect(await screen.findByText('Add an API key in Settings to enable this integration.')).toBeTruthy();
     const button = screen.getByRole('button', { name: 'Enable Sermon AI import' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it('holds the switch still, and says why, when the deployment environment sets it', async () => {
+    setFetching(async () => listReply([integration({ enabled: true, lockedByEnvironment: true })]));
+    await renderPage();
+
+    expect(await screen.findByText('The deployment environment sets this switch, so it cannot be changed here.')).toBeTruthy();
+    const button = screen.getByRole('button', { name: 'Disable Sermon AI import' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
   });
 
