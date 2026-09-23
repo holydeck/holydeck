@@ -2,12 +2,12 @@
 // an earlier one brought back (spec v1c-09, COLAB-02). `revisions.ts` keys every revision by content id
 // alone, so the route itself asks which kind an id belongs to before it answers anything about it: a
 // Slide Layout's history is as much Admin's as the Layout is, and holding history alone opens nothing
-// the session could not already edit. No conflict handling: a restore this route offers
-// has already read the revision it names, so the only way `RevisionStore.restore()` could still refuse
-// it is a race this code cannot correct by retrying, and is answered as the fault it is.
+// the session could not already edit. A restore this route offers has already read the
+// revision it names, so the only way `RevisionStore.restore()` can still refuse it is another writer
+// appending first: a race this code cannot correct by retrying, answered as the 409 it is.
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
-import { successEnvelope, validationFailure } from '@holydeck/contracts/http';
+import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import { parseRevisionCompareQuery } from '@holydeck/contracts/revisions';
 import { diffRevisions } from '@holydeck/core/diff-revisions';
 
@@ -15,7 +15,7 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession, refuseAsForbidden } from './csrf.js';
 import { notFound } from './failures.js';
-import { revisionContext } from './revisions.js';
+import { RevisionError, revisionContext } from './revisions.js';
 import { CONTENT_EDIT, CONTENT_HISTORY_MANAGE, LAYOUTS_MANAGE, SERVICE_TEMPLATES_MANAGE } from './roles.js';
 import { serviceTemplateContext } from './service-templates.js';
 import { slideLayoutContext } from './slide-layouts.js';
@@ -214,7 +214,15 @@ export function serveRevisionRoutes(
     const target = await store.read(context, contentId, number);
     if (target === undefined) return reply.code(404).send(notFound(request));
 
-    const outcome = await store.restore(context, { contentId, revision: number });
+    let outcome;
+    try {
+      outcome = await store.restore(context, { contentId, revision: number });
+    } catch (error: unknown) {
+      if (error instanceof RevisionError && error.kind === 'conflict') {
+        return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, error.message, request.id));
+      }
+      throw error;
+    }
     await note(request, context.actor, contentId, number);
     return reply.send(successEnvelope(outcome, request.id, CLIENT_WINDOW.current));
   });

@@ -1,5 +1,5 @@
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
-import { VALIDATION_FAILED } from '@holydeck/contracts/http';
+import { ENTITY_CONFLICT, VALIDATION_FAILED } from '@holydeck/contracts/http';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -19,7 +19,7 @@ import {
   contentKindResolver,
   serveRevisionRoutes,
 } from './revision-routes.js';
-import { revisionContext, revisionsOn } from './revisions.js';
+import { RevisionError, revisionContext, revisionsOn } from './revisions.js';
 import { CONTENT_EDIT, CONTENT_HISTORY_MANAGE, LAYOUTS_MANAGE, SERVICE_TEMPLATES_MANAGE } from './roles.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { totpsOn } from './totp.js';
@@ -233,6 +233,20 @@ describe('restoring a revision', () => {
       from: 1,
       revision: { revision: 3, body: { title: 'A' } },
     });
+  });
+});
+
+describe('restoring a revision another writer just moved past', () => {
+  test('answers the race as a conflict rather than a fault', async () => {
+    await seed('song:1', 'A');
+    await app.close();
+    await serving({
+      ...revisions,
+      restore: () => Promise.reject(new RevisionError('conflict', 'revision 2 of song:1 was appended by another writer')),
+    });
+    const response = await restoring('song:1', '1');
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe(ENTITY_CONFLICT);
   });
 });
 
