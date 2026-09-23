@@ -55,7 +55,9 @@ const renderAt = async (path: string): Promise<void> => {
   history.pushState({}, '', path);
   currentPath.value = path;
   render(<App />);
-  await screen.findByRole('heading', { level: 1, name: 'Sunday' });
+  // The workspace is a lazy chunk with a large module graph: a cold transform under a parallel full-repo
+  // run can outlast the default 1 s wait.
+  await screen.findByRole('heading', { level: 1, name: 'Sunday' }, { timeout: 10_000 });
 };
 
 beforeEach(() => {

@@ -21,6 +21,8 @@ const at = (path: string): void => {
   currentPath.value = path;
 };
 
+const LAZY_PAGE_MS = 10_000;
+
 describe('the route to page switch', () => {
   beforeEach(() => {
     resetAppState();
@@ -51,7 +53,9 @@ describe('the route to page switch', () => {
     session.value = signedIn;
     at(path);
     render(<App />);
-    expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeTruthy();
+    // Pages are lazy chunks; the workspace's module graph is large enough that a cold transform under a
+    // parallel full-repo run can outlast the default 1 s wait.
+    expect(await screen.findByRole('heading', { level: 1, name: heading }, { timeout: LAZY_PAGE_MS })).toBeTruthy();
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy();
   });
 
