@@ -32,9 +32,10 @@ export const ADMINISTRATION_PERMISSIONS = Object.freeze(['accounts.manage', 'set
 const roleLabel = (role: AccountRole): string => t(`app.role.${role}`);
 
 /** Which primary section a route belongs to, so its link can say `aria-current="page"`. */
-const sectionOf = (current: Route): 'services' | 'administration' | undefined => {
+const sectionOf = (current: Route): 'services' | 'administration' | 'security' | undefined => {
   if (current.name === 'services' || current.name === 'service') return 'services';
   if (current.name === 'admin-users') return 'administration';
+  if (current.name === 'account-security') return 'security';
   return undefined;
 };
 
@@ -102,6 +103,11 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
                 </a>
               </li>
             ) : null}
+            <li>
+              <a href="/account/security" aria-current={section === 'security' ? 'page' : undefined}>
+                {t('app.nav.security')}
+              </a>
+            </li>
           </ul>
         </nav>
       )}

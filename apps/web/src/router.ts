@@ -13,6 +13,7 @@ export type Route =
   | { readonly name: 'services' }
   | { readonly name: 'service'; readonly id: string }
   | { readonly name: 'admin-users' }
+  | { readonly name: 'account-security' }
   | { readonly name: 'content-history'; readonly contentId: string }
   | { readonly name: 'output'; readonly kind: string }
   | { readonly name: 'not-found' };
@@ -57,6 +58,7 @@ export function matchRoute(pathWithSearch: string): Route {
   if (pathname === '/welcome') return { name: 'welcome' };
   if (pathname === '/services' || pathname === '/services/') return { name: 'services' };
   if (pathname === '/admin/users') return { name: 'admin-users' };
+  if (pathname === '/account/security') return { name: 'account-security' };
 
   const service = /^\/services\/([^/]+)$/u.exec(pathname);
   if (service !== null) {

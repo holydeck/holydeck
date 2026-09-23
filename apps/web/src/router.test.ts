@@ -28,6 +28,7 @@ describe('matchRoute', () => {
     ['/services/', { name: 'services' }],
     ['/services/church%20service', { name: 'service', id: 'church service' }],
     ['/admin/users', { name: 'admin-users' }],
+    ['/account/security', { name: 'account-security' }],
     ['/output/audience', { name: 'output', kind: 'audience' }],
     ['/services/a/b', { name: 'not-found' }],
     ['/services/%E0%A4%A', { name: 'not-found' }],

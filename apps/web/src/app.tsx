@@ -26,6 +26,7 @@ const OutputPage = lazy(() => import('./pages/output.js').then((module) => modul
 const ServicePage = lazy(() => import('./pages/service.js').then((module) => module.ServicePage));
 const AdminUsersPage = lazy(() => import('./pages/admin-users.js').then((module) => module.AdminUsersPage));
 const HistoryPage = lazy(() => import('./pages/history.js').then((module) => module.HistoryPage));
+const SecurityPage = lazy(() => import('./pages/account-security.js').then((module) => module.SecurityPage));
 
 /** What the current route renders inside the shell. */
 function Page(): JSX.Element {
@@ -38,6 +39,8 @@ function Page(): JSX.Element {
       return <ServicePage id={current.id} />;
     case 'admin-users':
       return <AdminUsersPage />;
+    case 'account-security':
+      return <SecurityPage />;
     case 'content-history':
       return <HistoryPage contentId={current.contentId} />;
     case 'welcome':

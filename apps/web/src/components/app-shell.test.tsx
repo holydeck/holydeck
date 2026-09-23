@@ -71,6 +71,18 @@ describe('the navigation shell', () => {
     expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('aria-current')).toBe('page');
   });
 
+  it('offers Security to every signed-in session, and marks it current on its own route', () => {
+    session.value = signedIn([], 'editor');
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByRole('link', { name: 'Security' }).getAttribute('href')).toBe('/account/security');
+    expect(screen.getByRole('link', { name: 'Security' }).getAttribute('aria-current')).toBeNull();
+
+    act(() => {
+      currentPath.value = '/account/security';
+    });
+    expect(screen.getByRole('link', { name: 'Security' }).getAttribute('aria-current')).toBe('page');
+  });
+
   it('omits the account line for a session with no account behind it, and sign-out when it is not wired', () => {
     session.value = { ...signedIn([]), account: undefined } as unknown as SessionView;
     render(<AppShell><p>page</p></AppShell>);
