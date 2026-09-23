@@ -251,3 +251,16 @@ export function resolveSlide(group: SlideGroupBody, slide: Slide): ResolvedSlide
         : { value: slide.background, source: 'override' },
   };
 }
+
+/**
+ * Every media library id a slide group body holds a durable reference to (OPS-14): its own
+ * background, its backing audio track (LIVE-20), and each slide's own background override —
+ * the same three fields the LIVE-20 header above names as needing a scanner. Deduplicated, in
+ * first-seen order, so a caller building a purge-time reference index does not have to.
+ */
+export function mediaReferencesIn(body: SlideGroupBody): readonly string[] {
+  const ids = [body.background, body.audioTrackId, ...body.slides.map((slide) => slide.background)].filter(
+    (id): id is string => id !== undefined,
+  );
+  return [...new Set(ids)];
+}

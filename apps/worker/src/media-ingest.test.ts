@@ -1,10 +1,11 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
 
 import { mediaIngestOn } from './media-ingest.js';
 import { runnerOn } from './runner.js';
 import { fakeDb } from '../../app/test/helpers/fake-db.js';
+import { fakeMediaPurgeDb } from '../../app/test/helpers/media-purge-db.js';
 
 import type { LeasedJob } from '@holydeck/contracts/jobs';
 import type { MediaLibrary, MediaStorageIO } from '@holydeck/app/media';
@@ -47,15 +48,20 @@ const open = (): { media: MediaLibrary; storage: MediaStorageIO; writes: Array<{
       if (value === undefined) throw new Error(`${key} is unreadable`);
       return value;
     },
+    async remove(_root, key) {
+      bytes.delete(key);
+    },
   };
   let serial = 0;
+  const db = fakeDb();
   return {
     storage,
     writes,
-    media: mediaLibraryOn(fakeDb(), {
+    media: mediaLibraryOn(db, {
       now: () => NOW,
       newId: () => `media-${(serial += 1)}`,
-      mediaRoot: '/media',
+      mediaRoot: () => '/media',
+      purge: fakeMediaPurgeDb(db),
       ...storage,
       queue: { async enqueue() { return { id: 'job-1', created: true }; } },
     }),
@@ -70,7 +76,7 @@ describe('media ingestion', () => {
       context: CONTEXT,
       media: world.media,
       storage: world.storage,
-      mediaRoot: '/media',
+      mediaRoot: () => '/media',
       poster: { async generate() { throw new Error('a non-video does not need a poster'); } },
     });
 
@@ -86,6 +92,23 @@ describe('media ingestion', () => {
     expect(world.writes).toHaveLength(1);
   });
 
+  test('reads the storage root live from the getter, not once at construction', async () => {
+    const world = open();
+    const uploaded = await world.media.upload(CONTEXT, { bytes: png() });
+    const mediaRoot = vi.fn(() => '/media');
+    const handler = mediaIngestOn({
+      context: CONTEXT,
+      media: world.media,
+      storage: world.storage,
+      mediaRoot,
+      poster: { async generate() { throw new Error('a non-video does not need a poster'); } },
+    });
+
+    await handler(job(uploaded.stamp.id), new AbortController().signal);
+
+    expect(mediaRoot).toHaveBeenCalled();
+  });
+
   test('refuses to complete when the stored bytes no longer match the asset’s recorded hash', async () => {
     const world = open();
     const uploaded = await world.media.upload(CONTEXT, { bytes: png() });
@@ -96,7 +119,7 @@ describe('media ingestion', () => {
       context: CONTEXT,
       media: world.media,
       storage: world.storage,
-      mediaRoot: '/media',
+      mediaRoot: () => '/media',
       poster: { async generate() { throw new Error('a non-video does not need a poster'); } },
     });
 
@@ -114,7 +137,7 @@ describe('media ingestion', () => {
       context: CONTEXT,
       media: world.media,
       storage: world.storage,
-      mediaRoot: '/media',
+      mediaRoot: () => '/media',
       poster: { async generate() { return failed ? undefined : new Uint8Array([1, 2, 3]); } },
     });
 
@@ -144,7 +167,7 @@ describe('media ingestion', () => {
       context: CONTEXT,
       media: world.media,
       storage: world.storage,
-      mediaRoot: '/media',
+      mediaRoot: () => '/media',
       poster: {
         async generate() {
           entered();
@@ -210,7 +233,7 @@ describe('media ingestion', () => {
       context: CONTEXT,
       media: world.media,
       storage: world.storage,
-      mediaRoot: '/media',
+      mediaRoot: () => '/media',
       poster: {
         async generate() {
           entered();

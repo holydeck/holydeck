@@ -71,6 +71,7 @@ describe('the released message codes', () => {
       ['corpus.upstream.unavailable', 502],
       ['corpus.unexpected_error', 500],
       ['media.too_large', 413],
+      ['server.maintenance_active', 503],
       ['server.unexpected_error', 500],
       ['run.not_ready', 409],
       ['run.snapshot_outdated', 409],

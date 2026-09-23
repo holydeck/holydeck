@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { MediaError, mediaContext, mediaLibraryOn } from './media.js';
 import { RECORDS } from './records.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
+import { fakeMediaPurgeDb } from '../test/helpers/media-purge-db.js';
 import { fakeMediaStorageIO } from '../test/helpers/media-storage-io.js';
 
 import type { MediaLibrary } from './media.js';
@@ -27,9 +28,11 @@ const store = (): { db: FakeDb; io: FakeMediaStorageIO; jobs: Array<Parameters<Q
     media: mediaLibraryOn(db, {
       now: () => new Date(Date.parse('2026-09-17T09:30:00.000Z') + (tick += 1) * 1000).toISOString(),
       newId: () => `media-${(serial += 1)}`,
-      mediaRoot: '/media',
+      mediaRoot: () => '/media',
       write: io.write,
       read: io.read,
+      remove: io.remove,
+      purge: fakeMediaPurgeDb(db),
       queue: {
         async enqueue(_context, input) {
           jobs.push(input);
@@ -69,6 +72,29 @@ describe('the media library', () => {
     expect(jobs).toEqual([{ kind: 'media-ingest', idempotencyKey: 'media-ingest:media-1', payload: { assetId: 'media-1' } }]);
     expect(await media.inspect(ADMIN, 'media-1')).toEqual(uploaded);
     expect(await media.list(ADMIN)).toEqual([uploaded]);
+  });
+
+  it('reads the storage root live from the getter on every write, not once at construction', async () => {
+    const db = fakeDb();
+    const io = fakeMediaStorageIO();
+    let root = '/media/first';
+    let serial = 0;
+    const media = mediaLibraryOn(db, {
+      now: () => '2026-09-17T09:30:00.000Z',
+      newId: () => `media-${(serial += 1)}`,
+      mediaRoot: () => root,
+      write: io.write,
+      read: io.read,
+      remove: io.remove,
+      purge: fakeMediaPurgeDb(db),
+      queue: { async enqueue() { return { id: 'job-1', created: true }; } },
+    });
+
+    await media.upload(ADMIN, { bytes: png() });
+    root = '/media/second';
+    await media.upload(ADMIN, { bytes: new Uint8Array([...png(), 0x01]) });
+
+    expect(io.writes.map((write) => write.root)).toEqual(['/media/first', '/media/second']);
   });
 
   it('archives and restores an asset without changing its manifest or stored bytes', async () => {
@@ -165,5 +191,133 @@ describe('processing state transitions', () => {
     expect(await media.completeProcessing(ADMIN, 'ghost', [])).toBeUndefined();
     expect(await media.failProcessing(ADMIN, 'ghost')).toBeUndefined();
     expect(await media.retryProcessing(ADMIN, 'ghost')).toBeUndefined();
+  });
+});
+
+describe('purging archived media past its grace period (OPS-14)', () => {
+  it('never purges a standing (non-archived) asset, however old options.graceDays is set to 0', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    const outcome = await media.purgeArchived(ADMIN, { graceDays: 0, referencedBy: () => [] });
+    expect(outcome.purged).toEqual([]);
+    expect(await media.inspect(ADMIN, uploaded.stamp.id)).toBeDefined();
+  });
+
+  it('retains an archived asset before its grace period elapses', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    const outcome = await media.purgeArchived(ADMIN, { graceDays: 3_650, referencedBy: () => [] });
+    expect(outcome.purged).toEqual([]);
+    expect(outcome.retained).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, reason: 'too-recent' }),
+    ]);
+    expect(await media.inspect(ADMIN, uploaded.stamp.id)).toBeDefined();
+  });
+
+  it('purges an archived asset past its grace period: rows and bytes both gone', async () => {
+    const { db, io, media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    const outcome = await media.purgeArchived(ADMIN, { graceDays: 0, referencedBy: () => [] });
+    expect(outcome.purged).toEqual([uploaded.stamp.id]);
+    expect(outcome.retained).toEqual([]);
+    expect(await media.inspect(ADMIN, uploaded.stamp.id)).toBeUndefined();
+    expect(db.rows.get(RECORDS.mediaAssets.collection) ?? []).toEqual([]);
+    expect(io.removed).toEqual([`/media/${uploaded.stamp.id}`]);
+  });
+
+  it('purges a video asset’s poster derivative alongside its main bytes', async () => {
+    const { io, media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    const id = uploaded.stamp.id;
+    await media.startProcessing(ADMIN, id);
+    const source = { kind: 'source', bytes: uploaded.manifest.bytes, hash: uploaded.manifest.hash, from: id };
+    const poster = { kind: 'poster', bytes: 1, hash: 'sha256:poster', from: id };
+    await media.completeProcessing(ADMIN, id, [source, poster]);
+    await media.archive(ADMIN, id);
+    const outcome = await media.purgeArchived(ADMIN, { graceDays: 0, referencedBy: () => [] });
+    expect(outcome.purged).toEqual([id]);
+    expect(io.removed).toEqual([`/media/${id}`, `${id}.poster.jpg`]);
+  });
+
+  it('never purges a referenced asset, however far past its grace period', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    const outcome = await media.purgeArchived(ADMIN, {
+      graceDays: 0,
+      referencedBy: (assetId) => (assetId === uploaded.stamp.id ? ['service:svc-1'] : []),
+    });
+    expect(outcome.purged).toEqual([]);
+    expect(outcome.retained).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, reason: 'referenced' }),
+    ]);
+    expect(await media.inspect(ADMIN, uploaded.stamp.id)).toBeDefined();
+  });
+
+  it('purges only the archived assets among a mixed batch, leaving standing ones untouched', async () => {
+    const { media } = store();
+    const kept = await media.upload(ADMIN, { bytes: png() });
+    const archived = await media.upload(ADMIN, { bytes: new TextEncoder().encode('\x00\x00\x00\x00ftyp\x00\x00\x00\x00mp42') });
+    await media.archive(ADMIN, archived.stamp.id);
+    const outcome = await media.purgeArchived(ADMIN, { graceDays: 0, referencedBy: () => [] });
+    expect(outcome.purged).toEqual([archived.stamp.id]);
+    expect(await media.inspect(ADMIN, kept.stamp.id)).toBeDefined();
+    expect(await media.inspect(ADMIN, archived.stamp.id)).toBeUndefined();
+  });
+
+  it('purgeReport categorizes a still-live asset as protected, with no reason or purgeableAt', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    const { items } = await media.purgeReport(ADMIN, { graceDays: 180, referencedBy: () => [] });
+    expect(items).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, category: 'protected', reason: undefined, purgeableAt: undefined }),
+    ]);
+  });
+
+  it('purgeReport categorizes an archived asset still inside its grace period, with a purgeableAt', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    const { items } = await media.purgeReport(ADMIN, { graceDays: 180, referencedBy: () => [] });
+    expect(items).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, category: 'grace-period', purgeableAt: expect.any(String) }),
+    ]);
+    expect(items[0]?.reason).toMatch(/short of media-asset's 180-day window/);
+  });
+
+  it('purgeReport categorizes an archived asset past its grace period as eligible', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    const { items } = await media.purgeReport(ADMIN, { graceDays: 0, referencedBy: () => [] });
+    expect(items).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, category: 'eligible', reason: undefined, purgeableAt: undefined }),
+    ]);
+  });
+
+  it('purgeReport categorizes a referenced archived asset as protected, however far past grace', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    const { items } = await media.purgeReport(ADMIN, {
+      graceDays: 0,
+      referencedBy: (assetId) => (assetId === uploaded.stamp.id ? ['service:svc-1'] : []),
+    });
+    expect(items).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, category: 'protected', purgeableAt: undefined }),
+    ]);
+    expect(items[0]?.reason).toMatch(/still referenced by service:svc-1/);
+  });
+
+  it('purgeReport never deletes anything, however eligible', async () => {
+    const { db, io, media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    await media.purgeReport(ADMIN, { graceDays: 0, referencedBy: () => [] });
+    expect(await media.inspect(ADMIN, uploaded.stamp.id)).toBeDefined();
+    expect(db.rows.get(RECORDS.mediaAssets.collection)?.length).toBeGreaterThan(0);
+    expect(io.removed).toEqual([]);
   });
 });

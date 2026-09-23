@@ -6,6 +6,8 @@
 
 import { resolve as resolvePath } from 'node:path';
 
+import { RESTORE_CLASSES } from '@holydeck/contracts/backups';
+import type { RestoreClass } from '@holydeck/contracts/backups';
 import { INTERNAL_BINDINGS, MINIMUM_CORPUS_TOKEN_LENGTH } from '@holydeck/contracts/corpus';
 import { LOCALES, type Locale } from '@holydeck/localization/locales';
 import { parse, stringify } from 'yaml';
@@ -13,6 +15,9 @@ import { parse, stringify } from 'yaml';
 import { bindingOf, corpusBinding } from './corpus.js';
 
 export const CANONICAL_SETTINGS_PATH = '/data/holydeck/config/settings.yaml';
+
+export const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
 
 export interface Settings {
   port: number;
@@ -61,6 +66,32 @@ export interface Settings {
   /** The credential the sermon-AI integration calls Anthropic with. Empty means this deployment has
    *  not configured one, the same convention `corpusToken` and `resticPassword` use for "unset". */
   anthropicApiKey: string;
+  backupDailyAt: string;
+  backupComponents: readonly RestoreClass[];
+  backupMinimumGapMinutes: number;
+  backupRehearsalWeekday: Weekday;
+  retentionSweepAt: string;
+  notificationReadRetentionDays: number;
+  /** How long an archived media asset stands before it becomes purge-eligible (OPS-14). Purging
+   *  itself is a separate, explicit Admin action — this only sets the window `purgeArchived` grades
+   *  candidates against. */
+  mediaArchivedPurgeGraceDays: number;
+  /**
+   * The per-file ceiling `@fastify/multipart` enforces (OPS-13). Read once, at `app.ts`'s boot-time
+   * `app.register(multipart, ...)` call — a Fastify plugin's own options cannot change after registration,
+   * so raising or lowering this needs a restart to take effect, same as every other setting a route reads
+   * directly out of the static `settings` snapshot rather than through `settingsAdmin`. Formerly the
+   * hardcoded `MEDIA_SIZE_CEILING_BYTES` in `media-routes.ts`; the default below carries that same value
+   * forward unchanged.
+   */
+  mediaUploadLimitBytes: number;
+  /**
+   * How much free space `media-routes.ts`'s upload route insists an accepted file leave behind on the
+   * media filesystem, checked fresh per request via `fs.statfs` on `mediaRoot` (OPS-13). Zero means a
+   * deployment has chosen to enforce no reserve at all. Unlike `mediaUploadLimitBytes` above, nothing
+   * about this one is fixed at boot — `media-routes.ts` reads it live through `settingsAdmin`.
+   */
+  mediaFreeSpaceReserveBytes: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -81,6 +112,15 @@ export const DEFAULT_SETTINGS: Settings = {
   autosaveRetentionDays: 30,
   sermonAiEnabled: false,
   anthropicApiKey: '',
+  backupDailyAt: '03:00',
+  backupComponents: RESTORE_CLASSES,
+  backupMinimumGapMinutes: 120,
+  backupRehearsalWeekday: 'sunday',
+  retentionSweepAt: '04:00',
+  notificationReadRetentionDays: 30,
+  mediaArchivedPurgeGraceDays: 180,
+  mediaUploadLimitBytes: 1_073_741_824,
+  mediaFreeSpaceReserveBytes: 5_368_709_120,
 };
 
 /**
@@ -142,6 +182,15 @@ export const ENV_KEYS: Record<keyof Settings, string> = {
   autosaveRetentionDays: 'HOLYDECK_AUTOSAVE_RETENTION_DAYS',
   sermonAiEnabled: 'HOLYDECK_SERMON_AI_ENABLED',
   anthropicApiKey: 'HOLYDECK_ANTHROPIC_API_KEY',
+  backupDailyAt: 'HOLYDECK_BACKUP_DAILY_AT',
+  backupComponents: 'HOLYDECK_BACKUP_COMPONENTS',
+  backupMinimumGapMinutes: 'HOLYDECK_BACKUP_MINIMUM_GAP_MINUTES',
+  backupRehearsalWeekday: 'HOLYDECK_BACKUP_REHEARSAL_WEEKDAY',
+  retentionSweepAt: 'HOLYDECK_RETENTION_SWEEP_AT',
+  notificationReadRetentionDays: 'HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS',
+  mediaArchivedPurgeGraceDays: 'HOLYDECK_MEDIA_ARCHIVED_PURGE_GRACE_DAYS',
+  mediaUploadLimitBytes: 'HOLYDECK_MEDIA_UPLOAD_LIMIT_BYTES',
+  mediaFreeSpaceReserveBytes: 'HOLYDECK_MEDIA_FREE_SPACE_RESERVE_BYTES',
 };
 
 // Normalized so a relative or non-canonical override still matches, byte for byte, the mount table
@@ -175,22 +224,6 @@ const parseFlag = (raw: unknown): Parsed<boolean> => {
   return { ok: false, problem: `expected true or false, got ${JSON.stringify(raw)}` };
 };
 
-function parseRetentionDays(field: string, min: number, max: number) {
-  return (raw: unknown): Parsed<number> => {
-    const value = typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim()) : raw;
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
-      return {
-        ok: false,
-        problem: `expected a whole number between ${min} and ${max}, got ${JSON.stringify(raw)}`,
-      };
-    }
-    return { ok: true, value };
-  };
-}
-
-const parseAuditRetentionDays = parseRetentionDays('auditRetentionDays', 30, 3650);
-const parseAutosaveRetentionDays = parseRetentionDays('autosaveRetentionDays', 1, 365);
-
 // Unlike parseFlag, this setting is administrable through the file, not protected — and the file layer
 // hands YAML's own parsed boolean rather than text, so both a real boolean and the environment's string
 // are accepted here.
@@ -203,6 +236,51 @@ const parseSermonAiEnabled = (raw: unknown): Parsed<boolean> => {
 const parseAnthropicApiKey = (raw: unknown): Parsed<string> => {
   if (typeof raw !== 'string') return { ok: false, problem: `expected a string, got ${JSON.stringify(raw)}` };
   return { ok: true, value: raw.trim() };
+};
+
+const TIME_OF_DAY = /^([01]\d|2[0-3]):([0-5]\d)$/u;
+
+const parseTimeOfDay = (raw: unknown): Parsed<string> => {
+  if (typeof raw !== 'string' || !TIME_OF_DAY.test(raw)) {
+    return { ok: false, problem: `expected HH:mm (24-hour), got ${JSON.stringify(raw)}` };
+  }
+  return { ok: true, value: raw };
+};
+
+const parseBackupComponents = (raw: unknown): Parsed<readonly RestoreClass[]> => {
+  const items = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? raw.split(',').map((item) => item.trim()).filter((item) => item !== '')
+      : undefined;
+  if (items === undefined) {
+    return { ok: false, problem: `expected a list of ${RESTORE_CLASSES.join('/')}, got ${JSON.stringify(raw)}` };
+  }
+  if (items.length === 0) return { ok: false, problem: 'expected at least one component' };
+  const invalid = items.find((item) => !RESTORE_CLASSES.includes(item as RestoreClass));
+  if (invalid !== undefined) {
+    return { ok: false, problem: `expected one of ${RESTORE_CLASSES.join(', ')}, got ${JSON.stringify(invalid)}` };
+  }
+  return { ok: true, value: Object.freeze([...new Set(items)] as RestoreClass[]) };
+};
+
+const parseBoundedInteger = (min: number, max: number) => (raw: unknown): Parsed<number> => {
+  const value = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : raw;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    return { ok: false, problem: `expected a whole number between ${min} and ${max}, got ${JSON.stringify(raw)}` };
+  }
+  return { ok: true, value };
+};
+
+const parseAuditRetentionDays = parseBoundedInteger(30, 3650);
+const parseAutosaveRetentionDays = parseBoundedInteger(1, 365);
+
+const parseWeekday = (raw: unknown): Parsed<Weekday> => {
+  const weekday = WEEKDAYS.find((candidate) => candidate === raw);
+  if (weekday === undefined) {
+    return { ok: false, problem: `expected one of ${WEEKDAYS.join(', ')}, got ${JSON.stringify(raw)}` };
+  }
+  return { ok: true, value: weekday };
 };
 
 const parseAbsolutePath = (raw: unknown): Parsed<string> => {
@@ -436,6 +514,45 @@ export function loadSettings(input: {
     parseAnthropicApiKey,
     layers,
   );
+  const backupDailyAt = resolve('backupDailyAt', DEFAULT_SETTINGS.backupDailyAt, parseTimeOfDay, layers);
+  const backupComponents = resolve('backupComponents', DEFAULT_SETTINGS.backupComponents, parseBackupComponents, layers);
+  const backupMinimumGapMinutes = resolve(
+    'backupMinimumGapMinutes',
+    DEFAULT_SETTINGS.backupMinimumGapMinutes,
+    parseBoundedInteger(1, 10_080),
+    layers,
+  );
+  const backupRehearsalWeekday = resolve(
+    'backupRehearsalWeekday',
+    DEFAULT_SETTINGS.backupRehearsalWeekday,
+    parseWeekday,
+    layers,
+  );
+  const retentionSweepAt = resolve('retentionSweepAt', DEFAULT_SETTINGS.retentionSweepAt, parseTimeOfDay, layers);
+  const notificationReadRetentionDays = resolve(
+    'notificationReadRetentionDays',
+    DEFAULT_SETTINGS.notificationReadRetentionDays,
+    parseBoundedInteger(1, 3_650),
+    layers,
+  );
+  const mediaArchivedPurgeGraceDays = resolve(
+    'mediaArchivedPurgeGraceDays',
+    DEFAULT_SETTINGS.mediaArchivedPurgeGraceDays,
+    parseBoundedInteger(1, 3_650),
+    layers,
+  );
+  const mediaUploadLimitBytes = resolve(
+    'mediaUploadLimitBytes',
+    DEFAULT_SETTINGS.mediaUploadLimitBytes,
+    parseBoundedInteger(1, 10_737_418_240),
+    layers,
+  );
+  const mediaFreeSpaceReserveBytes = resolve(
+    'mediaFreeSpaceReserveBytes',
+    DEFAULT_SETTINGS.mediaFreeSpaceReserveBytes,
+    parseBoundedInteger(0, 1_099_511_627_776),
+    layers,
+  );
 
   if (problems.length > 0) throw new SettingsError(problems);
 
@@ -458,6 +575,15 @@ export function loadSettings(input: {
       autosaveRetentionDays: autosaveRetentionDays.value,
       sermonAiEnabled: sermonAiEnabled.value,
       anthropicApiKey: anthropicApiKey.value,
+      backupDailyAt: backupDailyAt.value,
+      backupComponents: backupComponents.value,
+      backupMinimumGapMinutes: backupMinimumGapMinutes.value,
+      backupRehearsalWeekday: backupRehearsalWeekday.value,
+      retentionSweepAt: retentionSweepAt.value,
+      notificationReadRetentionDays: notificationReadRetentionDays.value,
+      mediaArchivedPurgeGraceDays: mediaArchivedPurgeGraceDays.value,
+      mediaUploadLimitBytes: mediaUploadLimitBytes.value,
+      mediaFreeSpaceReserveBytes: mediaFreeSpaceReserveBytes.value,
     },
     sources: {
       port: port.source,
@@ -477,6 +603,15 @@ export function loadSettings(input: {
       autosaveRetentionDays: autosaveRetentionDays.source,
       sermonAiEnabled: sermonAiEnabled.source,
       anthropicApiKey: anthropicApiKey.source,
+      backupDailyAt: backupDailyAt.source,
+      backupComponents: backupComponents.source,
+      backupMinimumGapMinutes: backupMinimumGapMinutes.source,
+      backupRehearsalWeekday: backupRehearsalWeekday.source,
+      retentionSweepAt: retentionSweepAt.source,
+      notificationReadRetentionDays: notificationReadRetentionDays.source,
+      mediaArchivedPurgeGraceDays: mediaArchivedPurgeGraceDays.source,
+      mediaUploadLimitBytes: mediaUploadLimitBytes.source,
+      mediaFreeSpaceReserveBytes: mediaFreeSpaceReserveBytes.source,
     },
     path,
   };

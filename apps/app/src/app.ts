@@ -6,6 +6,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastif
 import { serveAccountRoutes } from './accounts-routes.js';
 import { serveAuditRoutes } from './audit-routes.js';
 import { enforceAuthorization } from './authorization.js';
+import { serveBackupRoutes } from './backup-routes.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
 import { serveConflictRoutes } from './conflict-routes.js';
 import { contentKindResolver } from './content-kind.js';
@@ -14,11 +15,19 @@ import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } fro
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
 import { serveIntegrationRoutes, sermonAiSwitch } from './integration-routes.js';
+import { serveJobRoutes } from './job-routes.js';
 import { serveLibraryRoutes } from './library-routes.js';
 import { isUpgrade } from './live.js';
+import { guardMaintenance } from './maintenance.js';
+import { serveMediaCleanupRoutes } from './media-cleanup-routes.js';
 import { serveMediaDeliveryRoutes } from './media-delivery-routes.js';
-import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
+import { serveMediaMigrationRoutes } from './media-migration-routes.js';
+import { serveMediaRoutes } from './media-routes.js';
+import { serveNotificationRoutes } from './notification-routes.js';
+import { notificationStoreOn } from './notification-store.js';
+import { repositoriesOn } from './repositories.js';
 import { serveOnboarding } from './onboarding.js';
+import { serveOperationsRoutes } from './operations-routes.js';
 import { serveOrderRoutes } from './order-routes.js';
 import { serveOutputDefaultsRoutes } from './output-defaults-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
@@ -26,6 +35,7 @@ import { servePptxRoutes } from './pptx-routes.js';
 import { servePresenceRoutes } from './presence-routes.js';
 import { servePreparationRoutes } from './preparation-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
+import { serveRestoreRoutes } from './restore-routes.js';
 import { serveRevisionRoutes } from './revision-routes.js';
 import { serveRunRoutes } from './run-routes.js';
 import { serveScriptureSearchRoutes } from './scripture-routes.js';
@@ -49,15 +59,22 @@ import type { ConflictShelf } from './conflicts.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { Fetching } from './corpus.js';
 import type { LibraryStore } from './library.js';
+import type { MaintenanceStore } from './maintenance.js';
 import type { MediaByteSource } from './media-delivery-routes.js';
+import type { MediaMigrationStateStore } from './media-migration-state.js';
 import type { MediaLibrary } from './media.js';
 import type { MidServiceStore } from './mid-service-additions.js';
+import type { NotificationDb } from './notification-store.js';
 import type { Identity } from './onboarding.js';
+import type { MongoHealthDb } from './operational-sources.js';
 import type { PptxCommit } from './pptx-commit.js';
 import type { PptxImport } from './pptx-import.js';
 import type { PptxReview } from './pptx-review.js';
 import type { PptxSessionStore } from './pptx-sessions.js';
 import type { PresenceStore } from './presence.js';
+import type { Queue } from './queue.js';
+import type { RepositoryDb } from './repositories.js';
+import type { RestoreCompatibility } from './csrf.js';
 import type { RevisionStore } from './revisions.js';
 import type { RunDeck } from './run-deck.js';
 import type { RunEngine } from './run-engine.js';
@@ -97,6 +114,11 @@ export interface AppOptions {
   sessions?: SessionStore;
   /** Where accounts are kept and what is done to them is recorded. Without it, there is nothing to claim. */
   identity?: Identity;
+  /** Whether a restore was recently applied (OPS-06). Without it, a session a restore ended is refused
+   * with an ordinary sign-in-again rather than told to update, the same as before this store existed. */
+  compatibility?: RestoreCompatibility;
+  /** The same database as the audit trail, with the notification store’s mutation methods. */
+  notificationDb?: NotificationDb;
   /** Where a Guest's invitation or an output window's capability is kept. Without it, there is none to grant. */
   capabilities?: CapabilityStore;
   /** Where the settings file is written and hot-reloaded. Without it, there is nothing to administer. */
@@ -111,6 +133,24 @@ export interface AppOptions {
   media?: MediaLibrary;
   /** Reads the retained bytes behind a media record without buffering the whole file. */
   mediaBytes?: MediaByteSource;
+  /** The same content database `backups.db` above also points at, handed separately here because a
+   * deployment could in principle have media to purge without also having backups configured. Lets
+   * the media cleanup routes scan slide groups and reusable slides for live references (OPS-14)
+   * instead of grading every asset unreferenced. Without it, that scan is skipped and everything
+   * grades unreferenced, same as before this scan existed. */
+  contentDb?: RepositoryDb;
+  /** Where a backup is recorded and where an on-demand run is queued. Without both, there is
+   * nothing here to trigger or list. */
+  backups?: { readonly db: RepositoryDb; readonly queue: Queue };
+  /** The same driver `Db` `backups.db`/`contentDb` are `RepositoryDb` views of, narrowed differently for
+   * OPS-09's own database health reading. Without it, the operational health route answers not-found,
+   * the same as it does without `backups`/`media`. */
+  mongoDb?: MongoHealthDb;
+  /** The restore-apply lease `guardMaintenance` reads. Without it, no request is ever refused for one. */
+  readonly maintenance?: MaintenanceStore;
+  /** Where the last media storage-root migration is recorded (OPS-16). Without it, there is
+   * nothing here to trigger a migration against or clean up after one. */
+  readonly migrationState?: MediaMigrationStateStore;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
   translationOffsets?: TranslationOffsetStore;
   /** Where an account's last workspace position is kept. Without it, there is none to read or save. */
@@ -175,6 +215,8 @@ export function buildApp({
   web,
   sessions,
   identity,
+  compatibility,
+  notificationDb,
   capabilities,
   settingsAdmin,
   slideLayouts,
@@ -182,6 +224,11 @@ export function buildApp({
   conflictShelf,
   media,
   mediaBytes,
+  contentDb,
+  backups,
+  mongoDb,
+  maintenance,
+  migrationState,
   translationOffsets,
   workspacePositions,
   contentExists,
@@ -209,6 +256,9 @@ export function buildApp({
   pptxSessions,
   anthropicApiKey,
 }: AppOptions): FastifyInstance {
+  const notifications = identity === undefined || notificationDb === undefined
+    ? undefined
+    : notificationStoreOn(notificationDb, { now: () => new Date().toISOString() });
   // HTTPS makes Fastify infer a specialised server, while the routes below use its common interface.
   const app = Fastify({ logger, ...(https === undefined ? {} : { https }) }) as unknown as FastifyInstance;
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
@@ -217,7 +267,7 @@ export function buildApp({
   // A real, enforced ceiling on the request body itself (THR-07): an oversized upload is refused while
   // its body is still streaming in, never buffered whole before `media-routes.ts` ever sees it. Fastify
   // defers every registration below to boot, so this needs no `await` to take effect before a route does.
-  app.register(multipart, { limits: { fileSize: MEDIA_SIZE_CEILING_BYTES } });
+  app.register(multipart, { limits: { fileSize: settings.values.mediaUploadLimitBytes } });
   // A `.pptx` upload arrives as its own raw bytes, not as a multipart form: this one content type only,
   // so no other route's body is read any differently. Its size ceiling is the import route's own.
   app.addContentTypeParser(
@@ -248,11 +298,15 @@ export function buildApp({
 
   // Installed before the first route is registered, which is what makes `mutatingRoutesOf` the whole
   // list of the routes that change something: a route registered above this line would be missing from it.
-  guardMutations(app, { sessions });
+  guardMutations(app, { sessions, compatibility });
+
+  // Installed beside the guard above, the same reach: a restore mid-apply refuses every mutation until
+  // its lease is released, whichever route below would otherwise have handled it.
+  guardMaintenance(app, { maintenance, now: () => new Date().toISOString() });
 
   // Installed right after: a mutating route's session is already proved by the guard above by the time
   // this asks for it, and every route registered from here down is one this check was on for.
-  enforceAuthorization(app, { sessions, identity });
+  enforceAuthorization(app, { sessions, identity, compatibility });
 
   // A path the client routes to itself is answered with the shell, so a reload or a shared link lands on
   // the page it names; everything else that nothing serves stays the JSON 404 the API has always given.
@@ -371,8 +425,78 @@ export function buildApp({
 
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
-  serveMediaRoutes(app, { media, identity, slideGroups, library });
+  serveMediaRoutes(app, { media, identity, slideGroups, library, settingsAdmin });
   serveMediaDeliveryRoutes(app, { media, bytes: mediaBytes });
+
+  // Behind the same permission once more: reporting what is safe to remove from the media library,
+  // and performing a reviewed purge of it. Reuses the media surface's own `media` — the same source
+  // `serveMediaRoutes` above already reads and writes.
+  serveMediaCleanupRoutes(app, {
+    media,
+    db: contentDb,
+    now: () => new Date().toISOString(),
+    settingsAdmin,
+    identity,
+  });
+
+  // Behind its own Admin permission: listing recorded backups and asking for an on-demand run.
+  serveBackupRoutes(app, {
+    db: backups?.db,
+    queue: backups?.queue,
+    now: () => new Date().toISOString(),
+    identity,
+  });
+
+  // Behind the same permission as the backup surface, by its own vocabulary: applying a recorded backup
+  // to production. Reuses the backup surface's own `db`/`queue` — a restore-apply job is the same kind
+  // of queued work a backup run is, kept in the same repositories.
+  serveRestoreRoutes(app, {
+    db: backups?.db,
+    queue: backups?.queue,
+    now: () => new Date().toISOString(),
+    identity,
+  });
+
+  // Behind its own Admin permission: showing what the queue holds and trying a failed job again.
+  // Reuses the backup surface's own `queue` — the same queue every backup, restore-apply and future
+  // job kind is recorded in.
+  serveJobRoutes(app, {
+    queue: backups?.queue,
+    identity,
+  });
+
+  // Behind its own Admin permission, by its own vocabulary: asking this deployment to migrate its media
+  // storage to a new root, and cleaning up the old one afterward (OPS-16). Reuses the backup surface's
+  // own `queue` for the same reason `serveJobRoutes` does above.
+  serveMediaMigrationRoutes(app, {
+    queue: backups?.queue,
+    migrationState,
+    now: () => new Date().toISOString(),
+    identity,
+    settingsAdmin,
+  });
+
+  // Behind its own Admin permission: the operational health report OPS-09 defines. Reuses the backup
+  // surface's own `db`/`queue` and the media surface's own `media`, the same sources every reader above
+  // already reads from — this route only ever reports on them, never changes them.
+  serveOperationsRoutes(app, {
+    db: backups?.db,
+    queue: backups?.queue,
+    media,
+    dataDir: settings.values.dataDir,
+    now: () => new Date().toISOString(),
+    identity,
+    mongoDb,
+    corpus,
+    corpusConfigured: settings.values.corpusUrl !== '',
+    settingsAdmin,
+  });
+
+  serveNotificationRoutes(app, {
+    store: notifications,
+    events: identity === undefined || notificationDb === undefined ? undefined : repositoriesOn(notificationDb).auditEvents,
+    identity,
+  });
 
   // Reading is public, the same as the corpus routes above: BIBL-02 calls an offset inspectable, and
   // there is nothing in one worth a session. Setting one is behind the same permission once again.
@@ -383,7 +507,7 @@ export function buildApp({
   // the capability surface above is behind, because running a presentation is what this surface is for.
   serveReferenceRoutes(app, { corpus, shownReferences, runReview, runs, deck });
   serveOrderRoutes(app, { services, slideLabels });
-  serveOutputDefaultsRoutes(app);
+  serveOutputDefaultsRoutes(app, { uploadLimitBytes: settings.values.mediaUploadLimitBytes });
   serveServiceRoutes(app, { services });
   serveWorkspacePositionRoutes(app, { workspacePositions, services, contentExists });
   serveServiceTemplateRoutes(app, { serviceTemplates, identity, services });

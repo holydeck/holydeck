@@ -367,6 +367,16 @@ describe('reading the trail the notifications come from', () => {
     expect(read).toHaveBeenCalledWith(expect.anything(), {}, { limit: NOTIFICATION_PAGE_LIMIT, sort: { at: -1 } });
   });
 
+  it('filters the trail by action when the caller narrows it', async () => {
+    const read = vi.fn(async () => [] as Document[]);
+    await deriveNotifications({ read }, readContext(), [prefers()], { actions: ['content.change'] });
+    expect(read).toHaveBeenCalledWith(
+      expect.anything(),
+      { action: { $in: ['content.change'] } },
+      { limit: NOTIFICATION_PAGE_LIMIT, sort: { at: -1 } },
+    );
+  });
+
   it('takes the watermark from the newest entry on the page, whatever order the store answered in', async () => {
     const rows = [trailRow('audit:new', at(5)), trailRow('audit:old', AT)];
     const derived = await deriveNotifications({ read: async () => rows }, readContext(), [prefers()]);

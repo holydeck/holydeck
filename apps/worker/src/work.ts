@@ -8,11 +8,17 @@
 
 import { backupProducerOn } from './backup-producer.js';
 import { mediaIngestOn } from './media-ingest.js';
+import { mediaMigrationOn } from './media-migration-handler.js';
+import { restoreApplyOn } from './restore-apply-handler.js';
+import { retentionSweepOn } from './retention-sweep-handler.js';
 import { restoreRehearsalOn } from './restore-rehearsal.js';
 
 import type { BackupProducerOptions } from './backup-producer.js';
 import type { MediaIngestOptions } from './media-ingest.js';
+import type { MediaMigrationHandlerOptions } from './media-migration-handler.js';
+import type { RestoreApplyHandlerOptions } from './restore-apply-handler.js';
 import type { RestoreRehearsalOptions } from './restore-rehearsal.js';
+import type { RetentionSweepOptions } from './retention-sweep-handler.js';
 import type { Handler } from './runner.js';
 
 export type Handlers = Readonly<Record<string, Handler>>;
@@ -33,23 +39,46 @@ const unconfiguredRestoreRun: Handler = async () => {
   throw new Error('restore rehearsal has not been configured');
 };
 
+const unconfiguredRestoreApply: Handler = async () => {
+  throw new Error('restore-apply has not been configured');
+};
+
+const unconfiguredRetentionSweep: Handler = async () => {
+  throw new Error('retention sweep has not been configured');
+};
+
+const unconfiguredMediaMigration: Handler = async () => {
+  throw new Error('media storage-root migration has not been configured');
+};
+
 /** The kinds this build registers before the entry point supplies their deployment dependencies. */
 export const HANDLERS: Handlers = Object.freeze({
   'media-ingest': unconfiguredMediaIngest,
   'backup-run': unconfiguredBackupRun,
   'restore-run': unconfiguredRestoreRun,
+  'restore-apply': unconfiguredRestoreApply,
+  'retention-sweep': unconfiguredRetentionSweep,
+  'media-root-migrate': unconfiguredMediaMigration,
 });
 
-export function handlersOn(
-  mediaIngest: MediaIngestOptions,
-  backupProducer: BackupProducerOptions,
-  restoreRehearsal: RestoreRehearsalOptions,
-): Handlers {
+export interface HandlersOptions {
+  readonly mediaIngest: MediaIngestOptions;
+  readonly backupProducer: BackupProducerOptions;
+  readonly restoreRehearsal: RestoreRehearsalOptions;
+  readonly restoreApply: RestoreApplyHandlerOptions;
+  readonly retentionSweep: RetentionSweepOptions;
+  readonly mediaMigration: MediaMigrationHandlerOptions;
+}
+
+export function handlersOn(options: HandlersOptions): Handlers {
   return Object.freeze({
     ...HANDLERS,
-    'media-ingest': mediaIngestOn(mediaIngest),
-    'backup-run': backupProducerOn(backupProducer),
-    'restore-run': restoreRehearsalOn(restoreRehearsal),
+    'media-ingest': mediaIngestOn(options.mediaIngest),
+    'backup-run': backupProducerOn(options.backupProducer),
+    'restore-run': restoreRehearsalOn(options.restoreRehearsal),
+    'restore-apply': restoreApplyOn(options.restoreApply),
+    'retention-sweep': retentionSweepOn(options.retentionSweep),
+    'media-root-migrate': mediaMigrationOn(options.mediaMigration),
   });
 }
 

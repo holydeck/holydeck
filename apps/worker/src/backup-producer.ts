@@ -14,13 +14,16 @@ import { redactSettingsText } from '@holydeck/app/settings';
 
 import { backupPath, forgetSnapshots, initRepository } from './restic.js';
 
-import type { BackupDb } from '@holydeck/app/backups';
+import type { BackupDb, MongoArchive } from '@holydeck/app/backups';
 import type { RepositoryDb } from '@holydeck/app/repositories';
+import type { BackupContent } from '@holydeck/contracts/backups';
 import type { ResticOptions } from './restic.js';
 import type { Handler } from './runner.js';
+import type { SchedulerStateStore } from './scheduler-state.js';
 
 export interface BackupProducerOptions {
   readonly context: unknown;
+  readonly schedulerState: SchedulerStateStore;
   /** The database `readMongoArchive` reads the Mongo half of the archive from, inside its own snapshot. */
   readonly archive: BackupDb;
   /** The database `finalizeBackup` writes the finished manifest and its audit entry through. */
@@ -75,16 +78,36 @@ async function stageRedactedSettings(settingsPath: string, stagingDir: string): 
 /** The content class the Mongo archive's own dump is backed up as — what a restore has to put back first. */
 export const MONGO_DUMP_CLASS = 'mongo';
 
+/** Mirrors `backups.ts`'s private `RESTIC_CLASSES`: what "every component" means for deciding whether a run
+ * may advance the scheduler's "last successful backup" baseline — a partial run must not satisfy the day's
+ * full scheduled backup. */
+const FULL_BACKUP_COMPONENTS = ['mongo', 'settings', 'media'];
+
+const MONGO_NOT_REQUESTED: MongoArchive = {
+  contents: [],
+  consistency: { pointInTime: true, method: 'not read — mongo is not one of this run’s requested components' },
+};
+
 /**
  * Produces one backup: the Mongo archive (read, dumped to a temp directory, then backed up through Restic
  * so it is actually restorable rather than a fingerprint of data nothing durable ever holds), Restic's
  * settings and media, and the manifest joining all three.
  */
 export function backupProducerOn(options: BackupProducerOptions): Handler {
-  return async (_job, signal) => {
+  return async (job, signal) => {
+    const requested = job.payload['components'];
+    const components: readonly string[] =
+      Array.isArray(requested) && requested.every((entry) => typeof entry === 'string')
+        ? requested
+        : ['mongo', 'settings', 'media'];
     const dumpDir = await mkdtemp(join(tmpdir(), 'holydeck-backup-mongo-'));
     try {
-      const archive = await readMongoArchive(options.archive, options.context, { dumpDir });
+      // A settings-only or media-only run has no Mongo dump behind it: reading the archive anyway would fold
+      // its digest entries into the manifest as if a Restic snapshot of them existed, when the "mongo" content
+      // class below is what actually backs them — and skipped right alongside this when not requested.
+      const archive = components.includes(MONGO_DUMP_CLASS)
+        ? await readMongoArchive(options.archive, options.context, { dumpDir })
+        : MONGO_NOT_REQUESTED;
       stopped(signal);
 
       await stageRedactedSettings(options.settingsPath, SETTINGS_STAGING_DIR);
@@ -95,20 +118,41 @@ export function backupProducerOn(options: BackupProducerOptions): Handler {
       await initRepository(options.restic, signal);
       stopped(signal);
 
-      const mongo = await backupPath(options.restic, MONGO_DUMP_CLASS, MONGO_DUMP_CLASS, dumpDir, signal);
-      stopped(signal);
-      const settings = await backupPath(options.restic, 'settings', 'settings', SETTINGS_STAGING_DIR, signal);
-      stopped(signal);
-      const media = await backupPath(options.restic, 'media', 'media', options.mediaRoot, signal);
-      stopped(signal);
+      const otherContents: BackupContent[] = [];
+      if (components.includes(MONGO_DUMP_CLASS)) {
+        otherContents.push(await backupPath(options.restic, MONGO_DUMP_CLASS, MONGO_DUMP_CLASS, dumpDir, signal));
+        stopped(signal);
+      } else {
+        options.report?.('backup: mongo skipped — not in this run’s requested components');
+      }
+      if (components.includes('settings')) {
+        otherContents.push(await backupPath(options.restic, 'settings', 'settings', SETTINGS_STAGING_DIR, signal));
+        stopped(signal);
+      } else {
+        options.report?.('backup: settings skipped — not in this run’s requested components');
+      }
+      if (components.includes('media')) {
+        otherContents.push(await backupPath(options.restic, 'media', 'media', options.mediaRoot, signal));
+        stopped(signal);
+      } else {
+        options.report?.('backup: media skipped — not in this run’s requested components');
+      }
 
       const produced = await finalizeBackup(
         options.db,
         options.context,
-        { mongoContents: archive.contents, otherContents: [mongo, settings, media], consistency: archive.consistency },
+        { mongoContents: archive.contents, otherContents, consistency: archive.consistency },
         { now: options.now, newId: options.newId, schemaVersion: options.schemaVersion },
       );
       stopped(signal);
+
+      if (FULL_BACKUP_COMPONENTS.every((component) => components.includes(component))) {
+        await options.schedulerState.markBackup(options.now());
+      } else {
+        options.report?.(
+          `backup ${produced.manifest.id}: not marked as the scheduler’s last backup — only ${components.join(', ')} ran`,
+        );
+      }
 
       // Last, and only once the new backup is recorded: retention decides what to keep out of everything
       // that now exists, so a run that failed before finalizing can never be the reason an older one goes.

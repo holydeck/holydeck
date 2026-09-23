@@ -6,6 +6,12 @@
 // screen actually has: *what do I do about it*. That answer is this module's, and it is the only thing
 // here that is new.
 //
+// Four more domains (`database`, `corpus`, `disk`, `process`) answer OPS-09's own list of what an
+// operations page must show — Mongo reachability and storage, corpus reachability and latency, free
+// space on the media root, and this process's own CPU/RAM — that nothing else in the product already
+// tracks. `operational-sources.ts` takes the actual measurement (a ping, a probe, a `statfs`, a
+// `cpuUsage`); this module only grades what it is handed, the same as it does for the original seven.
+//
 // Three rules shape the whole file.
 //
 // *Every status states an action.* A finding with no action is a colour, and a colour is what an operator
@@ -46,8 +52,20 @@ import type { MediaManifestEntry, MediaProcessingState } from '@holydeck/contrac
 
 import type { RecordedBackup } from './backups.js';
 
-/** The seven statuses OPER-01 names, in the order the surface reports them. */
-export const OPERATIONAL_DOMAINS = ['health', 'storage', 'queue', 'backup', 'restore', 'media', 'readiness'] as const;
+/** The eleven statuses OPER-01 names, in the order the surface reports them. */
+export const OPERATIONAL_DOMAINS = [
+  'health',
+  'storage',
+  'queue',
+  'backup',
+  'restore',
+  'media',
+  'readiness',
+  'database',
+  'corpus',
+  'disk',
+  'process',
+] as const;
 
 export type OperationalDomain = (typeof OPERATIONAL_DOMAINS)[number];
 
@@ -103,6 +121,7 @@ export const OPERATIONAL_CODES = [
   'media.unreadable',
   'media.failed',
   'media.backlog',
+  'media.cleanupEligible',
 
   'readiness.ok',
   'readiness.unreported',
@@ -111,6 +130,24 @@ export const OPERATIONAL_CODES = [
   'readiness.snapshotUnusable',
   'readiness.environmentDiverged',
   'readiness.slidesBlocked',
+
+  'database.ok',
+  'database.slow',
+  'database.unreachable',
+  'database.unreadable',
+
+  'corpus.ok',
+  'corpus.notConfigured',
+  'corpus.slow',
+  'corpus.unreachable',
+  'corpus.unreadable',
+
+  'disk.ok',
+  'disk.low',
+  'disk.unreadable',
+
+  'process.ok',
+  'process.unreadable',
 ] as const;
 
 export type OperationalCode = (typeof OPERATIONAL_CODES)[number];
@@ -166,6 +203,13 @@ export interface WorkerHeartbeatReading {
   readonly pid?: number;
   readonly paths?: readonly string[];
   readonly staleAfterMs: number;
+  /** The worker's own process metrics — OPS-09's "worker-process" scope, never the host's. Optional:
+   *  a heartbeat written before this existed, or one a worker never measured itself into, carries none. */
+  readonly process?: {
+    readonly cpuUserSeconds: number;
+    readonly cpuSystemSeconds: number;
+    readonly memoryRssMb: number;
+  };
 }
 
 /**
@@ -256,8 +300,41 @@ export interface RecordedRehearsal {
   readonly objectives: BackupObjectives;
 }
 
+/** Whether the database this deployment keeps its own records in can be reached, and how long that took. */
+export type DatabaseReading =
+  | { readonly reachable: true; readonly latencyMs: number; readonly storageBytes: number }
+  | { readonly reachable: false };
+
 /**
- * Everything the surface was able to measure. The five server-side domains are always attempted, so their
+ * Whether the scripture library can be reached, and how long that took — or that none is configured,
+ * which `corpus.ts` treats as a supported shape rather than a fault (BIBL-01 makes it optional).
+ */
+export type CorpusReading =
+  | { readonly configured: false }
+  | { readonly configured: true; readonly reachable: true; readonly latencyMs: number }
+  | { readonly configured: true; readonly reachable: false };
+
+/** Free space on the media root against the reserve OPS-13's own upload guard already refuses under. */
+export interface DiskReading {
+  readonly freeBytes: number;
+  readonly reserveBytes: number;
+}
+
+/** This process's own CPU time and resident memory — never the host's, and never the worker's. */
+export interface ProcessReading {
+  readonly cpuUserSeconds: number;
+  readonly cpuSystemSeconds: number;
+  readonly memoryRssMb: number;
+}
+
+/** What OPS-15's cleanup scan found safe to purge, and how much space reclaiming it would free. */
+export interface MediaCleanupReading {
+  readonly eligibleCount: number;
+  readonly reclaimableBytes: number;
+}
+
+/**
+ * Everything the surface was able to measure. The nine server-side domains are always attempted, so their
  * only two answers are a reading or `UNREADABLE`; the two a browser owns may also be absent, because no
  * presenting machine has reported yet — which is a different thing to say and a different thing to do.
  */
@@ -268,6 +345,11 @@ export interface OperationalReadings {
   readonly backup: Observed<readonly RecordedBackup[]>;
   readonly restore: Observed<readonly RecordedRehearsal[]>;
   readonly media: Observed<readonly MediaManifestEntry[]>;
+  readonly database: Observed<DatabaseReading>;
+  readonly corpus: Observed<CorpusReading>;
+  readonly disk: Observed<DiskReading>;
+  readonly process: Observed<ProcessReading>;
+  readonly mediaCleanup: Observed<MediaCleanupReading>;
   readonly storage?: Observed<StorageReading>;
   readonly readiness?: Observed<ReadinessReading>;
 }
@@ -293,6 +375,12 @@ export const REHEARSAL_INTERVAL_MINUTES = 7 * 24 * 60;
  * can act on is the one that comes before that happens.
  */
 export const RECOVERY_TIME_WARNING_RATIO = 0.75;
+
+/** How long a database ping may take before it is worth an operator's attention, not yet a fault. */
+export const DATABASE_LATENCY_WARNING_MS = 500;
+
+/** How long a corpus request may take before it is worth an operator's attention, not yet a fault. */
+export const CORPUS_LATENCY_WARNING_MS = 1_000;
 
 const MINUTE_MS = 60_000;
 const MEGABYTE = 1_000_000;
@@ -717,6 +805,7 @@ const restoreFindings = (reading: Observed<readonly RecordedRehearsal[]>, at: st
 const mediaFindings = (
   reading: Observed<readonly MediaManifestEntry[]>,
   running: boolean,
+  cleanup: Observed<MediaCleanupReading>,
 ): readonly OperationalFinding[] => {
   if (reading === UNREADABLE) return [unreadable('media', 'media.unreadable')];
   const counted = (state: MediaProcessingState): number =>
@@ -757,6 +846,21 @@ const mediaFindings = (
     );
   }
 
+  // OPS-15: a nudge, not a fault — an unreadable cleanup reading here is silently skipped rather than
+  // reported as its own failure, because whether this deployment CAN compute what is safe to purge is a
+  // narrower question than whether its media is usable, which is what the rest of this domain already
+  // answers.
+  if (cleanup !== UNREADABLE && cleanup.eligibleCount > 0) {
+    found.push(
+      finding(
+        'media.cleanupEligible',
+        'degraded',
+        { eligibleCount: cleanup.eligibleCount, reclaimableMegabytes: megabytesFree(cleanup.reclaimableBytes) },
+        `Review the media cleanup report: ${cleanup.eligibleCount} item(s) are safe to purge and would free ${megabytesFree(cleanup.reclaimableBytes)} MB.`,
+      ),
+    );
+  }
+
   if (found.length > 0) return found;
   return [
     finding(
@@ -766,6 +870,133 @@ const mediaFindings = (
       `Leave media as it is: all ${ready} item(s) are processed and usable in a service.`,
     ),
   ];
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Database, corpus, disk and process: the four OPS-09 asks for that nothing else already tracks.
+
+const databaseFindings = (reading: Observed<DatabaseReading>): readonly OperationalFinding[] => {
+  if (reading === UNREADABLE) return [unreadable('database', 'database.unreadable')];
+  if (!reading.reachable) {
+    return [
+      finding(
+        'database.unreachable',
+        'failed',
+        {},
+        'Check the database and its network path: a ping to it failed, so nothing that reads or writes through it can be trusted right now.',
+      ),
+    ];
+  }
+  if (reading.latencyMs > DATABASE_LATENCY_WARNING_MS) {
+    return [
+      finding(
+        'database.slow',
+        'degraded',
+        { latencyMs: reading.latencyMs, warningMs: DATABASE_LATENCY_WARNING_MS },
+        `Look at the database's own load and its network path: a ping took ${reading.latencyMs}ms, past the ${DATABASE_LATENCY_WARNING_MS}ms this deployment expects.`,
+      ),
+    ];
+  }
+  return [
+    finding(
+      'database.ok',
+      'ok',
+      { latencyMs: reading.latencyMs, storageMegabytes: megabytesFree(reading.storageBytes) },
+      `Leave the database as it is: a ping took ${reading.latencyMs}ms and it holds ${megabytesFree(reading.storageBytes)} MB.`,
+    ),
+  ];
+};
+
+const corpusFindings = (reading: Observed<CorpusReading>): readonly OperationalFinding[] => {
+  if (reading === UNREADABLE) return [unreadable('corpus', 'corpus.unreadable')];
+  if (!reading.configured) {
+    return [
+      finding(
+        'corpus.notConfigured',
+        'ok',
+        {},
+        'Leave it as it is: no scripture library is configured for this deployment, which is a supported shape and not a fault.',
+      ),
+    ];
+  }
+  if (!reading.reachable) {
+    return [
+      finding(
+        'corpus.unreachable',
+        'failed',
+        {},
+        'Check the corpus service and its network path: a reachability request to it failed, so no passage can be shown from it right now.',
+      ),
+    ];
+  }
+  if (reading.latencyMs > CORPUS_LATENCY_WARNING_MS) {
+    return [
+      finding(
+        'corpus.slow',
+        'degraded',
+        { latencyMs: reading.latencyMs, warningMs: CORPUS_LATENCY_WARNING_MS },
+        `Look at the corpus service and its network path: a request took ${reading.latencyMs}ms, past the ${CORPUS_LATENCY_WARNING_MS}ms this deployment expects.`,
+      ),
+    ];
+  }
+  return [
+    finding(
+      'corpus.ok',
+      'ok',
+      { latencyMs: reading.latencyMs },
+      `Leave the corpus service as it is: a request to it took ${reading.latencyMs}ms.`,
+    ),
+  ];
+};
+
+const diskFindings = (reading: Observed<DiskReading>): readonly OperationalFinding[] => {
+  if (reading === UNREADABLE) return [unreadable('disk', 'disk.unreadable')];
+  const free = megabytesFree(reading.freeBytes);
+  const reserve = megabytesFree(reading.reserveBytes);
+  if (reading.freeBytes < reading.reserveBytes) {
+    return [
+      finding(
+        'disk.low',
+        'failed',
+        { freeMegabytes: free, reserveMegabytes: reserve },
+        `Free some room on the media filesystem: ${free} MB is free and this deployment reserves ${reserve} MB, so an upload is refused the same way OPS-13's own guard refuses one.`,
+      ),
+    ];
+  }
+  return [
+    finding(
+      'disk.ok',
+      'ok',
+      { freeMegabytes: free, reserveMegabytes: reserve },
+      `Leave the media filesystem as it is: ${free} MB is free, above the ${reserve} MB this deployment reserves.`,
+    ),
+  ];
+};
+
+/**
+ * The app-process reading is always attempted and graded on its own; the worker's is optional, riding
+ * along on the same heartbeat `healthFindings` already reads (a heartbeat written before it existed, or by
+ * a worker that never measured itself, carries none) and is folded into the same finding, clearly labelled,
+ * rather than reported as a domain of its own — one process-shaped fact set per scope, in one place.
+ */
+const processFindings = (
+  app: Observed<ProcessReading>,
+  worker: WorkerHeartbeatReading['process'] | undefined,
+): readonly OperationalFinding[] => {
+  if (app === UNREADABLE) return [unreadable('process', 'process.unreadable')];
+  const facts: Record<string, number> = {
+    appCpuUserSeconds: Math.round(app.cpuUserSeconds),
+    appCpuSystemSeconds: Math.round(app.cpuSystemSeconds),
+    appMemoryRssMegabytes: app.memoryRssMb,
+  };
+  let action = `Leave the app process as it is: it has used ${Math.round(app.cpuUserSeconds)}s of user CPU time and holds ${app.memoryRssMb} MB resident, scoped to this process alone.`;
+  if (worker !== undefined) {
+    facts['workerCpuUserSeconds'] = Math.round(worker.cpuUserSeconds);
+    facts['workerCpuSystemSeconds'] = Math.round(worker.cpuSystemSeconds);
+    facts['workerMemoryRssMegabytes'] = worker.memoryRssMb;
+    action += ` The worker process holds ${worker.memoryRssMb} MB resident, its own scope and not this one's.`;
+  }
+  return [finding('process.ok', 'ok', facts, action)];
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -907,8 +1138,15 @@ export function operationalHealthOf(readings: OperationalReadings): OperationalH
     statusOf('queue', queueFindings(readings.queue, at, running)),
     statusOf('backup', backupFindings(readings.backup, at)),
     statusOf('restore', restoreFindings(readings.restore, at)),
-    statusOf('media', mediaFindings(readings.media, running)),
+    statusOf('media', mediaFindings(readings.media, running, readings.mediaCleanup)),
     statusOf('readiness', readinessFindings(readings.readiness)),
+    statusOf('database', databaseFindings(readings.database)),
+    statusOf('corpus', corpusFindings(readings.corpus)),
+    statusOf('disk', diskFindings(readings.disk)),
+    statusOf(
+      'process',
+      processFindings(readings.process, readings.health === UNREADABLE ? undefined : readings.health.process),
+    ),
   ]);
 
   const state = statuses.reduce<OperationalState>(
@@ -932,6 +1170,11 @@ export interface OperationalSources {
   readonly backups: () => Promise<readonly RecordedBackup[]>;
   readonly rehearsals: () => Promise<readonly RecordedRehearsal[]>;
   readonly media: () => Promise<readonly MediaManifestEntry[]>;
+  readonly database: () => Promise<DatabaseReading>;
+  readonly corpus: () => Promise<CorpusReading>;
+  readonly disk: () => Promise<DiskReading>;
+  readonly process: () => Promise<ProcessReading>;
+  readonly mediaCleanup: () => Promise<MediaCleanupReading>;
   readonly storage?: () => Promise<StorageReading | undefined>;
   readonly readiness?: () => Promise<ReadinessReading | undefined>;
 }
@@ -956,16 +1199,36 @@ const readOptional = async <T>(
   source: (() => Promise<T | undefined>) | undefined,
 ): Promise<T | typeof UNREADABLE | undefined> => (source === undefined ? undefined : read(source));
 
-/** Takes all seven readings — one failure costing one domain and no other — and grades them. */
+/** Takes all eleven readings — one failure costing one domain and no other — and grades them. */
 export async function observeOperationalHealth(sources: OperationalSources): Promise<OperationalHealthReport> {
-  const [health, queue, backup, restore, media, storage, readiness] = await Promise.all([
-    read(sources.worker),
-    read(sources.queue),
-    read(sources.backups),
-    read(sources.rehearsals),
-    read(sources.media),
-    readOptional(sources.storage),
-    readOptional(sources.readiness),
-  ]);
-  return operationalHealthOf({ at: sources.now(), health, queue, backup, restore, media, storage, readiness });
+  const [health, queue, backup, restore, media, database, corpus, disk, appProcess, mediaCleanup, storage, readiness] =
+    await Promise.all([
+      read(sources.worker),
+      read(sources.queue),
+      read(sources.backups),
+      read(sources.rehearsals),
+      read(sources.media),
+      read(sources.database),
+      read(sources.corpus),
+      read(sources.disk),
+      read(sources.process),
+      read(sources.mediaCleanup),
+      readOptional(sources.storage),
+      readOptional(sources.readiness),
+    ]);
+  return operationalHealthOf({
+    at: sources.now(),
+    health,
+    queue,
+    backup,
+    restore,
+    media,
+    database,
+    corpus,
+    disk,
+    process: appProcess,
+    mediaCleanup,
+    storage,
+    readiness,
+  });
 }

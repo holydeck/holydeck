@@ -60,6 +60,34 @@
     "./migrations": {
       "types": "./dist/migrations.d.ts",
       "import": "./dist/migrations.js"
+    },
+    "./schedule": {
+      "types": "./dist/schedule.d.ts",
+      "import": "./dist/schedule.js"
+    },
+    "./audit": {
+      "types": "./dist/audit.d.ts",
+      "import": "./dist/audit.js"
+    },
+    "./maintenance": {
+      "types": "./dist/maintenance.d.ts",
+      "import": "./dist/maintenance.js"
+    },
+    "./restore-compatibility": {
+      "types": "./dist/restore-compatibility.d.ts",
+      "import": "./dist/restore-compatibility.js"
+    },
+    "./media-migration-state": {
+      "types": "./dist/media-migration-state.d.ts",
+      "import": "./dist/media-migration-state.js"
+    },
+    "./retention": {
+      "types": "./dist/retention.d.ts",
+      "import": "./dist/retention.js"
+    },
+    "./notification-store": {
+      "types": "./dist/notification-store.d.ts",
+      "import": "./dist/notification-store.js"
     }
   },
   "scripts": {

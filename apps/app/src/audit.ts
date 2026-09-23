@@ -117,6 +117,8 @@ export const AUDIT_ACTIONS = [
   'readiness.override',
   // Reserved for the backup surface T100+ builds. Exercised only by this task's own tests today.
   'backup.run',
+  // Written by backup-routes.ts when an operator triggers an on-demand backup.
+  'backup.request',
   // Reserved for the restore surface T101+ builds. Exercised only by this task's own tests today.
   'restore.run',
   // A losing edit's shelf row settled: `collaboration.ts`'s own caller, naming which revision won.
@@ -127,6 +129,34 @@ export const AUDIT_ACTIONS = [
   'integration.call',
   'integration.enable',
   'integration.disable',
+  // A restore-apply's own history (OPS-06), apart from `restore.run`: `restore-routes.ts` writes the
+  // first when an operator's request is accepted onto the queue, and `restore-apply-handler.ts` writes
+  // the other two around its own call to `applyRestore` — which still writes `restore.run` itself.
+  'restore.apply.request',
+  'restore.apply.complete',
+  'restore.apply.fail',
+  // A grading pass over the audit trail's own declared retention window (OPS-07): counts what it found
+  // removable and retained, and removes nothing itself — `retention.ts`'s own header says why.
+  'retention.sweep',
+  // A failed job an administrator asked to run again (OPS-08). Written by `job-routes.ts`. Category
+  // `integration` — queued work crossing into the systems it does, not any of the more specific
+  // categories above.
+  'job.requeue',
+  'notification.read',
+  'notification.dismiss',
+  'notification.preferences',
+  // A media storage-root migration (OPS-16): `media-migration-routes.ts` writes the first and last when
+  // an operator requests one and later cleans up the old root; `media-migration-handler.ts` writes the
+  // middle two around the copy-verify-switch itself. Category `integration`, the same as `job.requeue` —
+  // queued work crossing into the systems it does.
+  'media.storageMigration.request',
+  'media.storageMigration.complete',
+  'media.storageMigration.fail',
+  'media.storageMigration.cleanup',
+  // A reviewed purge of media past its grace period (OPS-15). Written by `media-cleanup-routes.ts`
+  // once per POST, whatever it purged or retained — the report a GET answers is never audited, the
+  // same as every other route module's read side in this codebase.
+  'media.cleanup',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -204,12 +234,26 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'run.recap.export': 'presentation',
   'readiness.override': 'presentation',
   'backup.run': 'backup',
+  'backup.request': 'backup',
   'restore.run': 'restore',
   'content.conflict.resolve': 'content',
   'content.revision.restore': 'content',
   'integration.call': 'integration',
   'integration.enable': 'integration',
   'integration.disable': 'integration',
+  'restore.apply.request': 'restore',
+  'restore.apply.complete': 'restore',
+  'restore.apply.fail': 'restore',
+  'retention.sweep': 'integration',
+  'job.requeue': 'integration',
+  'notification.read': 'integration',
+  'notification.dismiss': 'integration',
+  'notification.preferences': 'integration',
+  'media.storageMigration.request': 'integration',
+  'media.storageMigration.complete': 'integration',
+  'media.storageMigration.fail': 'integration',
+  'media.storageMigration.cleanup': 'integration',
+  'media.cleanup': 'integration',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */
@@ -344,12 +388,26 @@ export const AUDIT_DETAIL_REDACTION: Readonly<Record<AuditAction, 'verbatim' | '
   'run.recap.export': 'verbatim',
   'readiness.override': 'verbatim',
   'backup.run': 'verbatim',
+  'backup.request': 'verbatim',
   'restore.run': 'verbatim',
   'content.conflict.resolve': 'verbatim',
   'content.revision.restore': 'verbatim',
   'integration.call': 'verbatim',
   'integration.enable': 'verbatim',
   'integration.disable': 'verbatim',
+  'restore.apply.request': 'verbatim',
+  'restore.apply.complete': 'verbatim',
+  'restore.apply.fail': 'verbatim',
+  'retention.sweep': 'verbatim',
+  'job.requeue': 'verbatim',
+  'notification.read': 'verbatim',
+  'notification.dismiss': 'verbatim',
+  'notification.preferences': 'verbatim',
+  'media.storageMigration.request': 'verbatim',
+  'media.storageMigration.complete': 'verbatim',
+  'media.storageMigration.fail': 'verbatim',
+  'media.storageMigration.cleanup': 'verbatim',
+  'media.cleanup': 'verbatim',
 };
 
 const IPV4 = /\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}\b/gu;
@@ -470,7 +528,7 @@ export function auditContext(actor: string, correlationId: string): RequestConte
   return requestContext({ actor, permissions: [permissionsFor('auditEvents').append], correlationId });
 }
 
-/** The context an admin reads the trail under: able to list it, and to do nothing else. */
+/** The context a reader of the trail runs under: able to read it, and to do nothing else. */
 export function auditReadContext(actor: string, correlationId: string): RequestContext {
   return requestContext({ actor, permissions: [permissionsFor('auditEvents').read], correlationId });
 }
@@ -496,4 +554,17 @@ export function integrationCallAudit(
       durationMs: call.durationMs,
     });
   };
+}
+
+/**
+ * The context a retention sweep runs under (OPS-07): able to read the trail to find what is old enough
+ * to grade, and to append its own `retention.sweep` summary — nothing else, and nothing more of the
+ * trail than that.
+ */
+export function retentionSweepContext(actor: string, correlationId: string): RequestContext {
+  return requestContext({
+    actor,
+    permissions: [permissionsFor('auditEvents').read, permissionsFor('auditEvents').append],
+    correlationId,
+  });
 }

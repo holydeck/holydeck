@@ -9,7 +9,9 @@
 // decided at the boundary: `mongo`, `settings` and `media` are independent, so any non-empty subset of
 // them may be restored on its own, and `mode` accepts only `'replace'` — there is no merge to ask for.
 // This module checks `mode` again rather than trusting the boundary alone, because the one thing worse
-// than a merge being refused is a merge being half applied.
+// than a merge being refused is a merge being half applied. The 24 h rehearsal precondition is re-checked
+// here for the same reason: `restore-routes.ts` already checked it once, before the job was ever queued,
+// but that answer can go stale while the job waits its turn.
 //
 // *Everything is checked before anything is written*. Every requested class is proved against the
 // manifest, and a target was wired to receive it, before the first write — the same guarantee
@@ -27,14 +29,18 @@ import { cp, rm } from 'node:fs/promises';
 import { auditContext, auditOn } from './audit.js';
 import { contextProblems } from './context.js';
 import { permissionsFor } from './records.js';
-import { RESTORE_RECORD, RestoreError, replaceCollection, verifyMongoArchive } from './restores.js';
+import { RESTORE_RECORD, RestoreError, hasPassingRehearsal, replaceCollection, verifyMongoArchive } from './restores.js';
 
 import type { BackupProduction, RestoreClass, RestoreSelection } from '@holydeck/contracts/backups';
 import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
+import type { RestoreCompatibilityStore } from './restore-compatibility.js';
 import type { RestoreCapabilities, RestoreDb, RestoreSessions } from './restores.js';
 
-export type RestoreApplyRefusal = 'context' | 'permission' | 'mode' | 'archive' | 'target';
+/** What this module needs from `restore-compatibility.ts`: only the write half — `csrf.ts` reads it back. */
+export type RestoreCompatibilityRecorder = Pick<RestoreCompatibilityStore, 'record'>;
+
+export type RestoreApplyRefusal = 'context' | 'permission' | 'mode' | 'rehearsal' | 'archive' | 'target';
 
 /** Carries why a restore was refused, so a caller can tell an unwired target from a corrupt archive. */
 export class RestoreApplyError extends Error {
@@ -97,6 +103,9 @@ export interface RestoreApplyOptions {
   readonly sessions: RestoreSessions;
   /** Revoked only when `mongo` is part of the selection, the same as `sessions`. */
   readonly capabilities: RestoreCapabilities;
+  /** Recorded only when `mongo` is part of the selection, the same as `sessions` and `capabilities` — so a
+   *  client whose session this restore just ended is told to update rather than merely to sign in again. */
+  readonly compatibility: RestoreCompatibilityRecorder;
   readonly now: () => string;
 }
 
@@ -177,6 +186,13 @@ async function run(
     throw new RestoreApplyError('mode', `restore ${backupId}: only a replace restore is supported`);
   }
 
+  // Re-checked here even though `restore-routes.ts` already checked it before this job was ever queued:
+  // that answer is only as fresh as the moment the route asked it, and a job can sit queued long enough
+  // for a passing rehearsal to age out of the window before this module ever runs.
+  if (!(await hasPassingRehearsal(db, checked, backupId, options.now()))) {
+    throw new RestoreApplyError('rehearsal', `restore ${backupId}: no passing rehearsal in the last 24 hours`);
+  }
+
   // Every class, proved against the manifest and wired to a target, before the first write — so a request
   // this backup or this deployment cannot fully satisfy writes nothing at all rather than some of it.
   for (const restoreClass of classes) {
@@ -217,6 +233,9 @@ async function run(
     sessionsEnded = mongoTarget === undefined ? undefined : await options.sessions.revokeEvery(checked);
     // A capability outlives no restore either, for the same reason a session does not.
     capabilitiesRevoked = mongoTarget === undefined ? undefined : await options.capabilities.revokeEvery(checked);
+    // Marks when this happened, so a session ended by *this* restore is told to update rather than to sign
+    // in again the next time it is presented — see `restore-compatibility.ts`.
+    if (mongoTarget !== undefined) await options.compatibility.record();
   } catch (error) {
     if (applied.length > 0) {
       await auditOn(db, { now: options.now }).record(checked, {

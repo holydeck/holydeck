@@ -256,26 +256,75 @@ export interface RestoreSelection {
   readonly classes: readonly RestoreClass[];
 }
 
-const readRestoreClasses = (reader: FieldReader): readonly RestoreClass[] => {
-  const raw = reader.textList('classes');
+const readClassList = (
+  reader: FieldReader,
+  field: string,
+  options: { readonly optional: boolean } = { optional: false },
+): readonly RestoreClass[] => {
+  if (options.optional && !reader.names.includes(field)) return RESTORE_CLASSES;
+  const raw = reader.textList(field);
   const classes: RestoreClass[] = [];
   for (const [index, value] of raw.entries()) {
     const found = RESTORE_CLASSES.find((candidate) => candidate === value);
     if (found === undefined) {
-      reader.reject(`classes.${index}`, FIELD_CODES.notAllowed, `must be one of ${RESTORE_CLASSES.join(', ')}`);
+      reader.reject(`${field}.${index}`, FIELD_CODES.notAllowed, `must be one of ${RESTORE_CLASSES.join(', ')}`);
     } else if (classes.includes(found)) {
-      reader.reject(`classes.${index}`, FIELD_CODES.notAllowed, `${found} is selected more than once`);
+      reader.reject(`${field}.${index}`, FIELD_CODES.notAllowed, `${found} is selected more than once`);
     } else {
       classes.push(found);
     }
   }
-  if (classes.length === 0) reader.reject('classes', FIELD_CODES.notAllowed, 'selects nothing to restore');
+  if (classes.length === 0) reader.reject(field, FIELD_CODES.notAllowed, 'selects nothing to restore');
   return classes;
 };
+
+const readRestoreClasses = (reader: FieldReader): readonly RestoreClass[] => readClassList(reader, 'classes');
+
+export interface BackupRequest {
+  readonly components: readonly RestoreClass[];
+}
+
+/**
+ * What an operator may ask for when triggering a backup on demand. `components` is optional and
+ * defaults to every class (`RESTORE_CLASSES`) when absent — the whole point of an on-demand
+ * backup is "back up everything, right now" unless the operator narrows it. An explicit empty
+ * list is still refused, the same as a restore selecting nothing: there is no reading of "back up
+ * nothing" that is a legitimate request.
+ */
+export function parseBackupRequest(value: unknown): Parsed<BackupRequest> {
+  return parseObject(value, 'backup', (reader) => ({
+    components: readClassList(reader, 'components', { optional: true }),
+  }));
+}
 
 export function parseRestoreSelection(value: unknown): Parsed<RestoreSelection> {
   return parseObject(value, 'restore', (reader) => ({
     mode: reader.choice('mode', ['replace'] as const),
     classes: readRestoreClasses(reader),
   }));
+}
+
+export interface RestoreRequest {
+  readonly backupId: string;
+  readonly components: readonly RestoreClass[];
+}
+
+/**
+ * What an operator may ask for when applying a recorded backup to production (OPS-06). `confirm` guards
+ * against the wrong backup, not the wrong operator: the operator retypes the exact backup identifier, and
+ * a request whose `confirm` does not match its own `backupId` is refused before anything is queued — there
+ * being no human-readable label anywhere in a `BackupProduction` to retype instead. It is layered on top of,
+ * not instead of, the route's own step-up (a password re-check, the same mechanism already asked of
+ * revoking a second factor or a passkey — see `restore-routes.ts`), which guards against the wrong operator.
+ * `components` is optional and defaults to every class the same way an on-demand backup request does.
+ */
+export function parseRestoreRequest(value: unknown): Parsed<RestoreRequest> {
+  return parseObject(value, 'restore', (reader) => {
+    const backupId = reader.text('backupId');
+    const confirm = reader.text('confirm');
+    if (confirm !== backupId) {
+      reader.reject('confirm', FIELD_CODES.notAllowed, 'must repeat backupId exactly, to confirm a restore into production');
+    }
+    return { backupId, components: readClassList(reader, 'components', { optional: true }) };
+  });
 }

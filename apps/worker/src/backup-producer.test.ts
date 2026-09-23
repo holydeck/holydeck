@@ -14,6 +14,7 @@ import { fakeDb } from '../../app/test/helpers/fake-db.js';
 import type { BackupCollection, BackupDb, BackupSession } from '@holydeck/app/backups';
 import type { LeasedJob } from '@holydeck/contracts/jobs';
 import type { RunnerQueue } from './runner.js';
+import type { SchedulerStateStore } from './scheduler-state.js';
 
 class FakeChild extends EventEmitter {
   readonly kill = vi.fn();
@@ -67,7 +68,21 @@ const LAUNCHED = {
   env: expect.objectContaining({ RESTIC_PASSWORD: RESTIC.password }) as unknown,
 };
 
+const fakeSchedulerState = (): SchedulerStateStore & { readonly calls: string[] } => {
+  const calls: string[] = [];
+  return {
+    calls,
+    read: async () => ({}),
+    markBackup: async (at: string) => {
+      calls.push(at);
+    },
+    markRestoreRehearsal: async () => {},
+    markRetentionSweep: async () => {},
+  };
+};
+
 const OPTIONS = {
+  schedulerState: fakeSchedulerState(),
   context: CONTEXT,
   restic: RESTIC,
   // Left pointing at nothing on disk: most of these tests do not care what the "settings" class holds,
@@ -123,7 +138,8 @@ describe('producing a backup', () => {
   it('reads the Mongo archive, dumps it, backs up mongo, settings and media, and finalizes one manifest', async () => {
     const db = fakeDb();
     const seededService = { _id: 'svc-1', name: 'Sunday' };
-    const handler = backupProducerOn({ ...OPTIONS, archive: fakeArchiveDb({ services: [seededService] }), db });
+    const schedulerState = fakeSchedulerState();
+    const handler = backupProducerOn({ ...OPTIONS, archive: fakeArchiveDb({ services: [seededService] }), db, schedulerState });
 
     const running = handler(job(), new AbortController().signal);
     await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(1));
@@ -164,6 +180,7 @@ describe('producing a backup', () => {
 
     await expect(running).resolves.toBeUndefined();
 
+    expect(schedulerState.calls).toEqual([NOW]);
     const backups = db.rows.get('backups') ?? [];
     expect(backups).toHaveLength(1);
     const manifest = (backups[0] as { manifest: { contents: Array<{ class: string; hash: string }> } }).manifest;
@@ -204,6 +221,66 @@ describe('producing a backup', () => {
       LAUNCHED,
     );
   });
+
+  it.each(['settings', 'media'] as const)(
+    'backs up only requested %s, drops the Mongo record inventory, and leaves the scheduler baseline alone',
+    async (component) => {
+      const db = fakeDb();
+      const reported: string[] = [];
+      const schedulerState = fakeSchedulerState();
+      const handler = backupProducerOn({
+        ...OPTIONS,
+        archive: fakeArchiveDb(),
+        db,
+        schedulerState,
+        report: (line) => reported.push(line),
+      });
+      const stopping = new AbortController();
+      const running = handler(job({ payload: { components: [component] } }), stopping.signal);
+      const settled = running.catch(() => undefined);
+      try {
+        await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(1));
+        children[0]?.emit('close', 0);
+        await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(2));
+        expect(spawned).toHaveBeenNthCalledWith(
+          2,
+          'restic',
+          ['backup', '--repo', OPTIONS.restic.repository, '--json', '--tag', component,
+            component === 'settings' ? SETTINGS_STAGING_DIR : OPTIONS.mediaRoot],
+          LAUNCHED,
+        );
+        children[1]?.stdout.emit(
+          'data',
+          Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 1, snapshot_id: 'selected-snap' })),
+        );
+        children[1]?.emit('close', 0);
+        await expect(running).resolves.toBeUndefined();
+        expect(spawned).toHaveBeenCalledTimes(2);
+        const backups = db.rows.get('backups') ?? [];
+        const manifest = (backups[0] as { manifest: { contents: Array<{ class: string; hash: string }> } }).manifest;
+        // No Mongo dump ran, so none of MONGO_CONTENTS' digest entries belong in this manifest — carrying
+        // them would claim a Restic snapshot backs bytes no snapshot of this run ever took.
+        expect(manifest.contents.map((content) => content.class)).toEqual([component]);
+        expect(manifest.contents).toEqual([expect.objectContaining({ class: component, hash: 'restic:selected-snap' })]);
+        expect((backups[0] as { consistency: unknown }).consistency).toEqual({
+          pointInTime: true,
+          method: 'not read — mongo is not one of this run’s requested components',
+        });
+        expect(reported).toEqual([
+          'backup: mongo skipped — not in this run’s requested components',
+          component === 'settings'
+            ? 'backup: media skipped — not in this run’s requested components'
+            : 'backup: settings skipped — not in this run’s requested components',
+          `backup backup-fixed: not marked as the scheduler’s last backup — only ${component} ran`,
+        ]);
+        expect(schedulerState.calls).toEqual([]);
+      } finally {
+        stopping.abort();
+        children.at(-1)?.emit('close', 0);
+        await settled;
+      }
+    },
+  );
 
   it('redacts the settings file before backing it up, so no export ever carries a secret', async () => {
     const configDir = await mkdtemp(join(tmpdir(), 'holydeck-backup-producer-settings-'));
@@ -283,7 +360,8 @@ describe('producing a backup', () => {
 
   it('kills an in-flight restic process and writes nothing when the lease is lost mid-run', async () => {
     const db = fakeDb();
-    const handler = backupProducerOn({ ...OPTIONS, archive: fakeArchiveDb(), db });
+    const schedulerState = fakeSchedulerState();
+    const handler = backupProducerOn({ ...OPTIONS, archive: fakeArchiveDb(), db, schedulerState });
     let claimed = false;
     const queue: RunnerQueue = {
       async claim() {
@@ -333,6 +411,7 @@ describe('producing a backup', () => {
 
     await expect(running).resolves.toBe('lost');
     expect(children[1]?.kill).not.toHaveBeenCalled();
+    expect(schedulerState.calls).toEqual([]);
     expect(db.rows.get('backups') ?? []).toHaveLength(0);
     expect(db.rows.get('audit_events') ?? []).toHaveLength(0);
   });

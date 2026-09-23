@@ -6,6 +6,7 @@ import {
   HEARTBEAT_STALE_MS,
   heartbeatPath,
   heartbeatProblem,
+  heartbeatProcess,
   heartbeatText,
 } from './heartbeat.js';
 import { workerPaths } from './runtime.js';
@@ -43,6 +44,38 @@ describe('what the worker writes', () => {
 
   it('writes what the health check reads, with nothing between them to disagree about', () => {
     expect(heartbeatProblem(heartbeatText(AT, 41, paths), AT)).toBeUndefined();
+  });
+
+  it('carries no process metrics when none are given, the same file OPS-09 read before this existed', () => {
+    expect(JSON.parse(heartbeatText(AT, 41, paths))).not.toHaveProperty('process');
+  });
+
+  it('carries the worker-process scope OPS-09 asks for when it is given one', () => {
+    const process = { cpuUserSeconds: 12, cpuSystemSeconds: 3, memoryRssMb: 64 };
+    expect(JSON.parse(heartbeatText(AT, 41, paths, process))).toMatchObject({ process });
+  });
+});
+
+describe('reading the worker-process metrics back off a heartbeat', () => {
+  it('reads what was written', () => {
+    const process = { cpuUserSeconds: 12, cpuSystemSeconds: 3, memoryRssMb: 64 };
+    expect(heartbeatProcess(heartbeatText(AT, 41, paths, process))).toEqual(process);
+  });
+
+  it('is absent from a heartbeat written before this existed', () => {
+    expect(heartbeatProcess(heartbeatText(AT, 41, paths))).toBeUndefined();
+  });
+
+  it('is absent when there is no heartbeat at all', () => {
+    expect(heartbeatProcess(undefined)).toBeUndefined();
+  });
+
+  it('is absent from a heartbeat that is not readable', () => {
+    expect(heartbeatProcess('{ half written')).toBeUndefined();
+  });
+
+  it('is absent when the field is there but is not shaped like three numbers', () => {
+    expect(heartbeatProcess(JSON.stringify({ at: AT, pid: 41, process: { cpuUserSeconds: 'a lot' } }))).toBeUndefined();
   });
 });
 

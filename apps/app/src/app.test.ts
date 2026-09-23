@@ -26,17 +26,23 @@ import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
 import { needsOf } from './authorization.js';
+import { BACKUPS_PATH } from './backup-routes.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { CONFLICT_RESOLVE_PATH } from './conflict-routes.js';
 import { CONTENT_LANGUAGE_KEY_PATH, CONTENT_LANGUAGE_STATUS_PATH } from './content-language-routes.js';
 import { contentLanguagesOn } from './content-languages.js';
 import { INTEGRATION_ID_PATH } from './integration-routes.js';
+import { JOBS_PATH } from './job-routes.js';
 import { libraryOn } from './library.js';
+import { MEDIA_CLEANUP_PATH } from './media-cleanup-routes.js';
+import { MEDIA_MIGRATION_CLEANUP_PATH, MEDIA_MIGRATION_PATH } from './media-migration-routes.js';
+import { NOTIFICATIONS_PATH, NOTIFICATIONS_READ_ALL_PATH, NOTIFICATIONS_PREFERENCES_PATH } from './notification-routes.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { passkeysOn } from './passkeys.js';
 import { PPTX_COMMIT_PATH, PPTX_ID_PATH, PPTX_REVIEW_PATH } from './pptx-routes.js';
 import { PREPARATION_OVERRIDE_PATH, PREPARATION_PREPARE_PATH } from './preparation-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
+import { RESTORES_PATH } from './restore-routes.js';
 import { CATALOGUE_MANAGE, CONTENT_EDIT, PRESENTATION_CONTROL } from './roles.js';
 import { RUN_ADDITIONS_PATH, RUN_END_PATH, RUN_PATH, RUN_THEME_PATH } from './run-routes.js';
 import { SERMON_ID_PATH } from './sermon-routes.js';
@@ -112,6 +118,15 @@ const sources: LoadedSettings['sources'] = {
   autosaveRetentionDays: 'default',
   sermonAiEnabled: 'default',
   anthropicApiKey: 'default',
+  backupDailyAt: 'default',
+  backupComponents: 'default',
+  backupMinimumGapMinutes: 'default',
+  backupRehearsalWeekday: 'default',
+  retentionSweepAt: 'default',
+  notificationReadRetentionDays: 'default',
+  mediaArchivedPurgeGraceDays: 'default',
+  mediaUploadLimitBytes: 'default',
+  mediaFreeSpaceReserveBytes: 'default',
 };
 
 const settings: LoadedSettings = {
@@ -202,6 +217,25 @@ describe('every route that changes something', () => {
       { method: 'POST', url: MEDIA_PATH },
       { method: 'PATCH', url: `${MEDIA_PATH}/:id/status` },
       { method: 'POST', url: `${MEDIA_PATH}/:id/retry` },
+      // Behind the same permission once more: reporting what is safe to remove is not a change and is
+      // absent here, and performing a reviewed purge of it is.
+      { method: 'POST', url: MEDIA_CLEANUP_PATH },
+      // And triggering an on-demand backup: listing what has run is not a change, asking for a new one is,
+      // which is why only the POST side of the backup surface is on this list.
+      { method: 'POST', url: BACKUPS_PATH },
+      // Behind the same permission as the backup surface: applying a recorded backup to production.
+      { method: 'POST', url: RESTORES_PATH },
+      // The queue's own surface, gated by its own permission: trying a failed job again is Admin's.
+      // Listing what the queue holds and summarizing it are not changes and are absent here.
+      { method: 'POST', url: `${JOBS_PATH}/:id/requeue` },
+      // Behind its own Admin permission, by its own vocabulary: asking this deployment to migrate its
+      // media storage to a new root, and cleaning up the old one afterward (OPS-16).
+      { method: 'POST', url: MEDIA_MIGRATION_PATH },
+      { method: 'POST', url: MEDIA_MIGRATION_CLEANUP_PATH },
+      { method: 'POST', url: `${NOTIFICATIONS_PATH}/:id/read` },
+      { method: 'POST', url: NOTIFICATIONS_READ_ALL_PATH },
+      { method: 'POST', url: `${NOTIFICATIONS_PATH}/:id/dismiss` },
+      { method: 'PUT', url: NOTIFICATIONS_PREFERENCES_PATH },
       // Behind the same permission once more: configuring a translation's offset is Admin's alone,
       // reading every one configured is not, which is why only this one route is on this list at all.
       { method: 'PUT', url: `${TRANSLATION_OFFSETS_PATH}/:abbr` },

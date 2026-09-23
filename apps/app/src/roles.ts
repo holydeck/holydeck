@@ -86,6 +86,46 @@ export const AUDIT_READ = 'audit.read';
 /** Views status and toggles integrations on/off (spec v1c-09, ADMN-04). Admin's alone, by role. */
 export const INTEGRATIONS_MANAGE = 'integrations.manage';
 
+/**
+ * Lists recorded backups and requests an on-demand run (OPS-05). Admin's alone, by role — the same as
+ * administering settings and accounts, with its own operator-facing permission apart from the stores.
+ */
+export const BACKUP_MANAGE = 'backup.manage';
+
+/**
+ * Requests a recorded backup be applied to production (OPS-06). Admin's alone, by role — the same as
+ * requesting a backup, and kept apart from `BACKUP_MANAGE` because granting one is not granting the other.
+ */
+export const RESTORE_MANAGE = 'restore.manage';
+
+/**
+ * Sees what the queue holds — the Jobs page's own list, summary and per-job detail (OPS-08). Held apart
+ * from `JOBS_MANAGE` because seeing a job is not resetting one. Spelled `jobs.view` rather than `jobs.read`:
+ * `queue.ts` already grants `jobs.read` at the record layer, and an operator-facing permission and the
+ * internal vocabulary it is checked against are never the same word.
+ */
+export const JOBS_READ = 'jobs.view';
+
+/**
+ * Asks a failed job be tried again (OPS-08). Admin's alone, by role — the same as every other
+ * administrative surface. Spelled `jobs.manage` deliberately apart from the store-level
+ * `jobs.read`/`jobs.run`/`jobs.requeue` `queue.ts` already grants at the record layer: an operator-facing
+ * permission and the internal vocabulary it is checked against are never the same word. Held apart from
+ * `JOBS_READ` above because requeuing is not merely seeing: a role that reads the queue does not thereby
+ * act on it.
+ */
+export const JOBS_MANAGE = 'jobs.manage';
+
+/**
+ * Reads the operational health report (OPS-09). Admin's alone, by role — the same as every other
+ * administrative surface. Spelled `operations.read` rather than `operations.manage` because this
+ * surface has nothing to change: it reports on other domains' own state and never writes any of them.
+ */
+export const OPERATIONS_READ = 'operations.read';
+
+/** Reads and manages the caller's own notification inbox, granted to every signed-in account (OPS-10). */
+export const NOTIFICATIONS_USE = 'notifications.use';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -100,6 +140,11 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     CONTENT_HISTORY_MANAGE,
     AUDIT_READ,
     INTEGRATIONS_MANAGE,
+    BACKUP_MANAGE,
+    RESTORE_MANAGE,
+    JOBS_READ,
+    JOBS_MANAGE,
+    OPERATIONS_READ,
   ],
   editor: [SERVICES_MANAGE, CONTENT_EDIT, PRESENCE_USE, CONTENT_HISTORY_MANAGE],
   member: [PRESENCE_USE],
@@ -115,6 +160,7 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
  */
 export function permissionsFor(account: AccountRecord): readonly string[] {
   return Object.freeze([
+    NOTIFICATIONS_USE,
     ...ROLE_PERMISSIONS[account.role],
     ...(account.controlPresentation ? [PRESENTATION_CONTROL, PRESENTATION_VIEW, SERVICE_READ] : []),
   ]);

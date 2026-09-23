@@ -25,11 +25,29 @@ const DEV_TOP_SERVICES = ['app', 'server', 'web', 'worker'];
 // services named here, and --wait follows their depends_on conditions rather than needing them spelled out.
 const DEPLOY_TOP_SERVICES = ['app', 'server', 'worker'];
 
-// compose.yaml requires this and has no dev-token fallback; nothing this script does is a real deployment,
-// so a fixed placeholder is enough to bring it up for verification.
+// compose.yaml requires these and has no dev-token/dev-password fallback; nothing this script does is a
+// real deployment, so fixed placeholders are enough to bring it up for verification.
 const DEPLOY_TOKEN = 'stack-verify-corpus-token-not-a-secret';
+const DEPLOY_MONGO_ROOT_PASSWORD = 'stack-verify-mongo-root-not-a-secret';
+const DEPLOY_MONGO_PASSWORD = 'stack-verify-mongo-app-not-a-secret';
 
-const ENV_FOR = Object.freeze({ [DEPLOY_FILE]: { HOLYDECK_CORPUS_TOKEN: DEPLOY_TOKEN } });
+const ENV_FOR = Object.freeze({
+  [DEPLOY_FILE]: {
+    HOLYDECK_CORPUS_TOKEN: DEPLOY_TOKEN,
+    HOLYDECK_MONGO_ROOT_PASSWORD: DEPLOY_MONGO_ROOT_PASSWORD,
+    HOLYDECK_MONGO_PASSWORD: DEPLOY_MONGO_PASSWORD,
+  },
+});
+
+// Every stack now runs mongo with authentication on (OPS's Mongo-auth change), so the app-user password
+// this script uses to inspect each database directly must match what each compose file actually applied:
+// compose.dev.yaml's own `:-` default (this script never overrides it), compose.test.yaml's hardcoded
+// literal, and the DEPLOY_MONGO_PASSWORD this script sets above.
+const MONGO_PASSWORD_FOR = Object.freeze({
+  [DEV_FILE]: 'dev-mongo-app-not-a-secret',
+  [TEST_FILE]: 'test-mongo-password-not-a-secret',
+  [DEPLOY_FILE]: DEPLOY_MONGO_PASSWORD,
+});
 
 // What "a usable seeded instance" (T59, SEED-01) means: the content-language registry, the slide-label
 // catalogue, the built-in slide layouts and the default service template are all non-empty. slide_groups
@@ -73,7 +91,15 @@ const down = (file, { volumes }) =>
   compose(file, ['down', '--remove-orphans', ...(volumes ? ['--volumes'] : [])]);
 
 const mongo = (file, script) =>
-  compose(file, ['exec', '-T', 'mongo', 'mongosh', 'holydeck', '--quiet', '--eval', script], true).trim();
+  compose(
+    file,
+    [
+      'exec', '-T', 'mongo', 'mongosh', 'holydeck',
+      '-u', 'holydeck', '-p', MONGO_PASSWORD_FOR[file], '--authenticationDatabase', 'holydeck',
+      '--quiet', '--eval', script,
+    ],
+    true,
+  ).trim();
 
 const check = (claim, ok, detail) => {
   if (!ok) failures.push(claim);
@@ -88,6 +114,21 @@ const healthy = (file) => {
     file === DEPLOY_FILE ? DEPLOY_SERVICES : undefined,
   );
   check(`${file}: every service is up, health-checked and the migration finished`, problems.length === 0, problems.join('; '));
+};
+
+// The mongo healthcheck itself already refuses to report healthy until an unauthenticated
+// `listDatabases` fails (see each compose file's own comment), so a passing `healthy(file)`
+// already implies this — but only as a side effect of a liveness check. This asserts it as its
+// own named, legible claim: attempting the same unauthenticated call directly and requiring it
+// to fail, rather than leaving auth enforcement to be inferred from why health passed.
+const refusesUnauthenticated = (file) => {
+  let refused = false;
+  try {
+    compose(file, ['exec', '-T', 'mongo', 'mongosh', '--quiet', '--eval', 'db.adminCommand("listDatabases")'], true);
+  } catch {
+    refused = true;
+  }
+  check(`${file}: mongo refuses an unauthenticated connection`, refused);
 };
 
 const ledger = (file) => ({
@@ -178,6 +219,7 @@ try {
   say(`\n=== ${DEV_FILE}: first bring-up ===`);
   up(DEV_FILE);
   healthy(DEV_FILE);
+  refusesUnauthenticated(DEV_FILE);
   const first = ledger(DEV_FILE);
   // Not an exact row count, for the same reason the DEPLOY_FILE check below already avoids one: the
   // migration set has grown since this was written for a single migration.
@@ -204,6 +246,7 @@ try {
   say(`\n=== ${TEST_FILE}: first run ===`);
   up(TEST_FILE);
   healthy(TEST_FILE);
+  refusesUnauthenticated(TEST_FILE);
   const testFirst = ledger(TEST_FILE);
   check(`${TEST_FILE}: the test stack migrated its own database`, testFirst.rows > 0, `${testFirst.rows} ledger rows`);
   markProbe(TEST_FILE, 'first-run');
@@ -224,6 +267,7 @@ try {
   down(DEPLOY_FILE, { volumes: true });
   up(DEPLOY_FILE);
   healthy(DEPLOY_FILE);
+  refusesUnauthenticated(DEPLOY_FILE);
   const deployed = ledger(DEPLOY_FILE);
   // Not an exact row count: there is no prior run on this stack to compare against, and hardcoding
   // today's migration count would only go stale as the migration set grows. What "ran against an empty

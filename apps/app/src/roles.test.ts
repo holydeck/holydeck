@@ -3,15 +3,21 @@ import { describe, expect, it } from 'vitest';
 import {
   ACCOUNTS_MANAGE,
   AUDIT_READ,
+  BACKUP_MANAGE,
   CATALOGUE_MANAGE,
   CONTENT_EDIT,
   CONTENT_HISTORY_MANAGE,
   INTEGRATIONS_MANAGE,
+  JOBS_MANAGE,
+  JOBS_READ,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
+  NOTIFICATIONS_USE,
+  OPERATIONS_READ,
   PRESENCE_USE,
   PRESENTATION_CONTROL,
   PRESENTATION_VIEW,
+  RESTORE_MANAGE,
   SERVICES_MANAGE,
   SERVICE_READ,
   SERVICE_TEMPLATES_MANAGE,
@@ -34,8 +40,9 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, content, catalogues, presence, history, audit and integrations', () => {
+  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, content, catalogues, presence, history, audit, integrations, backups, restores, jobs and operations', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
+      NOTIFICATIONS_USE,
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
       LAYOUTS_MANAGE,
@@ -48,12 +55,18 @@ describe('what a role grants', () => {
       CONTENT_HISTORY_MANAGE,
       AUDIT_READ,
       INTEGRATIONS_MANAGE,
+      BACKUP_MANAGE,
+      RESTORE_MANAGE,
+      JOBS_READ,
+      JOBS_MANAGE,
+      OPERATIONS_READ,
     ]);
   });
 
   it('grants an editor service management, content editing, presence and history, but neither catalogue nor Service Template management', () => {
     expect(SERVICES_MANAGE).toBe('services.manage');
     expect(permissionsFor(accountOf('editor', false))).toEqual([
+      NOTIFICATIONS_USE,
       SERVICES_MANAGE,
       CONTENT_EDIT,
       PRESENCE_USE,
@@ -63,8 +76,8 @@ describe('what a role grants', () => {
     expect(permissionsFor(accountOf('editor', false))).not.toContain(CATALOGUE_MANAGE);
   });
 
-  it('grants a member presence by role alone', () => {
-    expect(permissionsFor(accountOf('member', false))).toEqual([PRESENCE_USE]);
+  it('grants a member presence and their own notifications by role alone', () => {
+    expect(permissionsFor(accountOf('member', false))).toEqual([NOTIFICATIONS_USE, PRESENCE_USE]);
     expect(permissionsFor(accountOf('member', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
     expect(permissionsFor(accountOf('member', false))).not.toContain(CONTENT_EDIT);
   });
@@ -75,6 +88,7 @@ describe('what Control presentation is', () => {
   // and an editor or a member holds it the moment it is granted to them, same as anyone else would.
   it('is independent of role: granted to an editor or a member, it is theirs', () => {
     expect(permissionsFor(accountOf('editor', true))).toEqual([
+      NOTIFICATIONS_USE,
       SERVICES_MANAGE,
       CONTENT_EDIT,
       PRESENCE_USE,
@@ -83,7 +97,13 @@ describe('what Control presentation is', () => {
       PRESENTATION_VIEW,
       SERVICE_READ,
     ]);
-    expect(permissionsFor(accountOf('member', true))).toEqual([PRESENCE_USE, PRESENTATION_CONTROL, PRESENTATION_VIEW, SERVICE_READ]);
+    expect(permissionsFor(accountOf('member', true))).toEqual([
+      NOTIFICATIONS_USE,
+      PRESENCE_USE,
+      PRESENTATION_CONTROL,
+      PRESENTATION_VIEW,
+      SERVICE_READ,
+    ]);
   });
 
   it('is not granted to an admin implicitly, whatever else admin carries', () => {
@@ -92,6 +112,7 @@ describe('what Control presentation is', () => {
 
   it('adds to what the role already grants, rather than replacing it', () => {
     expect(permissionsFor(accountOf('admin', true))).toEqual([
+      NOTIFICATIONS_USE,
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
       LAYOUTS_MANAGE,
@@ -104,6 +125,11 @@ describe('what Control presentation is', () => {
       CONTENT_HISTORY_MANAGE,
       AUDIT_READ,
       INTEGRATIONS_MANAGE,
+      BACKUP_MANAGE,
+      RESTORE_MANAGE,
+      JOBS_READ,
+      JOBS_MANAGE,
+      OPERATIONS_READ,
       PRESENTATION_CONTROL,
       PRESENTATION_VIEW,
       SERVICE_READ,

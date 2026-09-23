@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { sniffMediaType } from '@holydeck/contracts/media';
 
+import { posterStorageKey } from '@holydeck/app/media';
+
 import type { MediaDerivative } from '@holydeck/contracts/media';
 import type { MediaLibrary, MediaStorageIO } from '@holydeck/app/media';
 import type { Handler } from './runner.js';
@@ -14,7 +16,8 @@ export interface MediaIngestOptions {
   readonly context: unknown;
   readonly media: MediaLibrary;
   readonly storage: MediaStorageIO;
-  readonly mediaRoot: string;
+  /** Read live on every read and write — see `MediaLibraryOptions.mediaRoot`'s own comment for why. */
+  readonly mediaRoot: () => string;
   readonly poster: PosterGenerator;
 }
 
@@ -52,7 +55,7 @@ export function mediaIngestOn(options: MediaIngestOptions): Handler {
     if (processing.manifest.processingState === 'ready') return;
 
     try {
-      const source = await options.storage.read(options.mediaRoot, processing.storageKey);
+      const source = await options.storage.read(options.mediaRoot(), processing.storageKey);
       stopped(signal);
       const type = sniffMediaType(source);
       if (type !== processing.manifest.type) {
@@ -69,7 +72,7 @@ export function mediaIngestOn(options: MediaIngestOptions): Handler {
         const poster = await options.poster.generate(source, signal);
         stopped(signal);
         if (poster === undefined) throw new Error(`media asset ${assetId} has no static poster frame`);
-        await options.storage.write(options.mediaRoot, `${assetId}.poster.jpg`, poster);
+        await options.storage.write(options.mediaRoot(), posterStorageKey(assetId), poster);
         stopped(signal);
         derivatives.push({ kind: 'poster', bytes: poster.byteLength, hash: HASH(poster), from: assetId });
       }

@@ -41,6 +41,7 @@ describe('RETENTION_POLICIES', () => {
         'current-revision',
         'latest-autosave',
         'manual-checkpoint',
+        'media-asset',
         'prepared-snapshot',
         'run-event',
       ] satisfies RetentionClass[],
@@ -78,6 +79,26 @@ describe('policyFor', () => {
   it('still throws no-policy for an unmapped class', () => {
     expect(() => policyFor('not-a-class', { auditRetentionDays: 90 })).toThrow();
   });
+
+  it('leaves protected unchanged by an override', () => {
+    expect(policyFor('audit-entry', { auditRetentionDays: 90 }).protected).toBe(false);
+  });
+
+  it('supports an override for media-asset (spec v1c-10, OPS-14)', () => {
+    expect(policyFor('media-asset').retentionDays).toBe(180);
+    expect(policyFor('media-asset', { mediaArchivedPurgeGraceDays: 200 }).retentionDays).toBe(200);
+  });
+
+  it('threads an override through guardRemoval and sweep, not just policyFor directly', () => {
+    expect(() =>
+      guardRemoval({ id: 'a', class: 'media-asset', ageDays: 50, protectedBy: [] }, { mediaArchivedPurgeGraceDays: 30 }),
+    ).not.toThrow();
+    const outcome = sweep(
+      [{ id: 'a', class: 'media-asset', ageDays: 50, protectedBy: [] }],
+      { mediaArchivedPurgeGraceDays: 30 },
+    );
+    expect(outcome.removable).toEqual(['a']);
+  });
 });
 
 describe('the retention windows an administrator sets', () => {
@@ -94,10 +115,13 @@ describe('the retention windows an administrator sets', () => {
     expect(() => guardRemoval(entry, { auditRetentionDays: 730 })).toThrow(RetentionError);
   });
 
-  it('reads both windows straight off the settings', () => {
-    expect(retentionOverridesOf({ auditRetentionDays: 90, autosaveRetentionDays: 14 })).toEqual({
+  it('reads every window straight off the settings', () => {
+    expect(
+      retentionOverridesOf({ auditRetentionDays: 90, autosaveRetentionDays: 14, mediaArchivedPurgeGraceDays: 60 }),
+    ).toEqual({
       auditRetentionDays: 90,
       autosaveRetentionDays: 14,
+      mediaArchivedPurgeGraceDays: 60,
     });
   });
 });
@@ -220,5 +244,30 @@ describe('protected content revisions never expire (ADR 0001)', () => {
     );
     expect(outcome.removable).toEqual(['revision-1']);
     expect(outcome.retained.map((row) => row.id).toSorted()).toEqual(['revision-2', 'revision-3']);
+  });
+});
+
+describe('archived media purge eligibility (OPS-14)', () => {
+  it('is not eligible before its grace period elapses', () => {
+    const error = thrown(() =>
+      guardRemoval(candidate({ class: 'media-asset', ageDays: 179 }), { 'media-asset': 180 }),
+    );
+    expect(error.kind).toBe('too-recent');
+  });
+
+  it('is eligible once its age reaches the grace period', () => {
+    expect(() =>
+      guardRemoval(candidate({ class: 'media-asset', ageDays: 180 }), { 'media-asset': 180 }),
+    ).not.toThrow();
+  });
+
+  it('is never eligible while referenced, however old', () => {
+    const error = thrown(() =>
+      guardRemoval(
+        candidate({ class: 'media-asset', ageDays: 100_000, protectedBy: ['service:svc-1'] }),
+        { 'media-asset': 180 },
+      ),
+    );
+    expect(error.kind).toBe('referenced');
   });
 });

@@ -2,7 +2,20 @@ import { describe, expect, it } from 'vitest';
 
 import { CONTENT_LANGUAGES } from './content-languages.js';
 import { FIELD_CODES } from './problems.js';
-import { SLIDE_GROUP_MODES, parseLanguageBlock, parseLanguageBlockOrder, parseSlide, parseSlideBackgroundOverride, parseSlideGroupBody, parseSlideGroupDraft, parseSlideGroupStatus, parseSlideLayoutOverride, parseSlideOrder, resolveSlide } from './slide-groups.js';
+import {
+  SLIDE_GROUP_MODES,
+  mediaReferencesIn,
+  parseLanguageBlock,
+  parseLanguageBlockOrder,
+  parseSlide,
+  parseSlideBackgroundOverride,
+  parseSlideGroupBody,
+  parseSlideGroupDraft,
+  parseSlideGroupStatus,
+  parseSlideLayoutOverride,
+  parseSlideOrder,
+  resolveSlide,
+} from './slide-groups.js';
 
 import type { LanguageBlock, Slide, SlideGroupBody } from './slide-groups.js';
 
@@ -235,6 +248,33 @@ describe("resolving a slide's effective background and Slide Layout (SLID-02)", 
       slideLayoutId: { value: 'layout-a', source: 'inherited' },
       background: { value: undefined, source: 'inherited' },
     });
+  });
+});
+
+describe('collecting the media a slide group body references (OPS-14)', () => {
+  it('collects the group background, the audio track, and every slide background, deduplicated', () => {
+    const body: SlideGroupBody = {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      background: 'asset-bg',
+      audioTrackId: 'asset-audio',
+      slides: [
+        { ...SLIDE, background: 'asset-bg' },
+        { ...SLIDE, id: 'slide-2', background: 'asset-slide-2' },
+      ],
+    };
+    expect(mediaReferencesIn(body)).toEqual(['asset-bg', 'asset-audio', 'asset-slide-2']);
+  });
+
+  it('returns nothing when the group and its slides reference no media', () => {
+    const body: SlideGroupBody = {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      slides: [SLIDE],
+    };
+    expect(mediaReferencesIn(body)).toEqual([]);
   });
 });
 

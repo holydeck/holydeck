@@ -72,6 +72,18 @@ export interface ExcludedRecord {
  * only when carrying it would be actively wrong — state that is meaningless in another deployment, or a
  * secret nobody should archive — and never because carrying it was inconvenient. Whatever lands here also
  * has to be reasoned about on the restore side, which puts back exactly `MONGO_CONTENTS` and nothing else.
+ *
+ * `notification-store.ts`'s three collections (`notifications`, `notification_preferences`,
+ * `notification_watermarks`) cannot appear here either, and `censusProblems` cannot see the gap: they
+ * are not a `RecordName` at all, because `RecordKind` offers only `append-only`/`immutable` and every one
+ * of those three is rewritten or physically deleted in place (`markRead`, `markDismissed`, `expireRead`)
+ * — a shape neither kind allows, so joining `RECORDS` would mean inventing a third kind this census
+ * was never built to grade. `notifications` and `notification_watermarks` cost nothing real to lose: both
+ * rebuild from the audit trail the next time `materialize` runs, the watermark simply restarting that
+ * rebuild from the beginning. `notification_preferences` is the one real loss today — an account's mute
+ * state and channel/category/severity choices — silently replaced by `DEFAULT_PREFERENCE` after a restore
+ * rather than carried through it. Left as a known, named gap rather than a silent one until this store's
+ * own mutable-in-place shape has somewhere in `RECORDS` to fit.
  */
 export const EXCLUDED_RECORDS: readonly ExcludedRecord[] = Object.freeze([
   {

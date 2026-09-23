@@ -4,8 +4,6 @@ import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { successEnvelope } from '@holydeck/contracts/http';
 import { DEFAULT_SAFE_AREA_MARGINS } from '@holydeck/contracts/snapshots';
 
-import { MEDIA_SIZE_CEILING_BYTES } from './media-routes.js';
-
 import type { RouteNeed } from './authorization.js';
 import type { FastifyInstance } from 'fastify';
 
@@ -14,11 +12,17 @@ export const OUTPUT_DEFAULTS_PATH = '/api/v1/output-defaults';
 
 const SESSION: RouteNeed = { kind: 'session' };
 
+export interface OutputDefaultsRoutesOptions {
+  /** The deployment's configured per-file upload ceiling (OPS-13), the same value `app.ts` registers
+   *  `@fastify/multipart` with — read once at boot from `settings`, never from `settingsAdmin`. */
+  readonly uploadLimitBytes: number;
+}
+
 /** Registers the authenticated output defaults route. */
-export function serveOutputDefaultsRoutes(app: FastifyInstance): void {
+export function serveOutputDefaultsRoutes(app: FastifyInstance, { uploadLimitBytes }: OutputDefaultsRoutesOptions): void {
   app.get(OUTPUT_DEFAULTS_PATH, { config: { need: SESSION } }, (request) =>
     successEnvelope({
-      aspectRatio: '16:9', safeAreaMargins: DEFAULT_SAFE_AREA_MARGINS, uploadLimitBytes: MEDIA_SIZE_CEILING_BYTES,
+      aspectRatio: '16:9', safeAreaMargins: DEFAULT_SAFE_AREA_MARGINS, uploadLimitBytes,
     }, request.id, CLIENT_WINDOW.current),
   );
 }

@@ -117,6 +117,26 @@ describe('reading the settings', () => {
     expect(response.body).not.toContain(TOKEN);
   });
 
+  // `redaction.ts`'s `secretsIn` reads the store address' own credential off `mongoUrl`, the same way it
+  // reads `corpusToken` above — proven directly here rather than left to that module's own tests, since
+  // this route is the one place either ever reaches a caller.
+  test('never sends the store address credential back verbatim either', async () => {
+    const withStore = `corpusUrl: http://corpus:8080\ncorpusToken: ${TOKEN}\nmongoUrl: mongodb://operator:hunter2@mongo:27017/holydeck\n`;
+    const io = fakeSettingsIO({ [PATH]: withStore });
+    settingsAdmin = settingsAdminOn(loadSettings({ fileText: withStore, env: {}, path: PATH }), { ...io, env: {} });
+    await app.close();
+    app = Fastify({ logger: false });
+    withSafeErrors(app);
+    guardMutations(app, { sessions });
+    enforceAuthorization(app, { sessions, identity: undefined });
+    serveSettingsRoutes(app, { settingsAdmin, identity });
+    await app.ready();
+
+    const response = await reading();
+    expect(response.body).not.toContain('hunter2');
+    expect(response.json().data.values.mongoUrl).not.toContain('hunter2');
+  });
+
   test('writes nothing to the trail, the same as any other read', async () => {
     await reading();
     expect(entries()).toEqual([]);
@@ -179,6 +199,22 @@ describe('changing a setting', () => {
     expect(response.json().error.fields[0].path).toBe('settings');
   });
 
+  test('refuses to change mediaRoot through this route at all, leaving it untouched', async () => {
+    const response = await patching({ mediaRoot: '/data/holydeck/other-media' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+    expect(response.json().error.fields[0]).toMatchObject({ path: 'mediaRoot', code: 'field.not_allowed' });
+    expect((await reading()).json().data.values.mediaRoot).not.toBe('/data/holydeck/other-media');
+  });
+
+  test('refuses mediaRoot even alongside a change that would otherwise be applied, applying neither', async () => {
+    const response = await patching({ locale: 'de', mediaRoot: '/data/holydeck/other-media' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.fields[0]).toMatchObject({ path: 'mediaRoot', code: 'field.not_allowed' });
+    expect((await reading()).json().data.values).toMatchObject({ locale: 'en' });
+    expect((await reading()).json().data.values.mediaRoot).not.toBe('/data/holydeck/other-media');
+  });
+
   test('an unexpected failure while writing is not turned into a validation refusal', async () => {
     const io = fakeSettingsIO({ [PATH]: `corpusUrl: http://corpus:8080\ncorpusToken: ${TOKEN}\n` });
     io.failNextRename('the disk is full');
@@ -222,12 +258,12 @@ describe('who may ask any of it', () => {
 
 describe('the trail this route writes', () => {
   test('records exactly one entry per change, naming the fields and never a value', async () => {
-    await patching({ locale: 'de', mediaRoot: '/data/holydeck/other-media' });
+    await patching({ locale: 'de', resticRepository: '/data/holydeck/backups-secondary' });
     expect(actions()).toEqual(['settings.update']);
     expect(entries()[0]).toMatchObject({ actor: ADMINISTRATOR, subject: 'settings' });
-    expect(JSON.stringify(entries()[0])).not.toContain('/data/holydeck/other-media');
+    expect(JSON.stringify(entries()[0])).not.toContain('/data/holydeck/backups-secondary');
     expect(JSON.stringify(entries()[0])).toContain('locale');
-    expect(JSON.stringify(entries()[0])).toContain('mediaRoot');
+    expect(JSON.stringify(entries()[0])).toContain('resticRepository');
   });
 
   test('writes nothing for a change the file refused', async () => {

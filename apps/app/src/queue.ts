@@ -118,6 +118,18 @@ export function workerContext(correlationId: string): RequestContext {
   });
 }
 
+/**
+ * The context the scheduler runs under: the product acting as itself, allowed to enqueue what is due, see
+ * what already failed, and requeue a due job whose earlier attempt was retired — never to run one itself.
+ */
+export function schedulerContext(correlationId: string): RequestContext {
+  return requestContext({
+    actor: 'system',
+    permissions: [QUEUE_PERMISSIONS.enqueue, QUEUE_PERMISSIONS.read, QUEUE_PERMISSIONS.requeue],
+    correlationId,
+  });
+}
+
 // Mongo compares `leaseExpiresAt` as a string, which is the comparison of the instants it names only while
 // every one of them is written the same way. A clock that writes them any other way is refused here rather
 // than producing a lease that never expires or one that expires at once.
@@ -305,6 +317,9 @@ export interface Queue {
     },
   ): Promise<readonly JobRecord[]>;
   summary(context: unknown): Promise<Readonly<Record<JobState, number>>>;
+  /** One job by its own id, undefined when there is none — the direct lookup `requeue` needs, rather than
+   *  a page of `list` a job can sit past. */
+  get(context: unknown, id: string): Promise<JobRecord | undefined>;
   requeue(
     context: unknown,
     input: { readonly id: string; readonly idempotencyKey: string },
@@ -469,6 +484,12 @@ export function queueOn(db: QueueDb, options: QueueOptions): Queue {
         JOB_STATES.map(async (state) => [state, await collection().countDocuments({ state })] as const),
       );
       return Object.freeze(Object.fromEntries(counts)) as Readonly<Record<JobState, number>>;
+    },
+
+    async get(context, id) {
+      permit(context, 'read');
+      const document = await collection().findOne({ _id: id });
+      return document === null ? undefined : jobFrom(document);
     },
 
     async requeue(context, { id, idempotencyKey }) {

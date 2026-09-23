@@ -46,9 +46,16 @@ export const KNOWN_INTEGRATION_GAPS = {
   'live.ts GET LIVE_CONNECTIONS_PATH': 'no harness test reads live connection counts over HTTP',
   'accounts-routes.ts': 'no harness test drives the admin account lifecycle over HTTP',
   'audit-routes.ts': 'no harness test reads the audit trail over HTTP',
+  'backup-routes.ts': 'no harness test starts a backup over HTTP',
   'capability-routes.ts': 'no harness test issues or revokes a guest or output capability over HTTP',
   'conflict-routes.ts': 'no harness test lists or settles a shelved conflict over HTTP',
   'integration-routes.ts': 'no harness test reads or toggles a third-party integration over HTTP',
+  'job-routes.ts': 'no harness test lists or requeues a job over HTTP',
+  'media-migration-routes.ts': 'no harness test triggers or cleans up a media storage-root migration over HTTP',
+  'media-routes.ts': 'no harness test uploads a file over HTTP',
+  'media-cleanup-routes.ts': 'no harness test reports on or purges media over HTTP',
+  'notification-routes.ts': 'no harness test reads or manages a notification inbox over HTTP',
+  'operations-routes.ts': 'no harness test reads operational health over HTTP',
   'order-routes.ts': 'no harness test reads the running order over HTTP',
   'passkey-routes.ts':
     'registration and authentication need a WebAuthn authenticator, which the harness (raw fetch, no ' +
@@ -56,6 +63,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'preparation-routes.ts': 'no harness test drives preparing a Service, its readiness checklist or an operator override over HTTP',
   'presence-routes.ts': 'no harness test enters, lists or leaves presence over HTTP',
   'reference-routes.ts': 'no harness test looks a reference up or shows one over HTTP',
+  'restore-routes.ts': 'no harness test starts a restore over HTTP',
   'revision-routes.ts': 'no harness test reads, compares or restores a revision over HTTP',
   'sermon-routes.ts': 'no harness test creates or edits a Sermon over HTTP',
   'run-routes.ts':

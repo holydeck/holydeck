@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn, auditReadContext, integrationCallAudit } from './audit.js';
+import {
+  AUDIT_ACTIONS,
+  AUDIT_CATEGORIES,
+  CATEGORY_OF,
+  auditContext,
+  auditOn,
+  auditReadContext,
+  integrationCallAudit,
+  retentionSweepContext,
+} from './audit.js';
 import { ContextError, requestContext } from './context.js';
 import { RepositoryError } from './repositories.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -112,6 +121,14 @@ describe('what the trail refuses', () => {
 });
 
 describe('the context the trail is written under', () => {
+  it('grants a retention sweep exactly reading and appending the trail, and nothing else', () => {
+    expect(retentionSweepContext('system', CORRELATION)).toMatchObject({
+      actor: 'system',
+      permissions: ['auditEvents.read', 'auditEvents.append'],
+      correlationId: CORRELATION,
+    });
+  });
+
   it('grants appending and nothing else, so the trail cannot be read back through it', () => {
     expect(auditContext('system', CORRELATION)).toMatchObject({
       actor: 'system',
@@ -180,12 +197,26 @@ describe('the context the trail is written under', () => {
       'run.recap.export',
       'readiness.override',
       'backup.run',
+      'backup.request',
       'restore.run',
       'content.conflict.resolve',
       'content.revision.restore',
       'integration.call',
       'integration.enable',
       'integration.disable',
+      'restore.apply.request',
+      'restore.apply.complete',
+      'restore.apply.fail',
+      'retention.sweep',
+      'job.requeue',
+      'notification.read',
+      'notification.dismiss',
+      'notification.preferences',
+      'media.storageMigration.request',
+      'media.storageMigration.complete',
+      'media.storageMigration.fail',
+      'media.storageMigration.cleanup',
+      'media.cleanup',
     ]);
   });
 });
@@ -212,6 +243,20 @@ describe('the category taxonomy', () => {
     for (const category of AUDIT_CATEGORIES) {
       const members = AUDIT_ACTIONS.filter((action) => CATEGORY_OF[action] === category);
       expect(members.length, `category ${category} has no member action`).toBeGreaterThan(0);
+    }
+  });
+
+  // `content` drives two things neither of these five actions should: `apps/worker/src/main.ts`'s
+  // `CHANGE_CATEGORIES` treats it as "the deployment changed, back it up early", and
+  // `notification-routes.ts`'s `OPEN_CATEGORIES` hands it to every signed-in account regardless of role.
+  // A daily sweep, a purge an admin already asked for, and a member reading their own inbox are none of
+  // those things — none is a content edit a backup would be racing to protect, and the last three are not
+  // something a different member should be notified about at all. `integration` is where this trail
+  // already keeps the operational actions of the same shape: `job.requeue` and every `media.storageMigration.*`.
+  it('keeps retention, notification housekeeping and media cleanup out of content', () => {
+    const notContent = ['retention.sweep', 'notification.read', 'notification.dismiss', 'notification.preferences', 'media.cleanup'] as const;
+    for (const action of notContent) {
+      expect(CATEGORY_OF[action], action).toBe('integration');
     }
   });
 });

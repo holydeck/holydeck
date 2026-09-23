@@ -5,13 +5,16 @@ import { parseMediaManifestEntry, sniffMediaType } from '@holydeck/contracts/med
 
 import { requestContext } from './context.js';
 import { QUEUE_PERMISSIONS } from './queue.js';
-import { permissionsFor } from './records.js';
+import { RECORDS, permissionsFor } from './records.js';
+import { sweep } from './retention.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 
 import type { EntityStamp } from '@holydeck/contracts/entities';
 import type { MediaManifestEntry } from '@holydeck/contracts/media';
+import type { Db } from 'mongodb';
 import type { RequestContext } from './context.js';
 import type { Queue } from './queue.js';
+import type { RetainedCandidate, RetentionCandidate, SweepOutcome } from './retention.js';
 import type { Document, RepositoryDb } from './repositories.js';
 
 export const MEDIA_ASSET_RECORD = 'mediaAssets';
@@ -36,11 +39,24 @@ export const MEDIA_INDEXES = Object.freeze(DECLARED_INDEXES);
 
 const STAMP_SEPARATOR = '#';
 
+const MS_PER_DAY = 86_400_000;
+
+/** The storage key a video asset's static poster frame is written under (OPS-14): named here, once,
+ *  so `purgeArchived`'s cleanup below and `apps/worker/src/media-ingest.ts`'s write agree on the
+ *  same key without either duplicating the literal. Always root-relative, never a stored
+ *  `storageKey` of its own — a poster derivative carries no storage location on the manifest
+ *  (`MediaDerivative` has no path field), so this naming convention is its only record of where it
+ *  lives. */
+export const posterStorageKey = (assetId: string): string => `${assetId}.poster.jpg`;
+
 export interface MediaStorageIO {
   /** Stores bytes below this deployment's configured media root and returns their durable handle. */
   write(root: string, key: string, bytes: Uint8Array): Promise<string>;
   /** Reads bytes from a durable handle returned by write. */
   read(root: string, key: string): Promise<Uint8Array>;
+  /** Physically deletes bytes at a durable handle returned by write — reached only from
+   *  `purgeArchived` (OPS-14), never from any of this file's other operations. */
+  remove(root: string, key: string): Promise<void>;
 }
 
 export type MediaRefusal = 'schema' | 'invalid-type' | 'duplicate' | 'state' | 'corrupt';
@@ -69,6 +85,64 @@ export interface MediaRecord {
   readonly storageKey: string;
 }
 
+interface Filter {
+  readonly [key: string]: unknown;
+}
+
+/** The slice of a Mongo collection `purgeArchived` needs to physically remove rows — narrower even
+ *  than `notification-store.ts`'s own delete adapter, since purge only ever needs one bulk delete
+ *  by `assetId`. No `Repository`/`RepositoryCollection` exposes this (ADR 0009), so this is its own
+ *  adapter, the same way `NotificationDb`/`NotificationCollection` is its own. */
+export interface MediaPurgeCollection {
+  deleteMany(filter: Filter): Promise<{ deletedCount: number }>;
+}
+
+export interface MediaPurgeDb {
+  collection(name: string): MediaPurgeCollection;
+}
+
+/** The Mongo driver adapter for archived-media purge deletion (OPS-14) — the one place media.ts is
+ *  allowed to physically remove a row. */
+export function mediaPurgeDb(db: Db): MediaPurgeDb {
+  return { collection: (name) => db.collection(name) as unknown as MediaPurgeCollection };
+}
+
+/** What grades and grants purge eligibility: the grace window (a settings value the caller reads
+ *  and supplies — this file has no settings access of its own) and how to learn whether an asset is
+ *  still referenced. No content model in this codebase tracks media references yet — the same gap
+ *  `retention-sweep-handler.ts` already documents and defers for autosave-revision — so this is
+ *  injectable rather than resolved internally, and fully testable by that injection. */
+export interface MediaPurgeOptions {
+  readonly graceDays: number;
+  readonly referencedBy: (assetId: string) => readonly string[];
+}
+
+export interface MediaPurgeOutcome {
+  readonly purged: readonly string[];
+  readonly retained: readonly RetainedCandidate[];
+}
+
+export type MediaPurgeCategory = 'grace-period' | 'eligible' | 'protected';
+
+/** One row of `purgeReport`'s output: the same data `purgeArchived` would act on if run right now,
+ *  graded but not touched. */
+export interface MediaPurgeItem {
+  readonly id: string;
+  readonly bytes: number;
+  readonly type: string;
+  readonly hash: string;
+  readonly archivedAt: string | undefined;
+  readonly category: MediaPurgeCategory;
+  /** Set whenever category is not `'eligible'` — `retention.ts`'s own refusal message. */
+  readonly reason: string | undefined;
+  /** Set only when category is `'grace-period'`: the first instant this item becomes eligible. */
+  readonly purgeableAt: string | undefined;
+}
+
+export interface MediaPurgeReport {
+  readonly items: readonly MediaPurgeItem[];
+}
+
 export interface MediaLibrary {
   upload(context: unknown, upload: MediaUpload): Promise<MediaRecord>;
   inspect(context: unknown, id: string): Promise<MediaRecord | undefined>;
@@ -79,13 +153,27 @@ export interface MediaLibrary {
   completeProcessing(context: unknown, id: string, derivatives: MediaManifestEntry['derivatives']): Promise<MediaRecord | undefined>;
   failProcessing(context: unknown, id: string): Promise<MediaRecord | undefined>;
   retryProcessing(context: unknown, id: string): Promise<MediaRecord | undefined>;
+  /** Explicit, Admin-triggered (OPS-14) — never run by the daily retention sweep. Removes every
+   *  archived asset past `options.graceDays` and not reported referenced by `options.referencedBy`,
+   *  both the database rows and the stored bytes. Never auto-deletes: this method only runs when a
+   *  caller (Task 10-19's route) calls it. */
+  purgeArchived(context: unknown, options: MediaPurgeOptions): Promise<MediaPurgeOutcome>;
+  /** Read-only twin of `purgeArchived` (OPS-15): the same grading, none of the deletion. Every
+   *  current media row, categorized `'protected'` (still live, or archived but referenced),
+   *  `'grace-period'` (archived, not yet past `options.graceDays`) or `'eligible'` (archived, past
+   *  grace, unreferenced) — the exact three categories a purge would act on if run right now. */
+  purgeReport(context: unknown, options: MediaPurgeOptions): Promise<MediaPurgeReport>;
 }
 
 export interface MediaLibraryOptions extends MediaStorageIO {
   readonly queue: Pick<Queue, 'enqueue'>;
   readonly now: () => string;
-  readonly mediaRoot: string;
+  /** Read live on every write and purge, not captured once at construction: a settings hot-reload —
+   *  including one a media storage-root migration (OPS-16) just wrote — has to be seen by the very
+   *  next call, not held stale until this process restarts. */
+  readonly mediaRoot: () => string;
   readonly newId?: () => string;
+  readonly purge: MediaPurgeDb;
 }
 
 const ID_BYTES = 16;
@@ -109,6 +197,25 @@ const own = async <T>(work: () => Promise<T>): Promise<T> => {
     throw refusalFor(error);
   }
 };
+
+/** The same candidate-grading step `purgeArchived` and `purgeReport` both need: every archived row,
+ *  graded by `retention.ts`'s `sweep` under the `media-asset` class and this call's own
+ *  `graceDays`/`referencedBy`. A pure function — nothing here reads or writes a database. */
+function mediaPurgeCandidates(
+  rows: readonly (MediaRecord & { readonly sequence: number })[],
+  purgeOptions: MediaPurgeOptions,
+  nowMs: number,
+): SweepOutcome {
+  const candidates: RetentionCandidate[] = rows
+    .filter((row) => row.stamp.archivedAt !== undefined)
+    .map((row) => ({
+      id: row.stamp.id,
+      class: 'media-asset',
+      ageDays: Math.floor((nowMs - Date.parse(row.stamp.archivedAt as string)) / MS_PER_DAY),
+      protectedBy: purgeOptions.referencedBy(row.stamp.id),
+    }));
+  return sweep(candidates, { 'media-asset': purgeOptions.graceDays });
+}
 
 export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): MediaLibrary {
   const records = repositoriesOn(db)[MEDIA_ASSET_RECORD];
@@ -208,7 +315,7 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
         const manifest: MediaManifestEntry = { id, bytes: upload.bytes.byteLength, hash, type, processingState: 'pending', derivatives: [] };
         const parsed = parseMediaManifestEntry(manifest, 'manifest');
         if (!parsed.ok) throw new MediaError('schema', 'the generated media manifest is invalid');
-        const storageKey = await options.write(options.mediaRoot, id, upload.bytes);
+        const storageKey = await options.write(options.mediaRoot(), id, upload.bytes);
         const record = await append(
           context,
           { stamp: createdStamp({ id, kind: 'mediaAsset', at: options.now(), by: actor }), manifest: parsed.value, storageKey },
@@ -283,6 +390,55 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
           throw new MediaError('state', `${id} is ${row.manifest.processingState}, not failed`);
         }
         return processing(context, id, 'pending', []);
+      }),
+
+    purgeArchived: (context, purgeOptions) =>
+      own(async () => {
+        const rows = await everything(context);
+        const { removable, retained } = mediaPurgeCandidates(rows, purgeOptions, Date.parse(options.now()));
+
+        const purged: string[] = [];
+        for (const id of removable) {
+          const row = rows.find((candidate) => candidate.stamp.id === id);
+          if (row === undefined) continue;
+          await options.purge.collection(RECORDS.mediaAssets.collection).deleteMany({ assetId: id });
+          await options.remove(options.mediaRoot(), row.storageKey);
+          if (row.manifest.derivatives.some((derivative) => derivative.kind === 'poster')) {
+            await options.remove(options.mediaRoot(), posterStorageKey(id));
+          }
+          purged.push(id);
+        }
+        return { purged, retained };
+      }),
+
+    purgeReport: (context, purgeOptions) =>
+      own(async () => {
+        const rows = await everything(context);
+        const { removable, retained } = mediaPurgeCandidates(rows, purgeOptions, Date.parse(options.now()));
+        const removableIds = new Set(removable);
+        const retainedById = new Map(retained.map((entry) => [entry.id, entry]));
+
+        const items: MediaPurgeItem[] = rows.map((row) => {
+          const { archivedAt } = row.stamp;
+          const base = { id: row.stamp.id, bytes: row.manifest.bytes, type: row.manifest.type, hash: row.manifest.hash, archivedAt };
+          if (archivedAt === undefined) {
+            return { ...base, category: 'protected' as const, reason: undefined, purgeableAt: undefined };
+          }
+          if (removableIds.has(row.stamp.id)) {
+            return { ...base, category: 'eligible' as const, reason: undefined, purgeableAt: undefined };
+          }
+          const retainedEntry = retainedById.get(row.stamp.id);
+          if (retainedEntry?.reason === 'too-recent') {
+            return {
+              ...base,
+              category: 'grace-period' as const,
+              reason: retainedEntry.message,
+              purgeableAt: new Date(Date.parse(archivedAt) + purgeOptions.graceDays * MS_PER_DAY).toISOString(),
+            };
+          }
+          return { ...base, category: 'protected' as const, reason: retainedEntry?.message, purgeableAt: undefined };
+        });
+        return { items };
       }),
   };
 }

@@ -1,5 +1,6 @@
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
-import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
+import { UPDATE_REQUIRED } from '@holydeck/contracts/http';
+import { CSRF_HEADER, SESSION_COOKIE, sessionCookie } from '@holydeck/contracts/sessions';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
@@ -20,6 +21,7 @@ import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { RouteNeed } from './authorization.js';
+import type { RestoreCompatibility } from './csrf.js';
 import type { Identity } from './onboarding.js';
 import type { Document } from './repositories.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
@@ -56,11 +58,15 @@ const identityWith = (trail: FakeDb): Identity => ({
 
 const entries = (trail: FakeDb): Document[] => trail.rows.get('audit_events') ?? [];
 
-const serving = async (sessions: SessionStore | undefined, identity?: Identity): Promise<FastifyInstance> => {
+const serving = async (
+  sessions: SessionStore | undefined,
+  identity?: Identity,
+  compatibility?: RestoreCompatibility,
+): Promise<FastifyInstance> => {
   const built = Fastify({ logger: false });
   withSafeErrors(built);
-  guardMutations(built, { sessions });
-  enforceAuthorization(built, { sessions, identity });
+  guardMutations(built, { sessions, compatibility });
+  enforceAuthorization(built, { sessions, identity, compatibility });
 
   built.get('/api/v1/open', { config: { need: PUBLIC } }, () => ({ open: true }));
   built.get('/api/v1/mine', { config: { need: SESSION } }, (request) => ({
@@ -144,6 +150,17 @@ describe('a route declared session', () => {
   test('a mutating one is refused by the guard above before this check is ever asked', async () => {
     const response = await app.inject({ method: 'POST', url: '/api/v1/change', headers: withSession(undefined) });
     expect(response.statusCode).toBe(401);
+  });
+
+  test('a safe one proves its session through `sessionFor`, so a restore’s grace window reaches it too', async () => {
+    app = await serving(store, undefined, { restoredRecently: async () => true });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/mine',
+      headers: withSession(undefined, { cookie: `${SESSION_COOKIE}=${'x'.repeat(43)}` }),
+    });
+    expect(response.statusCode).toBe(426);
+    expect(response.json().error.code).toBe(UPDATE_REQUIRED);
   });
 });
 

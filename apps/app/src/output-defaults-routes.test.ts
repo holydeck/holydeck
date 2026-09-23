@@ -7,10 +7,9 @@ import { DEFAULT_SAFE_AREA_MARGINS } from '@holydeck/contracts/snapshots';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { buildApp } from './app.js';
-import { MEDIA_SIZE_CEILING_BYTES } from './media-routes.js';
 import { OUTPUT_DEFAULTS_PATH } from './output-defaults-routes.js';
 import { sessionContext, sessionsOn } from './sessions.js';
-import { loadSettings } from './settings.js';
+import { DEFAULT_SETTINGS, loadSettings } from './settings.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -52,7 +51,7 @@ describe('output defaults routes', () => {
     const response = await asking();
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toEqual({
-      aspectRatio: '16:9', safeAreaMargins: DEFAULT_SAFE_AREA_MARGINS, uploadLimitBytes: MEDIA_SIZE_CEILING_BYTES,
+      aspectRatio: '16:9', safeAreaMargins: DEFAULT_SAFE_AREA_MARGINS, uploadLimitBytes: DEFAULT_SETTINGS.mediaUploadLimitBytes,
     });
   });
 

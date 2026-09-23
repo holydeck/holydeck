@@ -8,7 +8,7 @@ import { LIBRARY_PERMISSIONS } from './library.js';
 import { RECORDS } from './records.js';
 import { RepositoryError } from './repositories.js';
 import { addressOf } from './revisions.js';
-import { SlideGroupError, slideGroupContext, slideGroupsOn, subjectFor } from './slide-groups.js';
+import { SlideGroupError, slideGroupContext, slideGroupMediaReferences, slideGroupsOn, subjectFor } from './slide-groups.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { LanguageBlock, Slide, SlideGroupBody } from '@holydeck/contracts/slide-groups';
@@ -615,5 +615,34 @@ describe('what the Slide Group store is reached through', () => {
 describe('subjectFor', () => {
   it('names a slide group for the audit trail', () => {
     expect(subjectFor('group-1')).toBe('slideGroup:group-1');
+  });
+});
+
+describe('scanning slide group bodies for the media they reference (OPS-14)', () => {
+  const options = { now: () => '2026-09-23T00:00:00.000Z' };
+
+  it('maps each referenced asset to every slideGroup or reusableSlide that references it', async () => {
+    const { db, groups } = store();
+    const withBackground = await groups.create(ADMIN, 'slideGroup', 'Background', { ...CUSTOM, background: 'asset-1' });
+    const withAudio = await groups.create(ADMIN, 'slideGroup', 'Audio', { ...CUSTOM, audioTrackId: 'asset-1' });
+    const reusable = await groups.create(ADMIN, 'reusableSlide', 'Reusable', {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      slides: [{ ...SLIDE_A, background: 'asset-2' }],
+    });
+    await groups.create(ADMIN, 'slideGroup', 'Unrelated', CUSTOM);
+
+    const references = await slideGroupMediaReferences(db, options, ADMIN);
+    expect(references.get('asset-1')).toEqual([`slideGroup:${withBackground.stamp.id}`, `slideGroup:${withAudio.stamp.id}`]);
+    expect(references.get('asset-2')).toEqual([`reusableSlide:${reusable.stamp.id}`]);
+    expect(references.get('asset-3')).toBeUndefined();
+  });
+
+  it('returns an empty map when nothing references any media', async () => {
+    const { db, groups } = store();
+    await groups.create(ADMIN, 'slideGroup', 'Plain', CUSTOM);
+    const references = await slideGroupMediaReferences(db, options, ADMIN);
+    expect(references.size).toBe(0);
   });
 });

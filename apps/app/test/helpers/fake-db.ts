@@ -16,8 +16,8 @@ function compared(left: unknown, right: unknown): number {
 }
 
 // A field's value in a filter is either the value itself or an operator object naming what it is compared
-// against — `$eq`/`$gt`/`$gte`/`$lt`/`$lte`, the same handful `repositories.ts` lets a nested field carry
-// through unvalidated. Every operator an object names must hold, the same as Mongo reads it.
+// against — `$eq`/`$gt`/`$gte`/`$lt`/`$lte`/`$in`, the same handful `repositories.ts` lets a nested field
+// carry through unvalidated. Every operator an object names must hold, the same as Mongo reads it.
 function valueMatches(actual: unknown, expected: unknown): boolean {
   if (expected === null || typeof expected !== 'object' || Array.isArray(expected)) return actual === expected;
   return Object.entries(expected as Record<string, unknown>).every(([operator, operand]) => {
@@ -32,6 +32,8 @@ function valueMatches(actual: unknown, expected: unknown): boolean {
         return compared(actual, operand) < 0;
       case '$lte':
         return compared(actual, operand) <= 0;
+      case '$in':
+        return (operand as readonly unknown[]).includes(actual);
       default:
         return actual === operand;
     }

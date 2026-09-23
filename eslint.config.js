@@ -12,4 +12,11 @@ export default tseslint.config(
     files: ['**/*.mjs'],
     languageOptions: { globals: globals.nodeBuiltin },
   },
+  {
+    // docker-entrypoint-initdb.d runs these under mongosh, not Node: `db` is mongosh's own global for
+    // the database it selected, reassigned here to switch databases, and mongosh exposes `process.env`
+    // in the same shape Node does for reading the container's environment.
+    files: ['deploy/mongo-init/**/*.js'],
+    languageOptions: { globals: { ...globals.node, db: 'writable' } },
+  },
 );

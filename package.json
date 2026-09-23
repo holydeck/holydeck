@@ -14,6 +14,7 @@
     "test:release": "node --test \"scripts/release/**/*.test.mjs\"",
     "test:workspaces": "node --test \"scripts/workspace/**/*.test.mjs\"",
     "test:verify": "node --test \"scripts/verify/**/*.test.mjs\"",
+    "test:ops": "node --test \"scripts/ops/**/*.test.mjs\"",
     "dev:server": "docker compose -f compose.dev.yaml up --build",
     "verify:compose": "node scripts/workspace/compose.mjs",
     "verify:stack": "node scripts/stack/verify.mjs",

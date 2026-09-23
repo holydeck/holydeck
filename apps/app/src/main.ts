@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { constants, createReadStream, readFileSync, watch } from 'node:fs';
-import { access, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { access, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { MongoClient } from 'mongodb';
@@ -27,8 +27,11 @@ import { LIBRARY_PERMISSIONS, libraryOn } from './library.js';
 import { serveLive } from './live.js';
 import { liveHub } from './live-protocol.js';
 import { themesOn } from './live-theme.js';
+import { maintenanceDb, maintenanceOn } from './maintenance.js';
 import { schemaStatus } from './migrations.js';
-import { mediaLibraryOn } from './media.js';
+import { restoreCompatibilityDb, restoreCompatibilityOn } from './restore-compatibility.js';
+import { mediaMigrationStateDb, mediaMigrationStateOn } from './media-migration-state.js';
+import { mediaLibraryOn, mediaPurgeDb } from './media.js';
 import { MID_SERVICE_PERMISSIONS, midServiceOn } from './mid-service-additions.js';
 import { pptxCommitOn } from './pptx-commit.js';
 import { pptxImportOn } from './pptx-import.js';
@@ -37,6 +40,7 @@ import { pptxReviewOn } from './pptx-review.js';
 import { pptxSessionsOn } from './pptx-sessions.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
+import { notificationDb } from './notification-store.js';
 import { repositoryDb } from './repositories.js';
 import { REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
 import { deriveDeck } from './run-deck.js';
@@ -69,7 +73,9 @@ import type { CapabilityStore } from './capabilities.js';
 import type { ConflictShelf } from './conflicts.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { LibraryStore } from './library.js';
+import type { MaintenanceStore } from './maintenance.js';
 import type { MediaByteSource } from './media-delivery-routes.js';
+import type { MediaMigrationStateStore } from './media-migration-state.js';
 import type { MediaLibrary, MediaLibraryOptions } from './media.js';
 import type { MidServiceStore } from './mid-service-additions.js';
 import type { Identity } from './onboarding.js';
@@ -78,6 +84,10 @@ import type { PptxImport } from './pptx-import.js';
 import type { PptxReview } from './pptx-review.js';
 import type { PptxSessionStore } from './pptx-sessions.js';
 import type { PresenceStore } from './presence.js';
+import type { Queue } from './queue.js';
+import type { NotificationDb } from './notification-store.js';
+import type { RepositoryDb } from './repositories.js';
+import type { RestoreCompatibilityStore } from './restore-compatibility.js';
 import type { RevisionStore } from './revisions.js';
 import type { RunEventStore } from './run-events.js';
 import type { RunReviewStore } from './run-review.js';
@@ -167,6 +177,18 @@ let slideLayouts: SlideLayoutStore | undefined;
 // keep one has nothing here to upload to, and its route answers not-found the same way.
 let media: MediaLibrary | undefined;
 let mediaBytes: MediaByteSource | undefined;
+let notificationDatabase: NotificationDb | undefined;
+let backups: { readonly db: RepositoryDb; readonly queue: Queue } | undefined;
+// The restore-apply lease is kept the same way: a deployment with nowhere to keep one has no worker
+// applying a restore to it either, so `guardMaintenance` has nothing it could ever find held.
+let maintenance: MaintenanceStore | undefined;
+// Whether a restore was recently applied is kept the same way: a deployment with nowhere to keep one has
+// no worker recording a restore against it either, so a session a restore ends is simply refused, the
+// same as before this store existed.
+let compatibility: RestoreCompatibilityStore | undefined;
+// The last media storage-root migration is kept the same way: a deployment with nowhere to keep one has
+// no worker migrating its media to a new root either, and its routes answer not-found the same way.
+let migrationState: MediaMigrationStateStore | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
@@ -212,6 +234,7 @@ if (settings.values.mongoUrl !== '') {
   await store.connect();
   checkSchema(await schemaStatus(repositoryDb(store.db()), systemContext(`boot:${process.pid}`)));
   const now = (): string => new Date().toISOString();
+  const queue = queueOn(queueDb(store.db()), { now });
   sessions = sessionsOn(sessionDb(store.db()), { now });
   identity = {
     accounts: accountsOn(accountDb(store.db()), { now }),
@@ -271,16 +294,33 @@ if (settings.values.mongoUrl !== '') {
   await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
   const mediaOptions: MediaLibraryOptions = {
     now,
-    queue: queueOn(queueDb(store.db()), { now }),
-    mediaRoot: settings.values.mediaRoot,
+    queue,
+    // `settingsAdmin` is assigned later in this same block, but read lazily here: by the time this
+    // getter is actually called, boot has long finished and a storage-root migration (OPS-16) may
+    // have already rewritten `mediaRoot` — the live value, not the one read at construction, is
+    // what every write and purge must see.
+    mediaRoot: () => settingsAdmin?.current().values.mediaRoot ?? settings.values.mediaRoot,
+    purge: mediaPurgeDb(store.db()),
+    // The storageKey a write() hands back is bare — never root-prefixed — so a later storage-root
+    // migration (OPS-16) leaves every asset uploaded under the old root still readable under the new
+    // one. read()/remove() still accept an absolute key: the append-only architecture (ADR 0009)
+    // forbids rewriting a storageKey already recorded, so an asset uploaded before this change keeps
+    // its old absolute key forever, and resolving it against the live root would look in the wrong place.
     write: async (root, key, bytes) => {
       await mkdir(root, { recursive: true });
-      const path = join(root, key);
-      await writeFile(path, bytes);
-      return path;
+      await writeFile(join(root, key), bytes);
+      return key;
     },
-    async read(_root, key) {
-      return new Uint8Array(await readFile(key));
+    async read(root, key) {
+      return new Uint8Array(await readFile(isAbsolute(key) ? key : join(root, key)));
+    },
+    // OPS-14: this asset's own bytes only. `serveMediaCleanupRoutes` below decides, from a live scan
+    // of slide groups and reusable slides (`contentDb`), whether an asset is still referenced before
+    // this ever runs — a song, reading, or sermon's own reference fields, once those schemas exist
+    // (SONG-01, the sermon pipeline), are that task's to add to that scan, the same gap
+    // retention-sweep-handler.ts already documents and defers for autosave-revision.
+    async remove(root, key) {
+      await rm(isAbsolute(key) ? key : join(root, key), { force: true });
     },
   };
   media = mediaLibraryOn(repositoryDb(store.db()), mediaOptions);
@@ -288,6 +328,11 @@ if (settings.values.mongoUrl !== '') {
     size: async (key) => (await stat(key)).size,
     stream: (key, range) => createReadStream(key, range === undefined ? {} : { start: range.start, end: range.end }),
   };
+  backups = { db: repositoryDb(store.db()), queue };
+  notificationDatabase = notificationDb(store.db());
+  maintenance = maintenanceOn(maintenanceDb(store.db()));
+  compatibility = restoreCompatibilityOn(restoreCompatibilityDb(store.db()), { now });
+  migrationState = mediaMigrationStateOn(mediaMigrationStateDb(store.db()));
   pptxImport = pptxImportOn(repositoryDb(store.db()), { ...mediaOptions, runner: workerPptxRunner() });
   pptxReview = pptxReviewOn(repositoryDb(store.db()), { now });
   pptxCommit = pptxCommitOn(repositoryDb(store.db()), { now, newId });
@@ -333,6 +378,7 @@ const app = buildApp({
   web,
   sessions,
   identity,
+  compatibility,
   capabilities,
   settingsAdmin,
   slideLayouts,
@@ -340,6 +386,14 @@ const app = buildApp({
   conflictShelf,
   media,
   mediaBytes,
+  contentDb: backups?.db,
+  backups,
+  // The same driver `Db` `backups.db`/`contentDb` are `RepositoryDb` views of, narrowed differently
+  // for OPS-09's own ping/stats reading (`operational-sources.ts`'s `MongoHealthDb`).
+  mongoDb: store?.db(),
+  notificationDb: notificationDatabase,
+  maintenance,
+  migrationState,
   translationOffsets,
   workspacePositions,
   contentExists,

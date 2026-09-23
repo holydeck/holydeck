@@ -1,3 +1,7 @@
+import { mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT } from '@holydeck/contracts/http';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
@@ -17,11 +21,13 @@ import { mediaContext, mediaLibraryOn } from './media.js';
 import { MEDIA_PATH, MEDIA_PIXEL_CEILING, serveMediaRoutes } from './media-routes.js';
 import { passkeysOn } from './passkeys.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { DEFAULT_SETTINGS } from './settings.js';
 import { slideGroupContext, slideGroupsOn } from './slide-groups.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
+import { fakeMediaPurgeDb } from '../test/helpers/media-purge-db.js';
 import { fakeMediaStorageIO } from '../test/helpers/media-storage-io.js';
 import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
@@ -31,6 +37,7 @@ import type { Identity } from './onboarding.js';
 import type { LibraryStore } from './library.js';
 import type { MediaLibrary } from './media.js';
 import type { Document } from './repositories.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { SlideGroupStore } from './slide-groups.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
@@ -78,6 +85,8 @@ let slideGroups: SlideGroupStore;
 let library: LibraryStore;
 let upload: ReturnType<typeof vi.fn>;
 let admin: StartedSession;
+let mediaRoot: string;
+let freeSpaceReserveBytes: number;
 
 const entries = (): Document[] => trail.rows.get('audit_events') ?? [];
 
@@ -104,6 +113,14 @@ const uploaded = async (width = 4): Promise<string> => {
   return response.json().data.stamp.id as string;
 };
 
+const settingsAdmin: Pick<SettingsAdmin, 'current'> = {
+  current: () => ({
+    values: { ...DEFAULT_SETTINGS, mediaRoot, mediaFreeSpaceReserveBytes: freeSpaceReserveBytes },
+    sources: {} as never,
+    path: '/data/holydeck/config/settings.yaml',
+  }),
+};
+
 const served = async (options: {
   readonly media: MediaLibrary | undefined;
   readonly noIdentity?: boolean;
@@ -114,7 +131,13 @@ const served = async (options: {
   built.register(multipart, { limits: { fileSize: options.ceiling ?? 10_000_000 } });
   guardMutations(built, { sessions });
   enforceAuthorization(built, { sessions, identity: undefined });
-  serveMediaRoutes(built, { media: options.media, identity: options.noIdentity === true ? undefined : identity, slideGroups, library });
+  serveMediaRoutes(built, {
+    media: options.media,
+    identity: options.noIdentity === true ? undefined : identity,
+    slideGroups,
+    library,
+    settingsAdmin,
+  });
   await built.ready();
   return built;
 };
@@ -122,6 +145,9 @@ const served = async (options: {
 beforeEach(async () => {
   trail = fakeDb();
   sessions = sessionsOn(memorySessions().db, { now });
+  mediaRoot = join(tmpdir(), `holydeck-media-routes-${Math.random().toString(36).slice(2)}`);
+  await mkdir(mediaRoot, { recursive: true });
+  freeSpaceReserveBytes = 0;
   const accounts = accountsOn(memoryAccounts().db, {
     now,
     newId: () => 'A'.repeat(22),
@@ -137,12 +163,15 @@ beforeEach(async () => {
   };
   const io = fakeMediaStorageIO();
   let serial = 0;
-  const real = mediaLibraryOn(fakeDb(), {
+  const db = fakeDb();
+  const real = mediaLibraryOn(db, {
     now,
     newId: () => `media-${(serial += 1)}`,
-    mediaRoot: '/media',
+    mediaRoot: () => mediaRoot,
     write: io.write,
     read: io.read,
+    remove: io.remove,
+    purge: fakeMediaPurgeDb(db),
     queue: { enqueue: async (_context, input) => ({ id: `job-${input.idempotencyKey}`, created: true }) },
   });
   upload = vi.fn((...args: Parameters<MediaLibrary['upload']>) => real.upload(...args));
@@ -360,6 +389,35 @@ describe('the pixel-count ceiling', () => {
 
   test('a non-image file carries no declared dimension, and reaches upload() regardless', async () => {
     const response = await uploading({ filename: 'a.woff2', contentType: 'font/woff2', bytes: new Uint8Array([0x77, 0x4f, 0x46, 0x32, 0, 0, 0, 0]) });
+    expect(response.statusCode).toBe(201);
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the free-space reserve', () => {
+  test('accepts an upload when free space comfortably clears the reserve', async () => {
+    freeSpaceReserveBytes = 0;
+    const response = await uploading({ filename: 'a.png', contentType: 'image/png', bytes: png(4, 4) });
+    expect(response.statusCode).toBe(201);
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
+
+  test('refuses an upload that would leave free space under the reserve, and never reaches upload()', async () => {
+    freeSpaceReserveBytes = Number.MAX_SAFE_INTEGER;
+    const response = await uploading({ filename: 'a.png', contentType: 'image/png', bytes: png(4, 4) });
+    expect(response.statusCode).toBe(507);
+    expect(response.json().error.code).toBe('media.insufficient_space');
+    expect(upload).not.toHaveBeenCalled();
+    expect(entries()).toEqual([]);
+  });
+
+  // A fresh volume has nothing written to it yet, so `mediaRoot` itself may not exist — the same state
+  // `write()` already handles by mkdir'ing lazily on the first accepted upload. This check runs before
+  // that, so it has to make the same allowance itself rather than reading `statfs` a beat too early and
+  // refusing every upload with 507 until something else happens to create the directory first.
+  test('creates the media root first when nothing has written to it yet, rather than failing closed', async () => {
+    await rm(mediaRoot, { recursive: true, force: true });
+    const response = await uploading({ filename: 'a.png', contentType: 'image/png', bytes: png(4, 4) });
     expect(response.statusCode).toBe(201);
     expect(upload).toHaveBeenCalledTimes(1);
   });

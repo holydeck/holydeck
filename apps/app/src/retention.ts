@@ -23,6 +23,7 @@ export type RetentionClass =
   | 'current-revision'
   | 'latest-autosave'
   | 'manual-checkpoint'
+  | 'media-asset'
   | 'prepared-snapshot'
   | 'run-event';
 
@@ -54,6 +55,10 @@ const POLICIES: Record<RetentionClass, Omit<RetentionPolicy, 'class'>> = {
   'run-event': { retentionDays: 3650, protected: true },
   'autosave-revision': { retentionDays: 30, protected: false },
   'audit-entry': { retentionDays: 365, protected: false },
+  // OPS-14: archived media becomes purge-eligible after this many days, absent a settings override
+  // (settings.ts's mediaArchivedPurgeGraceDays) — see media.ts's purgeArchived, the one caller that
+  // actually supplies an override for this class.
+  'media-asset': { retentionDays: 180, protected: false },
 };
 
 export const RETENTION_POLICIES: readonly RetentionPolicy[] = Object.freeze(
@@ -83,23 +88,29 @@ export class RetentionError extends Error {
 const CLASS_OVERRIDE_KEY: Readonly<Partial<Record<RetentionClass, keyof RetentionOverrides>>> = {
   'audit-entry': 'auditRetentionDays',
   'autosave-revision': 'autosaveRetentionDays',
+  'media-asset': 'mediaArchivedPurgeGraceDays',
 };
 
-/** Settings-driven overrides for the two retention classes an admin can tune (spec v1c-09,
- *  COLAB-04, COLAB-11). */
+/** Settings-driven overrides for the retention classes an admin can tune (spec v1c-09, COLAB-04,
+ *  COLAB-11; spec v1c-10, OPS-14). */
 export interface RetentionOverrides {
   readonly auditRetentionDays?: number;
   readonly autosaveRetentionDays?: number;
+  readonly mediaArchivedPurgeGraceDays?: number;
 }
 
 /**
- * The two windows as the settings hold them. A settings value is always a number, defaulted by the loader,
+ * The windows as the settings hold them. A settings value is always a number, defaulted by the loader,
  * so what a sweep passes on is exactly what the Settings page shows, never a window only this file knows.
  */
 export function retentionOverridesOf(
-  settings: Pick<Settings, 'auditRetentionDays' | 'autosaveRetentionDays'>,
+  settings: Pick<Settings, 'auditRetentionDays' | 'autosaveRetentionDays' | 'mediaArchivedPurgeGraceDays'>,
 ): RetentionOverrides {
-  return { auditRetentionDays: settings.auditRetentionDays, autosaveRetentionDays: settings.autosaveRetentionDays };
+  return {
+    auditRetentionDays: settings.auditRetentionDays,
+    autosaveRetentionDays: settings.autosaveRetentionDays,
+    mediaArchivedPurgeGraceDays: settings.mediaArchivedPurgeGraceDays,
+  };
 }
 
 /** The declared window for a class, or a named refusal — never a silent policy of "anything goes". */
@@ -122,7 +133,9 @@ export interface RetentionCandidate {
 /**
  * Refuses with a named error, or returns — never both, and never a silent no-op. A reference outranks the
  * class's own policy (a record something else still points at cannot go even from an unprotected class),
- * then the class's own protection, then its age against the declared window.
+ * then the class's own protection, then its age against the declared window. `overrides` is optional and
+ * backward-compatible: omitting it (every call site before this task) behaves exactly as before, since
+ * `policyFor` already treats `undefined` as "use the hardcoded default".
  */
 export function guardRemoval(candidate: RetentionCandidate, overrides: RetentionOverrides = {}): void {
   const policy = policyFor(candidate.class, overrides);
@@ -155,6 +168,8 @@ export interface SweepOutcome {
  * Grades a whole batch at once, mixed classes and all. This is what proves Invariant 13: every candidate
  * is judged only against its own declared class and its own references, one at a time, so a protected or
  * referenced record is retained no matter what else — or how much of it — is being swept in the same pass.
+ * `overrides` is forwarded to every candidate's own `guardRemoval` call, so one settings-driven override
+ * (e.g. a shorter media grace period) applies uniformly across a mixed-class batch.
  */
 export function sweep(candidates: readonly RetentionCandidate[], overrides: RetentionOverrides = {}): SweepOutcome {
   const removable: string[] = [];

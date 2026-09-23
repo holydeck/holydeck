@@ -6,6 +6,7 @@ import { HolyDeckError } from '@holydeck/core/messages';
 import { libraryContext, libraryOn } from './library.js';
 import { pptxImportContext, pptxImportOn } from './pptx-import.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
+import { fakeMediaPurgeDb } from '../test/helpers/media-purge-db.js';
 import { fakeMediaStorageIO } from '../test/helpers/media-storage-io.js';
 
 import type { LibraryStore } from './library.js';
@@ -124,9 +125,11 @@ const setup = (): { db: FakeDb; io: FakeMediaStorageIO; importer: PptxImport; ca
   const importer = pptxImportOn(db, {
     now,
     newId,
-    mediaRoot: '/media',
+    mediaRoot: () => '/media',
     write: io.write,
     read: io.read,
+    remove: io.remove,
+    purge: fakeMediaPurgeDb(db),
     queue: {
       async enqueue(_context, input) {
         jobs.push(input);

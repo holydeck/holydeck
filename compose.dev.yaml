@@ -22,6 +22,11 @@
 #   --server-url http://localhost:3000   and   HOLYDECK_SERVER_TOKEN=dev-corpus-token-not-a-secret
 # Set HOLYDECK_CORPUS_TOKEN in your shell to use a different one; both services read the same value.
 #
+# HOLYDECK_MONGO_PASSWORD and HOLYDECK_MONGO_ROOT_PASSWORD default to the same kind of not-a-secret
+# value below, rather than compose.yaml's required `${…:?}` (OPS-01): this stack is never a real
+# deployment, so a fixed default costs nothing a real one would, and `pnpm dev:server` stays a single
+# command with nothing to export first.
+#
 # Named explicitly so it never shares a default project name — and so the containers it starts — with
 # compose.yaml, the supported deployment stack this same directory also holds.
 name: holydeck-dev
@@ -32,7 +37,7 @@ services:
       context: .
       dockerfile: apps/corpus/Dockerfile
     environment:
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017
+      HOLYDECK_MONGO_URL: mongodb://holydeck:${HOLYDECK_MONGO_PASSWORD:-dev-mongo-app-not-a-secret}@mongo:27017?authSource=holydeck
       HOLYDECK_MONGO_DB: holydeck
       HOLYDECK_LOG_LEVEL: debug
       # bible.com answers plain HTTP clients with a JavaScript challenge. The image ships the
@@ -58,7 +63,7 @@ services:
       dockerfile: apps/app/Dockerfile
     command: ["node", "/srv/app/dist/migrate.js"]
     environment:
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+      HOLYDECK_MONGO_URL: mongodb://holydeck:${HOLYDECK_MONGO_PASSWORD:-dev-mongo-app-not-a-secret}@mongo:27017/holydeck?authSource=holydeck
       HOLYDECK_LOG_LEVEL: debug
     volumes:
       - holydeck-dev-data:/data/holydeck
@@ -79,7 +84,7 @@ services:
       # The application reads the corpus over this network and never publishes it onwards.
       HOLYDECK_CORPUS_URL: http://server:3000
       HOLYDECK_CORPUS_TOKEN: ${HOLYDECK_CORPUS_TOKEN:-dev-corpus-token-not-a-secret}
-      HOLYDECK_MONGO_URL: mongodb://mongo:27017/holydeck
+      HOLYDECK_MONGO_URL: mongodb://holydeck:${HOLYDECK_MONGO_PASSWORD:-dev-mongo-app-not-a-secret}@mongo:27017/holydeck?authSource=holydeck
     ports:
       - "3100:3100"
     depends_on:
@@ -124,6 +129,7 @@ services:
     command: ["node", "/srv/worker/dist/main.js"]
     environment:
       HOLYDECK_LOG_LEVEL: debug
+      HOLYDECK_MONGO_URL: mongodb://holydeck:${HOLYDECK_MONGO_PASSWORD:-dev-mongo-app-not-a-secret}@mongo:27017/holydeck?authSource=holydeck
     volumes:
       - holydeck-dev-data:/data/holydeck
     depends_on:
@@ -143,10 +149,20 @@ services:
     # mongosh or Compass on this machine still reach it.
     ports:
       - "127.0.0.1:27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${HOLYDECK_MONGO_ROOT_PASSWORD:-dev-mongo-root-not-a-secret}
+      HOLYDECK_MONGO_PASSWORD: ${HOLYDECK_MONGO_PASSWORD:-dev-mongo-app-not-a-secret}
     volumes:
       - mongo-dev-data:/data/db
+      - ./deploy/mongo-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      # A plain ping succeeds even against the throwaway, unauthenticated mongod the entrypoint runs
+      # the initdb scripts against, before it restarts into the authenticated instance this stack
+      # actually depends on (ping is deliberately exempt from authorization) - so depends_on could
+      # race a server that is mid-restart. listDatabases needs a session, so demanding it fail
+      # unauthenticated is what actually proves the authenticated instance is the one answering.
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping')\" >/dev/null 2>&1 && ! mongosh --quiet --eval \"db.adminCommand('listDatabases')\" >/dev/null 2>&1"]
       interval: 5s
       timeout: 5s
       retries: 12

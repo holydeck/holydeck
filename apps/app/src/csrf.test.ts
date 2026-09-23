@@ -1,5 +1,6 @@
 import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
+import { UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import {
   CSRF_HEADER,
   SESSION_COOKIE,
@@ -25,7 +26,7 @@ import { SessionError, sessionContext, sessionsOn } from './sessions.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 
 import type { FastifyInstance } from 'fastify';
-import type { Route } from './csrf.js';
+import type { RestoreCompatibility, Route } from './csrf.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 
 const NOW = '2026-09-13T09:30:00.000Z';
@@ -37,14 +38,22 @@ let store: SessionStore;
 
 const version = { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) };
 
-const serving = async (sessions: SessionStore | undefined): Promise<FastifyInstance> => {
+const serving = async (
+  sessions: SessionStore | undefined,
+  compatibility?: RestoreCompatibility,
+): Promise<FastifyInstance> => {
   const built = Fastify({ logger: false });
-  guardMutations(built, { sessions });
+  guardMutations(built, { sessions, compatibility });
   built.post('/api/v1/anything', (request) => ({ actor: provenSession(request).record.actor }));
   built.get('/api/v1/anything', () => ({ read: true }));
   await built.ready();
   return built;
 };
+
+/** A `RestoreCompatibility` that answers the same thing every time it is asked. */
+const compatibility = (restoredRecently: boolean): RestoreCompatibility => ({
+  restoredRecently: async () => restoredRecently,
+});
 
 const signedIn = async (): Promise<StartedSession> =>
   store.start(sessionContext('req-0f9c2a41'), { actor: 'account:7f3a', permissions: ['services.read'] });
@@ -164,6 +173,54 @@ describe('what the guard refuses', () => {
       expect(response.body).not.toContain('hunter2');
       await app.close();
     }
+  });
+});
+
+describe('the guard after a restore', () => {
+  test('a session this server does not know, within a restore’s grace window, is told to update', async () => {
+    app = await serving(store, compatibility(true));
+    const response = await mutating(undefined, { cookie: `${SESSION_COOKIE}=${'x'.repeat(43)}` });
+    expect(response.statusCode).toBe(426);
+    expect(response.json().error).toMatchObject({ code: UPDATE_REQUIRED, fields: [{ path: SESSION_COOKIE }] });
+    expect(response.headers['set-cookie']).toBe(clearedSessionCookie());
+  });
+
+  test('a session that expired, within a restore’s grace window, is also told to update', async () => {
+    let clock = Date.parse(NOW);
+    store = sessionsOn(memorySessions().db, { now: () => new Date(clock).toISOString() });
+    app = await serving(store, compatibility(true));
+    const session = await signedIn();
+    clock = Date.parse(NOW) + 25 * 3_600_000;
+    const response = await mutating(session);
+    expect(response.statusCode).toBe(426);
+    expect(response.json().error.code).toBe(UPDATE_REQUIRED);
+  });
+
+  test('outside a restore’s grace window, an unknown session is refused the ordinary way', async () => {
+    app = await serving(store, compatibility(false));
+    const response = await mutating(undefined, { cookie: `${SESSION_COOKIE}=${'x'.repeat(43)}` });
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe(SESSION_EXPIRED);
+  });
+
+  test('a deployment with no compatibility store to ask refuses the ordinary way, exactly as before', async () => {
+    app = await serving(store);
+    const response = await mutating(undefined, { cookie: `${SESSION_COOKIE}=${'x'.repeat(43)}` });
+    expect(response.statusCode).toBe(401);
+  });
+
+  test('a request that carries no session at all is not told to update, restore or not', async () => {
+    app = await serving(store, compatibility(true));
+    const response = await mutating(undefined);
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe(SESSION_EXPIRED);
+  });
+
+  test('a defect in the store is still a defect, restore or not', async () => {
+    const broken: SessionStore = { ...store, read: () => Promise.reject(new SessionError('schema', 'broken')) };
+    app = await serving(broken, compatibility(true));
+    const response = await mutating(await signedIn());
+    expect(response.statusCode).toBe(500);
   });
 });
 

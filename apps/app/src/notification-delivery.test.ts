@@ -177,10 +177,8 @@ describe('no outbound channel exists in v1', () => {
     }
   });
 
-  // A notification nothing consumes cannot be delivered anywhere. The derivation and this policy are
-  // the whole of what knows the type exists, which is what makes the claim above hold by construction
-  // rather than by a denylist that a new dependency could step around.
-  test('nothing outside the derivation and this policy consumes a notification at all', () => {
+  // Consumers remain confined to derivation, delivery policy and the in-app inbox.
+  test('only the derivation, policy and in-app inbox consume notifications', () => {
     const consumers = WORKSPACES.flatMap((workspace) => sourcesUnder(`${workspace}src/`))
       .filter(({ text }) => text.includes("/notifications.js'"))
       .map(({ name }) => name)
@@ -188,7 +186,11 @@ describe('no outbound channel exists in v1', () => {
     expect(consumers).toEqual([
       'apps/app/src/notification-delivery.test.ts',
       'apps/app/src/notification-delivery.ts',
+      'apps/app/src/notification-routes.ts',
+      'apps/app/src/notification-store.test.ts',
+      'apps/app/src/notification-store.ts',
       'apps/app/src/notifications.test.ts',
+      'packages/contracts/src/notifications.test.ts',
     ]);
   });
 

@@ -52,6 +52,15 @@ describe('precedence', () => {
       autosaveRetentionDays: 'default',
       sermonAiEnabled: 'default',
       anthropicApiKey: 'default',
+      backupDailyAt: 'default',
+      backupComponents: 'default',
+      backupMinimumGapMinutes: 'default',
+      backupRehearsalWeekday: 'default',
+      retentionSweepAt: 'default',
+      notificationReadRetentionDays: 'default',
+      mediaArchivedPurgeGraceDays: 'default',
+      mediaUploadLimitBytes: 'default',
+      mediaFreeSpaceReserveBytes: 'default',
     });
     expect(loaded.path).toBe(CANONICAL_SETTINGS_PATH);
   });
@@ -79,6 +88,15 @@ describe('precedence', () => {
       autosaveRetentionDays: 'default',
       sermonAiEnabled: 'default',
       anthropicApiKey: 'default',
+      backupDailyAt: 'default',
+      backupComponents: 'default',
+      backupMinimumGapMinutes: 'default',
+      backupRehearsalWeekday: 'default',
+      retentionSweepAt: 'default',
+      notificationReadRetentionDays: 'default',
+      mediaArchivedPurgeGraceDays: 'default',
+      mediaUploadLimitBytes: 'default',
+      mediaFreeSpaceReserveBytes: 'default',
     });
   });
 
@@ -109,6 +127,15 @@ describe('precedence', () => {
       HOLYDECK_AUTOSAVE_RETENTION_DAYS: '7',
       HOLYDECK_SERMON_AI_ENABLED: 'true',
       HOLYDECK_ANTHROPIC_API_KEY: 'sk-ant-example-key',
+      HOLYDECK_BACKUP_DAILY_AT: '01:30',
+      HOLYDECK_BACKUP_COMPONENTS: 'mongo,media',
+      HOLYDECK_BACKUP_MINIMUM_GAP_MINUTES: '180',
+      HOLYDECK_BACKUP_REHEARSAL_WEEKDAY: 'monday',
+      HOLYDECK_RETENTION_SWEEP_AT: '02:30',
+      HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS: '31',
+      HOLYDECK_MEDIA_ARCHIVED_PURGE_GRACE_DAYS: '181',
+      HOLYDECK_MEDIA_UPLOAD_LIMIT_BYTES: '2147483648',
+      HOLYDECK_MEDIA_FREE_SPACE_RESERVE_BYTES: '10737418240',
     });
     expect(loaded.values).toEqual({
       port: 8080,
@@ -128,8 +155,17 @@ describe('precedence', () => {
       autosaveRetentionDays: 7,
       sermonAiEnabled: true,
       anthropicApiKey: 'sk-ant-example-key',
+      backupDailyAt: '01:30',
+      backupComponents: ['mongo', 'media'],
+      backupMinimumGapMinutes: 180,
+      backupRehearsalWeekday: 'monday',
+      retentionSweepAt: '02:30',
+      notificationReadRetentionDays: 31,
+      mediaArchivedPurgeGraceDays: 181,
+      mediaUploadLimitBytes: 2_147_483_648,
+      mediaFreeSpaceReserveBytes: 10_737_418_240,
     });
-    expect(Object.values(loaded.sources)).toEqual(Array(17).fill('env'));
+    expect(Object.values(loaded.sources)).toEqual(Array(26).fill('env'));
   });
 });
 
@@ -240,6 +276,9 @@ describe('the media root and the Restic repository accept a filesystem path only
       'port', 'dataDir', 'mediaRoot', 'resticRepository', 'resticPassword', 'locale', 'corpusUrl', 'corpusToken',
       'tlsCertFile', 'tlsKeyFile', 'mongoUrl', 'timezone', 'developmentDiagnostics', 'auditRetentionDays',
       'autosaveRetentionDays', 'sermonAiEnabled', 'anthropicApiKey',
+      'backupDailyAt', 'backupComponents', 'backupMinimumGapMinutes', 'backupRehearsalWeekday',
+      'retentionSweepAt', 'notificationReadRetentionDays',
+      'mediaArchivedPurgeGraceDays', 'mediaUploadLimitBytes', 'mediaFreeSpaceReserveBytes',
     ]);
   });
 
@@ -279,6 +318,195 @@ describe('the installation’s time zone', () => {
     expect(problemsOf(undefined, { HOLYDECK_TIMEZONE: 'not/a-zone' })).toEqual([
       'HOLYDECK_TIMEZONE: expected an IANA time zone, got "not/a-zone"',
     ]);
+  });
+});
+
+describe('operations settings', () => {
+  const fields = [
+    'backupDailyAt',
+    'backupComponents',
+    'backupMinimumGapMinutes',
+    'backupRehearsalWeekday',
+    'retentionSweepAt',
+    'notificationReadRetentionDays',
+    'autosaveRetentionDays',
+    'auditRetentionDays',
+    'mediaArchivedPurgeGraceDays',
+  ] as const;
+
+  it('defaults every operations setting when neither layer sets it', () => {
+    const loaded = load();
+    for (const field of fields) {
+      expect(loaded.values[field]).toEqual(DEFAULT_SETTINGS[field]);
+      expect(loaded.sources[field]).toBe('default');
+    }
+  });
+
+  it('reads every operations setting from the file', () => {
+    const loaded = load([
+      'backupDailyAt: "01:30"',
+      'backupComponents: [mongo, media]',
+      'backupMinimumGapMinutes: 180',
+      'backupRehearsalWeekday: monday',
+      'retentionSweepAt: "02:30"',
+      'notificationReadRetentionDays: 31',
+      'autosaveRetentionDays: 32',
+      'auditRetentionDays: 401',
+      'mediaArchivedPurgeGraceDays: 181',
+    ].join('\n'));
+    expect(loaded.values).toMatchObject({
+      backupDailyAt: '01:30',
+      backupComponents: ['mongo', 'media'],
+      backupMinimumGapMinutes: 180,
+      backupRehearsalWeekday: 'monday',
+      retentionSweepAt: '02:30',
+      notificationReadRetentionDays: 31,
+      autosaveRetentionDays: 32,
+      auditRetentionDays: 401,
+      mediaArchivedPurgeGraceDays: 181,
+    });
+    for (const field of fields) expect(loaded.sources[field]).toBe('file');
+  });
+
+  it('lets the environment override every operations setting from the file', () => {
+    const loaded = load([
+      'backupDailyAt: "01:30"',
+      'backupComponents: [mongo]',
+      'backupMinimumGapMinutes: 180',
+      'backupRehearsalWeekday: monday',
+      'retentionSweepAt: "02:30"',
+      'notificationReadRetentionDays: 31',
+      'autosaveRetentionDays: 32',
+      'auditRetentionDays: 401',
+      'mediaArchivedPurgeGraceDays: 181',
+    ].join('\n'), {
+      HOLYDECK_BACKUP_DAILY_AT: '03:30',
+      HOLYDECK_BACKUP_COMPONENTS: 'settings,media',
+      HOLYDECK_BACKUP_MINIMUM_GAP_MINUTES: '181',
+      HOLYDECK_BACKUP_REHEARSAL_WEEKDAY: 'tuesday',
+      HOLYDECK_RETENTION_SWEEP_AT: '04:30',
+      HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS: '33',
+      HOLYDECK_AUTOSAVE_RETENTION_DAYS: '34',
+      HOLYDECK_AUDIT_RETENTION_DAYS: '402',
+      HOLYDECK_MEDIA_ARCHIVED_PURGE_GRACE_DAYS: '182',
+    });
+    expect(loaded.values).toMatchObject({
+      backupDailyAt: '03:30',
+      backupComponents: ['settings', 'media'],
+      backupMinimumGapMinutes: 181,
+      backupRehearsalWeekday: 'tuesday',
+      retentionSweepAt: '04:30',
+      notificationReadRetentionDays: 33,
+      autosaveRetentionDays: 34,
+      auditRetentionDays: 402,
+      mediaArchivedPurgeGraceDays: 182,
+    });
+    for (const field of fields) expect(loaded.sources[field]).toBe('env');
+  });
+
+  it('requires a zero-padded valid 24-hour time', () => {
+    for (const field of ['backupDailyAt', 'retentionSweepAt']) {
+      for (const raw of ['3:00', '24:00', '03:60', '', 300]) {
+        expect(problemsOf(`${field}: ${typeof raw === 'string' ? JSON.stringify(raw) : raw}\n`)[0]).toContain(
+          `${field}: expected HH:mm (24-hour)`,
+        );
+      }
+    }
+  });
+
+  it('accepts backup components as YAML or comma-separated text, and deduplicates them', () => {
+    expect(load('backupComponents: [mongo, media]\n').values.backupComponents).toEqual(['mongo', 'media']);
+    expect(load(undefined, { HOLYDECK_BACKUP_COMPONENTS: 'mongo,media,mongo' }).values.backupComponents)
+      .toEqual(['mongo', 'media']);
+  });
+
+  it('requires at least one known backup component', () => {
+    expect(problemsOf('backupComponents: []\n')).toEqual(['backupComponents: expected at least one component']);
+    expect(problemsOf('backupComponents: [unknown]\n')[0]).toContain('"unknown"');
+  });
+
+  it('bounds every operations retention and gap window to whole positive days or minutes', () => {
+    // autosaveRetentionDays and auditRetentionDays are bounds-tested separately below (1-365 and
+    // 30-3650 respectively — narrower than this generic 1-3650 range).
+    for (const [field, max] of [
+      ['backupMinimumGapMinutes', 10_080],
+      ['notificationReadRetentionDays', 3_650],
+      ['mediaArchivedPurgeGraceDays', 3_650],
+    ] as const) {
+      for (const raw of [0, -1, max + 1, '12.5']) {
+        expect(problemsOf(`${field}: ${raw}\n`)[0]).toContain(`expected a whole number between 1 and ${max}`);
+      }
+    }
+  });
+
+  it('requires a lower-case named weekday', () => {
+    for (const raw of ['Sunday', 'someday']) {
+      expect(problemsOf(`backupRehearsalWeekday: ${raw}\n`)[0]).toContain('expected one of sunday, monday');
+    }
+  });
+
+  it('does not treat operations settings as secrets', () => {
+    for (const field of fields) expect(SETTINGS_SECRET_FIELDS).not.toContain(field);
+  });
+});
+
+describe('media settings', () => {
+  const fields = ['mediaUploadLimitBytes', 'mediaFreeSpaceReserveBytes'] as const;
+
+  it('defaults every media setting when neither layer sets it', () => {
+    const loaded = load();
+    for (const field of fields) {
+      expect(loaded.values[field]).toEqual(DEFAULT_SETTINGS[field]);
+      expect(loaded.sources[field]).toBe('default');
+    }
+  });
+
+  it('reads every media setting from the file', () => {
+    const loaded = load([
+      'mediaUploadLimitBytes: 2147483648',
+      'mediaFreeSpaceReserveBytes: 10737418240',
+    ].join('\n'));
+    expect(loaded.values).toMatchObject({
+      mediaUploadLimitBytes: 2_147_483_648,
+      mediaFreeSpaceReserveBytes: 10_737_418_240,
+    });
+    for (const field of fields) expect(loaded.sources[field]).toBe('file');
+  });
+
+  it('lets the environment override every media setting from the file', () => {
+    const loaded = load([
+      'mediaUploadLimitBytes: 2147483648',
+      'mediaFreeSpaceReserveBytes: 10737418240',
+    ].join('\n'), {
+      HOLYDECK_MEDIA_UPLOAD_LIMIT_BYTES: '3221225472',
+      HOLYDECK_MEDIA_FREE_SPACE_RESERVE_BYTES: '21474836480',
+    });
+    expect(loaded.values).toMatchObject({
+      mediaUploadLimitBytes: 3_221_225_472,
+      mediaFreeSpaceReserveBytes: 21_474_836_480,
+    });
+    for (const field of fields) expect(loaded.sources[field]).toBe('env');
+  });
+
+  it('bounds the upload limit to whole bytes from 1 up to 10 GiB', () => {
+    for (const raw of [0, -1, 10_737_418_240 + 1, '12.5']) {
+      expect(problemsOf(`mediaUploadLimitBytes: ${raw}\n`)[0]).toContain(
+        'expected a whole number between 1 and 10737418240',
+      );
+    }
+  });
+
+  it('bounds the free-space reserve to whole bytes from zero up to 1 TiB, zero meaning no reserve', () => {
+    expect(load('mediaFreeSpaceReserveBytes: 0\n').values.mediaFreeSpaceReserveBytes).toBe(0);
+    for (const raw of [-1, 1_099_511_627_776 + 1, '12.5']) {
+      expect(problemsOf(`mediaFreeSpaceReserveBytes: ${raw}\n`)[0]).toContain(
+        'expected a whole number between 0 and 1099511627776',
+      );
+    }
+  });
+
+  it('does not treat media settings as secrets', () => {
+    for (const field of fields) expect(SETTINGS_SECRET_FIELDS).not.toContain(field);
   });
 });
 

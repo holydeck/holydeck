@@ -121,6 +121,15 @@ export function serveSettingsRoutes(app: FastifyInstance, { settingsAdmin, ident
         validationFailure(request.id, [{ path: 'settings', code: FIELD_CODES.notAnObject, message: 'must be an object' }]),
       );
     }
+    if ('mediaRoot' in request.body) {
+      return reply.code(422).send(
+        validationFailure(request.id, [{
+          path: 'mediaRoot',
+          code: FIELD_CODES.notAllowed,
+          message: 'change the media root through POST /api/v1/media/storage-migration, which copies and verifies every file first',
+        }]),
+      );
+    }
     const operator = provenSession(request).record.actor;
     try {
       const updated = await admin.update(request.body as Partial<Settings>);

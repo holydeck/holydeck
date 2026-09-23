@@ -15,8 +15,43 @@ export const HEARTBEAT_STALE_MS = 45_000;
 
 export const heartbeatPath = ({ dataDir }: WorkerPaths): string => `${dataDir}/worker/heartbeat.json`;
 
-export function heartbeatText(at: string, pid: number, paths: WorkerPaths): string {
-  return `${JSON.stringify({ at, pid, paths: Object.values(paths) }, undefined, 2)}\n`;
+/**
+ * The worker's own process metrics, the "worker-process" scope OPS-09 asks CPU/RAM be labelled with —
+ * never the host's, which this process cannot see and has no business reporting. Optional on
+ * `heartbeatText` because a heartbeat written before this existed, or by a worker that never measured
+ * itself, is still a valid heartbeat: `heartbeatProblem` above judges liveness from `at` alone.
+ */
+export interface HeartbeatProcess {
+  readonly cpuUserSeconds: number;
+  readonly cpuSystemSeconds: number;
+  readonly memoryRssMb: number;
+}
+
+export function heartbeatText(at: string, pid: number, paths: WorkerPaths, metrics?: HeartbeatProcess): string {
+  return `${JSON.stringify({ at, pid, paths: Object.values(paths), process: metrics }, undefined, 2)}\n`;
+}
+
+/**
+ * The same defensive read `heartbeatProblem` gives the rest of the file: an absent, unreadable or
+ * malformed heartbeat is not a worker-process reading, and this says so by returning nothing rather than
+ * by throwing — `operational-sources.ts` reads this off the same file it already read for liveness.
+ */
+export function heartbeatProcess(text: string | undefined): HeartbeatProcess | undefined {
+  if (text === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined;
+  const metrics = (parsed as Record<string, unknown>)['process'];
+  if (typeof metrics !== 'object' || metrics === null) return undefined;
+  const { cpuUserSeconds, cpuSystemSeconds, memoryRssMb } = metrics as Record<string, unknown>;
+  if (typeof cpuUserSeconds !== 'number' || typeof cpuSystemSeconds !== 'number' || typeof memoryRssMb !== 'number') {
+    return undefined;
+  }
+  return { cpuUserSeconds, cpuSystemSeconds, memoryRssMb };
 }
 
 const seconds = (ms: number): number => Math.round(ms / 1000);
