@@ -80,9 +80,17 @@ const importSubject = (id: string): string => `pptxImport:${id}`;
 /** A refused upload has no session id yet — nothing was created — so it is audited under this instead. */
 const UPLOAD_SUBJECT = 'pptxImport:upload';
 
+/** `x-file-name` is unvalidated client input, stored in the session row and echoed back to the owner:
+ *  trim it, strip control characters, and cap its length the way the other name fields in this app do. */
+const FILE_NAME_MAX_LENGTH = 255;
+// eslint-disable-next-line no-control-regex -- stripping control characters is the point.
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/gu;
+
 const fileNameIn = (request: FastifyRequest): string => {
   const named = request.headers['x-file-name'];
-  return typeof named === 'string' && named.length > 0 ? named : DEFAULT_FILE_NAME;
+  if (typeof named !== 'string') return DEFAULT_FILE_NAME;
+  const cleaned = named.replace(CONTROL_CHARS, '').trim().slice(0, FILE_NAME_MAX_LENGTH);
+  return cleaned.length > 0 ? cleaned : DEFAULT_FILE_NAME;
 };
 
 /** The spec asks for `{ decisions: [...] }`; anything else is read as no list at all. */
@@ -182,7 +190,7 @@ export function servePptxRoutes(
         return reply.code(413).send(errorEnvelope('pptx.too_large', error.message, request.id));
       }
       if (error.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE') {
-        return reply.code(415).send(errorEnvelope('pptx.invalid_format', error.message, request.id));
+        return reply.code(422).send(errorEnvelope('pptx.invalid_format', error.message, request.id));
       }
       return reply.send(error);
     },

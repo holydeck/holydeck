@@ -200,6 +200,18 @@ describe('POST /api/v1/pptx-imports', () => {
     expect(trail).toMatchObject({ action: 'pptx.import', subject: `pptxImport:${data['id'] as string}` });
   });
 
+  test('trims, strips control characters from, and caps the length of x-file-name', async () => {
+    const response = await app.inject({
+      method: 'POST', url: PPTX_IMPORTS_PATH,
+      headers: { ...headers(), 'content-type': PPTX_TYPE, 'x-file-name': `  evil\u0000\u001f${'x'.repeat(300)}.pptx  ` },
+      payload: Buffer.from(DECK),
+    }) as Response;
+    expect(response.statusCode).toBe(201);
+    const fileName = response.json().data['fileName'] as string;
+    expect(fileName).toHaveLength(255);
+    expect(fileName).toBe(`evil${'x'.repeat(251)}`);
+  });
+
   test('answers 413 pptx.too_large for a body over the configured limit', async () => {
     await app.close();
     await serving({ bodyLimit: 64 });
@@ -226,11 +238,11 @@ describe('POST /api/v1/pptx-imports', () => {
     expect(response.json().error.code).toBe('pptx.invalid_format');
   });
 
-  test('answers 415 pptx.invalid_format for a content type no parser reads', async () => {
+  test('answers 422 pptx.invalid_format for a content type no parser reads', async () => {
     const response = await app.inject({
       method: 'POST', url: PPTX_IMPORTS_PATH, headers: { ...headers(), 'content-type': 'application/octet-stream' }, payload: Buffer.from(DECK),
     }) as Response;
-    expect(response.statusCode).toBe(415);
+    expect(response.statusCode).toBe(422);
     expect(response.json().error.code).toBe('pptx.invalid_format');
   });
 
