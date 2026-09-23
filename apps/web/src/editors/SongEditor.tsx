@@ -3,6 +3,8 @@
 // revision it was read at, and a save that finds a newer revision is refused rather than overwriting it
 // (409) — the person reloads the latest and carries on from there. The Raw YAML tab saves through the
 // server's own validation, and the form re-reads the song after it, because the server is the truth.
+// Once the song exists, the editor also says who else has it open and offers the conflict shelf for any
+// save that lost a race (COLAB-05); settling one re-reads the song, since the settlement is a new revision.
 
 import { ENTITY_CONFLICT } from '@holydeck/contracts/http';
 import { METADATA_KEYS, TITLE_LANGUAGE_KEYS } from '@holydeck/contracts/songs';
@@ -12,6 +14,8 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 
 import { API } from '../api-routes.js';
 import { csrf } from '../app-state.js';
+import { ConflictShelf } from '../components/conflict-shelf.js';
+import { PresenceIndicator } from '../components/presence-indicator.js';
 import { t } from '../i18n.js';
 import { request } from '../request.js';
 import { readSongRecord, useContentLanguages, useSlideLabels, type SongRecord } from '../workspace/tabs/song-sources.js';
@@ -252,6 +256,8 @@ export function SongEditor({ songId, onChange }: SongEditorProps): JSX.Element {
           {t('song.raw')}
         </button>
       </div>
+      {id === undefined ? null : <PresenceIndicator contentId={id} />}
+      {id === undefined ? null : <ConflictShelf contentId={id} onResolved={() => setReads((count) => count + 1)} />}
       {stale ? (
         <div role="alert" class="song-stale">
           <p>{t('song.stale')}</p>

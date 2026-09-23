@@ -3,7 +3,9 @@
 // Text, labels and new slides or blocks travel in one whole-group save 800 ms after the last input; the
 // server has no create route for a single slide. A generated group takes no whole-group save — its text
 // is its song's, edited there and generated again — so it keeps only the per-slide operations. The slide
-// open for editing is published as `activeSlide` for the Properties panel's overrides.
+// open for editing is published as `activeSlide` for the Properties panel's overrides. Who else has the
+// group open and any save of it that lost a race are shown above the slides (COLAB-05); settling a
+// conflict re-reads the group, since the settlement is a new revision of it.
 
 import type { Slide, SlideGroupBody } from '@holydeck/contracts/slide-groups';
 import type { MessageKey } from '@holydeck/localization/messages';
@@ -13,6 +15,8 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { UNREADABLE_RESPONSE } from '../api.js';
 import { API } from '../api-routes.js';
 import { can, csrf } from '../app-state.js';
+import { ConflictShelf } from '../components/conflict-shelf.js';
+import { PresenceIndicator } from '../components/presence-indicator.js';
 import { t } from '../i18n.js';
 import { request } from '../request.js';
 import { selection } from '../state/workspace-store.js';
@@ -42,6 +46,7 @@ export function SlideGroupEditor({ groupId }: { readonly groupId: string }): JSX
   const [dirty, setDirty] = useState(false);
   const [open, setOpen] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
+  const [reads, setReads] = useState(0);
   const latest = useRef<SlideGroupBody | undefined>(undefined);
   const saved = useRef<SlideGroupBody | undefined>(undefined);
   const canEdit = can('content.edit');
@@ -67,7 +72,7 @@ export function SlideGroupEditor({ groupId }: { readonly groupId: string }): JSX
       setLoaded({ status: 'ready' });
     });
     return (): void => { current = false; };
-  }, [groupId]);
+  }, [groupId, reads]);
 
   const save = useCallback(async (value: SlideGroupBody | undefined): Promise<boolean> => {
     if (value === undefined) return false;
@@ -138,6 +143,8 @@ export function SlideGroupEditor({ groupId }: { readonly groupId: string }): JSX
   return (
     <section class="slide-group-editor" aria-label={t('slides.heading')}>
       <h2>{title}</h2>
+      <PresenceIndicator contentId={groupId} />
+      <ConflictShelf contentId={groupId} onResolved={() => setReads((count) => count + 1)} />
       <label>
         <input
           type="checkbox"
