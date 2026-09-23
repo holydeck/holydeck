@@ -222,14 +222,14 @@ export const RECORDS = {
     kind: 'append-only',
     fields: { ...HISTORY, version: 'required', direction: 'required', attempt: 'required', phase: 'required', at: 'required', detail: 'optional' },
   },
-  // Spec TMPL-04: a Service Template's own stamp — its name, and when and by whom it was defined. No
-  // update verb exists for one yet, because no requirement says what changing or archiving one does (see
-  // service-templates.ts's own header); each Service Template is therefore exactly one row, keyed by its
-  // own identifier rather than a growing stamp history like `slideLayouts`.
+  // Spec TMPL-04, AUTH-09: a Service Template's own stamp and name, apart from the entries it holds — the
+  // same append-only stamp history `slideLayouts` keeps, and for the same reason: the standing stamp is
+  // the highest `sequence` a `templateId` has, and a second writer claiming that same ordinal is a
+  // duplicate key rather than a lost change.
   serviceTemplates: {
     collection: 'service_templates',
     kind: 'append-only',
-    fields: { ...HISTORY, name: 'required', createdAt: 'required', createdBy: 'required' },
+    fields: { ...HISTORY, templateId: 'required', sequence: 'required', at: 'required', name: 'required', stamp: 'required' },
   },
   // Spec SERV-01: a Service's own stamp, kept as a history of stamps like `slideLayouts` rather than
   // one row edited in place — a Service has no separately-versioned body to delegate to, so its

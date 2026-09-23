@@ -42,6 +42,7 @@ export const ENTITY_KINDS = [
   'reusableSlide',
   'sermon',
   'service',
+  'serviceTemplate',
   'slideGroup',
   'slideLabel',
   'slideLayout',
@@ -125,6 +126,15 @@ export const ENTITY_POLICIES: Readonly<Record<EntityKind, EntityPolicy>> = Objec
     graceDays: undefined,
     portable: false,
     requirement: 'SERV-03 with DELT-01',
+  },
+  serviceTemplate: {
+    kind: 'serviceTemplate',
+    schemaVersion: 1,
+    archive: 'hidden',
+    deletion: 'never',
+    graceDays: undefined,
+    portable: false,
+    requirement: 'TMPL-04',
   },
   slideGroup: {
     kind: 'slideGroup',

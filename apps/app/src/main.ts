@@ -164,7 +164,7 @@ if (settings.values.mongoUrl !== '') {
   };
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
   services = servicesOn(repositoryDb(store.db()), { now });
-  serviceTemplates = serviceTemplatesOn(repositoryDb(store.db()), { now });
+  serviceTemplates = serviceTemplatesOn(repositoryDb(store.db()), { now, services });
   preparation = preparationOn(repositoryDb(store.db()), { now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });

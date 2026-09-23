@@ -4,6 +4,8 @@ import {
   instantiate,
   parseServiceTemplateBody,
   parseServiceTemplateDraft,
+  parseServiceTemplateName,
+  parseServiceTemplateStatus,
   templateFromService,
 } from './service-templates.js';
 
@@ -134,6 +136,28 @@ describe('parseServiceTemplateDraft', () => {
     if (!parsed.ok) throw new Error('expected the draft to parse');
     expect(parsed.value.name).toBe('Sunday Service');
     expect(parsed.value.body.sections).toHaveLength(1);
+  });
+});
+
+describe('parseServiceTemplateStatus', () => {
+  it('reads whether a Service Template is being hidden or brought back, and refuses anything else', () => {
+    expect(parseServiceTemplateStatus({ archived: true })).toEqual({ ok: true, value: { archived: true } });
+    const parsed = parseServiceTemplateStatus({ archived: 'yes' });
+    expect(parsed.ok).toBe(false);
+    expect(!parsed.ok && parsed.problems.map((problem) => `${problem.path}: ${problem.code}`)).toEqual([
+      'serviceTemplate.archived: field.not_a_boolean',
+    ]);
+  });
+});
+
+describe('parseServiceTemplateName', () => {
+  it('reads just the name fromService asks a caller for', () => {
+    expect(parseServiceTemplateName({ name: 'Sunday Service' })).toEqual({ ok: true, value: { name: 'Sunday Service' } });
+    const parsed = parseServiceTemplateName({});
+    expect(parsed.ok).toBe(false);
+    expect(!parsed.ok && parsed.problems.map((problem) => `${problem.path}: ${problem.code}`)).toEqual([
+      'serviceTemplate.name: field.required',
+    ]);
   });
 });
 

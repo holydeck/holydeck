@@ -53,7 +53,12 @@ import {
   SERVICE_STATUS_PATH,
   SERVICE_TRANSITION_PATH,
 } from './service-routes.js';
-import { SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
+import {
+  SERVICE_TEMPLATE_FROM_SERVICE_PATH,
+  SERVICE_TEMPLATE_ID_PATH,
+  SERVICE_TEMPLATE_PATH,
+  SERVICE_TEMPLATE_STATUS_PATH,
+} from './service-template-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
 import { SLIDE_GROUP_ID_PATH, SLIDE_PATH } from './slide-group-routes.js';
@@ -195,8 +200,13 @@ describe('every route that changes something', () => {
       { method: 'POST', url: SERVICE_ITEM_DUPLICATE_PATH },
       { method: 'POST', url: SERVICE_ITEMS_REORDER_PATH },
       { method: 'POST', url: SERVICE_ITEM_REVISE_PATH },
-      // A Service Template is Admin's by a permission of its own: creating one changes what New Service offers.
+      // A Service Template is Admin's by a permission of its own: creating one changes what New Service
+      // offers, and saving it forward, archiving it, bringing it back or minting one from a Service already
+      // run are the same permission's again.
       { method: 'POST', url: SERVICE_TEMPLATE_PATH },
+      { method: 'PUT', url: SERVICE_TEMPLATE_ID_PATH },
+      { method: 'PATCH', url: SERVICE_TEMPLATE_STATUS_PATH },
+      { method: 'POST', url: SERVICE_TEMPLATE_FROM_SERVICE_PATH },
       // Preparation's own surface: preparing a Service into a manifest is Admin's or an Editor's, the
       // same permission Editing one already takes; overriding a readiness blocker is Control presentation's
       // alone, the one route in this module gated by a different permission than the rest.

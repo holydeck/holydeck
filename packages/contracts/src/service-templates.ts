@@ -107,6 +107,23 @@ export function parseServiceTemplateDraft(value: unknown): Parsed<ServiceTemplat
   });
 }
 
+export type ServiceTemplateStatus = {
+  readonly archived: boolean;
+};
+
+export function parseServiceTemplateStatus(value: unknown): Parsed<ServiceTemplateStatus> {
+  return parseObject(value, 'serviceTemplate', (reader) => ({ archived: reader.flag('archived') }));
+}
+
+export type ServiceTemplateName = {
+  readonly name: string;
+};
+
+/** Just the name: `fromService` mints its entries from an existing Service and asks a caller for this alone. */
+export function parseServiceTemplateName(value: unknown): Parsed<ServiceTemplateName> {
+  return parseObject(value, 'serviceTemplate', (reader) => ({ name: reader.text('name') }));
+}
+
 export type EntryFill = {
   readonly entryId: string;
   readonly title: string;

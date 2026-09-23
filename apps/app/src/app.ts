@@ -303,7 +303,7 @@ export function buildApp({
   serveReferenceRoutes(app, { corpus, shownReferences });
   serveOrderRoutes(app, { services, slideLabels });
   serveServiceRoutes(app, { services });
-  serveServiceTemplateRoutes(app, { serviceTemplates });
+  serveServiceTemplateRoutes(app, { serviceTemplates, identity });
   servePreparationRoutes(app, { preparation });
 
   // The content surfaces content-routes spec adds: songs, sermons, slide groups and the library are each
