@@ -11,3 +11,8 @@ export const geometry = (value: number): number => roundTo(value, GEOMETRY_PRECI
 
 /** Subpixel slack when asking whether something fits: a box is not overflowing by a hundredth of a pixel. */
 export const FIT_TOLERANCE_PX = 0.01;
+
+/** Subpixel noise below this is not a layout decision; rounding it keeps a re-preparation byte-stable. It
+ *  lives here rather than in `measure.ts` so the layout half never pulls the lazy puppeteer import into a
+ *  browser bundle. */
+export const MEASUREMENT_PRECISION = 2;

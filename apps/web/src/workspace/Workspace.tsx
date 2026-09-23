@@ -14,6 +14,7 @@ import type { MessageKey } from '@holydeck/localization/messages';
 import type { ComponentChildren, JSX } from 'preact';
 
 import { t } from '../i18n.js';
+import { ExactPreview } from '../preview/ExactPreview.js';
 import {
   loadService, loadState, resetWorkspace, rightTab, selection, service,
 } from '../state/workspace-store.js';
@@ -105,6 +106,12 @@ const ASIDE_IDS = ['workspace-tab-properties-aside', 'workspace-tab-library-asid
 
 function EditorPlaceholder(): JSX.Element {
   return <textarea aria-label={t('workspace.region.editor')} />;
+}
+
+/** The center region: the selected item's exact preview, or the bare editor until something is selected. */
+function EditorCenter(): JSX.Element {
+  const itemId = selection.value.itemId;
+  return itemId === undefined ? <EditorPlaceholder /> : <ExactPreview itemId={itemId} />;
 }
 
 function LibraryPlaceholder(): JSX.Element {
@@ -286,7 +293,7 @@ export function Workspace({ id }: { readonly id: string }): JSX.Element {
       </div>
       <WorkspaceFrame
         order={<OrderPanel view={view} onEmpty={() => { rightTab.value = 'library'; mobileRegion.value = 'details'; }} />}
-        center={<EditorPlaceholder />}
+        center={<EditorCenter />}
         properties={<PropertiesPanel />}
         library={<LibraryPlaceholder />}
         status={<WorkspaceStatus />}

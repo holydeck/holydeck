@@ -35,6 +35,7 @@ describe('API routes', () => {
     expect(API.canon('a/b')).toBe('/api/v1/translations/a%2Fb/canon');
     expect(API.verses('a/b', 'c/d', 3, '4/5')).toBe('/api/v1/translations/a%2Fb/verses?book=c%2Fd&chapter=3&verses=4%2F5');
     expect(API.translationOffset('a/b')).toBe('/api/v1/translation-offsets/a%2Fb');
+    expect(API.media('a/b')).toBe('/api/v1/media/a%2Fb');
     expect(API.mediaContent('a/b')).toBe('/api/v1/media/a%2Fb/content');
     expect(API.mediaDerivative('a/b', 'c/d')).toBe('/api/v1/media/a%2Fb/derivatives/c%2Fd');
   });

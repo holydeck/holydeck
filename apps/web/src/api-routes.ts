@@ -29,5 +29,6 @@ export const API = {
   translationOffset: (abbr: string) => `/api/v1/translation-offsets/${enc(abbr)}`,
   mediaContent: (id: string) => `/api/v1/media/${enc(id)}/content`,
   mediaDerivative: (id: string, name: string) => `/api/v1/media/${enc(id)}/derivatives/${enc(name)}`,
+  media: (id: string) => `/api/v1/media/${enc(id)}`,
   mediaUpload: '/api/v1/media',
 } as const;

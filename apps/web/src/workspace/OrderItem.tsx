@@ -10,6 +10,7 @@ import type { JSX } from 'preact';
 
 import { showToast } from '../components/toast.js';
 import { t } from '../i18n.js';
+import { Thumbnail } from '../preview/Thumbnail.js';
 import { bulkSelecting, bulkSelection, isReadOnly, mutate, pending, service } from '../state/workspace-store.js';
 import { API } from '../api-routes.js';
 import { DriftNotice } from './DriftNotice.js';
@@ -178,7 +179,7 @@ export function OrderItem({ sectionId, item, index }: {
           </div>
         ) : null}
       </div>
-      {expanded ? <div data-slot="thumbnails" /> : null}
+      {expanded ? <div data-slot="thumbnails"><Thumbnail itemId={item.id} /></div> : null}
       {moveToOpen ? (
         <MoveToDialog
           itemId={item.id}
