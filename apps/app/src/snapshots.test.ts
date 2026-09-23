@@ -769,3 +769,22 @@ describe('a record this code cannot read back', () => {
     await expect(built.preparation.prepare(CONTEXT, service.stamp.id, INPUTS)).rejects.toThrow('the volume is full');
   });
 });
+
+describe('reading a run manifest by id', () => {
+  it('reads the pinned manifest even after the service is prepared again', async () => {
+    const { preparation, serviceId } = await prepared();
+    const first = await preparation.prepared(CONTEXT, serviceId);
+    const second = await preparation.prepare(CONTEXT, serviceId, { ...INPUTS, corpus: 'corpus@new' });
+    expect(second?.snapshot.id).not.toBe(first?.snapshot.id);
+    expect(await preparation.snapshot(CONTEXT, first!.snapshot.id)).toEqual(first?.snapshot);
+    expect(await preparation.snapshot(CONTEXT, 'absent')).toBeUndefined();
+  });
+
+  it('refuses a corrupt manifest through the existing parser', async () => {
+    const { preparation, db, serviceId } = await prepared();
+    const first = await preparation.prepared(CONTEXT, serviceId);
+    const stored = rows(db, SNAPSHOTS);
+    stored[0] = { ...stored[0], pins: {} };
+    await expect(preparation.snapshot(CONTEXT, first!.snapshot.id)).rejects.toMatchObject({ kind: 'corrupt' });
+  });
+});

@@ -38,6 +38,11 @@ describe('the four change classes LIVE-04 names', () => {
       standby: 'standby-changed',
       theme: 'theme-changed',
       runState: 'run-state-changed',
+      // Reserved names for spec 07 and later tasks of this one (T84/T85, the run engine) — not one of
+      // LIVE-04's own four classes, but the same registry, so pinned here too.
+      mode: 'mode-changed',
+      itemAdded: 'item-added',
+      media: 'media-changed',
     });
   });
 

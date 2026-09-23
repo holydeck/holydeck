@@ -21,14 +21,22 @@
 
 import { randomBytes } from 'node:crypto';
 
+import { DEFAULT_THEMES, THEME_SURFACES } from '@holydeck/contracts/live-theme';
+import { LIVE_MODES, initialLiveModeState } from '@holydeck/contracts/live-mode';
+import { RUN_MODES, type RunMode } from '@holydeck/contracts/runs';
+
 import { auditOn } from './audit.js';
 import { requestContext } from './context.js';
 import { permissionsFor as recordPermissions } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { SERVICE_RECORD, subjectFor } from './services.js';
-import { SNAPSHOT_PERMISSIONS, preparationOn } from './snapshots.js';
+import { PreparationError, SNAPSHOT_PERMISSIONS, preparationOn } from './snapshots.js';
 
+import type { LiveMode } from '@holydeck/contracts/live-mode';
+import type { LivePosition, LiveState } from '@holydeck/contracts/live-state';
+import type { ThemeSurface } from '@holydeck/contracts/live-theme';
+import type { RunStartBody } from '@holydeck/contracts/runs';
 import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
 import type { OperatorSession, PreparationStore, ReadinessObservation } from './snapshots.js';
@@ -36,12 +44,8 @@ import type { OperatorSession, PreparationStore, ReadinessObservation } from './
 export const RUN_RECORD = 'presentationRuns';
 export const RUN_PERMISSIONS = recordPermissions(RUN_RECORD);
 
-/** One name for the trail entry both `start` and `end` write, distinguished only by `detail` — the same
- *  way `services.ts`'s `restamp` files archive and unarchive under one action. */
-export const RUN_ACTION = 'presentation.run';
-
-export const RUN_MODES = ['rehearsal', 'live'] as const;
-export type RunMode = (typeof RUN_MODES)[number];
+export { RUN_MODES };
+export type { RunMode };
 
 export const RUN_PHASES = ['active', 'ended'] as const;
 export type RunPhase = (typeof RUN_PHASES)[number];
@@ -58,7 +62,7 @@ const DECLARED_INDEXES: readonly RunIndex[] = [
 
 export const RUN_INDEXES = Object.freeze(DECLARED_INDEXES);
 
-export type RunRefusal = 'permission' | 'state' | 'conflict' | 'corrupt';
+export type RunRefusal = 'permission' | 'state' | 'conflict' | 'corrupt' | 'outdated' | 'active';
 
 export class RunError extends Error {
   readonly kind: RunRefusal;
@@ -91,28 +95,56 @@ export interface RunRecord {
   readonly snapshotId: string;
   readonly phase: RunPhase;
   readonly mode: RunMode;
-  /** A 0-based ordinal into whatever a run replays. Fixed at 0 by `start`; nothing here moves it — the
-   *  WebSocket protocol this lifecycle sits under (T77/T78) is what would advance it. */
+  /** A 0-based ordinal into whatever a run replays. Once `live` (below) exists on a row, this is a
+   *  derived read from `live.public` — not a second, independently moving value — kept only so a row
+   *  written before this field existed still answers the same shape (spec Design §4). */
   readonly position: number;
-  /** When this row — the latest lifecycle change, start or end — was written. */
+  /** The authoritative live state — LIVE-01's `select`/pause/standby model over this run's own
+   *  positions, exactly what `live-state.ts`'s `projectFor` privacy-projects for every viewer. */
+  readonly live: LiveState;
+  /** Moves forward on every start, end and accepted `advance`, never backward — the compare-and-set token
+   *  a caller's own `advance` races on (see `RunStore.advance`). The run engine names the value each write
+   *  lands at (the live hub's next revision), so a new run continues the numbering the wire already used
+   *  rather than restarting it at zero; left unnamed, a start begins at 0 and every later write adds one. */
+  readonly stateRevision: number;
+  /** When this row — the latest lifecycle change, start, end, or state advance — was written. */
   readonly at: string;
 }
 
-export interface StartRunRequest {
-  readonly serviceId: string;
-  readonly mode: RunMode;
+/** What starts a run: `@holydeck/contracts/runs`'s own wire shape, `override` included (D-8) — a live
+ *  start over a blocked checklist is refused unless one is given, exactly the same reason and shape the
+ *  standalone override route (`preparation-routes.ts`) already takes. */
+export type StartRunRequest = RunStartBody;
+
+export interface RunListFilter {
+  readonly serviceId?: string;
+  readonly phase?: RunPhase;
 }
 
 export interface RunStore {
+  active(context: unknown): Promise<readonly RunRecord[]>;
+  /** Every run's latest row, most recently started first, optionally narrowed by service or phase — the
+   *  same "reduce to latest row per runId" read `active` does, without `active`'s phase filter fixed to
+   *  `'active'`. Used to answer `GET /api/v1/runs`, never to derive a single run's own history. */
+  list(context: unknown, filter?: RunListFilter): Promise<readonly RunRecord[]>;
+  /** Every row a single run has ever written, oldest first — `start` through every `advance` to `end`,
+   *  unfiltered. Exists so a reader can derive facts no single row carries alone, such as when a run
+   *  started or ended, without this module inventing new stored fields for them (spec Design §4). */
+  history(context: unknown, runId: string): Promise<readonly RunRecord[]>;
   /** Starts a fresh run from a Ready prepared snapshot. Refuses with a named error from anything else,
    *  Outdated included (spec LIVE-01). Requires Control presentation, checked before anything is read. */
-  start(session: OperatorSession, request: StartRunRequest): Promise<RunRecord>;
+  start(session: OperatorSession, request: StartRunRequest, stateRevision?: number): Promise<RunRecord>;
   /** Ends a run explicitly. Nothing written before this row is rewritten — the run's history is exactly
    *  as it was, with one more row appended. Nothing for a run this code has never heard of. */
-  end(session: OperatorSession, runId: string): Promise<RunRecord | undefined>;
+  end(session: OperatorSession, runId: string, stateRevision?: number): Promise<RunRecord | undefined>;
   /** A run's persisted state: the same answer whether this is the first read right after `start` or the
    *  first read after this process restarted, since nothing here is held between calls. */
   resume(context: unknown, runId: string): Promise<RunRecord | undefined>;
+  /** Moves a run's live state on, compare-and-set style: accepted only when `expectedRevision` still
+   *  matches this run's current `stateRevision`, the same way `start` races `standing` to claim a fresh
+   *  `runId`. Answers `'stale'` — never a thrown error — when another writer moved first, so a caller
+   *  racing normal contention (the run engine, Task 8) can branch on the answer instead of a catch. */
+  advance(context: unknown, runId: string, expectedRevision: number, next: LiveState, nextRevision?: number): Promise<RunRecord | 'stale' | undefined>;
 }
 
 export interface RunOptions {
@@ -150,10 +182,85 @@ const own = async <T>(work: () => Promise<T>): Promise<T> => {
   }
 };
 
+const isLivePosition = (value: unknown): value is LivePosition =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as Record<string, unknown>)['itemId'] === 'string' &&
+  typeof (value as Record<string, unknown>)['slideIndex'] === 'number';
+
+const isPublicPosition = (value: unknown): value is LiveState['public'] =>
+  isLivePosition(value) ||
+  (typeof value === 'object' && value !== null && typeof (value as Record<string, unknown>)['standby'] === 'string');
+
+/** A best-effort structural check, not a full re-parse: enough to refuse a row this code cannot read back
+ *  (the same promise `rowFrom`'s scalar checks already make), without duplicating `problems.ts`'s wire
+ *  parsers for a shape nothing here ever receives off the wire — `live` is only ever written by this
+ *  module's own `initialLiveState`/`advance`, never parsed from client input. */
+function isLiveState(value: unknown): value is LiveState {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v['runId'] === 'string' &&
+    typeof v['snapshotId'] === 'string' &&
+    typeof v['mode'] === 'string' &&
+    LIVE_MODES.includes(v['mode'] as LiveMode) &&
+    isPublicPosition(v['public']) &&
+    isLivePosition(v['selected']) &&
+    typeof v['additionsRevision'] === 'number' &&
+    Number.isInteger(v['additionsRevision']) &&
+    (v['additionsRevision'] as number) >= 0 &&
+    typeof v['themes'] === 'object' &&
+    v['themes'] !== null &&
+    THEME_SURFACES.every((surface) => typeof (v['themes'] as Record<string, unknown>)[surface] === 'string')
+  );
+}
+
+const positionOf = (live: LiveState): number => (isLivePosition(live.public) ? live.public.slideIndex : 0);
+
+const defaultThemes = (): Readonly<Record<ThemeSurface, string>> =>
+  Object.fromEntries(THEME_SURFACES.map((surface): [ThemeSurface, string] => [surface, DEFAULT_THEMES[surface].id])) as Readonly<
+    Record<ThemeSurface, string>
+  >;
+
+/** A fresh run's `live`: LIVE-01's own fresh-run rule (`initialLiveModeState`), read onto `LiveState`'s
+ *  shape — `public`/`selected` share one `LivePosition` literal rather than `initialLiveModeState`'s
+ *  single generic position, since `LiveState.public` (unlike `.selected`) may also be a standby screen;
+ *  nothing about a brand new run is that yet. Every surface starts under its shipped default theme
+ *  (`live-theme.ts`'s `DEFAULT_THEMES`), and nothing has been added mid-service. */
+const initialLiveState = (runId: string, snapshotId: string): LiveState => {
+  const emptyScreen: LivePosition = { itemId: '', slideIndex: 0 };
+  const seed = initialLiveModeState<LivePosition>(emptyScreen);
+  return {
+    runId,
+    snapshotId,
+    mode: seed.mode,
+    public: seed.publicPosition,
+    selected: seed.selectedPosition,
+    themes: defaultThemes(),
+    additionsRevision: 0,
+  };
+};
+
+/** A row written before this task shipped `live` at all: there is truly nothing to derive one from, so
+ *  this synthesizes the same shape `initialLiveState` would have written, over the row's own `position`
+ *  (spec Design §4's "derived read for old records") rather than pinning a guess at what was selected. */
+const legacyLiveState = (runId: string, snapshotId: string, position: number): LiveState => ({
+  runId,
+  snapshotId,
+  mode: 'live',
+  public: { itemId: '', slideIndex: position },
+  selected: { itemId: '', slideIndex: position },
+  themes: defaultThemes(),
+  additionsRevision: 0,
+});
+
 export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
   const runs = repositoriesOn(db)[RUN_RECORD];
   const trail = auditOn(db, { now: options.now, ...(options.newId === undefined ? {} : { newId: options.newId }) });
-  const preparation: PreparationStore = preparationOn(db, { now: options.now });
+  const preparation: PreparationStore = preparationOn(db, {
+    now: options.now,
+    ...(options.observe === undefined ? {} : { observe: options.observe }),
+  });
   const newId = options.newId ?? ((): string => randomBytes(RUN_ID_BYTES).toString('base64url'));
   const observe = options.observe ?? ((): ReadinessObservation => ({}));
   const onRunStateChange = options.onRunStateChange ?? ((): void => {});
@@ -164,7 +271,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
   };
 
   const rowFrom = (found: Record<string, unknown>): StandingRow => {
-    const { runId, sequence, at, serviceId, snapshotId, phase, mode, position } = found;
+    const { runId, sequence, at, serviceId, snapshotId, phase, mode, position, live, stateRevision } = found;
     if (
       typeof runId !== 'string' ||
       typeof sequence !== 'number' ||
@@ -174,14 +281,39 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
       typeof phase !== 'string' ||
       !RUN_PHASES.includes(phase as RunPhase) ||
       typeof mode !== 'string' ||
-      !RUN_MODES.includes(mode as RunMode) ||
-      typeof position !== 'number' ||
-      !Number.isInteger(position) ||
-      position < 0
+      !RUN_MODES.includes(mode as RunMode)
     ) {
       throw new RunError('corrupt', `${String(runId)} holds a run row this code cannot read`);
     }
-    return { runId, sequence, at, serviceId, snapshotId, phase: phase as RunPhase, mode: mode as RunMode, position };
+    const runPhase = phase as RunPhase;
+    const runMode = mode as RunMode;
+
+    // A row this task's own `start`/`end`/`advance` wrote: `live`/`stateRevision` are authoritative, and
+    // `position` is a derived read off `live.public`, never stored.
+    if (live !== undefined || stateRevision !== undefined) {
+      if (!isLiveState(live) || typeof stateRevision !== 'number' || !Number.isInteger(stateRevision) || stateRevision < 0) {
+        throw new RunError('corrupt', `${runId} holds a run row this code cannot read`);
+      }
+      return { runId, sequence, at, serviceId, snapshotId, phase: runPhase, mode: runMode, live, stateRevision, position: positionOf(live) };
+    }
+
+    // A row written before this task shipped: no `live` at all, so `position` is what it has always
+    // been — read as-is, and never as anything the row cannot support deriving.
+    if (typeof position !== 'number' || !Number.isInteger(position) || position < 0) {
+      throw new RunError('corrupt', `${String(runId)} holds a run row this code cannot read`);
+    }
+    return {
+      runId,
+      sequence,
+      at,
+      serviceId,
+      snapshotId,
+      phase: runPhase,
+      mode: runMode,
+      position,
+      live: legacyLiveState(runId, snapshotId, position),
+      stateRevision: 0,
+    };
   };
 
   const standing = async (context: unknown, runId: string): Promise<StandingRow | undefined> => {
@@ -189,18 +321,47 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
     return found === undefined ? undefined : rowFrom(found);
   };
 
+  /** Every run's latest row, reduced from its full row history — the read `active`, `list` and `start`'s
+   *  own already-active check all share, so the three never disagree about what "latest" means. */
+  const latestPerRun = async (context: unknown): Promise<readonly StandingRow[]> => {
+    const found = await runs.read(context, {});
+    const latest = new Map<unknown, Record<string, unknown>>();
+    for (const row of found) {
+      const previous = latest.get(row['runId']);
+      if (previous === undefined || Number(row['sequence']) > Number(previous['sequence'])) {
+        latest.set(row['runId'], row);
+      }
+    }
+    return [...latest.values()].map(rowFrom);
+  };
+
   const append = async (
     context: unknown,
-    fields: Omit<StandingRow, 'at'>,
+    fields: Omit<StandingRow, 'at' | 'position'>,
   ): Promise<RunRecord> => {
     const at = options.now();
     await runs.append(context, { _id: `${fields.runId}${SEQUENCE_SEPARATOR}${fields.sequence}`, at, ...fields, ...author(context) });
-    const { runId, serviceId, snapshotId, phase, mode, position } = fields;
-    return { runId, serviceId, snapshotId, phase, mode, position, at };
+    const { runId, serviceId, snapshotId, phase, mode, live, stateRevision } = fields;
+    return { runId, serviceId, snapshotId, phase, mode, live, stateRevision, position: positionOf(live), at };
   };
 
   const store: RunStore = {
-    start: (session, request) =>
+    active: async (context) => (await latestPerRun(context)).filter((run) => run.phase === 'active'),
+
+    list: async (context, filter) => {
+      const latest = await latestPerRun(context);
+      return latest
+        .filter((run) => filter?.serviceId === undefined || run.serviceId === filter.serviceId)
+        .filter((run) => filter?.phase === undefined || run.phase === filter.phase)
+        .sort((a, b) => b.at.localeCompare(a.at));
+    },
+
+    history: async (context, runId) => {
+      const found = await runs.read(context, { runId }, { sort: { sequence: 1 } });
+      return found.map(rowFrom);
+    },
+
+    start: (session, request, stateRevision = 0) =>
       own(async () => {
         // THR-11: checked first, before a single read, so the refusal is this server's and not a client's.
         if (!session.permissions.includes(PRESENTATION_CONTROL)) {
@@ -211,14 +372,42 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
         if (record === undefined) {
           throw new RunError('state', `${request.serviceId} has no prepared manifest to start a run from`);
         }
+        const activeForService = (await latestPerRun(context)).find(
+          (run) => run.phase === 'active' && run.serviceId === request.serviceId,
+        );
+        if (activeForService !== undefined) {
+          throw new RunError('active', `${request.serviceId} already has an active run (${activeForService.runId}), and a service run is never started twice`);
+        }
         const checklist = await preparation.readiness(context, request.serviceId, await observe(context, request.serviceId));
-        if (checklist === undefined || checklist.state !== 'ready') {
-          const state = checklist?.state ?? 'not prepared';
+        const state = checklist?.state ?? 'not prepared';
+        // D-8: going live over an open blocker is this one operation, not a separate call the client
+        // must sequence against a runId it does not yet have. An override offered when nothing is
+        // blocked is refused outright — mirrors `snapshots.ts`'s own override rule for the standalone
+        // route (`snapshots.ts:508`), so the two paths never disagree about when an override belongs.
+        if (state === 'ready' && request.override !== undefined) {
+          throw new RunError('state', 'an override is accepted only when a blocker is open, and none is');
+        }
+        if (state === 'outdated') {
+          throw new RunError('outdated', `${request.serviceId}'s prepared snapshot is outdated, and a run starts only from a Ready one`);
+        }
+        const overriding = state === 'blocked' && request.mode === 'live' && request.override !== undefined;
+        if (checklist === undefined || (state !== 'ready' && !overriding)) {
           throw new RunError('state', `a run starts only from a Ready prepared snapshot, and ${request.serviceId} is ${state}`);
         }
         const runId = newId();
         if ((await standing(context, runId)) !== undefined) {
           throw new RunError('conflict', `${runId} is a run another writer named first`);
+        }
+        if (overriding && request.override !== undefined) {
+          // Only after this resolves does a run row get written, so a run is never created for a blocked
+          // service without a recorded, validated override under its own minted runId (D-8).
+          try {
+            await preparation.override(session, { serviceId: request.serviceId, runId, reason: request.override.reason });
+          } catch (error) {
+            if (!(error instanceof PreparationError)) throw error;
+            if (error.kind === 'corrupt') throw error;
+            throw new RunError(error.kind === 'permission' ? 'permission' : 'state', error.message);
+          }
         }
         const started = await append(context, {
           runId,
@@ -227,10 +416,11 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
           snapshotId: record.snapshot.id,
           phase: 'active',
           mode: request.mode,
-          position: 0,
+          live: initialLiveState(runId, record.snapshot.id),
+          stateRevision,
         });
         await trail.record(context, {
-          action: RUN_ACTION,
+          action: 'run.start',
           subject: subjectFor(request.serviceId),
           outcome: 'allowed',
           detail: `Started a ${request.mode} presentation run`,
@@ -239,7 +429,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
         return started;
       }),
 
-    end: (session, runId) =>
+    end: (session, runId, stateRevision) =>
       own(async () => {
         if (!session.permissions.includes(PRESENTATION_CONTROL)) {
           throw new RunError('permission', `ending a run is the Operator's alone, which needs ${PRESENTATION_CONTROL}`);
@@ -257,10 +447,11 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
           snapshotId: row.snapshotId,
           phase: 'ended',
           mode: row.mode,
-          position: row.position,
+          live: row.live,
+          stateRevision: Math.max(stateRevision ?? 0, row.stateRevision + 1),
         });
         await trail.record(context, {
-          action: RUN_ACTION,
+          action: 'run.end',
           subject: subjectFor(row.serviceId),
           outcome: 'allowed',
           detail: 'Ended a presentation run',
@@ -273,8 +464,33 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
       own(async () => {
         const row = await standing(context, runId);
         if (row === undefined) return undefined;
-        const { runId: id, serviceId, snapshotId, phase, mode, position, at } = row;
-        return { runId: id, serviceId, snapshotId, phase, mode, position, at };
+        const { runId: id, serviceId, snapshotId, phase, mode, position, live, stateRevision, at } = row;
+        return { runId: id, serviceId, snapshotId, phase, mode, position, live, stateRevision, at };
+      }),
+
+    advance: (context, runId, expectedRevision, next, nextRevision) =>
+      own(async () => {
+        const row = await standing(context, runId);
+        if (row === undefined) return undefined;
+        if (row.phase !== 'active') throw new RunError('state', `${runId} has ended, and an ended run's state never moves`);
+        if (row.stateRevision !== expectedRevision) return 'stale';
+        try {
+          return await append(context, {
+            runId,
+            sequence: row.sequence + 1,
+            serviceId: row.serviceId,
+            snapshotId: row.snapshotId,
+            phase: row.phase,
+            mode: row.mode,
+            live: next,
+            stateRevision: Math.max(nextRevision ?? 0, expectedRevision + 1),
+          });
+        } catch (error) {
+          // Lost a race to another writer's own `advance` landing the same next sequence first — the
+          // caller's `expectedRevision` was current when read and is stale now, not an error to throw.
+          if (error instanceof RepositoryError && error.kind === 'duplicate') return 'stale';
+          throw error;
+        }
       }),
   };
   return Object.freeze(store);

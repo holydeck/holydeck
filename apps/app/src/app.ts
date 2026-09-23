@@ -19,6 +19,7 @@ import { servePasskeyRoutes } from './passkey-routes.js';
 import { servePptxRoutes } from './pptx-routes.js';
 import { servePreparationRoutes } from './preparation-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
+import { serveRunRoutes } from './run-routes.js';
 import { serveScriptureSearchRoutes } from './scripture-routes.js';
 import { serveSermonRoutes } from './sermon-routes.js';
 import { serveServiceRoutes } from './service-routes.js';
@@ -39,11 +40,16 @@ import type { ContentLanguageStore } from './content-languages.js';
 import type { Fetching } from './corpus.js';
 import type { LibraryStore } from './library.js';
 import type { MediaLibrary } from './media.js';
+import type { MidServiceStore } from './mid-service-additions.js';
 import type { Identity } from './onboarding.js';
 import type { PptxCommit } from './pptx-commit.js';
 import type { PptxImport } from './pptx-import.js';
 import type { PptxReview } from './pptx-review.js';
 import type { PptxSessionStore } from './pptx-sessions.js';
+import type { RunDeck } from './run-deck.js';
+import type { RunEngine } from './run-engine.js';
+import type { RunReviewStore } from './run-review.js';
+import type { RunRecord, RunStore } from './runs.js';
 import type { SermonStore } from './sermons.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
@@ -58,6 +64,7 @@ import type { ShownReferenceStore } from './shown-references.js';
 import type { SongStore } from './songs.js';
 import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
+import type { ThemeStore } from './live-theme.js';
 import type { WebAsset } from './static.js';
 
 const PUBLIC: RouteNeed = { kind: 'public' };
@@ -91,7 +98,19 @@ export interface AppOptions {
   services?: ServiceStore;
   serviceTemplates?: ServiceTemplateStore;
   preparation?: PreparationStore;
+  /** Where a run's own row is kept. Without it, `run-routes.ts` serves every path not-found, the same as
+   *  every other optional store here, and the override route's own D-8 ownership check is skipped. */
+  runs?: RunStore;
   slideLabels?: SlideLabelStore;
+  themes?: ThemeStore;
+  runReview?: RunReviewStore;
+  midService?: MidServiceStore;
+  /** The run engine `run-routes.ts` starts and ends runs through — Task 8's own store, wrapping `runs`
+   *  with the in-memory state a live command needs. Without it, the run surface serves not-found. */
+  runEngine?: RunEngine;
+  /** Derives a run's deck without exposing raw stores to `run-routes.ts`, the same seam the run engine
+   *  itself takes a `deck` function through. */
+  deck?: (context: unknown, run: RunRecord) => Promise<RunDeck>;
   /** Where a Song is kept. Without it, there is none to create, edit, export or generate slides from. */
   songs?: SongStore;
   chords?: SongSingerChordsStore;
@@ -139,7 +158,13 @@ export function buildApp({
   services,
   serviceTemplates,
   preparation,
+  runs,
   slideLabels,
+  themes,
+  runReview,
+  midService,
+  runEngine,
+  deck,
   songs,
   chords,
   sermons,
@@ -300,11 +325,16 @@ export function buildApp({
   // The operator's own half of the library: looking a reference up mid-service, and showing one, which is
   // the only read of a passage this server writes down. Behind Control presentation, the same permission
   // the capability surface above is behind, because running a presentation is what this surface is for.
-  serveReferenceRoutes(app, { corpus, shownReferences });
+  serveReferenceRoutes(app, { corpus, shownReferences, runReview, runs, deck });
   serveOrderRoutes(app, { services, slideLabels });
   serveServiceRoutes(app, { services });
   serveServiceTemplateRoutes(app, { serviceTemplates, identity });
-  servePreparationRoutes(app, { preparation });
+  servePreparationRoutes(app, { preparation, runs });
+
+  // The presentation run surface itself: starting and ending a run, its state and its deck, its theme,
+  // mid-service additions, and reviewing or exporting what it showed. Behind Control presentation, bar
+  // the deck route, which a capability ticket may read instead of a session (D-4).
+  serveRunRoutes(app, { runs, runEngine, runReview, themes, midService, capabilities, sessions, identity, deck });
 
   // The content surfaces content-routes spec adds: songs, sermons, slide groups and the library are each
   // behind `content.edit` alone, the one permission an Editor holds and an Admin's own catalogue

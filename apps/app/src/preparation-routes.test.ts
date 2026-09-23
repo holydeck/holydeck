@@ -12,6 +12,7 @@ import {
   PREPARATION_READINESS_PATH,
 } from './preparation-routes.js';
 import { PRESENTATION_CONTROL, SERVICES_MANAGE } from './roles.js';
+import { runsOn } from './runs.js';
 import { serviceContext, servicesOn } from './services.js';
 import { PreparationError, preparationContext, preparationOn } from './snapshots.js';
 import { sessionContext, sessionsOn } from './sessions.js';
@@ -20,9 +21,11 @@ import { fakeDb } from '../test/helpers/fake-db.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 
 import type { ServiceDraft } from '@holydeck/contracts/services';
+import type { RunStore } from './runs.js';
 import type { PreparationInputs, PreparationStore, ReadinessObservation } from './snapshots.js';
 import type { ServiceStore } from './services.js';
 import type { SessionStore, StartedSession } from './sessions.js';
+import type { FakeDb } from '../test/helpers/fake-db.js';
 import type { FastifyInstance } from 'fastify';
 
 const NOW = '2026-09-22T09:30:00.000Z';
@@ -51,13 +54,14 @@ const OBSERVED: ReadinessObservation = {
 const servicePath = (path: string, id: string): string => path.replace(':id', id);
 
 let app: FastifyInstance;
+let db: FakeDb;
 let services: ServiceStore;
 let preparation: PreparationStore;
 let routed: PreparationStore;
 let sessions: SessionStore;
 let operator: StartedSession;
 
-const building = async (store: PreparationStore | undefined): Promise<void> => {
+const building = async (store: PreparationStore | undefined, runStore?: RunStore): Promise<void> => {
   app = buildApp({
     settings: loadSettings({ env: {} }),
     logger: false,
@@ -65,6 +69,7 @@ const building = async (store: PreparationStore | undefined): Promise<void> => {
     sessions,
     services,
     ...(store === undefined ? {} : { preparation: store }),
+    ...(runStore === undefined ? {} : { runs: runStore }),
   });
   await app.ready();
 };
@@ -89,10 +94,11 @@ const service = async (): Promise<string> =>
 
 beforeEach(async () => {
   let serial = 0;
-  const db = fakeDb();
+  db = fakeDb();
   services = servicesOn(db, { now: () => NOW, newId: () => `service-${++serial}` });
   preparation = preparationOn(db, { now: () => NOW, newId: () => `audit-${++serial}`, observe: () => OBSERVED });
   routed = {
+    snapshot: (context, id) => preparation.snapshot(context, id),
     prepare: (context, id, inputs) => preparation.prepare(context, id, inputs),
     prepared: (context, id) => preparation.prepared(context, id),
     readiness: (context, id, observed) => preparation.readiness(context, id, observed),
@@ -251,6 +257,66 @@ describe('Preparation routes', () => {
 
     expect(response.statusCode).toBe(status);
     expect(response.json().error.code).toBe(status === 422 ? VALIDATION_FAILED : ENTITY_CONFLICT);
+  });
+
+  // D-8: closed at the call site, not inside `preparation.override` itself — see `runs.ts`'s own header.
+  describe('the override runId ownership check (D-8)', () => {
+    test('refuses an override whose runId belongs to a different Service (409)', async () => {
+      const serviceA = await service();
+      const serviceB = (await services.create(serviceContext(OPERATOR, CORRELATION), { ...DRAFT, title: 'Second service' })).stamp.id;
+      await asking('POST', servicePath(PREPARATION_PREPARE_PATH, serviceA), INPUTS);
+      const runs = runsOn(db, { now: () => NOW, newId: () => 'run-a' });
+      const started = await runs.start(
+        { actor: OPERATOR, permissions: [PRESENTATION_CONTROL], correlationId: CORRELATION },
+        { serviceId: serviceA, mode: 'live' },
+      );
+      const override = vi.spyOn(routed, 'override');
+      await app.close();
+      await building(routed, runs);
+
+      const response = await asking('POST', servicePath(PREPARATION_OVERRIDE_PATH, serviceB), {
+        runId: started.runId, reason: 'wrong service on purpose',
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.code).toBe(ENTITY_CONFLICT);
+      expect(override).not.toHaveBeenCalled();
+    });
+
+    test('still overrides when the runId belongs to the addressed Service', async () => {
+      const serviceA = await service();
+      await asking('POST', servicePath(PREPARATION_PREPARE_PATH, serviceA), INPUTS);
+      const runs = runsOn(db, { now: () => NOW, newId: () => 'run-a' });
+      const started = await runs.start(
+        { actor: OPERATOR, permissions: [PRESENTATION_CONTROL], correlationId: CORRELATION },
+        { serviceId: serviceA, mode: 'live' },
+      );
+      const override = vi.spyOn(routed, 'override');
+      await app.close();
+      await building(routed, runs);
+
+      const response = await asking('POST', servicePath(PREPARATION_OVERRIDE_PATH, serviceA), {
+        runId: started.runId, reason: 'The backup projector is on standby',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(override).toHaveBeenCalled();
+    });
+
+    test('is skipped for a deployment with no durable run store, unchanged', async () => {
+      // beforeEach already built the app this way — no runs store wired — so this exercises exactly what
+      // every deployment without a durable store gets, with nothing rebuilt.
+      const id = await service();
+      await asking('POST', servicePath(PREPARATION_PREPARE_PATH, id), INPUTS);
+      const override = vi.spyOn(routed, 'override');
+
+      const response = await asking('POST', servicePath(PREPARATION_OVERRIDE_PATH, id), {
+        runId: 'run-anything', reason: 'The backup projector is on standby',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(override).toHaveBeenCalled();
+    });
   });
 
   test.each([

@@ -112,10 +112,11 @@ export const RECORDS = {
   // `contentId` is the same word `contentRevisions` uses, and names the same key space: the body is saved
   // there under exactly this identifier. `libraryId` is the separate identifier `contentLibrary` minted
   // for the one addition somebody explicitly decided to keep, and is absent for every addition nobody did.
+  // `title` and `revision` are what the run deck names the item and builds its slides from (RUN-08).
   midServiceAdditions: {
     collection: 'mid_service_additions',
     kind: 'immutable',
-    fields: { ...HISTORY, contentId: 'required', runId: 'required', at: 'required', libraryId: 'optional' },
+    fields: { ...HISTORY, contentId: 'required', runId: 'required', title: 'required', revision: 'required', at: 'required', libraryId: 'optional' },
   },
   // Spec AUTH-04, Decision D08-1: a PPTX import session holds one uploaded file's parsed result between
   // upload, review and commit — actor-owned, and time-boxed to 24 hours from the moment it was created.
@@ -174,7 +175,11 @@ export const RECORDS = {
       snapshotId: 'required',
       phase: 'required',
       mode: 'required',
-      position: 'required',
+      // Superseded by `live`/`stateRevision` (spec Design §4): optional so a row written before this
+      // pair existed still reads back, and no longer written by a fresh append either.
+      position: 'optional',
+      live: 'optional',
+      stateRevision: 'optional',
     },
   },
   // Spec BACK-02: one row per restore rehearsal, holding the whole manifest a restore is what completes —

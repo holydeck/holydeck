@@ -9,6 +9,14 @@ import type { AccountRecord, AccountRole } from '@holydeck/contracts/accounts';
 /** Presents Control to a viewer without being one of the three roles that make an account. */
 export const PRESENTATION_CONTROL = 'presentation.control';
 
+/** Views a run's deck and the surfaces it drives, without Control presentation's power to change any of
+ *  it (spec RUN-09). Granted the same way Control presentation is — see `permissionsFor` below. */
+export const PRESENTATION_VIEW = 'presentation.view';
+
+/** Reads a Service's own run recap once it has ended (spec RUN-07). Granted the same way Control
+ *  presentation is — see `permissionsFor` below. */
+export const SERVICE_READ = 'service.read';
+
 /** Administers accounts: grants and revokes what other accounts hold. Admin's alone, by role. */
 export const ACCOUNTS_MANAGE = 'accounts.manage';
 
@@ -76,11 +84,14 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
 /**
  * What a session opened for this account is granted. Role and Control presentation are granted apart
  * from each other — an admin does not hold Control presentation for being admin, and an editor or a
- * member holds it the moment it is granted to them, exactly as an admin would.
+ * member holds it the moment it is granted to them, exactly as an admin would. Holding Control
+ * presentation always implies View presentation and Service read too: an Operator who may run a
+ * presentation may always view its deck and read its recap (no standalone way to grant either without
+ * Control presentation ships in this spec).
  */
 export function permissionsFor(account: AccountRecord): readonly string[] {
   return Object.freeze([
     ...ROLE_PERMISSIONS[account.role],
-    ...(account.controlPresentation ? [PRESENTATION_CONTROL] : []),
+    ...(account.controlPresentation ? [PRESENTATION_CONTROL, PRESENTATION_VIEW, SERVICE_READ] : []),
   ]);
 }

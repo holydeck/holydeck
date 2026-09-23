@@ -1,6 +1,7 @@
 import { actorFor } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
+import { DEFAULT_SAFE_AREA_MARGINS } from '@holydeck/contracts/snapshots';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
@@ -10,12 +11,16 @@ import { guardMutations } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { LOOKUP_BUDGET_MS, REFERENCE_LOOKUP_PATH, SHOWN_REFERENCES_PATH, serveReferenceRoutes } from './reference-routes.js';
 import { PRESENTATION_CONTROL, SETTINGS_MANAGE } from './roles.js';
+import { RunEventError } from './run-events.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { shownReferencesOn } from './shown-references.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryShownReferences } from '../test/helpers/shown-references.js';
 
 import type { Fetching } from './corpus.js';
+import type { RunDeck } from './run-deck.js';
+import type { RunReviewStore } from './run-review.js';
+import type { RunRecord, RunStore } from './runs.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { ShownReferenceStore } from './shown-references.js';
 import type { FastifyInstance, InjectOptions } from 'fastify';
@@ -66,12 +71,26 @@ let operator: StartedSession;
 /** Named rather than left to `undefined`, so a call meaning "carry no session" cannot be read as a default. */
 type Caller = StartedSession | 'anonymous';
 
-const building = async (fetching: Fetching, store: ShownReferenceStore | undefined): Promise<void> => {
+const building = async (
+  fetching: Fetching,
+  store: ShownReferenceStore | undefined,
+  extra: {
+    runReview?: RunReviewStore;
+    runs?: Pick<RunStore, 'resume'>;
+    deck?: (context: unknown, run: RunRecord) => Promise<RunDeck>;
+  } = {},
+): Promise<void> => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
   enforceAuthorization(app, { sessions, identity: undefined });
-  serveReferenceRoutes(app, { corpus: corpusClient({ url: LIBRARY, token: TOKEN }, fetching), shownReferences: store });
+  serveReferenceRoutes(app, {
+    corpus: corpusClient({ url: LIBRARY, token: TOKEN }, fetching),
+    shownReferences: store,
+    runReview: extra.runReview,
+    runs: extra.runs,
+    deck: extra.deck,
+  });
   await app.ready();
 };
 
@@ -111,6 +130,42 @@ beforeEach(async () => {
 afterEach(async () => {
   await app.close();
 });
+
+const RUN: RunRecord = {
+  runId: 'run-1',
+  serviceId: 'service-1',
+  snapshotId: 'snapshot-1',
+  phase: 'active',
+  mode: 'live',
+  position: 0,
+  live: {
+    runId: 'run-1',
+    snapshotId: 'snapshot-1',
+    mode: 'live',
+    public: { itemId: 'item-1', slideIndex: 0 },
+    selected: { itemId: 'item-1', slideIndex: 0 },
+    themes: { audience: 'default', stage: 'default', singer: 'default', operator: 'default' },
+    additionsRevision: 0,
+  },
+  stateRevision: 1,
+  at: NOW,
+};
+const RUN_DECK: RunDeck = {
+  snapshotId: 'snapshot-1',
+  standbyScreens: [],
+  pinnedRevisions: {
+    service: 'r1',
+    content: 'r1',
+    slideLayout: 'r1',
+    serviceTemplate: 'r1',
+    settings: 'r1',
+    media: 'r1',
+    corpus: 'r1',
+  },
+  aspectRatio: '16:9',
+  safeAreaMargins: DEFAULT_SAFE_AREA_MARGINS,
+  items: [],
+};
 
 describe('looking a reference up mid-service', () => {
   test('answers the verses and the revision they were read at', async () => {
@@ -234,6 +289,72 @@ describe('showing a reference', () => {
     expect(response.statusCode).toBe(422);
     expect(response.json().error.fields[0].path).toBe('shownReference.verses');
     expect(recorded.rows).toEqual([]);
+  });
+
+  test('appends through run-review.show when shown-references is posted with a runId', async () => {
+    await app.close();
+    const shows: unknown[] = [];
+    const runReview: RunReviewStore = Object.freeze({
+      show: (session: Parameters<RunReviewStore['show']>[0], request: Parameters<RunReviewStore['show']>[1]) => {
+        shows.push({ session, request });
+        return Promise.resolve({
+          runId: request.runId,
+          sequence: 1,
+          at: NOW,
+          kind: 'current-slide-changed',
+          pinnedRevisions: request.pinnedRevisions,
+          actor: session.actor,
+        });
+      },
+      review: () => Promise.resolve([]),
+      recap: () => Promise.resolve({ runId: 'run-1', lines: [] }),
+    });
+    await building(answering(), shownReferences, {
+      runReview,
+      runs: { resume: () => Promise.resolve(RUN) },
+      deck: () => Promise.resolve(RUN_DECK),
+    });
+    const response = await showing({ abbr: 'KJV', book: 'GEN', chapter: 1, verses: '1', runId: 'run-1' });
+    expect(response.statusCode).toBe(201);
+    expect(shows).toHaveLength(1);
+    expect((shows[0] as { request: { runId: string; itemId: string; pinnedRevisions: unknown } }).request).toEqual({
+      runId: 'run-1',
+      itemId: 'reference:KJV:GEN:1',
+      reference: expect.any(String),
+      pinnedRevisions: RUN_DECK.pinnedRevisions,
+    });
+  });
+
+  describe('naming a run that cannot take the show', () => {
+    const runShowing = async (
+      held: RunRecord | undefined, show: RunReviewStore['show'] = () => Promise.reject(new Error('show must not be reached')),
+    ) => {
+      await app.close();
+      await building(answering(), shownReferences, {
+        runReview: { show, review: () => Promise.resolve([]), recap: () => Promise.resolve({ runId: 'run-1', lines: [] }) },
+        runs: { resume: () => Promise.resolve(held) },
+        deck: () => Promise.resolve(RUN_DECK),
+      });
+      return showing({ abbr: 'KJV', book: 'GEN', chapter: 1, verses: '1', runId: 'run-1' });
+    };
+
+    test('answers 404 for a run this server does not hold, and records nothing', async () => {
+      expect((await runShowing(undefined)).statusCode).toBe(404);
+      expect(recorded.rows).toEqual([]);
+    });
+
+    test('answers 409 for a run that has ended, and records nothing', async () => {
+      expect((await runShowing({ ...RUN, phase: 'ended' })).statusCode).toBe(409);
+      expect(recorded.rows).toEqual([]);
+    });
+
+    test.each([['conflict', 409], ['schema', 422], ['permission', 403]] as const)(
+      'maps a %s refusal from the run log to %i, and records nothing in shown references', async (kind, status) => {
+        const response = await runShowing(RUN, () => Promise.reject(new RunEventError(kind, `run log: ${kind}`)));
+        expect(response.statusCode).toBe(status);
+        expect(recorded.rows).toEqual([]);
+      },
+    );
   });
 
   test('is Control presentation, not merely a proved session', async () => {

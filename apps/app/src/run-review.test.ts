@@ -87,18 +87,26 @@ const live = async (): Promise<Live> => {
   const runs = runsOn(db, { now, newId: () => `run-${(serial += 1)}`, observe: () => ({ slideLayoutRevision: 3, checks: [] }) });
   const run = await runs.start(SESSION, { serviceId: service.stamp.id, mode: 'live' });
   const events = runEventsOn(db, { now });
-  const additions = midServiceOn(db, { now: () => ADDED_AT, newId: () => CONTENT_ID });
+  const additions = midServiceOn(db, { now: () => ADDED_AT, newId: () => CONTENT_ID, runs, runEvents: events });
   return {
     db,
     events,
     review: runReviewOn(events),
     runId: run.runId,
     pins: record!.snapshot.pins,
+    // Added, then put up: adding logs `item-added` and claims nothing shown; the slide the engine logs
+    // when the operator shows it is what the review reads back.
     addMidService: async (title) => {
       const outcome = await additions.add(SESSION, { runId: run.runId, kind: 'reading', title, body: { text: title } });
-      return outcome.addition.contentId;
+      const { contentId } = outcome.addition;
+      await runReviewOn(events).show(SESSION, { runId: run.runId, itemId: contentId, reference: title, pinnedRevisions: record!.snapshot.pins });
+      return contentId;
     },
-    startAnother: async () => (await runs.start(SESSION, { serviceId: service.stamp.id, mode: 'live' })).runId,
+    startAnother: async () => {
+      // A service is never run twice at once, so the prior run (e.g. last Sunday) ends before this one starts.
+      await runs.end(SESSION, run.runId);
+      return (await runs.start(SESSION, { serviceId: service.stamp.id, mode: 'live' })).runId;
+    },
     end: async () => (await runs.end(SESSION, run.runId))!.phase,
   };
 };
@@ -184,7 +192,7 @@ describe('the references a run showed', () => {
     const shown = await review.review(READER, runId);
 
     expect(shown.map((entry) => entry.reference)).toEqual(['Psalm 23:1-6', 'Psalm 121']);
-    expect(shown[1]).toMatchObject({ itemId: contentId, reference: 'Psalm 121', sequence: 2 });
+    expect(shown[1]).toMatchObject({ itemId: contentId, reference: 'Psalm 121', sequence: 3 });
   });
 
   it('leaves out every event that put nothing in front of the room', async () => {
@@ -244,6 +252,18 @@ describe('the references a run showed', () => {
     expect(shown.map((entry) => entry.reference)).toEqual(['Psalm 23:1-6', 'Welcome']);
     expect(shown.map((entry) => entry.sequence)).toEqual([1, 3]);
     expect(await review.recap(READER, runId)).toEqual({ runId, lines: ['1. Psalm 23:1-6', '2. Welcome'] });
+  });
+
+  // RUN-06: a rehearsal is practice, not a service; its recap is empty unless someone asks for it.
+  it('leaves a rehearsal out of the recap by default, and includes it only when asked', async () => {
+    const { review, runId, pins } = await live();
+    await review.show(SESSION, { runId, itemId: 'item-2', reference: 'Psalm 23:1-6', pinnedRevisions: pins });
+
+    expect(await review.recap(READER, runId, { mode: 'rehearsal' })).toEqual({ runId, lines: [] });
+    expect(await review.recap(READER, runId, { mode: 'rehearsal', includeRehearsal: true })).toEqual({ runId, lines: ['1. Psalm 23:1-6'] });
+    expect(await review.recap(READER, runId, { mode: 'live' })).toEqual({ runId, lines: ['1. Psalm 23:1-6'] });
+    // The review itself is the operator's own record of the run, rehearsal or not.
+    expect(await review.review(READER, runId)).toHaveLength(1);
   });
 
   it('is empty for a run that has shown nothing yet', async () => {

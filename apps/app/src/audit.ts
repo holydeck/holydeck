@@ -95,8 +95,18 @@ export const AUDIT_ACTIONS = [
   'service.item.duplicate',
   'service.item.reorder',
   'service.item.revise',
-  // Reserved for the presentation-run surface T76+ builds. Exercised only by this task's own tests today.
-  'presentation.run',
+  // A presentation run's own lifecycle: starting one and ending one. `runs.ts` is the only caller —
+  // distinct actions rather than one shared name, so the trail can be filtered to just starts or just
+  // ends without parsing `detail`.
+  'run.start',
+  'run.end',
+  // The rest of a run's own history LIVE-01 asks the trail to answer for: its theme changed, content
+  // joined it mid-service, or its recap left the server as a download. `run-routes.ts` is the only
+  // caller — `run.start`/`run.end` above are `runs.ts`'s own, the same split this file already draws
+  // between a store's actions and a routes task's.
+  'run.theme',
+  'run.addition',
+  'run.recap.export',
   // An Operator taking a Service live over an open blocker. Written by `snapshots.ts` itself — no routes
   // task owns the readiness surface yet — and naming the Operator, the reason, and every check carried.
   'readiness.override',
@@ -173,7 +183,11 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'service.item.duplicate': 'content',
   'service.item.reorder': 'content',
   'service.item.revise': 'content',
-  'presentation.run': 'presentation',
+  'run.start': 'presentation',
+  'run.end': 'presentation',
+  'run.theme': 'presentation',
+  'run.addition': 'presentation',
+  'run.recap.export': 'presentation',
   'readiness.override': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',

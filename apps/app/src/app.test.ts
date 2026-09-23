@@ -36,6 +36,7 @@ import { PPTX_COMMIT_PATH, PPTX_ID_PATH, PPTX_REVIEW_PATH } from './pptx-routes.
 import { PREPARATION_OVERRIDE_PATH, PREPARATION_PREPARE_PATH } from './preparation-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
 import { CATALOGUE_MANAGE, CONTENT_EDIT, PRESENTATION_CONTROL } from './roles.js';
+import { RUN_ADDITIONS_PATH, RUN_END_PATH, RUN_PATH, RUN_THEME_PATH } from './run-routes.js';
 import { SERMON_ID_PATH } from './sermon-routes.js';
 import { sermonsOn } from './sermons.js';
 import {
@@ -212,6 +213,12 @@ describe('every route that changes something', () => {
       // alone, the one route in this module gated by a different permission than the rest.
       { method: 'POST', url: PREPARATION_PREPARE_PATH },
       { method: 'POST', url: PREPARATION_OVERRIDE_PATH },
+      // A live run's own surface: starting one, ending it, retheming it mid-service and adding to it are
+      // all Control presentation's alone, the same permission that drives the room while a run is live.
+      { method: 'POST', url: RUN_PATH },
+      { method: 'POST', url: RUN_END_PATH },
+      { method: 'POST', url: RUN_THEME_PATH },
+      { method: 'POST', url: RUN_ADDITIONS_PATH },
       // The content surfaces this spec adds: behind `content.edit`, the one permission an Editor holds.
       // Creating a Song, editing it or its raw YAML, importing one and generating its slides all change it.
       { method: 'POST', url: SONGS_PATH },
@@ -364,7 +371,7 @@ describe('the application server', () => {
     const { statusCode, body } = await served({ url: '/api/contracts', headers: current });
     expect(statusCode).toBe(200);
     expect(body).toEqual({
-      data: { clientVersions: [CLIENT_WINDOW.current], messageCodes: MESSAGE_CODES },
+      data: { clientVersions: [CLIENT_WINDOW.previous, CLIENT_WINDOW.current], messageCodes: MESSAGE_CODES },
       meta: { requestId: expect.any(String), version: CLIENT_WINDOW.current },
     });
   });
@@ -386,7 +393,11 @@ describe('the application server', () => {
         code: UPDATE_REQUIRED,
         message: UPDATE_REQUIRED_MESSAGE,
         requestId: expect.any(String),
-        fields: [{ path: CLIENT_VERSION_HEADER, code: UPDATE_REQUIRED, message: `supported versions: ${CLIENT_WINDOW.current}` }],
+        fields: [{
+          path: CLIENT_VERSION_HEADER,
+          code: UPDATE_REQUIRED,
+          message: `supported versions: ${CLIENT_WINDOW.previous}, ${CLIENT_WINDOW.current}`,
+        }],
       },
     });
   });

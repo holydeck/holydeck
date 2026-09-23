@@ -20,12 +20,15 @@ import {
   readSettingsText,
 } from './boot.js';
 import { contentLanguagesOn } from './content-languages.js';
-import { systemContext } from './context.js';
+import { requestContext, systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
-import { libraryOn } from './library.js';
+import { LIBRARY_PERMISSIONS, libraryOn } from './library.js';
 import { serveLive } from './live.js';
+import { liveHub } from './live-protocol.js';
+import { themesOn } from './live-theme.js';
 import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
+import { MID_SERVICE_PERMISSIONS, midServiceOn } from './mid-service-additions.js';
 import { pptxCommitOn } from './pptx-commit.js';
 import { pptxImportOn } from './pptx-import.js';
 import { workerPptxRunner } from './pptx-isolated.js';
@@ -34,6 +37,12 @@ import { pptxSessionsOn } from './pptx-sessions.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
+import { REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
+import { deriveDeck } from './run-deck.js';
+import { runEngineOn } from './run-engine.js';
+import { runEventsOn } from './run-events.js';
+import { runReviewOn } from './run-review.js';
+import { runsOn } from './runs.js';
 import { seedContext, seedOn } from './seed.js';
 import { sermonsOn } from './sermons.js';
 import { servicesOn } from './services.js';
@@ -57,17 +66,24 @@ import type { CapabilityStore } from './capabilities.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { LibraryStore } from './library.js';
 import type { MediaLibrary, MediaLibraryOptions } from './media.js';
+import type { MidServiceStore } from './mid-service-additions.js';
 import type { Identity } from './onboarding.js';
 import type { PptxCommit } from './pptx-commit.js';
 import type { PptxImport } from './pptx-import.js';
 import type { PptxReview } from './pptx-review.js';
 import type { PptxSessionStore } from './pptx-sessions.js';
+import type { RunEventStore } from './run-events.js';
+import type { RunReviewStore } from './run-review.js';
 import type { SermonStore } from './sermons.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
+import type { RequestContext } from './context.js';
+import type { RunDeck } from './run-deck.js';
+import type { RunEngine } from './run-engine.js';
+import type { SlideGroupStore } from './slide-groups.js';
+import type { RunRecord, RunStore } from './runs.js';
 import type { PreparationStore } from './snapshots.js';
 import type { SettingsAdmin } from './settings-admin.js';
-import type { SlideGroupStore } from './slide-groups.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SlideLabelStore } from './slide-labels.js';
 import type { SessionStore } from './sessions.js';
@@ -75,6 +91,7 @@ import type { ShownReferenceStore } from './shown-references.js';
 import type { SongStore } from './songs.js';
 import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
+import type { ThemeStore } from './live-theme.js';
 
 checkReleasedContracts();
 
@@ -94,6 +111,13 @@ checkCorpusBoundary(corpus);
 // anything else that can reach it too, and that is not a deployment to start serving through.
 checkCorpusIsClosed(await probeCorpusIsClosed(corpus, fetch));
 
+// Built here, not inside `serveLive`, because a later task's run engine publishes through the same hub
+// from outside the live socket entirely (Design §1) — the hub is a piece of this deployment's own state,
+// not a detail of how a connection to it is served. Kept unconditional, unlike the durable stores above:
+// a deployment with nowhere to keep a run still serves a live socket, watch-only, the same way it always
+// has (see the comment on `serveLive` below).
+const hub = liveHub({ clock: () => new Date().toISOString() });
+
 // Durable records are optional until a deployment keeps any, and the presentation milestone keeps none.
 // Where a store is configured, the schema it is at is graded before anything is served from it.
 let store: MongoClient | undefined;
@@ -111,6 +135,18 @@ let capabilities: CapabilityStore | undefined;
 let services: ServiceStore | undefined;
 let serviceTemplates: ServiceTemplateStore | undefined;
 let preparation: PreparationStore | undefined;
+// A run's own row is kept the same way, for the same reason: a deployment with nowhere to keep one
+// cannot start, end or resume it, and its routes answer not-found the same way.
+let runs: RunStore | undefined;
+let runEvents: RunEventStore | undefined;
+// Constructed once here (RUN-08) rather than inside midServiceOn/live-theme.ts/run-review.ts
+// themselves, so every caller in this deployment shares one instance over the same database instead of
+// each building its own — the same reason every other durable store in this file is built once, here.
+let themes: ThemeStore | undefined;
+let runReview: RunReviewStore | undefined;
+let midService: MidServiceStore | undefined;
+let engine: RunEngine | undefined;
+let deck: ((context: unknown, run: RunRecord) => Promise<RunDeck>) | undefined;
 let slideLabels: SlideLabelStore | undefined;
 // The settings admin is kept apart from the durable store, but wired up alongside it: a deployment with
 // nowhere to keep accounts has nobody who could administer settings either, and its route answers
@@ -166,6 +202,33 @@ if (settings.values.mongoUrl !== '') {
   services = servicesOn(repositoryDb(store.db()), { now });
   serviceTemplates = serviceTemplatesOn(repositoryDb(store.db()), { now, services });
   preparation = preparationOn(repositoryDb(store.db()), { now });
+  runs = runsOn(repositoryDb(store.db()), { now });
+  runEvents = runEventsOn(repositoryDb(store.db()), { now });
+  themes = themesOn(runEvents);
+  runReview = runReviewOn(runEvents);
+  midService = midServiceOn(repositoryDb(store.db()), { now, runs, runEvents });
+  slideGroups = slideGroupsOn(repositoryDb(store.db()), { now });
+  const manifests = preparation;
+  const additions = midService;
+  const groups = slideGroups;
+  const bodies = revisionsOn(repositoryDb(store.db()), { now });
+  const deckFor = async (context: unknown, run: RunRecord): Promise<RunDeck> => {
+    const held = context as RequestContext;
+    const deckContext = requestContext({
+      ...held,
+      permissions: [...new Set([
+        ...held.permissions,
+        LIBRARY_PERMISSIONS.read,
+        REVISION_PERMISSIONS.read,
+        MID_SERVICE_PERMISSIONS.read,
+      ])],
+    });
+    const snapshot = await manifests.snapshot(deckContext, run.snapshotId);
+    if (snapshot === undefined) throw new Error(`${run.snapshotId} is not a manifest this server holds`);
+    return deriveDeck(deckContext, { slideGroups: groups, revisions: bodies }, snapshot, await additions.additions(deckContext, run.runId));
+  };
+  deck = deckFor;
+  engine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
@@ -173,7 +236,6 @@ if (settings.values.mongoUrl !== '') {
   songs = songsOn(repositoryDb(store.db()), { now });
   chords = songSingerChordsOn(repositoryDb(store.db()), { now });
   sermons = sermonsOn(repositoryDb(store.db()), { now });
-  slideGroups = slideGroupsOn(repositoryDb(store.db()), { now });
   library = libraryOn(repositoryDb(store.db()), { now });
   contentLanguages = contentLanguagesOn(repositoryDb(store.db()), { now });
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
@@ -248,6 +310,12 @@ const app = buildApp({
   services,
   serviceTemplates,
   preparation,
+  runs,
+  themes,
+  runReview,
+  runEngine: engine,
+  deck,
+  midService,
   slideLabels,
   songs,
   chords,
@@ -270,7 +338,8 @@ const app = buildApp({
 // deployment that keeps no durable records has neither to hand the guard, and its socket refuses every
 // client there is — which is the same answer as before, reached now because there is nothing to sign in
 // to or be invited into, rather than no way to sign in.
-await serveLive(app, { sessions, capabilities, services });
+if (engine !== undefined) await engine.restore();
+await serveLive(app, { hub, engine, sessions, capabilities, services });
 
 for (const [key, source] of Object.entries(settings.sources)) {
   app.log.info(`${key} came from the ${source}`);

@@ -45,6 +45,10 @@
       "types": "./dist/live.d.ts",
       "import": "./dist/live.js"
     },
+    "./live-state": {
+      "types": "./dist/live-state.d.ts",
+      "import": "./dist/live-state.js"
+    },
     "./live-media": {
       "types": "./dist/live-media.d.ts",
       "import": "./dist/live-media.js"
@@ -96,6 +100,10 @@
     "./revisions": {
       "types": "./dist/revisions.d.ts",
       "import": "./dist/revisions.js"
+    },
+    "./runs": {
+      "types": "./dist/runs.d.ts",
+      "import": "./dist/runs.js"
     },
     "./service-templates": {
       "types": "./dist/service-templates.d.ts",
