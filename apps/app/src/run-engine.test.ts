@@ -402,11 +402,20 @@ describe('run-engine lifecycle', () => {
   });
 
   it('propagates start and deck failures', async () => {
-    const { engine, runs, deck } = setup();
+    const { engine, runs } = setup();
     runs.start.mockRejectedValueOnce(new RunError('state', 'not ready'));
     await expect(engine.start(SESSION, { serviceId: 'service-1', mode: 'live' })).rejects.toMatchObject({ kind: 'state' });
+  });
+
+  // A run the client never learned the id of must not stay active: a retry would meet run.already_active.
+  it('ends the run it just started when its deck cannot be derived, and presents nothing', async () => {
+    const { engine, runs, deck, hub } = setup();
     deck.mockRejectedValue(new Error('missing deck'));
-    await expect(engine.start(SESSION, { serviceId: 'service-1', mode: 'live' })).rejects.toThrow('missing deck');
+    await expect(engine.start(SESSION, { serviceId: 'service-1', mode: 'live' })).rejects.toMatchObject({ kind: 'state' });
+    expect(runs.end).toHaveBeenCalledWith(SESSION, 'run-1', 8);
+    expect(hub.publishChange).not.toHaveBeenCalled();
+    expect(engine.state('run-1')).toBeUndefined();
+    expect(await engine.command(CONTROL_MEMBER, frame('next'))).toEqual({ outcome: 'failed' });
   });
 
   it('ends an existing run and keeps it queryable', async () => {

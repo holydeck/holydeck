@@ -271,7 +271,15 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
   const engine: RunEngine = {
     start: async (session, request) => {
       const record = await options.runs.start(session, request, nextRevision());
-      const deck = await options.deck(runContext(session.actor, session.correlationId), record);
+      let deck: RunDeck;
+      try {
+        deck = await options.deck(runContext(session.actor, session.correlationId), record);
+      } catch (error) {
+        // Compensate rather than orphan: the client never receives this run's id, so leaving it active
+        // would refuse every retry with run.already_active until someone ends a run they cannot name.
+        await options.runs.end(session, record.runId, nextRevision());
+        throw new RunError('state', `${record.runId} could not derive its deck, so it was ended: ${error instanceof Error ? error.message : String(error)}`);
+      }
       currentRunId = record.runId;
       states.set(record.runId, record.live);
       options.hub.publishChange({
