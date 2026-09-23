@@ -115,6 +115,7 @@ beforeEach(async () => {
     failProcessing: async () => undefined,
     retryProcessing: async () => undefined,
     purgeArchived: async () => { throw new Error('not used in this test'); },
+    purgeReport: async () => { throw new Error('not used in this test'); },
   };
   app = await served();
   admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [OPERATIONS_READ] });

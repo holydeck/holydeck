@@ -13,6 +13,7 @@ import { notFound, withSafeErrors } from './failures.js';
 import { serveJobRoutes } from './job-routes.js';
 import { isUpgrade } from './live.js';
 import { guardMaintenance } from './maintenance.js';
+import { serveMediaCleanupRoutes } from './media-cleanup-routes.js';
 import { serveMediaMigrationRoutes } from './media-migration-routes.js';
 import { serveMediaRoutes } from './media-routes.js';
 import { serveNotificationRoutes } from './notification-routes.js';
@@ -259,6 +260,16 @@ export function buildApp({
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
   serveMediaRoutes(app, { media, identity, mediaRoot: settings.values.mediaRoot, settingsAdmin });
+
+  // Behind the same permission once more: reporting what is safe to remove from the media library,
+  // and performing a reviewed purge of it. Reuses the media surface's own `media` — the same source
+  // `serveMediaRoutes` above already reads and writes.
+  serveMediaCleanupRoutes(app, {
+    media,
+    now: () => new Date().toISOString(),
+    graceDays: settings.values.mediaArchivedPurgeGraceDays,
+    identity,
+  });
 
   // Behind its own Admin permission: listing recorded backups and asking for an on-demand run.
   serveBackupRoutes(app, {

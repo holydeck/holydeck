@@ -118,6 +118,10 @@ export const AUDIT_ACTIONS = [
   'media.storageMigration.complete',
   'media.storageMigration.fail',
   'media.storageMigration.cleanup',
+  // A reviewed purge of media past its grace period (OPS-15). Written by `media-cleanup-routes.ts`
+  // once per POST, whatever it purged or retained — the report a GET answers is never audited, the
+  // same as every other route module's read side in this codebase.
+  'media.cleanup',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -197,6 +201,7 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'media.storageMigration.complete': 'integration',
   'media.storageMigration.fail': 'integration',
   'media.storageMigration.cleanup': 'integration',
+  'media.cleanup': 'content',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */

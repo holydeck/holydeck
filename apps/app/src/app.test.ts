@@ -16,6 +16,7 @@ import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { BACKUPS_PATH } from './backup-routes.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { JOBS_PATH } from './job-routes.js';
+import { MEDIA_CLEANUP_PATH } from './media-cleanup-routes.js';
 import { MEDIA_MIGRATION_CLEANUP_PATH, MEDIA_MIGRATION_PATH } from './media-migration-routes.js';
 import { NOTIFICATIONS_PATH, NOTIFICATIONS_READ_ALL_PATH, NOTIFICATIONS_PREFERENCES_PATH } from './notification-routes.js';
 import { MEDIA_PATH } from './media-routes.js';
@@ -146,6 +147,9 @@ describe('every route that changes something', () => {
       // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
       // Admin's, the same as a Slide Layout's own surface above is.
       { method: 'POST', url: MEDIA_PATH },
+      // Behind the same permission once more: reporting what is safe to remove is not a change and is
+      // absent here, and performing a reviewed purge of it is.
+      { method: 'POST', url: MEDIA_CLEANUP_PATH },
       // And triggering an on-demand backup: listing what has run is not a change, asking for a new one is,
       // which is why only the POST side of the backup surface is on this list.
       { method: 'POST', url: BACKUPS_PATH },

@@ -35,6 +35,8 @@ export const KNOWN_INTEGRATION_GAPS = {
   'media-migration-routes.ts POST MEDIA_MIGRATION_PATH MEDIA_MANAGE': 'no harness test refuses a media storage migration request to a non-admin',
   'media-migration-routes.ts POST MEDIA_MIGRATION_CLEANUP_PATH MEDIA_MANAGE': 'no harness test refuses a media migration cleanup to a non-admin',
   'media-routes.ts POST MEDIA_PATH MEDIA_MANAGE': 'no harness test refuses media uploads to a non-admin',
+  'media-cleanup-routes.ts GET MEDIA_CLEANUP_PATH MEDIA_MANAGE': 'no harness test refuses the media cleanup report to a non-admin',
+  'media-cleanup-routes.ts POST MEDIA_CLEANUP_PATH MEDIA_MANAGE': 'no harness test refuses a media purge to a non-admin',
   'notification-routes.ts GET NOTIFICATIONS_PATH NOTIFICATIONS_USE': 'no harness test refuses the notification inbox to a session without notifications.use',
   'notification-routes.ts POST `${NOTIFICATIONS_PATH}/:id/read` NOTIFICATIONS_USE': 'no harness test refuses marking a notification read to a session without notifications.use',
   'notification-routes.ts POST NOTIFICATIONS_READ_ALL_PATH NOTIFICATIONS_USE': 'no harness test refuses marking every notification read to a session without notifications.use',

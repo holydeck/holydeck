@@ -171,6 +171,7 @@ describe('the context the trail is written under', () => {
       'media.storageMigration.complete',
       'media.storageMigration.fail',
       'media.storageMigration.cleanup',
+      'media.cleanup',
     ]);
   });
 });

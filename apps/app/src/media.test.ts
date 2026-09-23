@@ -229,4 +229,58 @@ describe('purging archived media past its grace period (OPS-14)', () => {
     expect(await media.inspect(ADMIN, kept.stamp.id)).toBeDefined();
     expect(await media.inspect(ADMIN, archived.stamp.id)).toBeUndefined();
   });
+
+  it('purgeReport categorizes a still-live asset as protected, with no reason or purgeableAt', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    const { items } = await media.purgeReport(ADMIN, { graceDays: 180, referencedBy: () => [] });
+    expect(items).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, category: 'protected', reason: undefined, purgeableAt: undefined }),
+    ]);
+  });
+
+  it('purgeReport categorizes an archived asset still inside its grace period, with a purgeableAt', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    const { items } = await media.purgeReport(ADMIN, { graceDays: 180, referencedBy: () => [] });
+    expect(items).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, category: 'grace-period', purgeableAt: expect.any(String) }),
+    ]);
+    expect(items[0]?.reason).toMatch(/short of media-asset's 180-day window/);
+  });
+
+  it('purgeReport categorizes an archived asset past its grace period as eligible', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    const { items } = await media.purgeReport(ADMIN, { graceDays: 0, referencedBy: () => [] });
+    expect(items).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, category: 'eligible', reason: undefined, purgeableAt: undefined }),
+    ]);
+  });
+
+  it('purgeReport categorizes a referenced archived asset as protected, however far past grace', async () => {
+    const { media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    const { items } = await media.purgeReport(ADMIN, {
+      graceDays: 0,
+      referencedBy: (assetId) => (assetId === uploaded.stamp.id ? ['service:svc-1'] : []),
+    });
+    expect(items).toEqual([
+      expect.objectContaining({ id: uploaded.stamp.id, category: 'protected', purgeableAt: undefined }),
+    ]);
+    expect(items[0]?.reason).toMatch(/still referenced by service:svc-1/);
+  });
+
+  it('purgeReport never deletes anything, however eligible', async () => {
+    const { db, io, media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    await media.archive(ADMIN, uploaded.stamp.id);
+    await media.purgeReport(ADMIN, { graceDays: 0, referencedBy: () => [] });
+    expect(await media.inspect(ADMIN, uploaded.stamp.id)).toBeDefined();
+    expect(db.rows.get(RECORDS.mediaAssets.collection)?.length).toBeGreaterThan(0);
+    expect(io.removed).toEqual([]);
+  });
 });

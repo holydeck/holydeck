@@ -14,7 +14,7 @@ import type { MediaManifestEntry } from '@holydeck/contracts/media';
 import type { Db } from 'mongodb';
 import type { RequestContext } from './context.js';
 import type { Queue } from './queue.js';
-import type { RetainedCandidate, RetentionCandidate } from './retention.js';
+import type { RetainedCandidate, RetentionCandidate, SweepOutcome } from './retention.js';
 import type { Document, RepositoryDb } from './repositories.js';
 
 export const MEDIA_ASSET_RECORD = 'mediaAssets';
@@ -114,6 +114,27 @@ export interface MediaPurgeOutcome {
   readonly retained: readonly RetainedCandidate[];
 }
 
+export type MediaPurgeCategory = 'grace-period' | 'eligible' | 'protected';
+
+/** One row of `purgeReport`'s output: the same data `purgeArchived` would act on if run right now,
+ *  graded but not touched. */
+export interface MediaPurgeItem {
+  readonly id: string;
+  readonly bytes: number;
+  readonly type: string;
+  readonly hash: string;
+  readonly archivedAt: string | undefined;
+  readonly category: MediaPurgeCategory;
+  /** Set whenever category is not `'eligible'` — `retention.ts`'s own refusal message. */
+  readonly reason: string | undefined;
+  /** Set only when category is `'grace-period'`: the first instant this item becomes eligible. */
+  readonly purgeableAt: string | undefined;
+}
+
+export interface MediaPurgeReport {
+  readonly items: readonly MediaPurgeItem[];
+}
+
 export interface MediaLibrary {
   upload(context: unknown, upload: MediaUpload): Promise<MediaRecord>;
   inspect(context: unknown, id: string): Promise<MediaRecord | undefined>;
@@ -129,6 +150,11 @@ export interface MediaLibrary {
    *  both the database rows and the stored bytes. Never auto-deletes: this method only runs when a
    *  caller (Task 10-19's route) calls it. */
   purgeArchived(context: unknown, options: MediaPurgeOptions): Promise<MediaPurgeOutcome>;
+  /** Read-only twin of `purgeArchived` (OPS-15): the same grading, none of the deletion. Every
+   *  current media row, categorized `'protected'` (still live, or archived but referenced),
+   *  `'grace-period'` (archived, not yet past `options.graceDays`) or `'eligible'` (archived, past
+   *  grace, unreferenced) — the exact three categories a purge would act on if run right now. */
+  purgeReport(context: unknown, options: MediaPurgeOptions): Promise<MediaPurgeReport>;
 }
 
 export interface MediaLibraryOptions extends MediaStorageIO {
@@ -160,6 +186,25 @@ const own = async <T>(work: () => Promise<T>): Promise<T> => {
     throw refusalFor(error);
   }
 };
+
+/** The same candidate-grading step `purgeArchived` and `purgeReport` both need: every archived row,
+ *  graded by `retention.ts`'s `sweep` under the `media-asset` class and this call's own
+ *  `graceDays`/`referencedBy`. A pure function — nothing here reads or writes a database. */
+function mediaPurgeCandidates(
+  rows: readonly (MediaRecord & { readonly sequence: number })[],
+  purgeOptions: MediaPurgeOptions,
+  nowMs: number,
+): SweepOutcome {
+  const candidates: RetentionCandidate[] = rows
+    .filter((row) => row.stamp.archivedAt !== undefined)
+    .map((row) => ({
+      id: row.stamp.id,
+      class: 'media-asset',
+      ageDays: Math.floor((nowMs - Date.parse(row.stamp.archivedAt as string)) / MS_PER_DAY),
+      protectedBy: purgeOptions.referencedBy(row.stamp.id),
+    }));
+  return sweep(candidates, { 'media-asset': purgeOptions.graceDays });
+}
 
 export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): MediaLibrary {
   const records = repositoriesOn(db)[MEDIA_ASSET_RECORD];
@@ -339,16 +384,7 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
     purgeArchived: (context, purgeOptions) =>
       own(async () => {
         const rows = await everything(context);
-        const nowMs = Date.parse(options.now());
-        const candidates: RetentionCandidate[] = rows
-          .filter((row) => row.stamp.archivedAt !== undefined)
-          .map((row) => ({
-            id: row.stamp.id,
-            class: 'media-asset',
-            ageDays: Math.floor((nowMs - Date.parse(row.stamp.archivedAt as string)) / MS_PER_DAY),
-            protectedBy: purgeOptions.referencedBy(row.stamp.id),
-          }));
-        const { removable, retained } = sweep(candidates, { 'media-asset': purgeOptions.graceDays });
+        const { removable, retained } = mediaPurgeCandidates(rows, purgeOptions, Date.parse(options.now()));
 
         const purged: string[] = [];
         for (const id of removable) {
@@ -359,6 +395,36 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
           purged.push(id);
         }
         return { purged, retained };
+      }),
+
+    purgeReport: (context, purgeOptions) =>
+      own(async () => {
+        const rows = await everything(context);
+        const { removable, retained } = mediaPurgeCandidates(rows, purgeOptions, Date.parse(options.now()));
+        const removableIds = new Set(removable);
+        const retainedById = new Map(retained.map((entry) => [entry.id, entry]));
+
+        const items: MediaPurgeItem[] = rows.map((row) => {
+          const { archivedAt } = row.stamp;
+          const base = { id: row.stamp.id, bytes: row.manifest.bytes, type: row.manifest.type, hash: row.manifest.hash, archivedAt };
+          if (archivedAt === undefined) {
+            return { ...base, category: 'protected' as const, reason: undefined, purgeableAt: undefined };
+          }
+          if (removableIds.has(row.stamp.id)) {
+            return { ...base, category: 'eligible' as const, reason: undefined, purgeableAt: undefined };
+          }
+          const retainedEntry = retainedById.get(row.stamp.id);
+          if (retainedEntry?.reason === 'too-recent') {
+            return {
+              ...base,
+              category: 'grace-period' as const,
+              reason: retainedEntry.message,
+              purgeableAt: new Date(Date.parse(archivedAt) + purgeOptions.graceDays * MS_PER_DAY).toISOString(),
+            };
+          }
+          return { ...base, category: 'protected' as const, reason: retainedEntry?.message, purgeableAt: undefined };
+        });
+        return { items };
       }),
   };
 }
