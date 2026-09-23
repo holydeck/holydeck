@@ -85,6 +85,33 @@ export async function refreshService(id: string): Promise<boolean> {
   return true;
 }
 
+const PROBE_FIRST_MS = 2000;
+const PROBE_MAX_MS = 30_000;
+let probe: ReturnType<typeof setTimeout> | undefined;
+
+function stopProbing(): void {
+  if (probe !== undefined) clearTimeout(probe);
+  probe = undefined;
+}
+
+/** After a save could not reach the server, keeps re-reading the service with a doubling back-off until one
+ *  answers, then lifts the read-only state. The browser's own `online` event (`useConnection`) never fires
+ *  when only the server, a proxy or one request dropped, so waiting for it alone would leave the workspace
+ *  frozen until a reload. */
+function probeUntilReachable(delayMs = PROBE_FIRST_MS): void {
+  stopProbing();
+  probe = setTimeout(() => {
+    probe = undefined;
+    const id = service.value?.id;
+    if (id === undefined || saveState.value !== 'offline') return;
+    void refreshService(id).then((ok) => {
+      if (saveState.value !== 'offline') return;
+      if (ok) saveState.value = 'idle';
+      else probeUntilReachable(Math.min(delayMs * 2, PROBE_MAX_MS));
+    });
+  }, delayMs);
+}
+
 export async function mutate(path: string, change: Omit<Change, 'csrf'>, pendingId?: string): Promise<ApiResult<ServiceView>> {
   if (pendingId !== undefined) pending.value = new Set(pending.value).add(pendingId);
   saveState.value = 'saving';
@@ -99,6 +126,7 @@ export async function mutate(path: string, change: Omit<Change, 'csrf'>, pending
       }
     } else {
       saveState.value = answer.code === NETWORK_UNREACHABLE ? 'offline' : 'idle';
+      if (answer.code === NETWORK_UNREACHABLE) probeUntilReachable();
     }
     return answer as ApiResult<ServiceView>;
   } finally {
@@ -128,6 +156,7 @@ export async function refreshDrift(): Promise<void> {
 }
 
 export function resetWorkspace(): void {
+  stopProbing();
   service.value = undefined;
   loadState.value = 'idle';
   loadRefusal.value = undefined;

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type AccountRecord } from '@holydeck/contracts/accounts';
 import { errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
@@ -22,7 +22,7 @@ const localStorage = {
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: localStorage });
 
-const { loadService, mutate, pending, resetWorkspace, rightTab, saveState, service } = await import('./workspace-store.js');
+const { isReadOnly, loadService, mutate, pending, resetWorkspace, rightTab, saveState, service } = await import('./workspace-store.js');
 
 const csrf = 'c'.repeat(43);
 const me: AccountRecord = {
@@ -65,6 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   if (originalStorage === undefined) delete (globalThis as { localStorage?: Storage }).localStorage;
   else Object.defineProperty(globalThis, 'localStorage', originalStorage);
 });
@@ -103,6 +104,52 @@ describe('workspace store', () => {
     expect(saveState.value).toBe('saved');
     expect(service.value?.sections[0]?.items[0]?.id).toBe('b');
     expect(calls.filter((call) => call === 'GET /api/v1/services/s1/content-drift')).toHaveLength(2);
+  });
+
+  it('leaves read-only on its own once a probe reaches the server again after one failed save', async () => {
+    vi.useFakeTimers();
+    let reachable = true;
+    const calls: string[] = [];
+    const answers = fakeFetch({
+      'GET /api/v1/services/s1': reply(200, successEnvelope(record('s1', ['a']), 'r1')),
+      'GET /api/v1/services/s1/content-drift': reply(200, successEnvelope([], 'r2')),
+      'POST /save': reply(200, successEnvelope(record('s1', ['a']), 'r3')),
+    }, calls);
+    setFetching(async (url, init) => {
+      if (!reachable) throw new TypeError('Failed to fetch');
+      return answers(url, init);
+    });
+    session.value = signedIn();
+    await loadService('s1');
+
+    reachable = false;
+    await mutate('/save', { method: 'POST' });
+    expect(saveState.value).toBe('offline');
+    expect(isReadOnly.value).toBe(true);
+
+    // Still unreachable at the first probe: stays offline and backs off.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(saveState.value).toBe('offline');
+
+    reachable = true;
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(saveState.value).toBe('idle');
+    expect(isReadOnly.value).toBe(false);
+  });
+
+  it('stops probing once the workspace is reset', async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    setFetching(async (url, init) => {
+      calls.push(`${init.method ?? 'GET'} ${url}`);
+      throw new TypeError('Failed to fetch');
+    });
+    session.value = signedIn();
+    service.value = { id: 's1', title: 'Sunday', date: '2026-09-27', site: 'Main Hall', state: 'upcoming', revision: 'r0', sections: [] };
+    await mutate('/save', { method: 'POST' });
+    resetWorkspace();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(calls).toEqual(['POST /save']);
   });
 
   it('persists rightTab to localStorage and survives a throwing storage', async () => {
