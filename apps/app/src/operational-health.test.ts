@@ -103,6 +103,11 @@ const healthy = (): OperationalReadings => ({
   backup: [backupRun(before(60))],
   restore: [rehearsalRun(before(120))],
   media: [mediaEntry('ready')],
+  database: { reachable: true, latencyMs: 20, storageBytes: 500_000_000 },
+  corpus: { configured: true, reachable: true, latencyMs: 80 },
+  disk: { freeBytes: 5_000_000_000, reserveBytes: 500_000_000 },
+  process: { cpuUserSeconds: 120, cpuSystemSeconds: 30, memoryRssMb: 256 },
+  mediaCleanup: { eligibleCount: 0, reclaimableBytes: 0 },
   readiness: rehearsed,
 });
 
@@ -199,6 +204,7 @@ const FIXTURES: readonly (readonly [OperationalCode, OperationalReadings])[] = [
   ['media.unreadable', readings({ media: UNREADABLE })],
   ['media.failed', readings({ media: [mediaEntry('ready'), mediaEntry('failed')] })],
   ['media.backlog', readings({ media: [mediaEntry('ready'), mediaEntry('pending')] })],
+  ['media.cleanupEligible', readings({ mediaCleanup: { eligibleCount: 3, reclaimableBytes: 250_000_000 } })],
 
   ['readiness.ok', healthy()],
   ['readiness.unreported', readings({ readiness: undefined })],
@@ -244,10 +250,28 @@ const FIXTURES: readonly (readonly [OperationalCode, OperationalReadings])[] = [
       },
     }),
   ],
+
+  ['database.ok', healthy()],
+  ['database.slow', readings({ database: { reachable: true, latencyMs: 900, storageBytes: 500_000_000 } })],
+  ['database.unreachable', readings({ database: { reachable: false } })],
+  ['database.unreadable', readings({ database: UNREADABLE })],
+
+  ['corpus.ok', healthy()],
+  ['corpus.notConfigured', readings({ corpus: { configured: false } })],
+  ['corpus.slow', readings({ corpus: { configured: true, reachable: true, latencyMs: 1500 } })],
+  ['corpus.unreachable', readings({ corpus: { configured: true, reachable: false } })],
+  ['corpus.unreadable', readings({ corpus: UNREADABLE })],
+
+  ['disk.ok', healthy()],
+  ['disk.low', readings({ disk: { freeBytes: 100_000_000, reserveBytes: 500_000_000 } })],
+  ['disk.unreadable', readings({ disk: UNREADABLE })],
+
+  ['process.ok', healthy()],
+  ['process.unreadable', readings({ process: UNREADABLE })],
 ];
 
 describe('the shape of the surface', () => {
-  test('reports one status for each of the seven domains OPER-01 names', () => {
+  test('reports one status for each of the eleven domains OPER-01 names', () => {
     const report = operationalHealthOf(healthy());
     expect(report.statuses.map((status) => status.domain)).toEqual([...OPERATIONAL_DOMAINS]);
     expect(report.at).toBe(AT);
@@ -352,6 +376,11 @@ describe('no secret and no private infrastructure detail reaches a status', () =
     ],
     restore: [rehearsalRun(before(120), 300)],
     media: [mediaEntry('failed', '/srv/holydeck/media/original/psalm-23.mp4'), mediaEntry('pending')],
+    database: { reachable: true, latencyMs: 20, storageBytes: 500_000_000 },
+    corpus: { configured: true, reachable: true, latencyMs: 80 },
+    disk: { freeBytes: 5_000_000_000, reserveBytes: 500_000_000 },
+    process: { cpuUserSeconds: 120, cpuSystemSeconds: 30, memoryRssMb: 256 },
+    mediaCleanup: { eligibleCount: 0, reclaimableBytes: 0 },
     readiness: {
       kind: 'blocked',
       rehearsedSlideIds: [],
@@ -567,7 +596,61 @@ describe('a page of jobs is a sample, and the queue says so', () => {
   });
 });
 
-describe('observing the six subsystems', () => {
+// OPS-09 asks CPU/RAM be labelled by scope. The app-process reading is graded on its own; the worker's
+// rides along on the same heartbeat `health` already reads, and only when the worker measured itself.
+describe('the process domain labels app and worker scope separately', () => {
+  test('reports only the app scope when the heartbeat carries no worker-process metrics', () => {
+    const found = findingsOf(operationalHealthOf(healthy())).find((candidate) => candidate.code === 'process.ok');
+    expect(found?.facts['appMemoryRssMegabytes']).toBe(256);
+    expect(found?.facts['workerMemoryRssMegabytes']).toBeUndefined();
+    expect(found?.action).not.toContain('worker process');
+  });
+
+  test('folds the worker-process metrics into the same finding when the heartbeat carries them', () => {
+    const report = operationalHealthOf(
+      readings({
+        health: { at: before(0.1), staleAfterMs: 45_000, process: { cpuUserSeconds: 9, cpuSystemSeconds: 1, memoryRssMb: 64 } },
+      }),
+    );
+    const found = findingsOf(report).find((candidate) => candidate.code === 'process.ok');
+    expect(found?.facts['appMemoryRssMegabytes']).toBe(256);
+    expect(found?.facts['workerMemoryRssMegabytes']).toBe(64);
+    expect(found?.action).toContain('worker process holds 64 MB');
+  });
+
+  test('an unreadable app-process reading is reported as its own domain, not folded into health', () => {
+    const report = operationalHealthOf(readings({ process: UNREADABLE }));
+    expect(report.statuses.find((status) => status.domain === 'process')?.state).toBe('unknown');
+    expect(codesOf(report)).toContain('process.unreadable');
+  });
+});
+
+// OPS-15: a purge candidate is a nudge, not a fault — it neither hides nor is hidden by a real problem in
+// the same domain, and an unreadable cleanup reading is skipped rather than reported as its own failure.
+describe('the media-cleanup nudge rides alongside the rest of the media domain', () => {
+  test('surfaces next to an unrelated media failure rather than being crowded out by it', () => {
+    const report = operationalHealthOf(
+      readings({ media: [mediaEntry('failed')], mediaCleanup: { eligibleCount: 2, reclaimableBytes: 100_000_000 } }),
+    );
+    const media = report.statuses.find((status) => status.domain === 'media');
+    expect(media?.findings.map((found) => found.code)).toEqual(
+      expect.arrayContaining(['media.failed', 'media.cleanupEligible']),
+    );
+  });
+
+  test('says nothing when nothing is eligible', () => {
+    expect(codesOf(operationalHealthOf(healthy()))).not.toContain('media.cleanupEligible');
+  });
+
+  test('is silently skipped, not reported as its own failure, when it could not be read', () => {
+    const report = operationalHealthOf(readings({ mediaCleanup: UNREADABLE }));
+    expect(codesOf(report)).toContain('media.ok');
+    expect(codesOf(report)).not.toContain('media.cleanupEligible');
+    expect(report.statuses.find((status) => status.domain === 'media')?.state).toBe('ok');
+  });
+});
+
+describe('observing the eleven subsystems', () => {
   const sources = (over: Partial<OperationalSources> = {}): OperationalSources => ({
     now: () => AT,
     worker: () => Promise.resolve({ at: before(0.1), staleAfterMs: 45_000 }),
@@ -575,6 +658,11 @@ describe('observing the six subsystems', () => {
     backups: () => Promise.resolve([backupRun(before(60))]),
     rehearsals: () => Promise.resolve([rehearsalRun(before(120))]),
     media: () => Promise.resolve([mediaEntry('ready')]),
+    database: () => Promise.resolve({ reachable: true, latencyMs: 20, storageBytes: 500_000_000 }),
+    corpus: () => Promise.resolve({ configured: true, reachable: true, latencyMs: 80 }),
+    disk: () => Promise.resolve({ freeBytes: 5_000_000_000, reserveBytes: 500_000_000 }),
+    process: () => Promise.resolve({ cpuUserSeconds: 120, cpuSystemSeconds: 30, memoryRssMb: 256 }),
+    mediaCleanup: () => Promise.resolve({ eligibleCount: 0, reclaimableBytes: 0 }),
     storage: () => Promise.resolve(admitted('granted')),
     readiness: () => Promise.resolve(rehearsed),
     ...over,
