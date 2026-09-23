@@ -103,7 +103,12 @@ export async function ask(path: string, fetching: FetchLike, change?: Change): P
     return failed(error instanceof TypeError ? NETWORK_UNREACHABLE : UNREADABLE_RESPONSE, message);
   }
 
-  if (response.status >= 200 && response.status < 300) {
+  return readEnvelope(response.status, body);
+}
+
+/** Reads an answer's JSON body as the envelope its status promises: a success for 2xx, else an error. */
+export function readEnvelope(status: number, body: unknown): ApiResult<unknown> {
+  if (status >= 200 && status < 300) {
     const parsed = parseSuccessEnvelope(body);
     return parsed.ok
       ? {

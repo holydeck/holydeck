@@ -21,8 +21,8 @@ export function setFetching(next: FetchLike): void {
   fetching = next;
 }
 
-// The whole-application consequences of one answer, shared by the JSON and the raw-text reads.
-function applied<T>(result: ApiResult<T>): ApiResult<T> {
+/** The whole-application consequences of one answer, shared by every read and the upload. */
+export function applied<T>(result: ApiResult<T>): ApiResult<T> {
   if (result.ok) lastAnsweredAt.value = Date.now();
   if (!result.ok && result.code === SESSION_EXPIRED) {
     session.value = null;
