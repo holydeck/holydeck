@@ -92,7 +92,7 @@ export function retentionSweepOn(options: RetentionSweepOptions): Handler {
 
     const auditCandidates = await auditEntryCandidates(options.db, options.context, cutoff, nowMs, options.report);
     stopped(signal);
-    const auditOutcome = sweep(auditCandidates);
+    const auditOutcome = sweep(auditCandidates, overrides);
 
     options.report?.('retention sweep: autosave-revision sweep deferred — see maintainer TODO');
     const autosaveOutcome = sweep([]);

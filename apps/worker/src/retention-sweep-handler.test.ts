@@ -143,12 +143,15 @@ describe('sweeping the audit trail against its own retention window', () => {
     expect(db.rows.get('audit_events')?.slice(0, 3)).toEqual(before);
   });
 
-  it('keeps the existing sweep grading window for candidates gathered with a shorter override', async () => {
+  it('applies the same override to grading as it already does to gathering', async () => {
     const { run, summary } = fixture([auditRow(1, 500), auditRow(2, 401), auditRow(3, 100), auditRow(4, 89)], {
       auditRetentionDays: 90,
     });
     await run(job(), new AbortController().signal);
-    expect(summary()?.['subject']).toContain('audit-entry: 2 removable, 1 retained');
+    // Age 89 is younger than the 90-day cutoff, so it is never gathered at all. All three gathered rows
+    // (500, 401, 100) clear that same 90-day window, so grading them against the default 400-day policy
+    // instead — as if the override stopped at gathering — would wrongly retain the 100-day-old row.
+    expect(summary()?.['subject']).toContain('audit-entry: 3 removable, 0 retained');
   });
 
   it('continues gathering after a full page without counting its rows twice', async () => {
