@@ -124,7 +124,7 @@ export class SettingsError extends Error {
   }
 }
 
-const ENV_KEYS: Record<keyof Settings, string> = {
+export const ENV_KEYS: Record<keyof Settings, string> = {
   port: 'HOLYDECK_PORT',
   dataDir: 'HOLYDECK_DATA_DIR',
   mediaRoot: 'HOLYDECK_MEDIA_ROOT',
