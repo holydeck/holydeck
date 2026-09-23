@@ -53,8 +53,14 @@ const isEnoent = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.
  * One stable path keeps every "settings" snapshot's recorded path identical, which is what lets a restore
  * target find the file without that machinery. Cleared before every use, so no run ever reads a file a
  * previous one left behind.
+ *
+ * `HOLYDECK_SETTINGS_STAGING_DIR` overrides the directory: unset in every real deployment, so production
+ * always resolves the same fixed path above. It exists so two processes sharing one machine's OS tmp
+ * directory — e.g. two concurrent test runs — stage into directories of their own instead of racing the
+ * same one; the value is still read once and reused for every run within a process, so "one stable path"
+ * holds for whichever directory this resolves to.
  */
-export const SETTINGS_STAGING_DIR = join(tmpdir(), 'holydeck-backup-settings');
+export const SETTINGS_STAGING_DIR = process.env.HOLYDECK_SETTINGS_STAGING_DIR ?? join(tmpdir(), 'holydeck-backup-settings');
 
 /**
  * Stages a redacted copy of the settings file into an otherwise-empty directory, so the "settings" class
