@@ -222,51 +222,65 @@ describe('producing a backup', () => {
     );
   });
 
-  it.each(['settings', 'media'] as const)('backs up only requested %s while retaining the Mongo record inventory', async (component) => {
-    const db = fakeDb();
-    const reported: string[] = [];
-    const handler = backupProducerOn({ ...OPTIONS, archive: fakeArchiveDb(), db, report: (line) => reported.push(line) });
-    const stopping = new AbortController();
-    const running = handler(job({ payload: { components: [component] } }), stopping.signal);
-    const settled = running.catch(() => undefined);
-    try {
-      await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(1));
-      children[0]?.emit('close', 0);
-      await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(2));
-      expect(spawned).toHaveBeenNthCalledWith(
-        2,
-        'restic',
-        ['backup', '--repo', OPTIONS.restic.repository, '--json', '--tag', component,
-          component === 'settings' ? SETTINGS_STAGING_DIR : OPTIONS.mediaRoot],
-        LAUNCHED,
-      );
-      children[1]?.stdout.emit(
-        'data',
-        Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 1, snapshot_id: 'selected-snap' })),
-      );
-      children[1]?.emit('close', 0);
-      await expect(running).resolves.toBeUndefined();
-      expect(spawned).toHaveBeenCalledTimes(2);
-      const backups = db.rows.get('backups') ?? [];
-      const manifest = (backups[0] as { manifest: { contents: Array<{ class: string; hash: string }> } }).manifest;
-      expect(manifest.contents.map((content) => content.class).sort()).toEqual(
-        [...MONGO_CONTENTS.map((content) => content.class), component].sort(),
-      );
-      expect(manifest.contents.filter((content) => content.hash.startsWith('restic:'))).toEqual([
-        expect.objectContaining({ class: component, hash: 'restic:selected-snap' }),
-      ]);
-      expect(reported).toEqual([
-        'backup: mongo skipped — not in this run’s requested components',
-        component === 'settings'
-          ? 'backup: media skipped — not in this run’s requested components'
-          : 'backup: settings skipped — not in this run’s requested components',
-      ]);
-    } finally {
-      stopping.abort();
-      children.at(-1)?.emit('close', 0);
-      await settled;
-    }
-  });
+  it.each(['settings', 'media'] as const)(
+    'backs up only requested %s, drops the Mongo record inventory, and leaves the scheduler baseline alone',
+    async (component) => {
+      const db = fakeDb();
+      const reported: string[] = [];
+      const schedulerState = fakeSchedulerState();
+      const handler = backupProducerOn({
+        ...OPTIONS,
+        archive: fakeArchiveDb(),
+        db,
+        schedulerState,
+        report: (line) => reported.push(line),
+      });
+      const stopping = new AbortController();
+      const running = handler(job({ payload: { components: [component] } }), stopping.signal);
+      const settled = running.catch(() => undefined);
+      try {
+        await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(1));
+        children[0]?.emit('close', 0);
+        await vi.waitFor(() => expect(spawned).toHaveBeenCalledTimes(2));
+        expect(spawned).toHaveBeenNthCalledWith(
+          2,
+          'restic',
+          ['backup', '--repo', OPTIONS.restic.repository, '--json', '--tag', component,
+            component === 'settings' ? SETTINGS_STAGING_DIR : OPTIONS.mediaRoot],
+          LAUNCHED,
+        );
+        children[1]?.stdout.emit(
+          'data',
+          Buffer.from(summaryLine({ files_new: 1, total_bytes_processed: 1, snapshot_id: 'selected-snap' })),
+        );
+        children[1]?.emit('close', 0);
+        await expect(running).resolves.toBeUndefined();
+        expect(spawned).toHaveBeenCalledTimes(2);
+        const backups = db.rows.get('backups') ?? [];
+        const manifest = (backups[0] as { manifest: { contents: Array<{ class: string; hash: string }> } }).manifest;
+        // No Mongo dump ran, so none of MONGO_CONTENTS' digest entries belong in this manifest — carrying
+        // them would claim a Restic snapshot backs bytes no snapshot of this run ever took.
+        expect(manifest.contents.map((content) => content.class)).toEqual([component]);
+        expect(manifest.contents).toEqual([expect.objectContaining({ class: component, hash: 'restic:selected-snap' })]);
+        expect((backups[0] as { consistency: unknown }).consistency).toEqual({
+          pointInTime: true,
+          method: 'not read — mongo is not one of this run’s requested components',
+        });
+        expect(reported).toEqual([
+          'backup: mongo skipped — not in this run’s requested components',
+          component === 'settings'
+            ? 'backup: media skipped — not in this run’s requested components'
+            : 'backup: settings skipped — not in this run’s requested components',
+          `backup backup-fixed: not marked as the scheduler’s last backup — only ${component} ran`,
+        ]);
+        expect(schedulerState.calls).toEqual([]);
+      } finally {
+        stopping.abort();
+        children.at(-1)?.emit('close', 0);
+        await settled;
+      }
+    },
+  );
 
   it('redacts the settings file before backing it up, so no export ever carries a secret', async () => {
     const configDir = await mkdtemp(join(tmpdir(), 'holydeck-backup-producer-settings-'));
