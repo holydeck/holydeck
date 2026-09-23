@@ -212,7 +212,13 @@ describe('asking this deployment to migrate its media storage root', () => {
   });
 
   test('a failed audit append does not lose an accepted request', async () => {
-    identity = { ...identity, audit: { record: vi.fn(async () => { throw new Error('trail unavailable'); }) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: vi.fn(async () => { throw new Error('trail unavailable'); }),
+        list: vi.fn(async () => ({ entries: [] })),
+      },
+    };
     await app.close();
     app = await served();
     const response = await requesting(MEDIA_MIGRATION_PATH, { targetRoot: '/mnt/media-new' });

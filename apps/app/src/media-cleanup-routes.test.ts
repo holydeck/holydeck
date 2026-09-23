@@ -210,7 +210,13 @@ describe('a reviewed purge', () => {
 
   test('a failed audit append does not lose an accepted purge', async () => {
     purgeArchived.mockResolvedValue({ purged: ['eligible-1'], retained: [] });
-    identity = { ...identity, audit: { record: vi.fn(async () => { throw new Error('trail unavailable'); }) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: vi.fn(async () => { throw new Error('trail unavailable'); }),
+        list: vi.fn(async () => ({ entries: [] })),
+      },
+    };
     await app.close();
     app = await served();
     const response = await app.inject({ method: 'POST', url: MEDIA_CLEANUP_PATH, headers: withHeaders(), payload: '{}' });

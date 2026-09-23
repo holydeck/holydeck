@@ -235,7 +235,13 @@ describe('applying a recorded backup to production', () => {
 
   test('a failed audit append does not lose an accepted request', async () => {
     trail.rows.set(RESTORE_RECORD, [rehearsal(BACKUP_ID, '2026-09-22T08:30:00.000Z')]);
-    identity = { ...identity, audit: { record: vi.fn(async () => { throw new Error('trail unavailable'); }) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: vi.fn(async () => { throw new Error('trail unavailable'); }),
+        list: vi.fn(async () => ({ entries: [] })),
+      },
+    };
     await app.close();
     app = await served();
     const response = await requesting({ backupId: BACKUP_ID, confirm: BACKUP_ID, password: CLAIM.password });

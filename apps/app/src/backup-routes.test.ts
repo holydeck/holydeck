@@ -225,7 +225,13 @@ describe('recorded backups and on-demand requests', () => {
   });
 
   test('a failed audit append does not lose an accepted request', async () => {
-    identity = { ...identity, audit: { record: vi.fn(async () => { throw new Error('trail unavailable'); }) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: vi.fn(async () => { throw new Error('trail unavailable'); }),
+        list: vi.fn(async () => ({ entries: [] })),
+      },
+    };
     await app.close();
     app = await served();
     expect((await requesting()).statusCode).toBe(202);

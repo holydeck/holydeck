@@ -28,6 +28,7 @@ import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
+import { fakeMediaPurgeDb } from '../test/helpers/media-purge-db.js';
 import { fakeMediaStorageIO } from '../test/helpers/media-storage-io.js';
 import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
@@ -170,7 +171,7 @@ beforeEach(async () => {
   };
   routes = {
     pptxImport: pptxImportOn(db, {
-      now, newId, mediaRoot: '/media', write: io.write, read: io.read,
+      now, newId, mediaRoot: () => '/media', write: io.write, read: io.read, remove: io.remove, purge: fakeMediaPurgeDb(db),
       queue: { enqueue: async () => ({ id: `job-${(serial += 1)}`, created: true }) },
     }),
     pptxReview: pptxReviewOn(db, { now }),

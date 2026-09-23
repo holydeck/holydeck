@@ -269,7 +269,13 @@ describe('trying a failed job again', () => {
 
   test('a failed audit append does not lose an accepted requeue', async () => {
     jobs.push(stored({ _id: 'job-1', kind: 'backup-run', state: 'failed', idempotencyKey: 'backup-run:2026-09-21' }));
-    identity = { ...identity, audit: { record: vi.fn(async () => { throw new Error('trail unavailable'); }) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: vi.fn(async () => { throw new Error('trail unavailable'); }),
+        list: vi.fn(async () => ({ entries: [] })),
+      },
+    };
     await app.close();
     app = await served();
     const response = await app.inject({ method: 'POST', url: `${JOBS_PATH}/job-1/requeue`, headers: withHeaders() });
