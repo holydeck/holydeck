@@ -199,11 +199,20 @@ export function serveSermonRoutes(
   const PREVIEW_WINDOW_MS = 60_000;
   const PREVIEW_LIMIT = 10;
 
+  // Every request's own window has already expired by the time this runs again a minute later, so
+  // sweeping it here keeps the map bounded by actors active in the last window, not every actor ever.
+  const pruneExpiredPreviewWindows = (now: number): void => {
+    for (const [actor, window] of previewLimiter) {
+      if (now - window.windowStart >= PREVIEW_WINDOW_MS) previewLimiter.delete(actor);
+    }
+  };
+
   app.post(SERMON_IMPORT_PREVIEW_PATH, { config: { need: IMPORT_PERMISSION } }, async (request, reply) => {
     const parsed = parseSermonImportRequest(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const actor = provenSession(request).record.actor;
     const now = Date.now();
+    pruneExpiredPreviewWindows(now);
     const window = previewLimiter.get(actor);
     if (window !== undefined && now - window.windowStart < PREVIEW_WINDOW_MS) {
       if (window.count >= PREVIEW_LIMIT) {
