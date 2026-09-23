@@ -38,6 +38,7 @@ import type { RequestContext } from './context.js';
 import type { Identity } from './onboarding.js';
 import type { MediaLibrary, MediaPurgeItem } from './media.js';
 import type { RepositoryDb } from './repositories.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 const MEDIA_CLEANUP_PREFIX = 'media-cleanup:';
@@ -61,9 +62,13 @@ export interface MediaCleanupRoutesOptions {
   readonly db: RepositoryDb | undefined;
   /** Fixed clock: the same one the report's `generatedAt` is read from. */
   readonly now: () => string;
-  /** `settings.values.mediaArchivedPurgeGraceDays` — read once per request, so a settings change
-   *  applies to the next report/purge without a restart. */
-  readonly graceDays: number;
+  /**
+   * Absent exactly when `media`/`identity` are, per the same `main.ts` wiring `media-routes.ts` relies
+   * on for its own `settingsAdmin`. Read live: `admin.current().values.mediaArchivedPurgeGraceDays` is
+   * read fresh inside each handler below, so a grace-period change reaches the next report or purge
+   * without a restart, rather than staying frozen at whatever it was when this module was wired up.
+   */
+  readonly settingsAdmin: Pick<SettingsAdmin, 'current'> | undefined;
   readonly identity: Identity | undefined;
 }
 
@@ -108,7 +113,7 @@ const reportFrom = (items: readonly MediaPurgeItem[], generatedAt: string) => {
 
 export function serveMediaCleanupRoutes(
   app: FastifyInstance,
-  { media, db, now, graceDays, identity }: MediaCleanupRoutesOptions,
+  { media, db, now, settingsAdmin, identity }: MediaCleanupRoutesOptions,
 ): void {
   // A deployment with nowhere to keep media has nothing here to report or to purge. Every path is
   // still served, so the guard's table remains the complete shape of the surface in every deployment.
@@ -123,6 +128,9 @@ export function serveMediaCleanupRoutes(
     }
     return;
   }
+
+  // Guaranteed by the same `main.ts` wiring as `media` above.
+  const admin = settingsAdmin as Pick<SettingsAdmin, 'current'>;
 
   const note = async (request: FastifyRequest, actor: string, subject: string, outcome: AuditOutcome): Promise<void> => {
     try {
@@ -141,7 +149,7 @@ export function serveMediaCleanupRoutes(
     const correlationId = correlationFor(MEDIA_CLEANUP_PREFIX, request.id);
     const context = routeContext(actor, correlationId);
     const referencedBy = await referencedByFor(db, now, actor, correlationId);
-    const { items } = await media.purgeReport(context, { graceDays, referencedBy });
+    const { items } = await media.purgeReport(context, { graceDays: admin.current().values.mediaArchivedPurgeGraceDays, referencedBy });
     return reply.send(successEnvelope(reportFrom(items, now()), request.id, CLIENT_WINDOW.current));
   });
 
@@ -150,7 +158,7 @@ export function serveMediaCleanupRoutes(
     const correlationId = correlationFor(MEDIA_CLEANUP_PREFIX, request.id);
     const context = routeContext(actor, correlationId);
     const referencedBy = await referencedByFor(db, now, actor, correlationId);
-    const outcome = await media.purgeArchived(context, { graceDays, referencedBy });
+    const outcome = await media.purgeArchived(context, { graceDays: admin.current().values.mediaArchivedPurgeGraceDays, referencedBy });
     await note(request, actor, `purged ${outcome.purged.length}, retained ${outcome.retained.length}`, 'allowed');
     return reply.send(successEnvelope(
       { purged: outcome.purged, purgedCount: outcome.purged.length, retained: outcome.retained },

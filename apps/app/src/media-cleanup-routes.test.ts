@@ -14,6 +14,7 @@ import { MEDIA_MANAGE } from './roles.js';
 import { passkeysOn } from './passkeys.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { slideGroupContext, slideGroupsOn } from './slide-groups.js';
+import { DEFAULT_SETTINGS } from './settings.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
@@ -26,6 +27,7 @@ import type { SlideGroupBody } from '@holydeck/contracts/slide-groups';
 import type { Identity } from './onboarding.js';
 import type { MediaLibrary, MediaPurgeItem } from './media.js';
 import type { Document } from './repositories.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 import type { FastifyInstance } from 'fastify';
@@ -58,8 +60,19 @@ let media: MediaLibrary;
 let purgeReport: ReturnType<typeof vi.fn>;
 let purgeArchived: ReturnType<typeof vi.fn>;
 let admin: StartedSession;
+// Mutable rather than the `GRACE_DAYS` constant, so a test can prove `settingsAdmin.current()` is read
+// live on each request — the same way `media-routes.test.ts` mutates `freeSpaceReserveBytes`.
+let graceDays: number;
 
 const entries = (): Document[] => trail.rows.get('audit_events') ?? [];
+
+const settingsAdmin: Pick<SettingsAdmin, 'current'> = {
+  current: () => ({
+    values: { ...DEFAULT_SETTINGS, mediaArchivedPurgeGraceDays: graceDays },
+    sources: {} as never,
+    path: '/data/holydeck/config/settings.yaml',
+  }),
+};
 
 const withHeaders = (held: StartedSession = admin) => ({
   [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
@@ -102,7 +115,7 @@ const served = async (missing?: 'media' | 'identity' | 'all', db: FakeDb | null 
     media: missing === 'media' || missing === 'all' ? undefined : media,
     db: db ?? undefined,
     now,
-    graceDays: GRACE_DAYS,
+    settingsAdmin,
     identity: missing === 'identity' || missing === 'all' ? undefined : identity,
   });
   await built.ready();
@@ -111,6 +124,7 @@ const served = async (missing?: 'media' | 'identity' | 'all', db: FakeDb | null 
 
 beforeEach(async () => {
   trail = fakeDb();
+  graceDays = GRACE_DAYS;
   sessions = sessionsOn(memorySessions().db, { now });
   identity = {
     accounts: accountsOn(memoryAccounts().db, {
@@ -158,6 +172,17 @@ describe('the report', () => {
     const response = await app.inject({ method: 'GET', url: MEDIA_CLEANUP_PATH, headers: withHeaders() });
     expect(response.json().data).toMatchObject({ items: [], reclaimableBytes: 0, totals: { gracePeriod: 0, eligible: 0, protected: 0 } });
   });
+
+  // `settingsAdmin.current()` is read inside the handler, not closed over at construction: a grace-period
+  // change reaches the very next report without a restart, the same live-read guarantee `media-routes.ts`
+  // already gives `mediaRoot`/`mediaFreeSpaceReserveBytes` (OPS-16).
+  test('reads the grace period live, so a settings change reaches the next report without a restart', async () => {
+    purgeReport.mockResolvedValue({ items: [] });
+    graceDays = 30;
+    const response = await app.inject({ method: 'GET', url: MEDIA_CLEANUP_PATH, headers: withHeaders() });
+    expect(response.statusCode).toBe(200);
+    expect(purgeReport).toHaveBeenCalledWith(expect.anything(), { graceDays: 30, referencedBy: expect.any(Function) });
+  });
 });
 
 describe('a reviewed purge', () => {
@@ -173,6 +198,14 @@ describe('a reviewed purge', () => {
     expect(purgeArchived).toHaveBeenCalledWith(expect.anything(), { graceDays: GRACE_DAYS, referencedBy: expect.any(Function) });
     expect(entries()).toHaveLength(1);
     expect(entries()[0]).toMatchObject({ actor: ADMINISTRATOR, action: 'media.cleanup', outcome: 'allowed' });
+  });
+
+  test('reads the grace period live too, so a settings change reaches the next purge without a restart', async () => {
+    purgeArchived.mockResolvedValue({ purged: [], retained: [] });
+    graceDays = 30;
+    const response = await app.inject({ method: 'POST', url: MEDIA_CLEANUP_PATH, headers: withHeaders(), payload: '{}' });
+    expect(response.statusCode).toBe(200);
+    expect(purgeArchived).toHaveBeenCalledWith(expect.anything(), { graceDays: 30, referencedBy: expect.any(Function) });
   });
 
   test('a failed audit append does not lose an accepted purge', async () => {

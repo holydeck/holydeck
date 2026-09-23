@@ -286,7 +286,7 @@ export function buildApp({
     media,
     db: contentDb,
     now: () => new Date().toISOString(),
-    graceDays: settings.values.mediaArchivedPurgeGraceDays,
+    settingsAdmin,
     identity,
   });
 
