@@ -173,7 +173,7 @@ describe('POST /api/v1/pptx-imports', () => {
     ]);
     expect(data['provenance']).toEqual({ title: 'Route Deck', source: 'Choir' });
     const trail = (db.rows.get('audit_events') ?? []).find((row) => row['detail'] === 'imported');
-    expect(trail).toMatchObject({ action: 'content.change', subject: `pptxImport:${data['id'] as string}` });
+    expect(trail).toMatchObject({ action: 'pptx.import', subject: `pptxImport:${data['id'] as string}` });
   });
 
   test('answers 413 pptx.too_large for a body over the configured limit', async () => {
@@ -263,6 +263,44 @@ describe('POST /api/v1/pptx-imports', () => {
     releases[1]?.({ slides: [{ textBlocks: ['b'], media: [] }], skippedMedia: [], provenance: {} });
     expect((await third).statusCode).toBe(201);
   });
+
+  test('audits a refused upload under pptxImport:upload', async () => {
+    const refusedTrail = () =>
+      (db.rows.get('audit_events') ?? []).filter((row) => row['outcome'] === 'refused' && row['subject'] === 'pptxImport:upload');
+
+    await ask('POST', PPTX_IMPORTS_PATH, { slides: [] });
+    expect(refusedTrail()).toHaveLength(1);
+    expect(refusedTrail()[0]).toMatchObject({ action: 'pptx.import', outcome: 'refused' });
+
+    await app.close();
+    await serving({ pptxImport: { import: () => Promise.reject(new HolyDeckError('pptx_too_many_entries', { max: 2000 })) } });
+    await upload();
+    expect(refusedTrail()).toHaveLength(2);
+
+    await app.close();
+    await serving({ pptxImport: { import: () => Promise.reject(new HolyDeckError('pptx_unsafe_entry_name', { name: '../evil.xml' })) } });
+    await upload();
+    expect(refusedTrail()).toHaveLength(3);
+  });
+
+  test('audits a refused upload with an import already in progress', async () => {
+    let started: () => void = () => undefined;
+    const nextStart = (): Promise<void> => new Promise((resolve) => { started = resolve; });
+    const releases: ((result: PptxImportResult) => void)[] = [];
+    const blocking: PptxImport = {
+      import: () => new Promise((resolve) => { releases.push(resolve); started(); }),
+    };
+    await app.close();
+    await serving({ pptxImport: blocking });
+    const running = nextStart();
+    const first = upload();
+    await running;
+    await upload();
+    const trail = (db.rows.get('audit_events') ?? []).find((row) => row['subject'] === 'pptxImport:upload' && row['outcome'] === 'refused');
+    expect(trail).toMatchObject({ action: 'pptx.import', outcome: 'refused' });
+    releases[0]?.({ slides: [{ textBlocks: ['a'], media: [] }], skippedMedia: [], provenance: {} });
+    await first;
+  });
 });
 
 describe('GET /api/v1/pptx-imports/:id', () => {
@@ -340,7 +378,7 @@ describe('POST /api/v1/pptx-imports/:id/commit', () => {
       target: CREATE,
     });
     const trail = (db.rows.get('audit_events') ?? []).find((row) => row['detail'] === `committed as ${song.stamp.id}`);
-    expect(trail).toMatchObject({ action: 'content.change', subject: `song:${song.stamp.id}` });
+    expect(trail).toMatchObject({ action: 'pptx.commit', subject: `pptxImport:${id}` });
   });
 
   test('appends onto an existing song', async () => {

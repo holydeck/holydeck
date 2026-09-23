@@ -62,8 +62,13 @@ export const AUDIT_ACTIONS = [
   'settings.update',
   // Every change to a piece of content, whatever the surface: `slide-layout-routes.ts` is its first
   // caller, and names the Layout in the subject and the direction in the detail rather than adding a
-  // verb per surface. The content surfaces after it join this action instead of inventing their own.
+  // verb per surface. Most content surfaces after it join this action; a surface the spec calls out for
+  // its own action, such as PPTX below (AUTH-04), is a documented exception rather than the norm.
   'content.change',
+  // PPTX import's own history, kept apart from `content.change` because AUTH-04 asks for it by name: the
+  // upload (including a refused one) and the commit that turns a reviewed import into a Song.
+  'pptx.import',
+  'pptx.commit',
   // A Service's own history: creating, duplicating, scheduling, archiving/unarchiving, transitioning
   // through its lifecycle, and editing its sections and items. `services.ts` is the only caller — no
   // routes task exists yet to carry this the way `accounts-routes.ts` carries `account.*`, so the
@@ -142,6 +147,8 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'authorization.refuse': 'authorization',
   'settings.update': 'settings',
   'content.change': 'content',
+  'pptx.import': 'content',
+  'pptx.commit': 'content',
   'service.create': 'content',
   'service.duplicate': 'content',
   'service.schedule': 'content',

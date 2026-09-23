@@ -133,6 +133,8 @@ describe('the context the trail is written under', () => {
       'capability.revoke',
       'settings.update',
       'content.change',
+      'pptx.import',
+      'pptx.commit',
       'service.create',
       'service.duplicate',
       'service.schedule',

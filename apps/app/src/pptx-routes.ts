@@ -22,7 +22,7 @@ import { REVISION_PERMISSIONS } from './revisions.js';
 import { SERVICES_MANAGE } from './roles.js';
 import { SLIDE_LABEL_PERMISSIONS } from './slide-labels.js';
 import { LAYOUT_PERMISSIONS } from './slide-layouts.js';
-import { SongError, subjectFor } from './songs.js';
+import { SongError } from './songs.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
@@ -76,6 +76,9 @@ const ROUTES = [
 const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
 
 const importSubject = (id: string): string => `pptxImport:${id}`;
+
+/** A refused upload has no session id yet — nothing was created — so it is audited under this instead. */
+const UPLOAD_SUBJECT = 'pptxImport:upload';
 
 const fileNameIn = (request: FastifyRequest): string => {
   const named = request.headers['x-file-name'];
@@ -151,11 +154,17 @@ export function servePptxRoutes(
   const sessions = pptxSessions;
   const call = (request: FastifyRequest) =>
     pptxRouteContext(provenSession(request).record.actor, correlationFor(PPTX_PREFIX, request.id));
-  const note = async (request: FastifyRequest, subject: string, outcome: AuditOutcome, detail: string): Promise<void> => {
+  const note = async (
+    request: FastifyRequest,
+    action: 'pptx.import' | 'pptx.commit',
+    subject: string,
+    outcome: AuditOutcome,
+    detail: string,
+  ): Promise<void> => {
     try {
       await identity.audit.record(
         auditContext(provenSession(request).record.actor, correlationFor(PPTX_PREFIX, request.id)),
-        { action: 'content.change', subject, outcome, detail },
+        { action, subject, outcome, detail },
       );
     } catch (error: unknown) {
       request.log.error({ err: error }, 'the pptx import trail refused an entry');
@@ -179,10 +188,12 @@ export function servePptxRoutes(
     },
   }, async (request, reply) => {
     if (!(request.body instanceof Uint8Array)) {
+      await note(request, 'pptx.import', UPLOAD_SUBJECT, 'refused', 'sent as something other than raw bytes');
       return reply.code(422).send(errorEnvelope('pptx.invalid_format', 'send the presentation as its own raw bytes', request.id));
     }
     const actor = provenSession(request).record.actor;
     if (inFlight.has(actor)) {
+      await note(request, 'pptx.import', UPLOAD_SUBJECT, 'refused', 'an import was already in progress for this account');
       return reply.code(409).send(errorEnvelope('pptx.import_in_progress', 'an import is already in progress for this account', request.id));
     }
     inFlight.add(actor);
@@ -192,15 +203,17 @@ export function servePptxRoutes(
         result = await importStore.import(call(request), request.body);
       } catch (error: unknown) {
         if (error instanceof HolyDeckError && SIZE_LIMIT_CODES.has(error.code)) {
+          await note(request, 'pptx.import', UPLOAD_SUBJECT, 'refused', error.message);
           return reply.code(413).send(errorEnvelope('pptx.too_large', error.message, request.id));
         }
         if (error instanceof HolyDeckError && INVALID_FORMAT_CODES.has(error.code)) {
+          await note(request, 'pptx.import', UPLOAD_SUBJECT, 'refused', error.message);
           return reply.code(422).send(errorEnvelope('pptx.invalid_format', error.message, request.id));
         }
         throw error;
       }
       const session = await sessions.create(call(request), { fileName: fileNameIn(request), result });
-      await note(request, importSubject(session.id), 'allowed', 'imported');
+      await note(request, 'pptx.import', importSubject(session.id), 'allowed', 'imported');
       return reply.code(201).send(successEnvelope(viewOf(session), request.id, CLIENT_WINDOW.current));
     } finally {
       inFlight.delete(actor);
@@ -236,7 +249,7 @@ export function servePptxRoutes(
     }
     const updated = await sessions.review(context, id, reviewed);
     if (updated === undefined) return reply.code(404).send(notFound(request));
-    await note(request, importSubject(id), 'allowed', 'reviewed');
+    await note(request, 'pptx.import', importSubject(id), 'allowed', 'reviewed');
     return reply.send(successEnvelope(viewOf(updated), request.id, CLIENT_WINDOW.current));
   });
 
@@ -261,7 +274,7 @@ export function servePptxRoutes(
       throw error;
     }
     await sessions.discard(context, id);
-    await note(request, subjectFor(song.stamp.id), 'allowed', `committed as ${song.stamp.id}`);
+    await note(request, 'pptx.commit', importSubject(id), 'allowed', `committed as ${song.stamp.id}`);
     const report = {
       slides: session.slides.length,
       blocks: reviewed.length,
@@ -279,7 +292,7 @@ export function servePptxRoutes(
   app.delete(PPTX_ID_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const id = idIn(request);
     if (!(await sessions.discard(call(request), id))) return reply.code(404).send(notFound(request));
-    await note(request, importSubject(id), 'allowed', 'discarded');
+    await note(request, 'pptx.import', importSubject(id), 'allowed', 'discarded');
     return reply.code(204).send();
   });
 }
