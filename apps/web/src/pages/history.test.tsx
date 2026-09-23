@@ -151,6 +151,21 @@ describe('HistoryPage', () => {
     expect(fetching).toHaveBeenCalledTimes(1);
   });
 
+  it('closes the restore confirmation on Escape and hands focus back to Restore', async () => {
+    setFetching(vi.fn<FetchLike>(async () => reply(200, successEnvelope([record({ revision: 1 })], 'request-list'))));
+
+    render(<HistoryPage contentId={contentId} />);
+    const action = await screen.findByRole('button', { name: 'Restore' });
+    action.focus();
+    fireEvent.click(action);
+    const dialog = await screen.findByRole('alertdialog');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Confirm' }));
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(document.activeElement).toBe(action);
+  });
+
   it('shows a restore refusal as an alert', async () => {
     const fetching = vi.fn<FetchLike>(async (_requestPath, init) => init.method === 'POST'
       ? reply(422, errorEnvelope('request.validation_failed', 'Refused', 'request-restore', []))

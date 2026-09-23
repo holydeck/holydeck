@@ -9,6 +9,7 @@ import { SHORTCUT_KEYS } from '@holydeck/contracts/slide-labels';
 import { useEffect, useState } from 'preact/hooks';
 
 import { can, csrf } from '../app-state.js';
+import { ConfirmDialog } from '../components/confirm-dialog.js';
 import { fieldErrors } from '../form-errors.js';
 import { t } from '../i18n.js';
 import { NotFoundPage } from './not-found.js';
@@ -174,21 +175,20 @@ export function AdminSlideLabelsPage(): JSX.Element {
         </div>
       )}
       {confirming === undefined ? null : (
-        <div class="modal-backdrop">
-          <div role="alertdialog" aria-modal="true" aria-labelledby="slide-labels-confirm-title" aria-describedby="slide-labels-confirm-body">
-            <h2 id="slide-labels-confirm-title">
-              {t(confirming.action === 'archive' ? 'slideLabels.archiveConfirmTitle' : 'slideLabels.restoreConfirmTitle', { name: confirming.name })}
-            </h2>
-            <p id="slide-labels-confirm-body">
-              {t(confirming.action === 'archive' ? 'slideLabels.archiveConfirmBody' : 'slideLabels.restoreConfirmBody', { name: confirming.name })}
-            </p>
-            {confirming.action === 'archive' && dependents !== undefined && dependents.count > 0 ? (
-              <p>{t('slideLabels.dependentsWarning', { count: dependents.count })}</p>
-            ) : null}
-            <button type="button" disabled={busy} onClick={() => void confirm()}>{t('slideLabels.confirm')}</button>
-            <button type="button" disabled={busy} onClick={close}>{t('slideLabels.cancel')}</button>
-          </div>
-        </div>
+        <ConfirmDialog
+          id="slide-labels-confirm"
+          title={t(confirming.action === 'archive' ? 'slideLabels.archiveConfirmTitle' : 'slideLabels.restoreConfirmTitle', { name: confirming.name })}
+          body={t(confirming.action === 'archive' ? 'slideLabels.archiveConfirmBody' : 'slideLabels.restoreConfirmBody', { name: confirming.name })}
+          confirmLabel={t('slideLabels.confirm')}
+          cancelLabel={t('slideLabels.cancel')}
+          busy={busy}
+          onConfirm={() => void confirm()}
+          onCancel={close}
+        >
+          {confirming.action === 'archive' && dependents !== undefined && dependents.count > 0 ? (
+            <p>{t('slideLabels.dependentsWarning', { count: dependents.count })}</p>
+          ) : null}
+        </ConfirmDialog>
       )}
     </>
   );

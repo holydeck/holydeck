@@ -6,6 +6,7 @@ import { parseRevisionRecord, type RevisionRecord } from '@holydeck/contracts/re
 import { useEffect, useState } from 'preact/hooks';
 
 import { can, csrf } from '../app-state.js';
+import { ConfirmDialog } from '../components/confirm-dialog.js';
 import { fieldErrors } from '../form-errors.js';
 import { t } from '../i18n.js';
 import { NotFoundPage } from './not-found.js';
@@ -175,14 +176,16 @@ export function HistoryPage({ contentId }: { readonly contentId: string }): JSX.
       )}
       {restoreError === undefined ? null : <p role="alert">{restoreError}</p>}
       {confirming === undefined ? null : (
-        <div class="modal-backdrop">
-          <div role="alertdialog" aria-modal="true" aria-labelledby="history-restore-title" aria-describedby="history-restore-body">
-            <h2 id="history-restore-title">{t('history.restoreConfirmLabel')}</h2>
-            <p id="history-restore-body">{t('history.restoreConfirmBody', { revision: confirming })}</p>
-            <button type="button" disabled={restoring} onClick={() => void restore(confirming)}>{t('history.confirm')}</button>
-            <button type="button" disabled={restoring} onClick={() => setConfirming(undefined)}>{t('history.cancel')}</button>
-          </div>
-        </div>
+        <ConfirmDialog
+          id="history-restore"
+          title={t('history.restoreConfirmLabel')}
+          body={t('history.restoreConfirmBody', { revision: confirming })}
+          confirmLabel={t('history.confirm')}
+          cancelLabel={t('history.cancel')}
+          busy={restoring}
+          onConfirm={() => void restore(confirming)}
+          onCancel={() => setConfirming(undefined)}
+        />
       )}
     </>
   );

@@ -8,6 +8,7 @@ import { parseEntityStamp } from '@holydeck/contracts/entities';
 import { useEffect, useState } from 'preact/hooks';
 
 import { can, csrf } from '../app-state.js';
+import { ConfirmDialog } from '../components/confirm-dialog.js';
 import { fieldErrors } from '../form-errors.js';
 import { t } from '../i18n.js';
 import { NotFoundPage } from './not-found.js';
@@ -178,21 +179,20 @@ export function AdminLanguagesPage(): JSX.Element {
         </div>
       )}
       {confirming === undefined ? null : (
-        <div class="modal-backdrop">
-          <div role="alertdialog" aria-modal="true" aria-labelledby="languages-confirm-title" aria-describedby="languages-confirm-body">
-            <h2 id="languages-confirm-title">
-              {t(confirming.action === 'archive' ? 'languages.archiveConfirmTitle' : 'languages.restoreConfirmTitle', { name: confirming.name })}
-            </h2>
-            <p id="languages-confirm-body">
-              {t(confirming.action === 'archive' ? 'languages.archiveConfirmBody' : 'languages.restoreConfirmBody', { name: confirming.name })}
-            </p>
-            {confirming.action === 'archive' && dependents !== undefined && dependents.count > 0 ? (
-              <p>{t('languages.dependentsWarning', { count: dependents.count })}</p>
-            ) : null}
-            <button type="button" disabled={busy} onClick={() => void confirm()}>{t('languages.confirm')}</button>
-            <button type="button" disabled={busy} onClick={close}>{t('languages.cancel')}</button>
-          </div>
-        </div>
+        <ConfirmDialog
+          id="languages-confirm"
+          title={t(confirming.action === 'archive' ? 'languages.archiveConfirmTitle' : 'languages.restoreConfirmTitle', { name: confirming.name })}
+          body={t(confirming.action === 'archive' ? 'languages.archiveConfirmBody' : 'languages.restoreConfirmBody', { name: confirming.name })}
+          confirmLabel={t('languages.confirm')}
+          cancelLabel={t('languages.cancel')}
+          busy={busy}
+          onConfirm={() => void confirm()}
+          onCancel={close}
+        >
+          {confirming.action === 'archive' && dependents !== undefined && dependents.count > 0 ? (
+            <p>{t('languages.dependentsWarning', { count: dependents.count })}</p>
+          ) : null}
+        </ConfirmDialog>
       )}
     </>
   );

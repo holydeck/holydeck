@@ -103,6 +103,24 @@ describe('AdminSlideLabelsPage', () => {
     expect(JSON.parse(statusCall?.[1]?.body ?? '{}')).toEqual({ archived: true });
   });
 
+  it('closes the confirmation on Escape and hands focus back to the row action', async () => {
+    const fetching = vi.fn<FetchLike>();
+    fetching.mockResolvedValueOnce(listReply([label()]));
+    fetching.mockResolvedValueOnce(reply(200, successEnvelope({ count: 0, approximate: false }, 'request-dependents')));
+    setFetching(fetching);
+    await renderPage();
+
+    const action = screen.getByRole('button', { name: 'Archive Chorus' });
+    action.focus();
+    fireEvent.click(action);
+    const dialog = await screen.findByRole('alertdialog');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Confirm' }));
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(document.activeElement).toBe(action);
+  });
+
   it('restores an archived label with a fresh PATCH and reloads', async () => {
     const fetching = vi.fn<FetchLike>();
     fetching.mockResolvedValueOnce(listReply([label({ stamp: { archivedAt: '2026-09-10T00:00:00.000Z', archivedBy: 'account:a1' } })]));
