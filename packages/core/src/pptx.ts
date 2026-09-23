@@ -168,8 +168,9 @@ function openArchive(bytes: Uint8Array): Record<string, Uint8Array> {
     if (error instanceof HolyDeckError) throw error;
     throw new HolyDeckError('pptx_corrupt', { reason: reasonOf(error) });
   }
-  // TOCTOU re-check: `originalSize` above is attacker-declared, so re-verify the limits against what
-  // actually came out of the archive before trusting it any further.
+  // Defense in depth, not a real TOCTOU gap: fflate inflates each entry into a buffer sized by the
+  // `originalSize` the filter above already bounded, so `entryBytes.byteLength` can't actually exceed
+  // it. Kept anyway in case that inflation guarantee ever changes underneath this package.
   let actualTotal = 0;
   for (const [name, entryBytes] of Object.entries(entries)) {
     if (entryBytes.byteLength > PPTX_MAX_ENTRY_BYTES) {
