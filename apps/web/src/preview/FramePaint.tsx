@@ -37,6 +37,10 @@ function TextBoxView({ box, scale }: { readonly box: RenderedBox; readonly scale
         fontWeight: box.fontWeight,
         fontSize: `${(box.fontSizePx ?? 0) * scale}px`,
         lineHeight: `${(box.lineHeightPx ?? 0) * scale}px`,
+        // The server measurer wraps with break-word and spaces letters; painting without either lets a
+        // long word or a spaced theme run past the lines preparation counted.
+        overflowWrap: 'break-word',
+        ...(box.letterSpacingPx === undefined ? {} : { letterSpacing: `${box.letterSpacingPx * scale}px` }),
       }}
     >
       {box.text}

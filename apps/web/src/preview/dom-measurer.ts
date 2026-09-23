@@ -53,13 +53,25 @@ function wrap(ctx: Context2DLike, request: MeasureRequest, read: VariableReader)
   const words = request.text.split(/\s+/u).filter((word) => word.length > 0);
   const lines: string[] = [];
   let current = '';
+  const fits = (line: string): boolean => widthOf(ctx, line, request.letterSpacingPx) <= request.maxWidthPx;
   for (const word of words) {
     const candidate = current === '' ? word : `${current} ${word}`;
-    if (current !== '' && widthOf(ctx, candidate, request.letterSpacingPx) > request.maxWidthPx) {
-      lines.push(current);
-      current = word;
-    } else {
+    if (fits(candidate)) {
       current = candidate;
+      continue;
+    }
+    if (current !== '') lines.push(current);
+    current = '';
+    // The server measurer lays text out with `overflow-wrap: break-word`: a word wider than the whole line
+    // starts a new line and then breaks between characters, never overflowing. The last piece stays open
+    // so the next word can still join it.
+    for (const char of word) {
+      if (current !== '' && !fits(current + char)) {
+        lines.push(current);
+        current = char;
+      } else {
+        current += char;
+      }
     }
   }
   if (current !== '' || lines.length === 0) lines.push(current);

@@ -67,6 +67,19 @@ describe('FramePaint', () => {
     expect(text.style.fontSize).toBe('20px');
   });
 
+  it('wraps a long word and spaces letters the way the server measured them', () => {
+    const [slide] = surfaceRender.frame.slides;
+    if (slide === undefined) throw new Error('no slide');
+    const spaced: SurfaceRender = {
+      ...surfaceRender,
+      frame: frameOf([{ ...slide, boxes: slide.boxes.map((box) => (box.kind === 'text' ? { ...box, letterSpacingPx: 4 } : box)) }]),
+    };
+    render(<FramePaint render={spaced} mediaOf={new Map()} label="Preview" />);
+    const [text] = screen.getAllByText('Hello').filter((el) => !el.classList.contains('visually-hidden'));
+    expect(text?.style.getPropertyValue('overflow-wrap')).toBe('break-word');
+    expect(text?.style.letterSpacing).toBe('2px');
+  });
+
   it('positions a media box image at mediaRect, relative to its own frame, times scale', () => {
     const mediaOf = new Map([['m1', 'asset-1']]);
     render(<FramePaint render={surfaceRender} mediaOf={mediaOf} label="Preview" />);

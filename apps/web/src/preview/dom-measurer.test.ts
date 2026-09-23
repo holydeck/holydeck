@@ -23,6 +23,14 @@ describe('domMeasurer', () => {
     expect(metrics).toEqual({ widthPx: 20, heightPx: 30, lineCount: 3 });
   });
 
+  it('breaks a word wider than the line by characters, as the server measurer\'s overflow-wrap does', async () => {
+    const measurer = domMeasurer(fakeCanvas());
+    const [metrics] = await measurer.measure([
+      { text: 'x abcdef y', fontFamily: 'serif', fontWeight: 400, fontSizePx: 10, lineHeight: 1, letterSpacingPx: 0, maxWidthPx: 25 },
+    ]);
+    expect(metrics).toEqual({ widthPx: 20, heightPx: 50, lineCount: 5 });
+  });
+
   it('adds letterSpacingPx * (chars - 1) to a line width', async () => {
     const measurer = domMeasurer(fakeCanvas());
     const [metrics] = await measurer.measure([
