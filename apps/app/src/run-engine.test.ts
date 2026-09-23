@@ -50,6 +50,7 @@ const setup = () => {
     seedStateRevision: vi.fn(),
     seedStates: vi.fn(),
     stateRevision: vi.fn(() => revision),
+    connectionCounts: vi.fn(() => ({ control: 1, audience: 3, stage: 0, singer: 0, guest: 0 })),
     // Flattened per channel, so an assertion reads which view was told what.
     publishChange: vi.fn<RunEngineOptions['hub']['publishChange']>((change) => {
       order.push('publish');
@@ -144,8 +145,8 @@ describe('run-engine command ordering', () => {
       expect(engine.state('run-1')?.public).toEqual(FIRST);
     }
     expect(hub.publishToCalls.filter((c) => c.channel === 'audience' || c.channel === 'singer')).toHaveLength(0);
-    expect(hub.publishToCalls.some((c) => c.channel === 'stage')).toBe(true);
-    expect(hub.publishToCalls.at(-1)?.state).toMatchObject({ view: 'control', counts: {}, state: { selected: FIRST, mode: 'paused' } });
+    expect(hub.publishToCalls.filter((c) => c.channel === 'stage').at(-1)?.state).toMatchObject({ view: 'stage', selected: FIRST, mode: 'paused' });
+    expect(hub.publishToCalls.at(-1)?.state).toMatchObject({ view: 'control', counts: { control: 1, audience: 3 }, state: { selected: FIRST, mode: 'paused' } });
   });
 
   it('take-selected publishes the selected position to every output channel', async () => {

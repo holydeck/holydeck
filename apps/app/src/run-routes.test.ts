@@ -109,6 +109,7 @@ const building = async (): Promise<void> => {
     },
     seedStates: (): void => {},
     stateRevision: (): number => 0,
+    connectionCounts: () => ({ control: 0, audience: 0, stage: 0, singer: 0, guest: 0 }),
   };
   const themes = themesOn(runEvents);
   const runReview = runReviewOn(runEvents);

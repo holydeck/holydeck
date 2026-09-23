@@ -35,7 +35,7 @@ import type { RunRecord, RunStore } from './runs.js';
 import type { OperatorSession } from './snapshots.js';
 
 export interface RunEngineOptions {
-  readonly hub: Pick<LiveHub, 'publishChange' | 'seedStateRevision' | 'seedStates' | 'stateRevision'>;
+  readonly hub: Pick<LiveHub, 'connectionCounts' | 'publishChange' | 'seedStateRevision' | 'seedStates' | 'stateRevision'>;
   readonly runs: RunStore;
   readonly runEvents: RunEventStore;
   readonly themes: ThemeStore;
@@ -181,7 +181,7 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
       const state = projectFor(
         channel === LIVE_CONTROL_CHANNEL ? 'control' : channel,
         live,
-        channel === LIVE_CONTROL_CHANNEL ? { counts: {} } : { next: upcoming },
+        channel === LIVE_CONTROL_CHANNEL ? { counts: options.hub.connectionCounts() } : { next: upcoming },
       );
       if (state !== undefined) states[channel] = state;
     }
