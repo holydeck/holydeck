@@ -20,7 +20,7 @@ import type { JSX } from 'preact';
 
 export const SETTINGS_PATH = '/api/v1/settings';
 
-type FieldKind = 'text' | 'number' | 'boolean' | 'secret';
+type FieldKind = 'text' | 'number' | 'boolean' | 'secret' | 'timezone';
 
 interface FieldSpec {
   readonly key: string;
@@ -28,30 +28,74 @@ interface FieldSpec {
   readonly kind: FieldKind;
 }
 
-const FIELDS: readonly FieldSpec[] = [
-  { key: 'port', label: 'settings.field.port', kind: 'number' },
-  { key: 'dataDir', label: 'settings.field.dataDir', kind: 'text' },
-  { key: 'mediaRoot', label: 'settings.field.mediaRoot', kind: 'text' },
-  { key: 'resticRepository', label: 'settings.field.resticRepository', kind: 'text' },
-  { key: 'resticPassword', label: 'settings.field.resticPassword', kind: 'secret' },
-  { key: 'locale', label: 'settings.field.locale', kind: 'text' },
-  { key: 'corpusUrl', label: 'settings.field.corpusUrl', kind: 'text' },
-  { key: 'corpusToken', label: 'settings.field.corpusToken', kind: 'secret' },
-  { key: 'tlsCertFile', label: 'settings.field.tlsCertFile', kind: 'text' },
-  { key: 'tlsKeyFile', label: 'settings.field.tlsKeyFile', kind: 'text' },
-  { key: 'mongoUrl', label: 'settings.field.mongoUrl', kind: 'text' },
-  { key: 'timezone', label: 'settings.field.timezone', kind: 'text' },
-  { key: 'developmentDiagnostics', label: 'settings.field.developmentDiagnostics', kind: 'boolean' },
-  { key: 'auditRetentionDays', label: 'settings.field.auditRetentionDays', kind: 'number' },
-  { key: 'autosaveRetentionDays', label: 'settings.field.autosaveRetentionDays', kind: 'number' },
-  { key: 'sermonAiEnabled', label: 'settings.field.sermonAiEnabled', kind: 'boolean' },
-  { key: 'anthropicApiKey', label: 'settings.field.anthropicApiKey', kind: 'secret' },
+interface FieldGroup {
+  readonly legend: MessageKey;
+  readonly fields: readonly FieldSpec[];
+}
+
+// The five groups COLAB-09 names, in its order. `mongoUrl` is a secret here for the same reason it is in
+// `settings.ts`'s `SETTINGS_SECRET_FIELDS`: it can carry the database password, the server answers it
+// redacted, and a text field would send that redaction marker straight back as the new password.
+const GROUPS: readonly FieldGroup[] = [
+  {
+    legend: 'settings.group.general',
+    fields: [
+      { key: 'port', label: 'settings.field.port', kind: 'number' },
+      { key: 'dataDir', label: 'settings.field.dataDir', kind: 'text' },
+      { key: 'mediaRoot', label: 'settings.field.mediaRoot', kind: 'text' },
+      { key: 'locale', label: 'settings.field.locale', kind: 'text' },
+      { key: 'developmentDiagnostics', label: 'settings.field.developmentDiagnostics', kind: 'boolean' },
+    ],
+  },
+  {
+    legend: 'settings.group.timezone',
+    fields: [{ key: 'timezone', label: 'settings.field.timezone', kind: 'timezone' }],
+  },
+  {
+    legend: 'settings.group.security',
+    fields: [
+      { key: 'tlsCertFile', label: 'settings.field.tlsCertFile', kind: 'text' },
+      { key: 'tlsKeyFile', label: 'settings.field.tlsKeyFile', kind: 'text' },
+      { key: 'mongoUrl', label: 'settings.field.mongoUrl', kind: 'secret' },
+      { key: 'resticRepository', label: 'settings.field.resticRepository', kind: 'text' },
+      { key: 'resticPassword', label: 'settings.field.resticPassword', kind: 'secret' },
+    ],
+  },
+  {
+    legend: 'settings.group.retention',
+    fields: [
+      { key: 'auditRetentionDays', label: 'settings.field.auditRetentionDays', kind: 'number' },
+      { key: 'autosaveRetentionDays', label: 'settings.field.autosaveRetentionDays', kind: 'number' },
+    ],
+  },
+  {
+    legend: 'settings.group.integrations',
+    fields: [
+      { key: 'corpusUrl', label: 'settings.field.corpusUrl', kind: 'text' },
+      { key: 'corpusToken', label: 'settings.field.corpusToken', kind: 'secret' },
+      { key: 'sermonAiEnabled', label: 'settings.field.sermonAiEnabled', kind: 'boolean' },
+      { key: 'anthropicApiKey', label: 'settings.field.anthropicApiKey', kind: 'secret' },
+    ],
+  },
 ];
+
+const FIELDS: readonly FieldSpec[] = GROUPS.flatMap((group) => group.fields);
+const FIELD_KEYS: readonly string[] = FIELDS.map((field) => field.key);
 
 // Refused by the server regardless of who asks (`settings.ts`'s `PROTECTED_SETTINGS`): only the
 // deployment's own environment sets this. Disabled here rather than let every edit round-trip into a
 // guaranteed refusal.
 const PROTECTED = new Set(['developmentDiagnostics']);
+
+/**
+ * Every IANA zone this browser knows, with the one already chosen kept even when it does not know it —
+ * a select that cannot show its own value would quietly offer to change it. `UTC` is listed first: some
+ * engines leave it out of `supportedValuesOf`, and it is the default `settings.ts` starts from.
+ */
+const timeZones = (current: string): readonly string[] => {
+  const known = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+  return [...new Set(['UTC', current, ...known].filter((zone) => zone !== ''))];
+};
 
 const SOURCE_LABEL: Readonly<Record<string, MessageKey>> = {
   default: 'settings.source.default',
@@ -76,7 +120,14 @@ const asSettingsView = (data: unknown): SettingsView | undefined => {
   };
 };
 
-type PendingValue = string | number | boolean;
+// A number field keeps what was typed until the save, so an empty or fractional entry can be refused
+// beside the field instead of being sent as whatever `Number()` makes of it (`Number('')` is 0).
+type PendingValue = string | boolean;
+
+const WHOLE_NUMBER = /^\d+$/u;
+
+const without = <T,>(record: Readonly<Record<string, T>>, key: string): Record<string, T> =>
+  Object.fromEntries(Object.entries(record).filter(([name]) => name !== key));
 
 /** The settings administration screen: every known field, which layer supplied it, and a guarded edit. */
 export function AdminSettingsPage(): JSX.Element {
@@ -86,6 +137,7 @@ export function AdminSettingsPage(): JSX.Element {
   const [pending, setPending] = useState<Record<string, PendingValue>>({});
   const [saving, setSaving] = useState(false);
   const [other, setOther] = useState<string>();
+  const [byField, setByField] = useState<Record<string, string>>({});
 
   const load = async (): Promise<void> => {
     const result = await request(SETTINGS_PATH);
@@ -100,20 +152,42 @@ export function AdminSettingsPage(): JSX.Element {
 
   if (!permitted) return <NotFoundPage />;
 
-  const setField = (key: string, value: PendingValue): void => {
-    setPending((current) => ({ ...current, [key]: value }));
+  // A secret emptied again is the same as one never typed into: blank means keep, never clear.
+  const setField = (key: string, value: PendingValue, secret = false): void => {
+    setPending((current) => {
+      if (secret && value === '') return without(current, key);
+      return { ...current, [key]: value };
+    });
+    setByField((current) => without(current, key));
     setOther(undefined);
   };
 
   const save = async (event: JSX.TargetedEvent<HTMLFormElement, SubmitEvent>): Promise<void> => {
     event.preventDefault();
     if (Object.keys(pending).length === 0) return;
+    const body: Record<string, string | number | boolean> = {};
+    const invalid: Record<string, string> = {};
+    for (const field of FIELDS) {
+      const value = pending[field.key];
+      if (value === undefined) continue;
+      if (field.kind !== 'number') body[field.key] = value;
+      else if (typeof value === 'string' && WHOLE_NUMBER.test(value.trim())) body[field.key] = Number(value.trim());
+      else invalid[field.key] = t('settings.numberInvalid');
+    }
+    if (Object.keys(invalid).length > 0) {
+      setByField(invalid);
+      say('assertive', t('settings.refusedFields'));
+      return;
+    }
     setSaving(true);
     try {
-      const result = await request(SETTINGS_PATH, { method: 'PATCH', csrf: csrf() ?? '', body: pending });
+      const result = await request(SETTINGS_PATH, { method: 'PATCH', csrf: csrf() ?? '', body });
       if (!result.ok) {
-        const message = fieldErrors(result, []).other ?? result.message;
-        const text = t('settings.refused', { message });
+        const split = fieldErrors(result, FIELD_KEYS);
+        setByField(split.byField);
+        const text = split.other === undefined && Object.keys(split.byField).length > 0
+          ? t('settings.refusedFields')
+          : t('settings.refused', { message: split.other ?? result.message });
         setOther(text);
         say('assertive', text);
         return;
@@ -121,6 +195,7 @@ export function AdminSettingsPage(): JSX.Element {
       const parsed = asSettingsView(result.data);
       if (parsed !== undefined) setSettings(parsed);
       setPending({});
+      setByField({});
       say('polite', t('settings.saved'));
     } finally {
       setSaving(false);
@@ -139,46 +214,82 @@ export function AdminSettingsPage(): JSX.Element {
           {settings.lastReloadError === undefined ? null : (
             <p role="alert">{t('settings.reloadError', { message: settings.lastReloadError })}</p>
           )}
-          {FIELDS.map((field) => {
-            const current = field.key in pending ? pending[field.key] : settings.values[field.key];
-            const source = settings.sources[field.key];
-            const sourceLabel = source === undefined ? undefined : SOURCE_LABEL[source];
-            const protectedField = PROTECTED.has(field.key);
-            return (
-              <div key={field.key}>
-                {field.kind === 'boolean' ? (
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(current)}
-                      disabled={protectedField}
-                      onChange={(event) => setField(field.key, event.currentTarget.checked)}
-                    />
-                    {' '}{t(field.label)}
-                  </label>
-                ) : field.kind === 'secret' ? (
-                  <FormField
-                    id={`settings-${field.key}`}
-                    label={t(field.label)}
-                    type="password"
-                    value={typeof pending[field.key] === 'string' ? pending[field.key] as string : ''}
-                    onInput={(value) => setField(field.key, value)}
-                    hint={t('settings.secretHint')}
-                    autoComplete="off"
-                  />
-                ) : (
-                  <FormField
-                    id={`settings-${field.key}`}
-                    label={t(field.label)}
-                    value={String(current ?? '')}
-                    onInput={(value) => setField(field.key, field.kind === 'number' ? Number(value) : value)}
-                    inputMode={field.kind === 'number' ? 'numeric' : 'text'}
-                  />
-                )}
-                {sourceLabel === undefined ? null : <span>{t(sourceLabel)}</span>}
-              </div>
-            );
-          })}
+          {GROUPS.map((group) => (
+            <fieldset key={group.legend}>
+              <legend>{t(group.legend)}</legend>
+              {group.fields.map((field) => {
+                const current = field.key in pending ? pending[field.key] : settings.values[field.key];
+                const source = settings.sources[field.key];
+                const sourceLabel = source === undefined ? undefined : SOURCE_LABEL[source];
+                // The environment wins over the file on every reload, so a change saved here would be
+                // written and then never seen; the field says where the value really comes from instead.
+                const fromEnv = source === 'env';
+                const locked = PROTECTED.has(field.key) || fromEnv;
+                const id = `settings-${field.key}`;
+                const error = byField[field.key];
+                const hint = fromEnv ? t('settings.envHint') : undefined;
+                return (
+                  <div key={field.key}>
+                    {field.kind === 'boolean' ? (
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(current)}
+                          disabled={locked}
+                          onChange={(event) => setField(field.key, event.currentTarget.checked)}
+                        />
+                        {' '}{t(field.label)}
+                      </label>
+                    ) : field.kind === 'timezone' ? (
+                      <div class="form-field">
+                        <label for={id}>{t(field.label)}</label>
+                        <select
+                          id={id}
+                          value={String(current ?? '')}
+                          disabled={locked}
+                          aria-invalid={error === undefined ? undefined : 'true'}
+                          aria-describedby={error === undefined ? undefined : `${id}-error`}
+                          onChange={(event) => setField(field.key, event.currentTarget.value)}
+                        >
+                          {timeZones(String(current ?? '')).map((zone) => <option key={zone} value={zone}>{zone}</option>)}
+                        </select>
+                      </div>
+                    ) : field.kind === 'secret' ? (
+                      <FormField
+                        id={id}
+                        label={t(field.label)}
+                        type="password"
+                        value={typeof pending[field.key] === 'string' ? pending[field.key] as string : ''}
+                        onInput={(value) => setField(field.key, value, true)}
+                        hint={hint ?? t('settings.secretHint')}
+                        error={error}
+                        autoComplete="off"
+                        disabled={locked}
+                      />
+                    ) : (
+                      <FormField
+                        id={id}
+                        label={t(field.label)}
+                        value={String(current ?? '')}
+                        onInput={(value) => setField(field.key, value)}
+                        inputMode={field.kind === 'number' ? 'numeric' : 'text'}
+                        hint={hint}
+                        error={error}
+                        disabled={locked}
+                      />
+                    )}
+                    {field.kind === 'boolean' || field.kind === 'timezone' ? (
+                      <>
+                        {hint === undefined ? null : <p id={`${id}-hint`} class="form-hint">{hint}</p>}
+                        {error === undefined ? null : <p id={`${id}-error`} class="form-error">{error}</p>}
+                      </>
+                    ) : null}
+                    {sourceLabel === undefined ? null : <span>{t(sourceLabel)}</span>}
+                  </div>
+                );
+              })}
+            </fieldset>
+          ))}
           <button type="submit" disabled={saving || Object.keys(pending).length === 0}>{t('settings.save')}</button>
         </form>
       )}

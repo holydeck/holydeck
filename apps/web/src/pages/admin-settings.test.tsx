@@ -52,7 +52,7 @@ const values = {
   anthropicApiKey: '',
 };
 
-const sources = { port: 'file', locale: 'default', anthropicApiKey: 'env' };
+const sources = { port: 'file', locale: 'default', anthropicApiKey: 'env', dataDir: 'env' };
 
 const settingsReply = (extra: { readonly lastReloadError?: string } = {}): ReturnType<typeof reply> =>
   reply(200, successEnvelope({ values, sources, ...extra }, 'request-settings'));
@@ -82,7 +82,7 @@ describe('AdminSettingsPage', () => {
     expect((screen.getByLabelText('Development diagnostics') as HTMLInputElement).checked).toBe(false);
     expect((screen.getByLabelText('Development diagnostics') as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByText('Settings file')).toBeTruthy();
-    expect(screen.getByText('Environment')).toBeTruthy();
+    expect(screen.getAllByText('Environment').length).toBeGreaterThan(0);
     expect(screen.getByText('Default')).toBeTruthy();
   });
 
@@ -115,7 +115,7 @@ describe('AdminSettingsPage', () => {
     await renderPage();
 
     fireEvent.input(screen.getByLabelText('Port'), { target: { value: '9443' } });
-    fireEvent.input(screen.getByLabelText('Time zone'), { target: { value: 'America/New_York' } });
+    fireEvent.change(screen.getByLabelText('Time zone'), { target: { value: 'America/New_York' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Save changes' }).closest('form') as HTMLFormElement);
 
     await waitFor(() => expect(document.getElementById('announce-polite')?.textContent).toBe('Settings saved.'));
@@ -132,17 +132,17 @@ describe('AdminSettingsPage', () => {
     setFetching(fetching);
     await renderPage();
 
-    fireEvent.input(screen.getByLabelText('Anthropic API key'), { target: { value: 'sk-example' } });
+    fireEvent.input(screen.getByLabelText('Corpus access token'), { target: { value: 'corpus-secret' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Save changes' }).closest('form') as HTMLFormElement);
 
     await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
-    expect(JSON.parse(fetching.mock.calls[1]?.[1].body ?? '{}')).toEqual({ anthropicApiKey: 'sk-example' });
+    expect(JSON.parse(fetching.mock.calls[1]?.[1].body ?? '{}')).toEqual({ corpusToken: 'corpus-secret' });
   });
 
-  it('shows and announces a refused change', async () => {
+  it('shows a refusal that names a setting beside that field, and announces it', async () => {
     setFetching(async (_path, init) => init.method === 'PATCH'
       ? reply(422, errorEnvelope('request.validation_failed', 'Refused', 'request-save', [
-        { path: 'settings.developmentDiagnostics', code: 'field.not_allowed', message: 'That setting is environment-only.' },
+        { path: 'settings.port', code: 'field.not_allowed', message: 'port: must be between 1 and 65535' },
       ]))
       : settingsReply());
     await renderPage();
@@ -150,8 +150,104 @@ describe('AdminSettingsPage', () => {
     fireEvent.input(screen.getByLabelText('Port'), { target: { value: '9443' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Save changes' }).closest('form') as HTMLFormElement);
 
-    expect((await screen.findByRole('alert')).textContent).toBe('The change was refused: That setting is environment-only.');
-    expect(document.getElementById('announce-assertive')?.textContent).toBe('The change was refused: That setting is environment-only.');
+    expect((await screen.findByRole('alert')).textContent).toBe('Some settings were refused. Each one says why beside it.');
+    expect(document.getElementById('announce-assertive')?.textContent).toBe('Some settings were refused. Each one says why beside it.');
+    expect(screen.getByLabelText('Port').getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById('settings-port-error')?.textContent).toBe('port: must be between 1 and 65535');
+  });
+
+  it('shows a refusal that names no one setting as an alert for the whole form', async () => {
+    setFetching(async (_path, init) => init.method === 'PATCH'
+      ? reply(422, errorEnvelope('request.validation_failed', 'Refused', 'request-save', [
+        { path: 'settings', code: 'field.not_allowed', message: 'tlsCertFile and tlsKeyFile: set both or neither' },
+      ]))
+      : settingsReply());
+    await renderPage();
+
+    fireEvent.input(screen.getByLabelText('TLS certificate file'), { target: { value: '/etc/tls.crt' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Save changes' }).closest('form') as HTMLFormElement);
+
+    expect((await screen.findByRole('alert')).textContent).toBe('The change was refused: tlsCertFile and tlsKeyFile: set both or neither');
+  });
+
+  it('groups the fields under General, Time zone, Security, Retention and Integrations', async () => {
+    setFetching(async () => settingsReply());
+    await renderPage();
+
+    const form = screen.getByRole('button', { name: 'Save changes' }).closest('form') as HTMLFormElement;
+    expect([...form.querySelectorAll('fieldset > legend')].map((legend) => legend.textContent)).toEqual([
+      'General', 'Time zone', 'Security', 'Retention', 'Integrations',
+    ]);
+  });
+
+  it('offers the time zone as a list of IANA names, keeping the current one', async () => {
+    const fetching = vi.fn<FetchLike>(async (_path, init) => init.method === 'PATCH' ? reply(200, successEnvelope({ values, sources }, 'request-save')) : settingsReply());
+    setFetching(fetching);
+    await renderPage();
+
+    const zone = screen.getByLabelText('Time zone') as HTMLSelectElement;
+    expect(zone.tagName).toBe('SELECT');
+    expect(zone.value).toBe('UTC');
+    expect([...zone.options].map((option) => option.value)).toContain('Europe/Zurich');
+    fireEvent.change(zone, { target: { value: 'Europe/Zurich' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Save changes' }).closest('form') as HTMLFormElement);
+
+    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetching.mock.calls[1]?.[1].body ?? '{}')).toEqual({ timezone: 'Europe/Zurich' });
+  });
+
+  it('keeps a field the environment sets read-only, and says where to change it', async () => {
+    setFetching(async () => settingsReply());
+    await renderPage();
+
+    const dataDir = screen.getByLabelText('Data directory') as HTMLInputElement;
+    expect(dataDir.disabled).toBe(true);
+    expect(document.getElementById('settings-dataDir-hint')?.textContent).toBe(
+      'Set by this deployment’s environment. Change it there.',
+    );
+    expect((screen.getByLabelText('Anthropic API key') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Port') as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('treats the database URL as a secret, never echoing its redacted value back', async () => {
+    const fetching = vi.fn<FetchLike>(async (_path, init) => init.method === 'PATCH' ? reply(200, successEnvelope({ values, sources }, 'request-save')) : settingsReply());
+    setFetching(fetching);
+    await renderPage();
+
+    const mongo = screen.getByLabelText('Database URL') as HTMLInputElement;
+    expect(mongo.type).toBe('password');
+    expect(mongo.value).toBe('');
+    fireEvent.input(screen.getByLabelText('Port'), { target: { value: '9443' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Save changes' }).closest('form') as HTMLFormElement);
+
+    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetching.mock.calls[1]?.[1].body ?? '{}')).toEqual({ port: 9443 });
+  });
+
+  it('keeps a secret typed into and then cleared again, rather than wiping it', async () => {
+    setFetching(async () => settingsReply());
+    await renderPage();
+
+    const token = screen.getByLabelText('Corpus access token');
+    fireEvent.input(token, { target: { value: 'typed' } });
+    fireEvent.input(token, { target: { value: '' } });
+
+    expect((screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('refuses an empty or fractional number beside the field, sending nothing', async () => {
+    const fetching = vi.fn<FetchLike>(async () => settingsReply());
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.input(screen.getByLabelText('Port'), { target: { value: '' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Save changes' }).closest('form') as HTMLFormElement);
+
+    await waitFor(() => expect(document.getElementById('settings-port-error')?.textContent).toBe('Enter a whole number.'));
+    fireEvent.input(screen.getByLabelText('Audit log retention (days)'), { target: { value: '1.5' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Save changes' }).closest('form') as HTMLFormElement);
+    await waitFor(() => expect(document.getElementById('settings-auditRetentionDays-error')?.textContent).toBe('Enter a whole number.'));
+    expect(fetching).toHaveBeenCalledTimes(1);
   });
 
   it('renders not found and makes no request without settings administration permission', () => {

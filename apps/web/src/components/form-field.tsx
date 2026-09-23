@@ -18,6 +18,7 @@ export function FormField(props: {
   readonly minLength?: number;
   readonly maxLength?: number;
   readonly inputMode?: 'numeric' | 'text';
+  readonly disabled?: boolean;
 }): JSX.Element {
   const describedBy = [props.hint === undefined ? undefined : `${props.id}-hint`, props.error === undefined ? undefined : `${props.id}-error`]
     .filter((id): id is string => id !== undefined)
@@ -38,6 +39,7 @@ export function FormField(props: {
         minLength={props.minLength}
         maxLength={props.maxLength}
         inputMode={props.inputMode}
+        disabled={props.disabled}
       />
       {props.hint === undefined ? null : <p id={`${props.id}-hint`} class="form-hint">{props.hint}</p>}
       {props.error === undefined ? null : <p id={`${props.id}-error`} class="form-error">{props.error}</p>}
