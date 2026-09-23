@@ -21,6 +21,7 @@ export const ROUTES_DIR = 'apps/app/src';
 export const ROUTE_INTEGRATION_TESTS = {
   'media-delivery-routes.ts': 'tests/harness/integration/media-delivery.test.ts',
   'session-routes.ts': 'tests/harness/integration/surfaces.test.ts',
+  'corpus-proxy-routes.ts': 'tests/harness/integration/cli-corpus-proxy.test.ts',
   'app.ts GET /health': 'tests/harness/integration/surfaces.test.ts',
   'app.ts GET /api/v1/translations': 'tests/harness/integration/surfaces.test.ts',
   'live.ts GET LIVE_PATH': 'tests/harness/integration/surfaces.test.ts',

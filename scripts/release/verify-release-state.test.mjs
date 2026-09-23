@@ -40,6 +40,21 @@ test('a malformed tag is the only reported problem', () => {
   ]);
 });
 
+test('a next-channel prerelease tag resolves the same way a stable tag does', () => {
+  const state = {
+    tag: 'v2026.10.0-next.1',
+    manifests: {
+      'package.json': manifest('package.json', '2026.10.0-next.1'),
+      'packages/core/package.json': manifest('packages/core/package.json', '2026.10.0-next.1'),
+      'apps/cli/package.json': manifest('apps/cli/package.json', '2026.10.0-next.1'),
+      'apps/corpus/package.json': manifest('apps/corpus/package.json', '2026.10.0-next.1'),
+    },
+    cliVersionModule: "export const CLI_VERSION = '2026.10.0-next.1';\n",
+    changelog: '# Changelog\n\n## 2026.10.0-next.1 (2026-10-01)\n\n### Features\n\n* next channel\n',
+  };
+  assert.deepEqual(verifyReleaseState(state), []);
+});
+
 test('rejects regex metacharacters in a tag', () => {
   assert.deepEqual(verifyReleaseState({ ...consistent, tag: 'v2026.9.0.*' }), [
     "tag 'v2026.9.0.*' does not match v<major>.<minor>.<patch>",

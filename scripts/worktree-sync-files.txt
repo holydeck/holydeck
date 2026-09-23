@@ -1,0 +1,7 @@
+# Repo-relative paths to symlink from the primary worktree into every
+# other worktree. See scripts/sync-worktree-config.sh. One path per line,
+# blank lines and #-comments ignored.
+#
+# No gitignored .env/config/secret files exist in this repo yet (checked
+# 2026-09-21) -- add paths here once any app under apps/* gets a real
+# .env/.env.local, so new worktrees pick it up automatically.

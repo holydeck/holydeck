@@ -21,6 +21,7 @@ import {
   provenSession,
   rememberProvenSession,
 } from './csrf.js';
+import { CORPUS_RENDER_PROXY_PATH } from './corpus-proxy-routes.js';
 import { withSafeErrors } from './failures.js';
 import { SessionError, sessionContext, sessionsOn } from './sessions.js';
 import { memorySessions } from '../test/helpers/sessions.js';
@@ -227,9 +228,10 @@ describe('the guard after a restore', () => {
 describe('the routes the guard covers', () => {
   test('every route that changes something is behind it, and the exceptions are the declared ones', () => {
     // Claiming a fresh instance and signing in are the only changes a request with no session may make:
-    // one creates the first account there could be a session for, the other opens the session. Anything
-    // added here is a hole.
-    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`, `POST ${SESSION_PATH}`]);
+    // one creates the first account there could be a session for, the other opens the session. The third
+    // is not this application's own change at all, only a render request forwarded to the corpus under
+    // the caller's own bearer token. Anything else added here is a hole.
+    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`, `POST ${SESSION_PATH}`, `POST ${CORPUS_RENDER_PROXY_PATH}`]);
     expect(mutatingRoutesOf(app)).toEqual([{ method: 'POST', url: '/api/v1/anything' }]);
   });
 

@@ -38,6 +38,36 @@ describe('the internal API token', () => {
   });
 });
 
+describe('the corpus client tokens', () => {
+  it('is an empty list by default', () => {
+    expect(resolveServerConfig({}).clientTokens).toEqual([]);
+  });
+
+  it('splits a comma-separated list, trimming blanks and empty entries', () => {
+    const first = 'p'.repeat(24);
+    const second = 'q'.repeat(24);
+    expect(resolveServerConfig({ HOLYDECK_CORPUS_CLIENT_TOKENS: ` ${first} , ${second} ,, ` }).clientTokens).toEqual([
+      first,
+      second,
+    ]);
+  });
+
+  it('refuses any entry too short to be worth presenting', () => {
+    expect(thrownCode({ HOLYDECK_CORPUS_CLIENT_TOKENS: 'short' })).toBe('config_invalid_value');
+    expect(thrownCode({ HOLYDECK_CORPUS_CLIENT_TOKENS: `${'p'.repeat(24)},short` })).toBe('config_invalid_value');
+  });
+
+  it('names the variable and never the value it refused', () => {
+    try {
+      resolveServerConfig({ HOLYDECK_CORPUS_CLIENT_TOKENS: 'short-but-secret' });
+      expect.fail('did not refuse');
+    } catch (error) {
+      expect((error as Error).message).toContain('HOLYDECK_CORPUS_CLIENT_TOKENS');
+      expect((error as Error).message).not.toContain('short-but-secret');
+    }
+  });
+});
+
 describe('resolveServerConfig', () => {
   it('returns documented defaults for an empty environment', () => {
     expect(resolveServerConfig({})).toEqual({
@@ -49,6 +79,7 @@ describe('resolveServerConfig', () => {
       syncConcurrency: 2,
       syncDelayMs: 1000,
       browserFetch: false,
+      clientTokens: [],
     });
   });
 
@@ -75,6 +106,7 @@ describe('resolveServerConfig', () => {
       syncDelayMs: 0,
       browserFetch: true,
       browserExecutablePath: '/usr/bin/chromium',
+      clientTokens: [],
     });
   });
 

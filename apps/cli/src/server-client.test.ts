@@ -10,14 +10,18 @@ const noGet: HttpGet = async () => {
   throw new Error('unexpected GET');
 };
 
-function getClient(responses: Record<string, { status: number; body: string }>, seen: string[] = []) {
+function getClient(
+  responses: Record<string, { status: number; body: string }>,
+  seen: string[] = [],
+  baseUrl = 'https://holydeck.example.com/',
+) {
   const httpGet: HttpGet = async (url) => {
     seen.push(url);
     const response = responses[url];
     if (!response) throw new Error(`connect ECONNREFUSED (${url})`);
     return response;
   };
-  return new ServerClient('https://holydeck.example.com/', { httpGet, httpPost: noPost });
+  return new ServerClient(baseUrl, { httpGet, httpPost: noPost });
 }
 
 describe('ServerClient URLs and parsing', () => {
@@ -33,6 +37,30 @@ describe('ServerClient URLs and parsing', () => {
       },
     });
     await expect(client.health()).resolves.toEqual({ status: 'ok', version: '0.0.0', uptime: 12, store: 'ok' });
+  });
+
+  it('preserves a base URL path prefix', async () => {
+    const seen: string[] = [];
+    const client = getClient(
+      {
+        'https://holydeck.example.com/corpus/health': {
+          status: 200,
+          body: JSON.stringify({ status: 'ok', version: '0.0.0', uptime: 12, store: 'ok' }),
+        },
+        'https://holydeck.example.com/corpus/api/v1/translations': {
+          status: 200,
+          body: JSON.stringify({ translations: [] }),
+        },
+      },
+      seen,
+      'https://holydeck.example.com/corpus',
+    );
+    await client.health();
+    await client.getTranslations();
+    expect(seen).toEqual([
+      'https://holydeck.example.com/corpus/health',
+      'https://holydeck.example.com/corpus/api/v1/translations',
+    ]);
   });
 
   it('lists translations', async () => {
@@ -191,6 +219,20 @@ describe('ServerClient errors', () => {
     });
     const error = await client.getTranslations().catch((e: unknown) => e as HolyDeckError);
     expect((error as HolyDeckError).code).toBe('server_bad_response');
+  });
+
+  it('rejects an app API envelope with corpus URL guidance', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/health': {
+        status: 200,
+        body: JSON.stringify({ data: { status: 'ok' }, meta: { requestId: 'x' } }),
+      },
+    });
+    const error = await client.health().catch((e: unknown) => e as HolyDeckError);
+    expect((error as HolyDeckError).code).toBe('server_bad_response');
+    expect((error as HolyDeckError).params['reason']).toBe(
+      'received an app API envelope, not a corpus response -- point --server-url at the corpus API (e.g. https://host/corpus)',
+    );
   });
 
   it('rejects mis-shaped payloads field by field', async () => {

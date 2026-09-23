@@ -15,6 +15,12 @@ export interface ServerConfig {
   browserExecutablePath?: string;
   /** Shared secret the /api/v1 routes require. Absent leaves them open to whoever can reach the port. */
   apiToken?: string;
+  /**
+   * Additional bearer tokens scoped to the read/render routes the app's corpus proxy exposes (REL-09).
+   * Never accepted on sync, stats or search, so a client holding only one of these can never reach
+   * those routes even with apiToken configured. Empty when unset.
+   */
+  clientTokens: string[];
 }
 
 function intFromEnv(env: NodeJS.ProcessEnv, key: string, fallback: number, min: number, max?: number): number {
@@ -56,6 +62,27 @@ function tokenFromEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
   return token;
 }
 
+// Same length floor as tokenFromEnv, applied to each comma-separated entry; an empty variable or one
+// with no non-blank entries yields no client tokens rather than an error.
+function tokenListFromEnv(env: NodeJS.ProcessEnv, key: string): string[] {
+  const raw = env[key];
+  if (raw === undefined) return [];
+  const tokens = raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  for (const token of tokens) {
+    if (token.length < MINIMUM_CORPUS_TOKEN_LENGTH) {
+      throw new HolyDeckError('config_invalid_value', {
+        key,
+        value: '<redacted>',
+        reason: `expected every entry to be at least ${MINIMUM_CORPUS_TOKEN_LENGTH} characters`,
+      });
+    }
+  }
+  return tokens;
+}
+
 export function resolveServerConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const browserExecutablePath = env.HOLYDECK_BROWSER_EXECUTABLE;
   const apiToken = tokenFromEnv(env, 'HOLYDECK_CORPUS_TOKEN');
@@ -64,6 +91,7 @@ export function resolveServerConfig(env: NodeJS.ProcessEnv = process.env): Serve
       ? {}
       : { browserExecutablePath }),
     ...(apiToken === undefined ? {} : { apiToken }),
+    clientTokens: tokenListFromEnv(env, 'HOLYDECK_CORPUS_CLIENT_TOKENS'),
     host: env.HOLYDECK_HOST ?? '0.0.0.0',
     port: intFromEnv(env, 'HOLYDECK_PORT', 3000, 1, 65535),
     mongoUrl: env.HOLYDECK_MONGO_URL ?? 'mongodb://127.0.0.1:27017',

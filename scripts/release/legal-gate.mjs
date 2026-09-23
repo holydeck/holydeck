@@ -13,13 +13,44 @@ import { fromRepoRoot } from '../workspace/pipeline.mjs';
 
 export const LEGAL_RECORD_FILE = 'legal/index.json';
 
+// Governs whether a `next`-channel release may ever substitute a recorded prerelease exemption for full
+// legal acceptance. Fixed at 'full' here: a maintainer ruling to allow 'prerelease-exemption' is a legal
+// decision this script does not make for itself, so flipping it is a deliberate, separate commit, never
+// something a release argument alone can trigger.
+export const NEXT_CHANNEL_POLICY = 'full';
+
+/**
+ * A prerelease exemption is a maintainer-granted, time-boxed substitute for full legal acceptance on the
+ * `next` channel only — never on stable. Every field must be present and the grant must not have expired;
+ * this only checks shape and expiry, never the signature's cryptographic validity (a workflow-level
+ * concern, see legal-gate's module comment).
+ */
+function exemptionValid(record, channel, now) {
+  const exemption = record?.prereleaseExemption;
+  if (exemption === undefined) return false;
+  if (exemption.channel !== channel) return false;
+  if (typeof exemption.grantedBy !== 'string' || exemption.grantedBy === '') return false;
+  if (typeof exemption.scope !== 'string' || exemption.scope === '') return false;
+  if (typeof exemption.signature !== 'string' || exemption.signature === '') return false;
+  const expiresAt = new Date(exemption.expiresAt ?? '');
+  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= now.getTime()) return false;
+  return true;
+}
+
 /**
  * Grades one legal-decision record (the parsed contents of legal/index.json, or undefined when the file
  * does not exist). Every decision must be accepted, with a reviewer, a date, an evidence link, no open
  * questions, and a role that says outright whether counsel was retained — "no counsel retained" is as
  * valid an answer here as naming real counsel, as long as it is the honest one.
+ *
+ * `channel` and `policy` only ever relax anything on `next`, and only when `policy` is explicitly
+ * `'prerelease-exemption'` — the default `policy` (the `NEXT_CHANNEL_POLICY` constant) keeps `next`
+ * exactly as strict as `stable`.
  */
-export function verifyLegalGate(record) {
+export function verifyLegalGate(record, { channel = 'stable', policy = NEXT_CHANNEL_POLICY, now = new Date() } = {}) {
+  if (channel === 'next' && policy === 'prerelease-exemption' && exemptionValid(record, channel, now)) {
+    return [];
+  }
   if (record === undefined) {
     return [
       `${LEGAL_RECORD_FILE} was not found: no legal decision is recorded in this repository, and a release with none recorded cannot proceed`,
@@ -67,12 +98,13 @@ export function readLegalRecord() {
 }
 
 function main() {
-  const problems = verifyLegalGate(readLegalRecord());
+  const channel = process.argv[2] ?? 'stable';
+  const problems = verifyLegalGate(readLegalRecord(), { channel });
   if (problems.length > 0) {
     for (const problem of problems) console.error(`legal-gate: ${problem}`);
     process.exit(1);
   }
-  console.log('legal-gate: every recorded legal decision is accepted');
+  console.log(`legal-gate: every recorded legal decision is accepted (channel: ${channel})`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main();

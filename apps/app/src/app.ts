@@ -12,6 +12,7 @@ import { serveConflictRoutes } from './conflict-routes.js';
 import { contentKindResolver } from './content-kind.js';
 import { serveContentLanguageRoutes } from './content-language-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
+import { serveCorpusProxyRoutes } from './corpus-proxy-routes.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
 import { serveIntegrationRoutes, sermonAiSwitch } from './integration-routes.js';
@@ -542,6 +543,10 @@ export function buildApp({
   // Behind `services.manage`, the same as the sermon import preview: bringing a PowerPoint deck in is a
   // service integration rather than content editing, even though what it ends in is a Song.
   servePptxRoutes(app, { pptxImport, pptxReview, pptxCommit, pptxSessions, identity });
+
+  // The CLI's own way into the library (REL-09): unauthenticated by this application, so it is registered
+  // public and last among the routes this server names for itself, next to the other corpus-backed ones.
+  serveCorpusProxyRoutes(app, { corpusUrl: settings.values.corpusUrl });
 
   if (web !== undefined) serveWebClient(app, web);
 

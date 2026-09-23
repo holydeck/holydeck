@@ -11,27 +11,49 @@ on:
         description: Release version to tag (required when push is true)
         type: string
         default: ""
+      channel:
+        description: Release channel, stable or next (required when push is true)
+        type: string
+        default: ""
 
-# A called workflow's own permissions cap what its caller's grant can hand down, so the build job
+# A called workflow's own permissions cap what its caller's grant can hand down, so the images job
 # below asks for exactly what it can use. ci.yml's caller grants only contents: read (enough for a
 # build check), which caps packages: write and id-token: write away there — harmless, since the
 # push- and sign-only steps stay inert (inputs.push is false). release.yml's caller grants the
 # full set for a real push and signature.
 jobs:
-  build:
+  images:
+    # Pinned to the one matrix field that names this build's identity, not left to GitHub's
+    # default of listing every matrix field in the check name: `dockerfile`, `description` and
+    # `aliases` are implementation details that have changed before (this job itself was renamed
+    # from `build` to `images` and gained its matrix in the same change) and will again, and each
+    # of those changes would otherwise silently rewrite the required-status-check name a branch
+    # ruleset pins by exact string — see RELEASING.md's maintainer setup checklist for the
+    # resulting names this repository's rulesets require.
+    name: images (${{ matrix.name }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
+    strategy:
+      matrix:
+        include:
+          - name: corpus
+            dockerfile: apps/corpus/Dockerfile
+            description: HolyDeck corpus
+            aliases: [server]
+          - name: app
+            dockerfile: apps/app/Dockerfile
+            description: HolyDeck app
+            aliases: []
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      # The tag list is what tells the :latest guard below whether this
-      # release is the newest one. Only push mode needs it, and the public
-      # repo serves it without credentials.
+      # The tag list is what tells image-tags.mjs whether this release is the newest stable one.
+      # Only push mode needs it, and the public repo serves it without credentials.
       - name: Fetch the release tags
         if: inputs.push
         run: git fetch --tags --depth=1 origin
@@ -47,52 +69,68 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Node 24.20.0
+        if: inputs.push
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .nvmrc
       - name: Compute the image tags
         id: tags
         shell: bash
         env:
           PUSH: ${{ inputs.push }}
           VERSION: ${{ inputs.version }}
+          NAME: ${{ matrix.name }}
+          ALIASES: ${{ join(matrix.aliases, ',') }}
         run: |
           if [ "$PUSH" != "true" ]; then
-            echo "tags=holydeck-server:ci" >> "$GITHUB_OUTPUT"
+            echo "tags=holydeck-${NAME}:ci" >> "$GITHUB_OUTPUT"
+            echo "all_tags=holydeck-${NAME}:ci" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -z "$VERSION" ]; then
             echo "the version input is required when push is true" >&2
             exit 1
           fi
-          # The tag being released is already pushed, so it is itself in this
-          # list: it sorts first exactly when this is the newest release.
-          # Re-running an older release's job therefore leaves :latest alone
-          # instead of pointing it backwards.
-          newest="$(git for-each-ref --count=1 --sort=-v:refname --format='%(refname:short)' 'refs/tags/v*')"
-          if [ -z "$newest" ]; then
-            echo "no v* tags found, cannot tell whether v$VERSION is the newest release" >&2
+          names="$NAME"
+          if [ -n "$ALIASES" ]; then
+            names="$names,$ALIASES"
+          fi
+          # image-tags.mjs does its own numeric year/month/patch comparison over every v* tag, so
+          # no --sort flag is needed here, unlike the versionsort-based lookup this replaced.
+          computed="$(git for-each-ref --format='%(refname:short)' 'refs/tags/v*' \
+            | node scripts/release/image-tags.mjs "$VERSION" "$names")"
+          name_upper="$(echo "$NAME" | tr '[:lower:]' '[:upper:]')"
+          primary_tags="$(echo "$computed" | sed -n "s/^${name_upper}_TAGS=//p")"
+          if [ -z "$primary_tags" ]; then
+            echo "image-tags.mjs produced no tags for $NAME" >&2
             exit 1
           fi
           {
             echo 'tags<<TAGS'
-            echo "ghcr.io/holydeck/server:$VERSION"
-            if [ "$newest" = "v$VERSION" ]; then
-              echo "ghcr.io/holydeck/server:latest"
-            fi
+            echo "$primary_tags" | tr ',' '\n'
             echo 'TAGS'
           } >> "$GITHUB_OUTPUT"
-          if [ "$newest" != "v$VERSION" ]; then
-            echo "$newest is newer than v$VERSION, leaving :latest where it is"
-          fi
-      - name: Build the server image
+          all_tags="$primary_tags"
+          IFS=',' read -ra alias_list <<<"$ALIASES"
+          for alias in "${alias_list[@]}"; do
+            [ -n "$alias" ] || continue
+            alias_upper="$(echo "$alias" | tr '[:lower:]' '[:upper:]')"
+            alias_tags="$(echo "$computed" | sed -n "s/^${alias_upper}_TAGS=//p")"
+            all_tags="$all_tags,$alias_tags"
+          done
+          echo "all_tags=$all_tags" >> "$GITHUB_OUTPUT"
+      - name: Build the ${{ matrix.name }} image
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
-          file: apps/corpus/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: ${{ inputs.push }}
           tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/holydeck/holydeck
-            org.opencontainers.image.description=HolyDeck server
+            org.opencontainers.image.description=${{ matrix.description }}
             org.opencontainers.image.licenses=MIT
             org.opencontainers.image.version=${{ inputs.version }}
             org.opencontainers.image.revision=${{ steps.commit.outputs.sha }}
@@ -103,21 +141,60 @@ jobs:
       # Fulcio for a short-lived signing certificate, signs the pushed digest, and records the
       # signature in Rekor's public transparency log — no private key exists anywhere for this to
       # leak. Signs the digest rather than a tag, because a tag can move and a digest cannot,
-      # which is what makes every tag above verify against this one signature. A signing failure
-      # fails this step, and github-release (which needs this job) never runs — see RELEASING.md
-      # for how a consumer verifies this independently.
+      # which is what makes every tag of this repository verify against this one signature. A
+      # signing failure fails this step, and github-release (which needs this job) never runs —
+      # see RELEASING.md for how a consumer verifies this independently.
       - name: Sign the image with cosign (keyless)
         if: inputs.push
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: cosign sign --yes "ghcr.io/holydeck/server@${DIGEST}"
+          NAME: ${{ matrix.name }}
+        run: cosign sign --yes "ghcr.io/holydeck/${NAME}@${DIGEST}"
+      - name: Set up crane
+        if: inputs.push && join(matrix.aliases, ',') != ''
+        uses: imjasonh/setup-crane@feee3b6bb0d4c68370f256a4502498c9227e5c6b # v0.7
+      # An alias is not a second build: crane copies the primary digest's raw manifest and blobs
+      # to a second repository name unmodified, so the alias's digest is byte-for-byte identical
+      # to the primary's — the promise MAINTENANCE.md makes to anyone still pulling the old name
+      # during its one-release deprecation window. (`docker buildx imagetools create` was tried
+      # first, but even without its `--annotation` flags it re-serializes the manifest into a new
+      # index and so mints a different digest — exactly the drift this step exists to avoid, and
+      # why the cosign call below is safe to reuse the primary's own $DIGEST for the alias too.)
+      # A registry stores a cosign signature per repository, not per digest, so each alias
+      # repository still needs its own sign call below, signing that same shared digest.
+      - name: Recreate the image under each alias name
+        if: inputs.push && join(matrix.aliases, ',') != ''
+        env:
+          NAME: ${{ matrix.name }}
+          ALIASES: ${{ join(matrix.aliases, ',') }}
+          VERSION: ${{ inputs.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          computed="$(git for-each-ref --format='%(refname:short)' 'refs/tags/v*' \
+            | node scripts/release/image-tags.mjs "$VERSION" "$NAME,$ALIASES")"
+          IFS=',' read -ra alias_list <<<"$ALIASES"
+          for alias in "${alias_list[@]}"; do
+            [ -n "$alias" ] || continue
+            alias_upper="$(echo "$alias" | tr '[:lower:]' '[:upper:]')"
+            alias_tags="$(echo "$computed" | sed -n "s/^${alias_upper}_TAGS=//p")"
+            IFS=',' read -ra tag_list <<<"$alias_tags"
+            for tag in "${tag_list[@]}"; do
+              [ -n "$tag" ] || continue
+              crane copy "ghcr.io/holydeck/${NAME}@${DIGEST}" "$tag"
+            done
+            cosign sign --yes "ghcr.io/holydeck/${alias}@${DIGEST}"
+            echo "- ghcr.io/holydeck/${alias} recreated as a deprecated alias of ghcr.io/holydeck/${NAME} (see MAINTENANCE.md)" >> "$GITHUB_STEP_SUMMARY"
+          done
       - name: Record the pushed image tags
         if: inputs.push
         env:
-          TAGS: ${{ steps.tags.outputs.tags }}
+          NAME: ${{ matrix.name }}
+          TAGS: ${{ steps.tags.outputs.all_tags }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
-          while IFS= read -r tag; do
-            if [ -n "$tag" ]; then
-              echo "- $tag pushed" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done <<<"$TAGS"
+          echo "- $NAME channel: $CHANNEL" >> "$GITHUB_STEP_SUMMARY"
+          IFS=',' read -ra tag_list <<<"$TAGS"
+          for tag in "${tag_list[@]}"; do
+            [ -n "$tag" ] || continue
+            echo "- $tag pushed" >> "$GITHUB_STEP_SUMMARY"
+          done

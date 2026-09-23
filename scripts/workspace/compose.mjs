@@ -33,13 +33,13 @@ export const TEST_FILE = 'compose.test.yaml';
 export const DEPLOY_FILE = 'compose.yaml';
 
 /** What a development stack has to start for the environment to be the whole environment. */
-export const REQUIRED_SERVICES = Object.freeze(['app', 'migrate', 'mongo', 'server', 'web', 'worker']);
+export const REQUIRED_SERVICES = Object.freeze(['app', 'corpus', 'migrate', 'mongo', 'web', 'worker']);
 
 // The deployment stack starts nothing to serve the web client with: the application image already has it
 // baked in, the same way apps/app/Dockerfile builds it for every stack, so there is no separate service
 // here to require.
 /** What the supported deployment has to start for DEPL-01 to be met. */
-export const DEPLOY_SERVICES = Object.freeze(['app', 'migrate', 'mongo', 'server', 'worker']);
+export const DEPLOY_SERVICES = Object.freeze(['app', 'corpus', 'migrate', 'mongo', 'worker']);
 
 /** The services that run once and exit, which is the opposite of what a healthcheck waits for. */
 export const ONE_SHOT_SERVICES = Object.freeze(['migrate']);
@@ -49,20 +49,27 @@ export const PERSISTED_PATHS = Object.freeze(['/data/db', '/data/holydeck']);
 
 /** What may never be published past this machine, and the reason each one may not be. */
 export const LOOPBACK_ONLY = Object.freeze({
+  corpus: 'the corpus is reachable from inside the deployment only',
   mongo: 'the records it holds answer from inside the deployment only',
-  server: 'the corpus is reachable from inside the deployment only',
   worker: 'nothing outside the deployment has any business calling the worker directly',
 });
 
 // The deployment stack pulls this image rather than building it, so no service here names a `build:`
 // whose Dockerfile a healthcheck or an image-pin check could read; this is where each such image's own
 // Dockerfile is found instead, the same Dockerfile docker-build.yml publishes it from.
-const FIRST_PARTY_DOCKERFILES = Object.freeze({ 'ghcr.io/holydeck/server': 'apps/corpus/Dockerfile' });
+const FIRST_PARTY_DOCKERFILES = Object.freeze({ 'ghcr.io/holydeck/corpus': 'apps/corpus/Dockerfile' });
 
 // A pulled image's digest or tag is stripped before it is looked up above: a digest comes after an
 // @, which the tag pattern below does not match, so it has to go first or a digest-pinned first-party
 // image is left with the digest still attached and never matches its own Dockerfile's key.
-const imageRepository = (image) => image.replace(/@.*$/u, '').replace(/:[^:@/]*$/u, '');
+const imageRepository = (image) => {
+  const noDigest = image.replace(/@.*$/u, '');
+  const lastSlash = noDigest.lastIndexOf('/');
+  const prefix = lastSlash === -1 ? '' : noDigest.slice(0, lastSlash + 1);
+  const last = lastSlash === -1 ? noDigest : noDigest.slice(lastSlash + 1);
+  const colon = last.indexOf(':');
+  return prefix + (colon === -1 ? last : last.slice(0, colon));
+};
 
 const dockerfileFor = (service) => service.build?.dockerfile ?? FIRST_PARTY_DOCKERFILES[imageRepository(service.image ?? '')];
 

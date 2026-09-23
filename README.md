@@ -9,7 +9,8 @@ A full setup for Sunday — bible verses and song slides, from sermon prep to sc
 
 > **Status: early development.** The first release has shipped: the CLI is on npm as
 > [`@holydeck/cli`](https://www.npmjs.com/package/@holydeck/cli) and the server is available as
-> a container image at `ghcr.io/holydeck/server`.
+> a container image at `ghcr.io/holydeck/corpus`. Prereleases are also published under the npm
+> `next` dist-tag and the GHCR `:next` image tag for testing ahead of a stable release.
 
 ## What it does
 
@@ -85,7 +86,7 @@ pnpm dev:server        # build from the working tree, serve on http://localhost:
 pnpm dev:server:down   # stop it and delete the volumes
 ```
 
-Every service is health-checked, so `docker compose -f compose.dev.yaml up --build --wait app server
+Every service is health-checked, so `docker compose -f compose.dev.yaml up --build --wait app corpus
 web worker` comes back only once the stack is usable rather than merely started. The application
 answers `/health`, the corpus declares its check in its own image, and the worker serves no HTTP at
 all: its health is the heartbeat it writes, which it stops writing when the data directory it needs
@@ -100,6 +101,11 @@ Records live in named volumes: `down` and `up` again finds the same database, an
 throws it away. `compose.test.yaml` is the same services arranged to remember nothing — its own
 project, tmpfs instead of volumes, loopback ports of its own — so a test run starts from an empty
 database and can run beside the development stack.
+
+For the published deployment stack, `HOLYDECK_VERSION` selects the image tag `compose.yaml` pulls
+for the corpus and the app, worker, and migration services. It defaults to `latest` when unset;
+set it to `next` to track the prerelease channel. See `.env.example` for every variable
+`compose.yaml` reads. The development and test stacks always build from the working tree instead.
 
 ```sh
 pnpm verify:compose   # read both Compose files: health gates, wait conditions, what persists

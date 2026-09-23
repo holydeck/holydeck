@@ -28,7 +28,7 @@ export const MANIFESTS = [
 export const CLI_VERSION_FILE = 'apps/cli/src/version.ts';
 
 export function isValidVersion(version) {
-  return /^\d+\.\d+\.\d+$/.test(version ?? '');
+  return /^\d+\.\d+\.\d+(-next\.\d+)?$/.test(version ?? '');
 }
 
 export function bumpManifest(jsonText, version) {

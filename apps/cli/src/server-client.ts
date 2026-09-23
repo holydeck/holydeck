@@ -103,11 +103,19 @@ export class ServerClient {
       }
       throw new HolyDeckError('server_error', { status: response.status, url, message });
     }
+    let parsed: unknown;
     try {
-      return JSON.parse(response.body);
+      parsed = JSON.parse(response.body);
     } catch {
       bad(url, 'not valid JSON');
     }
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && 'data' in parsed && 'meta' in parsed) {
+      bad(
+        url,
+        'received an app API envelope, not a corpus response -- point --server-url at the corpus API (e.g. https://host/corpus)',
+      );
+    }
+    return parsed;
   }
 
   async health(): Promise<ServerHealth> {

@@ -32,7 +32,7 @@ const dev = () => ({
       ports: ['127.0.0.1:27017:27017'],
       volumes: ['mongo-dev-data:/data/db'],
     },
-    server: {
+    corpus: {
       build: { dockerfile: 'apps/corpus/Dockerfile' },
       ports: ['127.0.0.1:3000:3000'],
       depends_on: { mongo: { condition: 'service_healthy' } },
@@ -48,7 +48,7 @@ const dev = () => ({
       volumes: ['holydeck-dev-data:/data/holydeck', 'web-dist:/srv/web/dist:ro'],
       depends_on: {
         migrate: { condition: 'service_completed_successfully' },
-        server: { condition: 'service_healthy' },
+        corpus: { condition: 'service_healthy' },
         web: { condition: 'service_healthy' },
       },
     },
@@ -96,8 +96,8 @@ const deploy = () => ({
       healthcheck: CHECK,
       volumes: ['mongo-data:/data/db'],
     },
-    server: {
-      image: 'ghcr.io/holydeck/server:latest',
+    corpus: {
+      image: 'ghcr.io/holydeck/corpus:latest',
       depends_on: { mongo: { condition: 'service_healthy' } },
     },
     migrate: {
@@ -112,7 +112,7 @@ const deploy = () => ({
       volumes: ['holydeck-data:/data/holydeck', './config:/data/holydeck/config'],
       depends_on: {
         migrate: { condition: 'service_completed_successfully' },
-        server: { condition: 'service_healthy' },
+        corpus: { condition: 'service_healthy' },
       },
     },
     worker: {
@@ -128,7 +128,7 @@ const deploy = () => ({
 const only = (stack) => verifyStack(stack, DOCKERFILES);
 
 test('the contract names the services a development stack has to start', () => {
-  assert.deepEqual([...REQUIRED_SERVICES], ['app', 'migrate', 'mongo', 'server', 'web', 'worker']);
+  assert.deepEqual([...REQUIRED_SERVICES], ['app', 'corpus', 'migrate', 'mongo', 'web', 'worker']);
   assert.deepEqual([...ONE_SHOT_SERVICES], ['migrate']);
   assert.deepEqual([...PERSISTED_PATHS], ['/data/db', '/data/holydeck']);
 });
@@ -153,7 +153,7 @@ test('refuses a long-running service whose health nothing checks', () => {
 });
 
 test('accepts a service whose image declares the check, which is where the corpus declares its own', () => {
-  assert.deepEqual(only(dev()).filter((problem) => problem.includes('server')), []);
+  assert.deepEqual(only(dev()).filter((problem) => problem.includes('corpus')), []);
 });
 
 test('refuses a healthcheck on a service that is meant to exit', () => {
@@ -172,9 +172,9 @@ test('refuses a dependency the stack does not define', () => {
 
 test('refuses the list form, which starts a service before the one it needs is ready', () => {
   const stack = dev();
-  stack.services.server.depends_on = ['mongo'];
+  stack.services.corpus.depends_on = ['mongo'];
   assert.deepEqual(only(stack), [
-    'compose.dev.yaml: server depends on mongo with no condition, so it starts before mongo is ready',
+    'compose.dev.yaml: corpus depends on mongo with no condition, so it starts before mongo is ready',
   ]);
 });
 
@@ -189,9 +189,9 @@ test('refuses waiting for health from a service that exits instead of becoming h
 
 test('refuses waiting for a long-running service to finish, because it never does', () => {
   const stack = dev();
-  stack.services.app.depends_on.server = { condition: 'service_completed_successfully' };
+  stack.services.app.depends_on.corpus = { condition: 'service_completed_successfully' };
   assert.deepEqual(only(stack), [
-    'compose.dev.yaml: app waits for server to finish, but server keeps running; wait for service_healthy',
+    'compose.dev.yaml: app waits for corpus to finish, but corpus keeps running; wait for service_healthy',
   ]);
 });
 
@@ -205,9 +205,9 @@ test('refuses an application that starts without the migration, which T19 makes 
 
 test('refuses a corpus published to more than this machine', () => {
   const stack = dev();
-  stack.services.server.ports = ['3000:3000'];
+  stack.services.corpus.ports = ['3000:3000'];
   assert.deepEqual(only(stack), [
-    'compose.dev.yaml: server publishes 3000:3000 on every interface; the corpus is reachable from inside the deployment only',
+    'compose.dev.yaml: corpus publishes 3000:3000 on every interface; the corpus is reachable from inside the deployment only',
   ]);
 });
 
@@ -307,7 +307,7 @@ test('refuses a test stack that publishes a port to the network', () => {
 });
 
 test('the contract names the services the supported deployment has to start', () => {
-  assert.deepEqual([...DEPLOY_SERVICES], ['app', 'migrate', 'mongo', 'server', 'worker']);
+  assert.deepEqual([...DEPLOY_SERVICES], ['app', 'corpus', 'migrate', 'mongo', 'worker']);
 });
 
 test('a deployment stack that keeps every rule has nothing to report', () => {
@@ -329,14 +329,14 @@ test('refuses the deployment stack missing one of its own required services', ()
 });
 
 test('accepts a pulled first-party image whose own Dockerfile declares the healthcheck', () => {
-  assert.deepEqual(only(deploy()).filter((problem) => problem.includes('server')), []);
+  assert.deepEqual(only(deploy()).filter((problem) => problem.includes('corpus')), []);
 });
 
 test('refuses a pulled image nothing here can trace back to a Dockerfile', () => {
   const stack = deploy();
-  stack.services.server.image = 'ghcr.io/example/unknown:1.0';
+  stack.services.corpus.image = 'ghcr.io/example/unknown:1.0';
   assert.deepEqual(only(stack), [
-    'compose.yaml: server declares no healthcheck, and its image is not built here to declare one',
+    'compose.yaml: corpus declares no healthcheck, and its image is not built here to declare one',
   ]);
 });
 
@@ -358,15 +358,15 @@ test('refuses the deployment stack mounting the settings file itself', () => {
 
 test('finds the first-party Dockerfile behind a digest-pinned reference, not just a tag', () => {
   const stack = deploy();
-  stack.services.server.image = `ghcr.io/holydeck/server@sha256:${'a'.repeat(64)}`;
+  stack.services.corpus.image = `ghcr.io/holydeck/corpus@sha256:${'a'.repeat(64)}`;
   assert.deepEqual(only(stack), []);
 });
 
 test('refuses a first-party image with no tag at all, not exempt merely by being first-party', () => {
   const stack = deploy();
-  stack.services.server.image = 'ghcr.io/holydeck/server';
+  stack.services.corpus.image = 'ghcr.io/holydeck/corpus';
   assert.deepEqual(only(stack), [
-    'compose.yaml: server runs ghcr.io/holydeck/server, which is whatever it was pulled on the day',
+    'compose.yaml: corpus runs ghcr.io/holydeck/corpus, which is whatever it was pulled on the day',
   ]);
 });
 
@@ -442,7 +442,7 @@ test('every service in the stack is health-gated, read out of the repository as 
 test('reads a stack where every service is up and the migration finished', () => {
   const ps = [
     { Service: 'mongo', State: 'running', Health: 'healthy' },
-    { Service: 'server', State: 'running', Health: 'healthy' },
+    { Service: 'corpus', State: 'running', Health: 'healthy' },
     { Service: 'web', State: 'running', Health: 'healthy' },
     { Service: 'app', State: 'running', Health: 'healthy' },
     { Service: 'worker', State: 'running', Health: 'healthy' },
@@ -457,7 +457,7 @@ test('reads a stack where every service is up and the migration finished', () =>
 test('reads the same stack when docker answers with one array instead of a line each', () => {
   const ps = JSON.stringify([
     { Service: 'mongo', State: 'running', Health: 'healthy' },
-    { Service: 'server', State: 'running', Health: 'healthy' },
+    { Service: 'corpus', State: 'running', Health: 'healthy' },
     { Service: 'web', State: 'running', Health: 'healthy' },
     { Service: 'app', State: 'running', Health: 'healthy' },
     { Service: 'worker', State: 'running', Health: 'healthy' },
@@ -470,7 +470,7 @@ test('reads the same stack when docker answers with one array instead of a line 
 test('names every service that is not up, and the migration that did not finish', () => {
   const ps = [
     { Service: 'mongo', State: 'running', Health: 'healthy' },
-    { Service: 'server', State: 'running', Health: 'starting' },
+    { Service: 'corpus', State: 'running', Health: 'starting' },
     { Service: 'web', State: 'running', Health: 'unhealthy' },
     { Service: 'app', State: 'exited', Health: '', ExitCode: 1 },
     { Service: 'migrate', State: 'exited', Health: '', ExitCode: 2 },
@@ -480,8 +480,8 @@ test('names every service that is not up, and the migration that did not finish'
 
   assert.deepEqual(healthVerdicts(ps), [
     'app is exited, not running',
+    'corpus is running but starting, not healthy',
     'migrate exited 2 rather than finishing successfully',
-    'server is running but starting, not healthy',
     'web is running but unhealthy, not healthy',
     'worker is not in the stack at all',
   ]);
@@ -490,7 +490,7 @@ test('names every service that is not up, and the migration that did not finish'
 test('names a migration still running, because a one-shot service that parks is a hung stack', () => {
   const ps = [
     { Service: 'mongo', State: 'running', Health: 'healthy' },
-    { Service: 'server', State: 'running', Health: 'healthy' },
+    { Service: 'corpus', State: 'running', Health: 'healthy' },
     { Service: 'web', State: 'running', Health: 'healthy' },
     { Service: 'app', State: 'running', Health: 'healthy' },
     { Service: 'worker', State: 'running', Health: 'healthy' },

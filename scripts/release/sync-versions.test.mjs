@@ -37,6 +37,11 @@ test('isValidVersion accepts calver and plain semver, rejects garbage', () => {
   assert.equal(isValidVersion(''), false);
 });
 
+test('isValidVersion accepts a next-channel prerelease suffix, rejects one with no digits', () => {
+  assert.equal(isValidVersion('2026.10.0-next.3'), true);
+  assert.equal(isValidVersion('2026.10.0-next'), false);
+});
+
 test('the fan-out targets are every workspace package and the CLI constant', () => {
   assert.deepEqual(MANIFESTS, [
     'packages/contracts/package.json',

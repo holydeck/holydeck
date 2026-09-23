@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { HolyDeckError } from '@holydeck/core/messages';
-import { requireApiToken } from './auth.js';
+import { requireApiToken, requireProxyToken } from './auth.js';
 import { API_ENDPOINTS, errorEnvelope, statusForCode } from './errors.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerLegacyVerseRoute } from './routes/legacy.js';
@@ -24,6 +24,8 @@ export interface AppDeps {
   logger?: FastifyServerOptions['logger'];
   /** Set by a deployment that keeps this service internal; absent leaves /api/v1 open. */
   apiToken?: string;
+  /** Additional tokens scoped to the read/render routes below; never accepted on sync, stats or search. */
+  clientTokens?: readonly string[];
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -66,6 +68,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerHealthRoute(app, deps);
 
   const apiToken = deps.apiToken;
+  const clientTokens = deps.clientTokens ?? [];
 
   void app.register(
     async (api) => {
@@ -76,13 +79,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           requireApiToken(request.headers, apiToken);
         });
       }
-      registerTranslationsRoutes(api, deps);
-      registerVersesRoute(api, deps);
       registerSearchRoute(api, deps);
       registerSyncRoutes(api, deps);
       registerStatsRoute(api, deps);
-      registerRenderRoute(api, deps);
       registerLegacyVerseRoute(api, deps);
+    },
+    { prefix: '/api/v1' },
+  );
+
+  // Read and render: the routes the app's corpus proxy (REL-09) exposes to CLI users, so a client token
+  // is enough here even though it is never accepted on the admin-scoped routes registered above.
+  void app.register(
+    async (api) => {
+      if (apiToken !== undefined) {
+        api.addHook('onRequest', async (request) => {
+          requireProxyToken(request.headers, apiToken, clientTokens);
+        });
+      }
+      registerTranslationsRoutes(api, deps);
+      registerVersesRoute(api, deps);
+      registerRenderRoute(api, deps);
     },
     { prefix: '/api/v1' },
   );

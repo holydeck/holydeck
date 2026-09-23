@@ -23,7 +23,7 @@ export const EXPECTED_PACKAGE_NAMES = {
 };
 
 export function verifyReleaseState({ tag, manifests, cliVersionModule, changelog }) {
-  const match = /^v(\d+\.\d+\.\d+)$/.exec(tag ?? '');
+  const match = /^v(\d+\.\d+\.\d+(?:-next\.\d+)?)$/.exec(tag ?? '');
   if (!match) {
     return [`tag '${tag ?? ''}' does not match v<major>.<minor>.<patch>`];
   }

@@ -28,7 +28,7 @@
 name: holydeck-test
 
 services:
-  server:
+  corpus:
     build:
       context: .
       dockerfile: apps/corpus/Dockerfile
@@ -62,7 +62,7 @@ services:
     environment:
       HOLYDECK_PORT: "3100"
       HOLYDECK_LOG_LEVEL: warn
-      HOLYDECK_CORPUS_URL: http://server:3000
+      HOLYDECK_CORPUS_URL: http://corpus:3000
       HOLYDECK_CORPUS_TOKEN: test-corpus-token-not-a-secret
       HOLYDECK_MONGO_URL: mongodb://holydeck:test-mongo-password-not-a-secret@mongo:27017/holydeck?authSource=holydeck
     ports:
@@ -74,7 +74,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      server:
+      corpus:
         condition: service_healthy
       web:
         condition: service_healthy

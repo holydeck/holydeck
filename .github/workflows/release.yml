@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.channel.outputs.channel }}
+      dist_tag: ${{ steps.channel.outputs.dist_tag }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
     env:
       MONGOMS_DOWNLOAD_DIR: /home/runner/.cache/mongodb-binaries
     steps:
@@ -25,17 +28,6 @@ jobs:
           # Full history so the tagged commit's ancestry can be checked below.
           fetch-depth: 0
           persist-credentials: false
-      # A tag can be pushed onto any commit, including one that never passed
-      # review. Everything downstream of here trusts the tag, so refuse a tag
-      # that is not on main before the human gate ever sees it.
-      - name: Check the tag is on main
-        run: |
-          git fetch --no-tags origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
-            echo "$GITHUB_REF_NAME points at $GITHUB_SHA, which is not reachable from main" >&2
-            exit 1
-          fi
-          echo "$GITHUB_REF_NAME is on main"
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6
       - name: Set up Node 24.20.0
@@ -43,6 +35,26 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - name: Compute release channel
+        id: channel
+        run: node scripts/release/channel-of.mjs "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+      # A tag can be pushed onto any commit, including one that never passed
+      # review. Everything downstream of here trusts the tag, so refuse a tag
+      # that is not on the channel's own branch before the human gate ever
+      # sees it: a stable tag must be reachable from main, a next tag from next.
+      - name: Check the tag is on the right branch
+        run: |
+          if [ "${{ steps.channel.outputs.channel }}" = "next" ]; then
+            branch=next
+          else
+            branch=main
+          fi
+          git fetch --no-tags origin "$branch"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "$GITHUB_REF_NAME points at $GITHUB_SHA, which is not reachable from $branch" >&2
+            exit 1
+          fi
+          echo "$GITHUB_REF_NAME is on $branch"
       - name: Cache the MongoDB test binaries
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -59,7 +71,7 @@ jobs:
       # unaccepted decision would, so this step is expected to fail until a maintainer records
       # and accepts every decision.
       - name: Check every legal decision is accepted
-        run: node scripts/release/legal-gate.mjs
+        run: node scripts/release/legal-gate.mjs "${{ steps.channel.outputs.channel }}"
       # No planning, prompt, audit, task-brief, task-report or review artifact, and no credit to
       # an AI coding assistant as this work's author — see docs-split.mjs.
       - name: Check the repository split holds
@@ -130,6 +142,7 @@ jobs:
       - name: Publish @holydeck/cli on npmjs
         env:
           VERSION: ${{ needs.verify.outputs.version }}
+          DIST_TAG: ${{ needs.verify.outputs.dist_tag }}
         run: |
           if live="$(npm view "@holydeck/cli@$VERSION" version --registry https://registry.npmjs.org 2>&1)"; then
             echo "@holydeck/cli@$VERSION is already live on npmjs, nothing to publish"
@@ -137,7 +150,7 @@ jobs:
             exit 0
           fi
           echo "npm view says @holydeck/cli@$VERSION is not live: $live"
-          if output="$(npm publish "$RUNNER_TEMP"/tarballs/holydeck-cli-[0-9]*.tgz 2>&1)"; then
+          if output="$(npm publish "$RUNNER_TEMP"/tarballs/holydeck-cli-[0-9]*.tgz --tag "$DIST_TAG" 2>&1)"; then
             echo "$output"
             echo "@holydeck/cli@$VERSION was uploaded to npmjs"
             echo "- @holydeck/cli@$VERSION → uploaded to npmjs" >> "$GITHUB_STEP_SUMMARY"
@@ -180,6 +193,7 @@ jobs:
       - name: Mirror @holydeck/cli
         env:
           VERSION: ${{ needs.verify.outputs.version }}
+          DIST_TAG: ${{ needs.verify.outputs.dist_tag }}
         run: |
           if live="$(npm view "@holydeck/cli@$VERSION" version --registry https://npm.pkg.github.com 2>&1)"; then
             echo "@holydeck/cli@$VERSION is already on GitHub Packages, skipping"
@@ -189,7 +203,7 @@ jobs:
           echo "npm view says @holydeck/cli@$VERSION is not published yet: $live"
           mkdir -p "$RUNNER_TEMP/mirror"
           (cd apps/cli && pnpm pack --pack-destination "$RUNNER_TEMP/mirror")
-          npm publish "$RUNNER_TEMP"/mirror/holydeck-cli-*.tgz --registry=https://npm.pkg.github.com
+          npm publish "$RUNNER_TEMP"/mirror/holydeck-cli-*.tgz --registry=https://npm.pkg.github.com --tag "$DIST_TAG"
           echo "- @holydeck/cli@$VERSION → published to GitHub Packages" >> "$GITHUB_STEP_SUMMARY"
 
   docker:
@@ -204,6 +218,7 @@ jobs:
     with:
       push: true
       version: ${{ needs.verify.outputs.version }}
+      channel: ${{ needs.verify.outputs.channel }}
 
   github-release:
     needs: [verify, mirror-github-packages, docker]
@@ -224,7 +239,7 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists, skipping"
           else
-            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md" ${{ needs.verify.outputs.prerelease == 'true' && '--prerelease' || '' }}
           fi
           url="$(gh release view "$GITHUB_REF_NAME" --json url -q .url)"
           echo "- release: $url" >> "$GITHUB_STEP_SUMMARY"
