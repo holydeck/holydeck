@@ -200,6 +200,20 @@ describe('the category taxonomy', () => {
       expect(members.length, `category ${category} has no member action`).toBeGreaterThan(0);
     }
   });
+
+  // `content` drives two things neither of these five actions should: `apps/worker/src/main.ts`'s
+  // `CHANGE_CATEGORIES` treats it as "the deployment changed, back it up early", and
+  // `notification-routes.ts`'s `OPEN_CATEGORIES` hands it to every signed-in account regardless of role.
+  // A daily sweep, a purge an admin already asked for, and a member reading their own inbox are none of
+  // those things — none is a content edit a backup would be racing to protect, and the last three are not
+  // something a different member should be notified about at all. `integration` is where this trail
+  // already keeps the operational actions of the same shape: `job.requeue` and every `media.storageMigration.*`.
+  it('keeps retention, notification housekeeping and media cleanup out of content', () => {
+    const notContent = ['retention.sweep', 'notification.read', 'notification.dismiss', 'notification.preferences', 'media.cleanup'] as const;
+    for (const action of notContent) {
+      expect(CATEGORY_OF[action], action).toBe('integration');
+    }
+  });
 });
 
 describe('the actions reserved for a surface not yet built', () => {

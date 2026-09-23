@@ -192,16 +192,16 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'restore.apply.request': 'restore',
   'restore.apply.complete': 'restore',
   'restore.apply.fail': 'restore',
-  'retention.sweep': 'content',
+  'retention.sweep': 'integration',
   'job.requeue': 'integration',
-  'notification.read': 'content',
-  'notification.dismiss': 'content',
-  'notification.preferences': 'content',
+  'notification.read': 'integration',
+  'notification.dismiss': 'integration',
+  'notification.preferences': 'integration',
   'media.storageMigration.request': 'integration',
   'media.storageMigration.complete': 'integration',
   'media.storageMigration.fail': 'integration',
   'media.storageMigration.cleanup': 'integration',
-  'media.cleanup': 'content',
+  'media.cleanup': 'integration',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */
