@@ -85,6 +85,35 @@ export function reorderPlan(view: ServiceView, itemId: string, target: { section
   return [{ kind: 'move', itemId, sectionId: target.sectionId, index: target.index }];
 }
 
+/** `ids` in the order the service shows them (section by section, top to bottom); ids it lacks are dropped. */
+export function inServiceOrder(view: ServiceView, ids: Iterable<string>): string[] {
+  const wanted = new Set(ids);
+  return itemsOf(view).map(({ item }) => item.id).filter((id) => wanted.has(id));
+}
+
+/**
+ * A bulk move's fixed point: the item the moved group must end up just before — the one at `target.index`
+ * among the target section's items that are *not* being moved — or `undefined` for its end. Positions are
+ * counted without the moved items so the same pick means the same place whichever of them started there.
+ */
+export function bulkMoveAnchor(
+  view: ServiceView, moving: ReadonlySet<string>, target: { sectionId: string; index: number },
+): string | undefined {
+  const section = view.sections.find((candidate) => candidate.id === target.sectionId);
+  return section?.items.filter((item) => !moving.has(item.id))[Math.max(0, target.index)]?.id;
+}
+
+/** Where `itemId` goes so it lands just before `anchorId` (or last) in `sectionId`, as a `reorderPlan`
+ *  target: an index into that section's items with `itemId` itself left out. */
+export function beforeAnchor(
+  view: ServiceView, itemId: string, sectionId: string, anchorId: string | undefined,
+): { sectionId: string; index: number } {
+  const others = (view.sections.find((candidate) => candidate.id === sectionId)?.items ?? [])
+    .map((item) => item.id).filter((id) => id !== itemId);
+  const at = anchorId === undefined ? -1 : others.indexOf(anchorId);
+  return { sectionId, index: at === -1 ? others.length : at };
+}
+
 /** A copy of the service's sections with one section's name changed. */
 export function renameSection(view: ServiceView, sectionId: string, title: string): ServiceView['sections'] {
   return view.sections.map((section) => (section.id === sectionId ? { ...section, name: title } : section));

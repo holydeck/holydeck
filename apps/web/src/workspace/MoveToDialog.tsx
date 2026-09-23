@@ -15,8 +15,10 @@ import { service } from '../state/workspace-store.js';
 import { runOrderSteps } from './order-actions.js';
 import { neighbours, reorderPlan } from './order-ops.js';
 
-export function MoveToDialog({ itemId, onClose, onPick }: {
+export function MoveToDialog({ itemId, moving, onClose, onPick }: {
   readonly itemId: string;
+  /** Every item being moved together (a bulk move); positions are counted among the items that stay. */
+  readonly moving?: ReadonlySet<string>;
   readonly onClose: () => void;
   /** When given, picking a target reports it here instead of moving `itemId` itself — a bulk run uses
    *  this to collect one target and then move each selected item to it in turn. */
@@ -38,17 +40,19 @@ export function MoveToDialog({ itemId, onClose, onPick }: {
   if (view === undefined || located === undefined) return null;
 
   const section = view.sections.find((candidate) => candidate.id === sectionId);
-  const positions = (section?.items ?? []).filter((candidate) => candidate.id !== itemId).length + 1;
+  const leaving = moving ?? new Set([itemId]);
+  const positions = (section?.items ?? []).filter((candidate) => !leaving.has(candidate.id)).length + 1;
+  const position = Math.min(index, positions - 1);
 
   const submit = async (event: JSX.TargetedEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
     if (onPick !== undefined) {
-      onPick({ sectionId, index });
+      onPick({ sectionId, index: position });
       onClose();
       return;
     }
     setSubmitting(true);
-    await runOrderSteps(view.id, itemId, reorderPlan(view, itemId, { sectionId, index }));
+    await runOrderSteps(view.id, itemId, reorderPlan(view, itemId, { sectionId, index: position }));
     setSubmitting(false);
     onClose();
   };
@@ -81,7 +85,7 @@ export function MoveToDialog({ itemId, onClose, onPick }: {
         </label>
         <label>
           {t('order.move.position')}
-          <select value={String(index)} onChange={(event) => setIndex(Number(event.currentTarget.value))}>
+          <select value={String(position)} onChange={(event) => setIndex(Number(event.currentTarget.value))}>
             {Array.from({ length: positions }, (_, position) => (
               <option key={position} value={String(position)}>{position + 1}</option>
             ))}

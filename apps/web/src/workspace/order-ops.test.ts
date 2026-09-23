@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { addSection, movedSections, moveWithin, neighbours, removeSection, renameSection, reorderPlan } from './order-ops.js';
+import { addSection, beforeAnchor, bulkMoveAnchor, inServiceOrder, movedSections, moveWithin, neighbours, removeSection, renameSection, reorderPlan } from './order-ops.js';
 import type { ServiceView } from './service-data.js';
 
 const item = (id: string) => ({ id, kind: 'custom-slide' as const, title: id, enabled: true, content: undefined });
@@ -129,5 +129,28 @@ describe('removeSection', () => {
   it('leaves the sections untouched for an unknown section id', () => {
     const one = view([{ id: 'sec', name: 'Welcome', items: [] }]);
     expect(removeSection(one, 'missing')).toEqual(one.sections);
+  });
+});
+
+describe('bulk move helpers', () => {
+  const two = view([
+    { id: 'one', name: 'Welcome', items: ['a', 'b', 'c'] },
+    { id: 'two', name: 'Response', items: ['x', 'y'] },
+  ]);
+
+  it('orders ids the way the service shows them, dropping unknown ones', () => {
+    expect(inServiceOrder(two, ['y', 'zz', 'b', 'a'])).toEqual(['a', 'b', 'y']);
+  });
+
+  it('anchors on the staying item at the picked position, or the end past it', () => {
+    expect(bulkMoveAnchor(two, new Set(['a', 'b']), { sectionId: 'one', index: 0 })).toBe('c');
+    expect(bulkMoveAnchor(two, new Set(['a']), { sectionId: 'two', index: 2 })).toBeUndefined();
+    expect(bulkMoveAnchor(two, new Set(['a']), { sectionId: 'gone', index: 0 })).toBeUndefined();
+  });
+
+  it('targets the index just before the anchor, counted without the item itself', () => {
+    expect(beforeAnchor(two, 'a', 'one', 'c')).toEqual({ sectionId: 'one', index: 1 });
+    expect(beforeAnchor(two, 'a', 'two', undefined)).toEqual({ sectionId: 'two', index: 2 });
+    expect(beforeAnchor(two, 'a', 'two', 'missing')).toEqual({ sectionId: 'two', index: 2 });
   });
 });

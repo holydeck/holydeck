@@ -16,7 +16,7 @@ import { bulkBusy, bulkSelecting, bulkSelection, isReadOnly, mutate, service } f
 import { runBulk, type BulkOutcome } from './bulk-run.js';
 import { MoveToDialog } from './MoveToDialog.js';
 import { runOrderSteps } from './order-actions.js';
-import { reorderPlan } from './order-ops.js';
+import { beforeAnchor, bulkMoveAnchor, inServiceOrder, reorderPlan } from './order-ops.js';
 import { itemsOf, type ServiceView } from './service-data.js';
 
 /** Leaves selection mode, confirming first when a bulk run is still going or the Move dialog is open, so a
@@ -43,11 +43,11 @@ export function BulkBar({ view }: { readonly view: ServiceView }): JSX.Element {
   const titleById = new Map(itemsOf(view).map(({ item }) => [item.id, item.title]));
   const titleOf = (itemId: string): string => titleById.get(itemId) ?? itemId;
 
-  const run = async (step: (itemId: string) => Promise<ApiResult<unknown>>): Promise<void> => {
+  const run = async (step: (itemId: string) => Promise<ApiResult<unknown>>, ids: readonly string[] = selectedIds): Promise<void> => {
     runningRef.current = true;
     bulkBusy.value = true;
-    setOutcome({ done: 0, total: selectedIds.length, refused: [] });
-    const result = await runBulk(selectedIds, step, titleOf, setOutcome);
+    setOutcome({ done: 0, total: ids.length, refused: [] });
+    const result = await runBulk(ids, step, titleOf, setOutcome);
     setOutcome(result);
     runningRef.current = false;
     bulkBusy.value = false;
@@ -61,15 +61,19 @@ export function BulkBar({ view }: { readonly view: ServiceView }): JSX.Element {
     void run(async (itemId) => mutate(API.item((service.value ?? view).id, itemId), { method: 'DELETE' }, itemId));
   };
 
+  // Each item in service order goes just before the same anchor, so the group arrives in the order it
+  // had — not click order, and not reversed by every item being dropped at one fixed index in turn.
   const runMove = (target: { sectionId: string; index: number }): void => {
+    const start = service.value ?? view;
+    const anchor = bulkMoveAnchor(start, bulkSelection.value, target);
     void run(async (itemId) => {
       const current = service.value ?? view;
-      const ok = await runOrderSteps(current.id, itemId, reorderPlan(current, itemId, target));
+      const ok = await runOrderSteps(current.id, itemId, reorderPlan(current, itemId, beforeAnchor(current, itemId, target.sectionId, anchor)));
       return asResult(ok);
-    });
+    }, inServiceOrder(start, selectedIds));
   };
 
-  const moveItemId = selectedIds[0];
+  const moveItemId = inServiceOrder(service.value ?? view, selectedIds)[0];
   const disableActions = readOnly || busy || selectedIds.length === 0;
 
   return (
@@ -108,6 +112,7 @@ export function BulkBar({ view }: { readonly view: ServiceView }): JSX.Element {
       {moveOpen && moveItemId !== undefined ? (
         <MoveToDialog
           itemId={moveItemId}
+          moving={bulkSelection.value}
           onClose={() => {
             setMoveOpen(false);
             if (!runningRef.current) bulkBusy.value = false;

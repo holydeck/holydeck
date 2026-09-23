@@ -184,6 +184,74 @@ describe('BulkBar', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  describe('keeps the selected items in their service order', () => {
+    // A tiny server holding the order, so the result is what the requests actually produced.
+    const serve = (start: Record<string, string[]>): { order: Record<string, string[]>; fetching: FetchLike } => {
+      const order: Record<string, string[]> = structuredClone(start);
+      const answer = () => reply(200, successEnvelope(record(Object.entries(order).map(([id, itemIds]) => ({ id, name: id, itemIds }))), 'r'));
+      const fetching: FetchLike = async (url, init) => {
+        if (url === '/api/v1/services/s1/content-drift') return noDrift;
+        const body = init.body === undefined ? undefined : JSON.parse(init.body as string) as Record<string, unknown>;
+        const reorder = /^\/api\/v1\/services\/s1\/sections\/([^/]+)\/items\/reorder$/u.exec(url);
+        if (init.method === 'POST' && reorder?.[1] !== undefined) {
+          order[reorder[1]] = body?.['itemIds'] as string[];
+          return answer();
+        }
+        if (init.method === 'PATCH' && url === '/api/v1/services/s1') {
+          for (const section of body?.['sections'] as { id: string; items: { id: string }[] }[]) {
+            order[section.id] = section.items.map((item) => item.id);
+          }
+          return answer();
+        }
+        throw new Error(`unexpected ${init.method ?? 'GET'} ${url}`);
+      };
+      return { order, fetching };
+    };
+    const viewOf = (order: Record<string, string[]>): ServiceView => ({
+      ...view,
+      sections: Object.entries(order).map(([id, itemIds]) => ({
+        id, name: id, items: itemIds.map((itemId) => ({ id: itemId, kind: 'custom-slide' as const, title: itemId, enabled: true, content: undefined })),
+      })),
+    });
+    const moveTo = async (section: string, position: string): Promise<void> => {
+      fireEvent.click(screen.getByRole('button', { name: 'Move' }));
+      const dialog = screen.getByRole('dialog', { name: 'Move To…' });
+      fireEvent.change(within(dialog).getByRole('combobox', { name: 'Section' }), { target: { value: section } });
+      fireEvent.change(within(dialog).getByRole('combobox', { name: 'Position' }), { target: { value: position } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+      await vi.waitFor(() => expect(screen.getByText('All 2 done.')).toBeTruthy());
+    };
+
+    it('across sections, in service order rather than click order', async () => {
+      const start = { one: ['a', 'b', 'c', 'd', 'e'], two: ['x', 'y'] };
+      const { order, fetching } = serve(start);
+      setFetching(fetching);
+      service.value = viewOf(start);
+      select('b', 'e');
+      render(<BulkBar view={viewOf(start)} />);
+
+      await moveTo('two', '1');
+      expect(order).toEqual({ one: ['a', 'c', 'd'], two: ['x', 'b', 'e', 'y'] });
+    });
+
+    it('within their own section, counting positions among the items that stay', async () => {
+      const start = { one: ['a', 'b', 'c', 'd', 'e'] };
+      const { order, fetching } = serve(start);
+      setFetching(fetching);
+      service.value = viewOf(start);
+      select('b', 'a');
+      render(<BulkBar view={viewOf(start)} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Move' }));
+      const dialog = screen.getByRole('dialog', { name: 'Move To…' });
+      expect(within(within(dialog).getByRole('combobox', { name: 'Position' })).getAllByRole('option')).toHaveLength(4);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+      await moveTo('one', '3');
+      expect(order).toEqual({ one: ['c', 'd', 'e', 'a', 'b'] });
+    });
+  });
+
   it('asks before leaving selection mode mid-run, and stays in selection mode if canceled', async () => {
     let resolveDuplicate: (value: ReturnType<typeof reply>) => void = () => {};
     setFetching(fakeFetch({
