@@ -379,11 +379,51 @@ export function liveHub(options: LiveHubOptions): LiveHub {
 
   const landedKey = (member: Member, key: string): string => `${member.identity ?? ''} ${key}`;
 
-  const command = async (member: Member, frame: CommandFrame): Promise<void> => {
-    if (!member.grant.command) {
-      // Answered rather than closed: a surface that mistakenly asks to command is still a surface an
-      // audience is watching, and ending its session would take the service off a screen over a mistake.
+  /**
+   * The one delegated command running at a time. Commands wait their turn rather than overlapping: a
+   * client retrying a frame it never saw acknowledged sends the same idempotency key while the first
+   * attempt may still be in flight, and only a retry that starts after the first finished can find that
+   * key remembered. Serial order is also what a single operator desk means by "one change after another".
+   */
+  let commands: Promise<void> = Promise.resolve();
+
+  const delegate = async (
+    member: Member,
+    frame: CommandFrame,
+    handler: NonNullable<typeof commandHandler>,
+  ): Promise<void> => {
+    if (!member.open) return;
+    const already = landed.get(landedKey(member, frame.idempotencyKey));
+    if (already !== undefined) {
+      write(member, ackOf(member, frame.id, 'duplicate', already));
+      return;
+    }
+    const liveMember: LiveMember = { channel: member.channel, grant: member.grant, identity: member.identity };
+    let outcome: AckOutcome;
+    try {
+      ({ outcome } = await handler(liveMember, frame));
+    } catch {
+      // Nothing waits on this chain to hand a rejection to, and an unhandled one ends the whole process —
+      // every view of the run, not just this command. A handler that threw moved nothing it could vouch
+      // for, so it is answered the way any other command that could not be carried out is.
+      outcome = 'failed';
+    }
+    if (!member.open) return;
+    const at = standing();
+    if (outcome === 'applied') remember(landedKey(member, frame.idempotencyKey), at);
+    write(member, ackOf(member, frame.id, outcome, at));
+  };
+
+  const command = (member: Member, frame: CommandFrame): void => {
+    // Only the control channel steers a run (Design §5). A stage, singer or guest session holding a
+    // command grant is still a screen somebody is watching, so it is answered rather than closed.
+    if (!member.grant.command || member.channel !== LIVE_CONTROL_CHANNEL) {
       write(member, ackOf(member, frame.id, 'unauthorized', standing()));
+      return;
+    }
+    if (commandHandler !== undefined) {
+      const handler = commandHandler;
+      commands = commands.then(() => delegate(member, frame, handler));
       return;
     }
     // Asked before staleness, deliberately. A client retrying a command it never saw acknowledged
@@ -392,23 +432,6 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     const already = landed.get(landedKey(member, frame.idempotencyKey));
     if (already !== undefined) {
       write(member, ackOf(member, frame.id, 'duplicate', already));
-      return;
-    }
-    if (commandHandler !== undefined) {
-      const liveMember: LiveMember = { channel: member.channel, grant: member.grant, identity: member.identity };
-      let outcome: AckOutcome;
-      try {
-        ({ outcome } = await commandHandler(liveMember, frame));
-      } catch {
-        // `void command(...)` below has no one to hand a rejection to, and an unhandled one ends the whole
-        // process — every view of the run, not just this command. A handler that threw moved nothing it
-        // could vouch for, so it is answered the way any other command that could not be carried out is.
-        outcome = 'failed';
-      }
-      if (!member.open) return;
-      const at = standing();
-      if (outcome === 'applied') remember(landedKey(member, frame.idempotencyKey), at);
-      write(member, ackOf(member, frame.id, outcome, at));
       return;
     }
     if (!PUBLIC_COMMAND_TYPES.has(frame.type)) {
@@ -473,7 +496,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
       return;
     }
     if (frame.kind === 'command') {
-      void command(member, frame);
+      command(member, frame);
       return;
     }
     // A snapshot, an event or an acknowledgement arriving from a client is not a mistake to be forgiven

@@ -5,7 +5,7 @@ import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, supporte
 import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
 import { LIVE_CHANNELS, LIVE_CLOSE, OUTPUT_CHANNELS, parseSnapshotFrame } from '@holydeck/contracts/live';
 import { TICKET_QUERY, sessionCookie } from '@holydeck/contracts/sessions';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SNAPSHOT_PINS } from '@holydeck/contracts/snapshots';
 
@@ -926,8 +926,7 @@ describe('run engine wiring', () => {
       kind: 'command', channel: 'live-control', id: 'engine-command', idempotencyKey: 'engine-key',
       type: 'pause', clientStateRevision: 0,
     }));
-    await Promise.resolve();
-    expect(frames.at(-1)).toMatchObject({ kind: 'ack', outcome: 'invalid' });
+    await vi.waitFor(() => expect(frames.at(-1)).toMatchObject({ kind: 'ack', outcome: 'invalid' }));
   });
 
   it('an operator go-to command reaches only the audience/stage channels of the same run, each with its own projected state', async () => {

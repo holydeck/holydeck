@@ -969,18 +969,51 @@ describe('delegated commands', () => {
     });
     const { connection, far } = joined(hub, 'live-control', OPERATOR, false, 'operator');
     connection?.receive(command({ type: 'pause', clientStateRevision: 999 }));
-    await Promise.resolve();
-    expect(far.frames().at(-1)).toMatchObject({ outcome: 'applied', stateRevision: 1 });
+    await vi.waitFor(() => expect(far.frames().at(-1)).toMatchObject({ outcome: 'applied', stateRevision: 1 }));
     expect(received).toMatchObject([{ member: { channel: 'live-control', grant: OPERATOR, identity: 'operator' } }]);
     connection?.receive(command({ type: 'pause' }));
-    expect(far.frames().at(-1)).toMatchObject({ outcome: 'duplicate' });
+    await vi.waitFor(() => expect(far.frames().at(-1)).toMatchObject({ outcome: 'duplicate' }));
     expect(received).toHaveLength(1);
     for (let i = 0; i < 2; i += 1) {
+      const before = far.frames().length;
       connection?.receive(command({ type: 'unknown', idempotencyKey: 'invalid' }));
-      await Promise.resolve();
+      await vi.waitFor(() => expect(far.frames().length).toBeGreaterThan(before));
       expect(far.frames().at(-1)).toMatchObject({ outcome: 'invalid' });
     }
     expect(received).toHaveLength(3);
+  });
+
+  it('runs a retry that arrives while the first attempt is in flight only once', async () => {
+    const hub = hubAt();
+    let release: () => void = () => {};
+    const handler = vi.fn(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      hub.publish('run-state-changed');
+      return { outcome: 'applied' as const };
+    });
+    hub.useCommands(handler);
+    const { connection, far } = joined(hub, 'live-control', OPERATOR, false, 'operator');
+    connection?.receive(command({ id: 'first', type: 'next' }));
+    connection?.receive(command({ id: 'retry', type: 'next' }));
+    await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+    release();
+    await vi.waitFor(() => expect(far.frames().filter((frame) => frame.kind === 'ack')).toHaveLength(2));
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(far.frames().filter((frame) => frame.kind === 'ack')).toMatchObject([
+      { id: 'first', outcome: 'applied', stateRevision: 1 },
+      { id: 'retry', outcome: 'duplicate', stateRevision: 1 },
+    ]);
+  });
+
+  it.each(['stage', 'singer', 'audience'] as const)('refuses commands from a command-granted %s session', (channel) => {
+    const hub = hubAt();
+    const handler = vi.fn(async () => ({ outcome: 'applied' as const }));
+    hub.useCommands(handler);
+    const { connection, far } = joined(hub, channel, OPERATOR);
+    connection?.receive(command({ channel, type: 'pause' }));
+    expect(far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'unauthorized' });
+    expect(handler).not.toHaveBeenCalled();
+    expect(far.ended()).toBeUndefined();
   });
 
   it('refuses unprivileged commands before delegation', () => {
