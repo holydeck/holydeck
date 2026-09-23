@@ -130,8 +130,7 @@ const reduce = (command: Exclude<Command, { type: 'theme' }>, mode: LiveModeStat
       return position === undefined ? undefined : select(mode, position);
     }
     case 'standby': {
-      const item = deck.items.find((candidate) => candidate.itemId === mode.selectedPosition.itemId);
-      const available = item?.standbyScreens?.some((screen) => screen.slideId === command.screenId) ?? false;
+      const available = deck.standbyScreens.some((screen) => screen.slideId === command.screenId);
       return enterStandby(mode, { itemId: command.screenId, slideIndex: 0 }, available);
     }
     case 'pause': return pause(mode);

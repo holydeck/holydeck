@@ -277,6 +277,7 @@ describe('showing a reference', () => {
     };
     const deck: RunDeck = {
       snapshotId: 'snapshot-1',
+      standbyScreens: [],
       pinnedRevisions: {
         service: 'r1',
         content: 'r1',

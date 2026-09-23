@@ -973,6 +973,7 @@ describe('run engine wiring', () => {
       pinnedRevisions: Object.fromEntries(SNAPSHOT_PINS.map((pin) => [pin, `${pin}@1`])) as Record<SnapshotPin, string>,
       aspectRatio: '16:9',
       safeAreaMargins: { top: 0, right: 0, bottom: 0, left: 0, unit: 'percent' },
+      standbyScreens: [],
       items: [
         { itemId: 'item-1', title: 'First song', kind: 'song', slides: [{ slideId: 'slide-1', boxes: [] }] },
         { itemId: 'item-2', title: 'Second song', kind: 'song', slides: [{ slideId: 'slide-2', boxes: [] }] },

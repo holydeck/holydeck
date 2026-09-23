@@ -157,6 +157,7 @@ describe('resuming a run after a real restart', () => {
     const deck = async (): Promise<RunDeck> => ({
       snapshotId: 'snapshot', pinnedRevisions: pins, aspectRatio: '16:9',
       safeAreaMargins: { top: 0, right: 0, bottom: 0, left: 0, unit: 'percent' },
+      standbyScreens: [],
       items: [{ itemId: 'item-1', title: 'Welcome', kind: 'custom-slide', slides: [0, 1, 2, 3].map((n) => ({ slideId: `slide-${n}`, boxes: [] })) }],
     });
     const engineOver = (db: RepositoryDb, hub: ReturnType<typeof liveHub>) => runEngineOn({

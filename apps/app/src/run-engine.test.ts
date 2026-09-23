@@ -93,8 +93,9 @@ const setup = () => {
   const deck = vi.fn(async () => ({
     snapshotId: 'snapshot-1', pinnedRevisions: PINS, aspectRatio: '16:9',
     safeAreaMargins: { top: 0, right: 0, bottom: 0, left: 0, unit: 'percent' as const },
+    standbyScreens: [{ slideId: 'welcome', boxes: [] }],
     items: [
-      { itemId: 'item-1', title: 'First song', kind: 'song', slides: [{ slideId: 'slide-1', boxes: [] }, { slideId: 'slide-2', boxes: [] }], standbyScreens: [{ slideId: 'welcome', boxes: [] }] },
+      { itemId: 'item-1', title: 'First song', kind: 'song', slides: [{ slideId: 'slide-1', boxes: [] }, { slideId: 'slide-2', boxes: [] }] },
       { itemId: 'empty', title: 'Addition', kind: 'mid-service', slides: [] },
       { itemId: 'item-2', title: 'Second song', kind: 'song', slides: [{ slideId: 'slide-3', boxes: [] }] },
     ],
@@ -119,6 +120,13 @@ describe('run-engine command ordering', () => {
       expect(await engine.command(CONTROL_MEMBER, frame(command))).toEqual({ outcome: 'applied' });
       expect(engine.state('run-1')?.public).toEqual(position);
     }
+  });
+
+  it('resolves standby against the deck, whichever item is selected', async () => {
+    const { engine } = await started();
+    await engine.command(CONTROL_MEMBER, frame('go-to', SECOND));
+    await engine.command(CONTROL_MEMBER, frame('standby', { screenId: 'welcome' }));
+    expect(engine.state('run-1')).toMatchObject({ mode: 'standby', public: { standby: 'welcome' } });
   });
 
   it('standby falls back to the empty screen when media is unavailable', async () => {

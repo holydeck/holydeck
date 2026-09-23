@@ -63,6 +63,7 @@ const INPUTS: PreparationInputs = {
 };
 const DECK: RunDeck = {
   snapshotId: 'snapshot-any',
+  standbyScreens: [],
   pinnedRevisions: {
     service: 'r1', content: 'r1', slideLayout: 'r1', serviceTemplate: 'r1', settings: 'r1', media: 'r1', corpus: 'r1',
   },

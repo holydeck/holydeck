@@ -24,7 +24,6 @@ export type DeckItem = {
   readonly kind: string;
   readonly title: string;
   readonly slides: readonly DeckSlide[];
-  readonly standbyScreens?: readonly DeckSlide[];
   readonly notes?: string;
   readonly key?: string;
   readonly languages?: readonly string[];
@@ -37,6 +36,11 @@ export type RunDeck = {
   readonly pinnedRevisions: PreparedSnapshot['pins'];
   readonly aspectRatio: string;
   readonly safeAreaMargins: SafeAreaMargins;
+  /** RUN-04: the screens `standby` may put up, resolved against the snapshot as a whole rather than
+   *  whichever item happens to be selected. PreparedSnapshot pins no standby slide groups or media yet,
+   *  and changing its persistence is outside this spec, so this is empty and every standby falls back
+   *  to the empty screen until a snapshot can carry them (D-PLAN-10). */
+  readonly standbyScreens: readonly DeckSlide[];
   readonly items: readonly DeckItem[];
 };
 
@@ -96,6 +100,7 @@ export async function deriveDeck(
     pinnedRevisions: snapshot.pins,
     aspectRatio: snapshot.resolved.aspectRatio,
     safeAreaMargins: snapshot.resolved.safeAreaMargins,
+    standbyScreens: [],
     items: [...generated.filter((item): item is DeckItem => item !== undefined), ...additions.map(additionItem)],
   };
   decks.set(cacheKey, deck);

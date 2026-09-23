@@ -79,6 +79,8 @@ describe('deriveDeck', () => {
       pinnedRevisions: snapshot().pins,
       aspectRatio: '16:9',
       safeAreaMargins: { top: 5, right: 5, bottom: 5, left: 5, unit: 'percent' },
+      // RUN-04 resolves standby against the snapshot's own screens; today's PreparedSnapshot pins none.
+      standbyScreens: [],
       items: [{
         itemId: 'group-1',
         kind: 'slideGroup',
@@ -137,6 +139,7 @@ describe('projectDeck', () => {
     pinnedRevisions: snapshot().pins,
     aspectRatio: '16:9',
     safeAreaMargins: { top: 5, right: 5, bottom: 5, left: 5, unit: 'percent' },
+    standbyScreens: [],
     items: [privateItem],
   };
 
@@ -160,6 +163,7 @@ describe('projectDeck', () => {
 describe('adjacentPosition', () => {
   const deck: RunDeck = {
     snapshotId: 'navigation', pinnedRevisions: snapshot().pins, aspectRatio: '16:9', safeAreaMargins: snapshot().resolved.safeAreaMargins,
+    standbyScreens: [],
     items: [0, 2, 0, 1, 0].map((count, index) => ({
       itemId: `item-${index}`, kind: 'song', title: 'Song',
       slides: Array.from({ length: count }, (_, slide) => ({ slideId: `slide-${slide}`, boxes: [] })),
