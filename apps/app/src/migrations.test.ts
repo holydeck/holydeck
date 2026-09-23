@@ -107,6 +107,7 @@ describe('the shipped migrations', () => {
       'restores',
       'run_events',
       'schema_migrations',
+      'service_templates',
       'services',
       'sessions',
       'sign_in_attempts',
