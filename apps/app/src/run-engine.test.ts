@@ -150,16 +150,50 @@ describe('run-engine command ordering', () => {
     expect(engine.state('run-1')).toMatchObject({ mode: 'live', public: SECOND });
   });
 
-  it('changes a per-surface theme without an audience event when the operator surface changes', async () => {
+  it('persists an operator theme and publishes it to control alone', async () => {
     const { engine, themes, hub, runs, runEvents } = await started();
     expect(await engine.command(CONTROL_MEMBER, frame('theme', { surface: 'operator', themeId: 'stage-default' }))).toEqual({ outcome: 'applied' });
     expect(themes.changeTheme).toHaveBeenCalledWith(expect.objectContaining({ permissions: [PRESENTATION_CONTROL] }), {
       runId: 'run-1', surface: 'operator', theme: DEFAULT_THEMES.stage, pinnedRevisions: PINS,
     });
-    expect(hub.publishToCalls).toEqual([]);
-    expect(hub.publishChange).not.toHaveBeenCalled();
+    expect(runs.advance).toHaveBeenCalledWith(expect.anything(), 'run-1', 7, expect.objectContaining({ themes: expect.objectContaining({ operator: 'stage-default' }) }), 9);
+    expect(hub.changes).toMatchObject([{ type: LIVE_EVENT_TYPES.theme, stateRevision: 8 }]);
+    expect(hub.publishToCalls.map((c) => c.channel)).toEqual([LIVE_CONTROL_CHANNEL]);
     expect(runEvents.record).not.toHaveBeenCalled();
-    expect(runs.advance).not.toHaveBeenCalled();
+  });
+
+  it('sends a stage theme to stage and control only, and keeps it through the next slide', async () => {
+    const { engine, hub } = await started();
+    await engine.command(CONTROL_MEMBER, frame('theme', { surface: 'stage', themeId: 'audience-default' }));
+    expect(hub.publishToCalls.map((c) => c.channel).sort()).toEqual(['live-control', 'stage']);
+    expect(hub.publishToCalls.find((c) => c.channel === 'stage')?.state).toMatchObject({ themeId: 'audience-default' });
+    hub.publishToCalls.length = 0;
+    await engine.command(CONTROL_MEMBER, { ...frame('next'), clientStateRevision: 8 });
+    expect(hub.publishToCalls.find((c) => c.channel === 'stage')?.state).toMatchObject({ themeId: 'audience-default' });
+    expect(hub.publishToCalls.find((c) => c.channel === 'audience')?.state).toMatchObject({ themeId: 'audience-default' });
+    expect(engine.state('run-1')?.themes.stage).toBe('audience-default');
+  });
+
+  it('answers a theme command stale when the run moved underneath it', async () => {
+    const { engine, runs, hub } = await started();
+    runs.advance.mockResolvedValueOnce('stale');
+    expect(await engine.command(CONTROL_MEMBER, frame('theme', { surface: 'stage', themeId: 'stage-default' }))).toEqual({ outcome: 'stale' });
+    expect(hub.publishChange).not.toHaveBeenCalled();
+  });
+
+  it('changes a theme over HTTP through the same path, and refuses a run it is not presenting', async () => {
+    const { engine, runs, hub } = await started();
+    const result = await engine.changeTheme(SESSION, 'run-1', 'singer', DEFAULT_THEMES.stage);
+    expect(hub.changes).toMatchObject([{ type: LIVE_EVENT_TYPES.theme, stateRevision: 8 }]);
+    expect(result.landed).toEqual({ sequence: 1, stateRevision: 9 });
+    expect(hub.publishToCalls.map((c) => c.channel).sort()).toEqual(['live-control', 'singer']);
+    await expect(engine.changeTheme(SESSION, 'run-9', 'singer', DEFAULT_THEMES.stage)).rejects.toMatchObject({ kind: 'state' });
+    runs.advance.mockResolvedValueOnce('stale');
+    await expect(engine.changeTheme(SESSION, 'run-1', 'singer', DEFAULT_THEMES.stage)).rejects.toMatchObject({ kind: 'conflict' });
+    runs.advance.mockResolvedValueOnce(undefined);
+    await expect(engine.changeTheme(SESSION, 'run-1', 'singer', DEFAULT_THEMES.stage)).rejects.toMatchObject({ kind: 'state' });
+    runs.resume.mockResolvedValueOnce({ ...RECORD, phase: 'ended' });
+    await expect(engine.changeTheme(SESSION, 'run-1', 'singer', DEFAULT_THEMES.stage)).rejects.toMatchObject({ kind: 'state' });
   });
 
   it('acks stale and publishes nothing on a lost CAS', async () => {

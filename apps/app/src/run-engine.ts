@@ -2,8 +2,8 @@
 // acknowledgements and retries; this module owns policy: which state a command means, whether it was
 // durably recorded, and which views may see it. Mode changes remain the pure contracts reducers; the
 // ordering here makes a log failure or a lost compare-and-set stop before anything is published.
-// Theme commands are the exception: ThemeStore owns their log and broadcast, so they never enter the
-// position pipeline or publish a second event here. One process runs one live run, matching the hub's
+// Theme changes take the same path with their own log row (ThemeStore) and reach only the surface they
+// theme, plus control (RUN-05). One process runs one live run, matching the hub's
 // global channels and counters; a command has no run identifier of its own.
 
 import { LIVE_CHANNELS, LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
@@ -16,7 +16,7 @@ import { LIVE_EVENT_TYPES } from './live-events.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { adjacentPosition } from './run-deck.js';
 import { RunEventError } from './run-events.js';
-import { RUN_PERMISSIONS, runContext } from './runs.js';
+import { RUN_PERMISSIONS, RunError, runContext } from './runs.js';
 
 import type { AckOutcome, CommandFrame, LiveChannel } from '@holydeck/contracts/live';
 import type { LiveModeState } from '@holydeck/contracts/live-mode';
@@ -25,7 +25,7 @@ import type { Theme, ThemeSurface } from '@holydeck/contracts/live-theme';
 import type { RunStartBody } from '@holydeck/contracts/runs';
 import type { LiveEventType } from './live-events.js';
 import type { LiveHub, LiveMember } from './live-protocol.js';
-import type { ThemeStore } from './live-theme.js';
+import type { ThemeChangeResult, ThemeStore } from './live-theme.js';
 import type { MidServiceStore } from './mid-service-additions.js';
 import type { RunDeck } from './run-deck.js';
 import type { RunEventStore } from './run-events.js';
@@ -47,6 +47,10 @@ export interface RunEngine {
   start(session: OperatorSession, request: RunStartBody): Promise<RunRecord>;
   end(session: OperatorSession, runId: string): Promise<RunRecord | undefined>;
   command(member: LiveMember, frame: CommandFrame): Promise<{ readonly outcome: AckOutcome; readonly conflictCode?: string }>;
+  /** The HTTP door onto a theme change: the same log, persist and publish path a `theme` command takes.
+   *  Refuses with a `RunError` — `state` for a run that is not the active one presented here, `conflict`
+   *  when the run moved while the change was being made. */
+  changeTheme(session: OperatorSession, runId: string, surface: ThemeSurface, theme: Theme): Promise<ThemeChangeResult>;
   state(runId: string): LiveState | undefined;
   restore(): Promise<void>;
 }
@@ -172,6 +176,27 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
     options.hub.publishChange({ type: kind, states: statesFor(next, deck, channels), stateRevision });
   };
 
+  const channelOf = (surface: ThemeSurface): LiveChannel => surface === 'operator' ? LIVE_CONTROL_CHANNEL : surface;
+
+  /** Logs, persists and publishes one theme change. The theme is part of the run's `LiveState`, so it is
+   *  compare-and-set like a position and survives both the next command and a restart. */
+  const retheme = async (
+    session: OperatorSession, run: RunRecord, deck: RunDeck, surface: ThemeSurface, theme: Theme,
+  ): Promise<ThemeChangeResult | 'stale'> => {
+    const recorded = await options.themes.changeTheme(session, {
+      runId: run.runId, surface, theme, pinnedRevisions: deck.pinnedRevisions,
+    });
+    const next: LiveState = { ...run.live, themes: { ...run.live.themes, [surface]: theme.id } };
+    const context = runContext(session.actor, session.correlationId);
+    const advanced = await options.runs.advance(context, run.runId, run.stateRevision, next, nextRevision());
+    if (advanced === 'stale') return 'stale';
+    if (advanced === undefined) throw new RunError('state', `${run.runId} is no longer a run this server knows`);
+    states.set(run.runId, next);
+    const channels = [...new Set<LiveChannel>([channelOf(surface), LIVE_CONTROL_CHANNEL])];
+    const landed = options.hub.publishChange({ type: LIVE_EVENT_TYPES.theme, states: statesFor(next, deck, channels), stateRevision: advanced.stateRevision });
+    return { ...recorded, landed };
+  };
+
   const apply: RunEngine['command'] = async (member, frame) => {
     if (!member.grant.command) return { outcome: 'unauthorized' };
     if (currentRunId === undefined) return { outcome: 'failed' };
@@ -193,11 +218,7 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
     const deck = await options.deck(context, run);
     if (command.type === 'theme') {
       try {
-        await options.themes.changeTheme(session, {
-          runId, surface: command.surface, theme: command.theme, pinnedRevisions: deck.pinnedRevisions,
-        });
-        states.set(runId, { ...run.live, themes: { ...run.live.themes, [command.surface]: command.theme.id } });
-        return { outcome: 'applied' };
+        return { outcome: await retheme(session, run, deck, command.surface, command.theme) === 'stale' ? 'stale' : 'applied' };
       } catch (error) {
         return { outcome: error instanceof RunEventError && (error.kind === 'schema' || error.kind === 'permission') ? 'invalid' : 'failed' };
       }
@@ -252,6 +273,17 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
       } catch {
         return { outcome: 'failed' };
       }
+    },
+    changeTheme: async (session, runId, surface, theme) => {
+      const context = runContext(session.actor, session.correlationId);
+      const run = runId === currentRunId ? await options.runs.resume(context, runId) : undefined;
+      if (run === undefined || run.phase !== 'active') {
+        throw new RunError('state', `${runId} is not the active run this server is presenting`);
+      }
+      const deck = await options.deck(context, run);
+      const result = await retheme(session, run, deck, surface, theme);
+      if (result === 'stale') throw new RunError('conflict', `${runId} moved while its theme was being changed`);
+      return result;
     },
     state: (runId) => states.get(runId),
     restore: async () => {

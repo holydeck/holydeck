@@ -156,15 +156,6 @@ const refusedEnd = (request: FastifyRequest, reply: FastifyReply, answer: Extrac
   return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
 };
 
-async function settledEvent<T>(work: () => Promise<T>): Promise<Answer<T, RunEventRefusal>> {
-  try {
-    return { ok: true, value: await work() };
-  } catch (error) {
-    if (error instanceof RunEventError && error.kind !== 'corrupt') return { ok: false, kind: error.kind, message: error.message };
-    throw error;
-  }
-}
-
 const refusedEvent = (request: FastifyRequest, reply: FastifyReply, answer: Extract<Answer<never, RunEventRefusal>, { ok: false }>): FastifyReply => {
   if (answer.kind === 'permission') return reply.code(403).send(errorEnvelope(FORBIDDEN, answer.message, request.id));
   if (answer.kind === 'schema') return reply.code(422).send(validationFailure(request.id, [{ path: '', code: 'invalid', message: answer.message }]));
@@ -352,13 +343,16 @@ export function serveRunRoutes(
       return reply.code(422).send(errorEnvelope('theme.contrast', `${theme.id} does not meet the contrast this surface requires`, request.id));
     }
 
-    const runDeck = await deck(context, record);
-    const answer = await settledEvent(() =>
-      themes.changeTheme(session, { runId, surface: parsed.value.surface, theme, pinnedRevisions: runDeck.pinnedRevisions }),
-    );
-    if (!answer.ok) return refusedEvent(request, reply, answer);
+    let changed;
+    try {
+      changed = await runEngine.changeTheme(session, runId, parsed.value.surface, theme);
+    } catch (error) {
+      if (error instanceof RunError && error.kind !== 'corrupt') return refusedEnd(request, reply, { ok: false, kind: error.kind, message: error.message });
+      if (error instanceof RunEventError && error.kind !== 'corrupt') return refusedEvent(request, reply, { ok: false, kind: error.kind, message: error.message });
+      throw error;
+    }
     await note(request, 'run.theme', session.actor, subjectFor(runId), `Changed the ${parsed.value.surface} theme to ${theme.id}`);
-    return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+    return reply.send(successEnvelope(changed, request.id, CLIENT_WINDOW.current));
   });
 
   app.post(RUN_ADDITIONS_PATH, { config: { need: CONTROL_PERMISSION } }, async (request, reply) => {

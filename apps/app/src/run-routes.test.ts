@@ -97,7 +97,7 @@ const building = async (): Promise<void> => {
     seedStates: (): void => {},
     stateRevision: (): number => 0,
   };
-  const themes = themesOn(hub, runEvents);
+  const themes = themesOn(runEvents);
   const runReview = runReviewOn(runEvents);
   const runEngine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });
   capabilities = capabilitiesOn(memoryCapabilities().db, { now });
@@ -285,6 +285,20 @@ describe('changing a run theme', () => {
     const runId = await startRun();
     const response = await asking('POST', runPath(RUN_THEME_PATH, runId), { surface: 'audience', theme: 'not-a-real-theme' }, operator);
     expect(response.statusCode).toBe(422);
+  });
+
+  test('persists the theme into the run, so reading it back shows it', async () => {
+    const runId = await startRun();
+    await asking('POST', runPath(RUN_THEME_PATH, runId), { surface: 'stage', theme: 'audience-default' }, operator);
+    const read = await asking('GET', runPath(RUN_ID_PATH, runId), undefined, operator);
+    expect(read.json()).toMatchObject({ data: { live: { themes: { stage: 'audience-default' } } } });
+  });
+
+  test('refuses a theme change on a run that has ended', async () => {
+    const runId = await startRun();
+    await asking('POST', runPath(RUN_END_PATH, runId), undefined, operator);
+    const response = await asking('POST', runPath(RUN_THEME_PATH, runId), { surface: 'audience', theme: 'audience-default' }, operator);
+    expect(response.statusCode).toBe(409);
   });
 
   test('answers 404 when the run does not exist', async () => {

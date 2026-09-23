@@ -165,7 +165,7 @@ if (settings.values.mongoUrl !== '') {
   preparation = preparationOn(repositoryDb(store.db()), { now });
   runs = runsOn(repositoryDb(store.db()), { now });
   runEvents = runEventsOn(repositoryDb(store.db()), { now });
-  themes = themesOn(hub, runEvents);
+  themes = themesOn(runEvents);
   runReview = runReviewOn(runEvents);
   midService = midServiceOn(repositoryDb(store.db()), { now, runs, runEvents });
   slideGroups = slideGroupsOn(repositoryDb(store.db()), { now });
