@@ -16,6 +16,7 @@ import { correlationFor } from './context.js';
 import { provenSession, refuseAsForbidden, rememberProvenSession, sessionFor } from './csrf.js';
 import { unexpectedFailure } from './failures.js';
 
+import type { RestoreCompatibility } from './csrf.js';
 import type { FastifyInstance, HTTPMethods } from 'fastify';
 import type { Identity } from './onboarding.js';
 import type { SessionStore } from './sessions.js';
@@ -48,6 +49,8 @@ export interface AuthorizationOptions {
   readonly sessions: SessionStore | undefined;
   /** Absent in a deployment that keeps no identity — a permission refusal then has nothing to audit against. */
   readonly identity: Identity | undefined;
+  /** Absent in a deployment that keeps no durable records, which is a deployment no restore can apply to. */
+  readonly compatibility?: RestoreCompatibility;
 }
 
 const NEEDS = new WeakMap<FastifyInstance, Map<string, RouteNeed>>();
@@ -61,7 +64,10 @@ export function needsOf(app: FastifyInstance): ReadonlyMap<string, RouteNeed> {
   return NEEDS.get(app) ?? new Map();
 }
 
-export function enforceAuthorization(app: FastifyInstance, { sessions, identity }: AuthorizationOptions): void {
+export function enforceAuthorization(
+  app: FastifyInstance,
+  { sessions, identity, compatibility }: AuthorizationOptions,
+): void {
   const declared = new Map<string, RouteNeed>();
   NEEDS.set(app, declared);
 
@@ -94,7 +100,9 @@ export function enforceAuthorization(app: FastifyInstance, { sessions, identity 
     // hook never runs at all if that guard refused, so reading it here is safe rather than presumed. A
     // safe route proves its own, the same way `csrf.ts`'s own safe route already did, and stashes it the
     // same way, so its handler reads it through the one door every other route's handler reads one through.
-    const proven = mutates(request.method) ? provenSession(request) : await sessionFor(sessions, request, reply);
+    const proven = mutates(request.method)
+      ? provenSession(request)
+      : await sessionFor(sessions, request, reply, compatibility);
     if (proven === undefined) return;
     if (!mutates(request.method)) rememberProvenSession(request, proven);
 

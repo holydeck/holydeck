@@ -10,7 +10,8 @@
 // compares that against every route the application registers.
 
 import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
-import { errorEnvelope } from '@holydeck/contracts/http';
+import { UPDATE_REQUIRED_MESSAGE, UPDATE_REQUIRED_STATUS } from '@holydeck/contracts/clients';
+import { UPDATE_REQUIRED, errorEnvelope } from '@holydeck/contracts/http';
 import {
   CSRF_HEADER,
   SESSION_COOKIE,
@@ -29,8 +30,12 @@ import { sessionContext } from './sessions.js';
 
 import type { SessionRecord } from '@holydeck/contracts/sessions';
 import type { RequestContext } from './context.js';
+import type { RestoreCompatibilityStore } from './restore-compatibility.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest, HTTPMethods } from 'fastify';
 import type { SessionRefusal, SessionStore } from './sessions.js';
+
+/** What `sessionFor`/`refuseAsStoreSaid` need to tell a restore-caused session end from an ordinary one. */
+export type RestoreCompatibility = Pick<RestoreCompatibilityStore, 'restoredRecently'>;
 
 /** Answered when there is no session to act under. The client's move is the same in every such case. */
 export const SESSION_EXPIRED = 'auth.session.expired';
@@ -70,6 +75,8 @@ export interface GuardOptions {
   /** Absent in a deployment that keeps no sessions, which is a deployment that changes nothing. */
   readonly sessions: SessionStore | undefined;
   readonly unguarded?: readonly string[];
+  /** Absent in a deployment that keeps no durable records, which is a deployment no restore can apply to. */
+  readonly compatibility?: RestoreCompatibility;
 }
 
 const TABLES = new WeakMap<FastifyInstance, Route[]>();
@@ -140,6 +147,22 @@ export const refuseWithoutSession = async (
     );
 };
 
+/**
+ * The answer to a request whose session ended because a restore was applied to production, within that
+ * restore's `RestoreCompatibility` grace window — told to reload rather than merely to sign in again,
+ * since what it holds beyond the session cookie (cached responses, an open build) may be stale too.
+ */
+const refuseAsUpdateRequired = async (request: FastifyRequest, reply: FastifyReply, why: string): Promise<void> => {
+  await reply
+    .header('set-cookie', clearedSessionCookie())
+    .code(UPDATE_REQUIRED_STATUS)
+    .send(
+      errorEnvelope(UPDATE_REQUIRED, UPDATE_REQUIRED_MESSAGE, request.id, [
+        { path: SESSION_COOKIE, code: UPDATE_REQUIRED, message: why },
+      ]),
+    );
+};
+
 /** The answer to a request there is a session behind that still cannot be accepted from where it came. */
 export const refuseAsForbidden = async (
   request: FastifyRequest,
@@ -154,17 +177,25 @@ export const refuseAsForbidden = async (
 
 /**
  * The answer to an error the store threw: sign in again for the two refusals that mean the session is
- * gone, and a fault of this server's for everything else, which is what everything else is.
+ * gone, and a fault of this server's for everything else, which is what everything else is. Of the two,
+ * a restore recently applied to production (`compatibility`, absent in a deployment that keeps no durable
+ * records) is answered "update" instead of "sign in again" — that session did not merely expire, this
+ * deployment ended it out from under its own client.
  */
 export async function refuseAsStoreSaid(
   request: FastifyRequest,
   reply: FastifyReply,
   error: unknown,
   why: string,
+  compatibility?: RestoreCompatibility,
 ): Promise<void> {
   // A session that is over is an answer; anything else the store says is this server's own fault, and
   // is not dressed up as one, because telling an operator to sign in again would not help them.
   if (error instanceof SessionError && SIGN_IN_AGAIN.has(error.kind)) {
+    if (compatibility !== undefined && (await compatibility.restoredRecently())) {
+      await refuseAsUpdateRequired(request, reply, why);
+      return;
+    }
     await refuseWithoutSession(request, reply, why);
     return;
   }
@@ -181,6 +212,7 @@ export async function sessionFor(
   sessions: SessionStore | undefined,
   request: FastifyRequest,
   reply: FastifyReply,
+  compatibility?: RestoreCompatibility,
 ): Promise<Guarded | undefined> {
   if (sessions === undefined) {
     await refuseWithoutSession(request, reply, 'this deployment keeps no sessions, and so accepts no changes');
@@ -194,12 +226,15 @@ export async function sessionFor(
   try {
     return { token, record: await sessions.read(sessionCallFor(request), token), sessions };
   } catch (error: unknown) {
-    await refuseAsStoreSaid(request, reply, error, 'this session is over, or was never one this server issued');
+    await refuseAsStoreSaid(request, reply, error, 'this session is over, or was never one this server issued', compatibility);
     return undefined;
   }
 }
 
-export function guardMutations(app: FastifyInstance, { sessions, unguarded = UNGUARDED }: GuardOptions): void {
+export function guardMutations(
+  app: FastifyInstance,
+  { sessions, unguarded = UNGUARDED, compatibility }: GuardOptions,
+): void {
   const covered: Route[] = [];
   const allowed = new Set(unguarded);
   TABLES.set(app, covered);
@@ -214,7 +249,7 @@ export function guardMutations(app: FastifyInstance, { sessions, unguarded = UNG
     if (!mutates(request.method)) return;
     if (allowed.has(`${request.method} ${String(request.routeOptions.url)}`)) return;
 
-    const proven = await sessionFor(sessions, request, reply);
+    const proven = await sessionFor(sessions, request, reply, compatibility);
     if (proven === undefined) return;
 
     if (!isSameOrigin(request.headers.origin, originOf(request))) {
