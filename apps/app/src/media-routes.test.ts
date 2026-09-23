@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -268,6 +268,17 @@ describe('the free-space reserve', () => {
     expect(response.json().error.code).toBe('media.insufficient_space');
     expect(upload).not.toHaveBeenCalled();
     expect(entries()).toEqual([]);
+  });
+
+  // A fresh volume has nothing written to it yet, so `mediaRoot` itself may not exist — the same state
+  // `write()` already handles by mkdir'ing lazily on the first accepted upload. This check runs before
+  // that, so it has to make the same allowance itself rather than reading `statfs` a beat too early and
+  // refusing every upload with 507 until something else happens to create the directory first.
+  test('creates the media root first when nothing has written to it yet, rather than failing closed', async () => {
+    await rm(mediaRoot, { recursive: true, force: true });
+    const response = await uploading({ filename: 'a.png', contentType: 'image/png', bytes: png(4, 4) });
+    expect(response.statusCode).toBe(201);
+    expect(upload).toHaveBeenCalledTimes(1);
   });
 });
 

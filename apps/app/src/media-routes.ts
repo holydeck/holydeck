@@ -17,7 +17,7 @@
 // media filesystem under its configured `mediaFreeSpaceReserveBytes` margin, via a fresh `fs.statfs` read
 // against `mediaRoot` — the same directory `MediaLibrary` itself was constructed to write into.
 
-import { statfs } from 'node:fs/promises';
+import { mkdir, statfs } from 'node:fs/promises';
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
@@ -152,11 +152,16 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity, settin
     }
 
     // OPS-13's capacity guard, not one of THR-07's three defenses above: confirms accepting these bytes
-    // would not leave this deployment under its configured free-space reserve. A statfs failure — an
-    // unreadable or missing `mediaRoot` — fails closed, the same direction an unverifiable ceiling would.
+    // would not leave this deployment under its configured free-space reserve. `mediaRoot` may not exist
+    // yet on a fresh volume nothing has written to — created first, the same way `write()` itself mkdirs
+    // lazily on the write this check runs ahead of — so a statfs failure past that (an unreadable
+    // `mediaRoot`, or any other read failure) still fails closed, the same direction an unverifiable
+    // ceiling would.
     let free: number;
     try {
-      const disk = await statfs(admin.current().values.mediaRoot);
+      const root = admin.current().values.mediaRoot;
+      await mkdir(root, { recursive: true });
+      const disk = await statfs(root);
       free = disk.bavail * disk.bsize;
     } catch (error) {
       request.log.error({ err: error }, 'could not read free space on the media filesystem before an upload');
