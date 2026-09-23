@@ -12,7 +12,7 @@
 // the handle or not, which is the store's promise and not this route's; and the counter is told and the
 // entry written only after the answer has been decided, so neither can change what is answered.
 
-import { accountIdIn, actorFor, parseSignIn } from '@holydeck/contracts/accounts';
+import { accountIdIn, actorFor, parseSignIn, type AccountRecord } from '@holydeck/contracts/accounts';
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
 import { SIGN_IN_REFUSED } from '@holydeck/contracts/sessions';
@@ -324,11 +324,20 @@ export function serveSessionRoutes(app: FastifyInstance, { sessions, identity }:
   // identifier itself — plus every slot the container holds, redacted to what another slot may be told.
   app.get(SESSION_PATH, { config: { need: SESSION } }, async (request) => {
     const proven = provenSession(request);
-    const slots = await proven.sessions.slots(sessionCallFor(request), proven.token);
-    const id = accountIdIn(proven.record.actor);
-    const account = identity === undefined || id === undefined
-      ? undefined
-      : await identity.accounts.read(accountContext(correlationFor(SIGN_IN_PREFIX, request.id)), id);
+    const held = await proven.sessions.slots(sessionCallFor(request), proven.token);
+    const accountFor = async (actor: string): Promise<AccountRecord | undefined> => {
+      const id = accountIdIn(actor);
+      return identity === undefined || id === undefined
+        ? undefined
+        : identity.accounts.read(accountContext(correlationFor(SIGN_IN_PREFIX, request.id)), id);
+    };
+    const account = await accountFor(proven.record.actor);
+    // A switcher lists every slot by who it is. The display name is all it is told about the account
+    // behind another slot: that slot's role and permissions stay its own until it is the active one.
+    const slots = await Promise.all(held.map(async (slot) => {
+      const named = slot.actor === proven.record.actor ? account : await accountFor(slot.actor);
+      return named === undefined ? slot : { ...slot, displayName: named.displayName };
+    }));
     return successEnvelope({
       ...proven.record,
       slots,

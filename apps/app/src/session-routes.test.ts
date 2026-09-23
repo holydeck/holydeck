@@ -288,6 +288,14 @@ describe('what an operator can ask about their own session', () => {
     expect(response.body).not.toContain(session.token);
   });
 
+  test('names the account behind each slot, so a switcher shows who rather than an actor id', async () => {
+    const session = await store.start(sessionContext('req-0f9c2a42'), { actor: actorFor(ID), permissions: ['services.read'] });
+    const response = await asking('GET', SESSION_PATH, session);
+    expect(response.json().data.slots).toEqual([
+      { slotId: expect.any(String), actor: actorFor(ID), displayName: CLAIM.displayName },
+    ]);
+  });
+
   test('answers an account session with only the account summary a client renders', async () => {
     const session = await store.start(sessionContext('req-0f9c2a41'), { actor: actorFor(ID), permissions: ['services.read'] });
     const response = await asking('GET', SESSION_PATH, session);
