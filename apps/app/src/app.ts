@@ -162,7 +162,7 @@ export function buildApp({
 
   // Installed beside the guard above, the same reach: a restore mid-apply refuses every mutation until
   // its lease is released, whichever route below would otherwise have handled it.
-  guardMaintenance(app, { maintenance });
+  guardMaintenance(app, { maintenance, now: () => new Date().toISOString() });
 
   // Installed right after: a mutating route's session is already proved by the guard above by the time
   // this asks for it, and every route registered from here down is one this check was on for.

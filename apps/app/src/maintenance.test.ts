@@ -1,7 +1,13 @@
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { MAINTENANCE_COLLECTION, guardMaintenance, maintenanceOn } from './maintenance.js';
+import {
+  MAINTENANCE_COLLECTION,
+  MAINTENANCE_LEASE_TTL_MS,
+  guardMaintenance,
+  maintenanceOn,
+  releaseOrphanedLease,
+} from './maintenance.js';
 
 import type { MaintenanceCollection, MaintenanceDb, MaintenanceStore } from './maintenance.js';
 import type { FastifyInstance } from 'fastify';
@@ -71,14 +77,42 @@ describe('the maintenance lease', () => {
   });
 });
 
+describe('releaseOrphanedLease', () => {
+  let memory: ReturnType<typeof memoryMaintenance>;
+  let store: MaintenanceStore;
+
+  beforeEach(() => {
+    memory = memoryMaintenance();
+    store = maintenanceOn(memory.db);
+  });
+
+  test('releases an active lease and reports why', async () => {
+    await store.acquire('applying restore backup-1', '2026-09-19T03:00:00.000Z');
+    const reported: string[] = [];
+    await releaseOrphanedLease(store, (line) => reported.push(line));
+    await expect(store.read()).resolves.toEqual({ active: false });
+    expect(reported).toEqual(['released an orphaned maintenance lease (applying restore backup-1)']);
+  });
+
+  test('does nothing and reports nothing while idle', async () => {
+    const reported: string[] = [];
+    await releaseOrphanedLease(store, (line) => reported.push(line));
+    await expect(store.read()).resolves.toEqual({ active: false });
+    expect(reported).toEqual([]);
+  });
+});
+
 describe('the maintenance guard', () => {
   let memory: ReturnType<typeof memoryMaintenance>;
   let store: MaintenanceStore;
   let app: FastifyInstance;
 
-  const serving = async (maintenance: MaintenanceStore | undefined): Promise<FastifyInstance> => {
+  const serving = async (
+    maintenance: MaintenanceStore | undefined,
+    now: () => string = () => '2026-09-19T03:00:00.000Z',
+  ): Promise<FastifyInstance> => {
     const built = Fastify({ logger: false });
-    guardMaintenance(built, { maintenance });
+    guardMaintenance(built, { maintenance, now });
     built.post('/api/v1/anything', () => ({ ok: true }));
     built.get('/api/v1/anything', () => ({ ok: true }));
     await built.ready();
@@ -113,10 +147,33 @@ describe('the maintenance guard', () => {
     expect(response.json()).toMatchObject({ error: { code: 'server.maintenance_active' } });
   });
 
+  test('never sends the lease reason to the client, which may not be authenticated yet', async () => {
+    await store.acquire('applying restore backup-with-a-secret-id', '2026-09-19T03:00:00.000Z');
+    const response = await app.inject({ method: 'POST', url: '/api/v1/anything' });
+    const body = JSON.stringify(response.json());
+    expect(body).not.toContain('backup-with-a-secret-id');
+  });
+
   test('lets every request through when this deployment keeps no maintenance lease at all', async () => {
     const unguarded = await serving(undefined);
     const response = await unguarded.inject({ method: 'POST', url: '/api/v1/anything' });
     expect(response.statusCode).toBe(200);
     await unguarded.close();
+  });
+
+  test('treats a lease older than the TTL as idle rather than blocking writes forever', async () => {
+    await store.acquire('applying a restore', '2026-09-19T03:00:00.000Z');
+    const stale = await serving(store, () => new Date(Date.parse('2026-09-19T03:00:00.000Z') + MAINTENANCE_LEASE_TTL_MS + 1).toISOString());
+    const response = await stale.inject({ method: 'POST', url: '/api/v1/anything' });
+    expect(response.statusCode).toBe(200);
+    await stale.close();
+  });
+
+  test('still blocks a lease that is within the TTL', async () => {
+    await store.acquire('applying a restore', '2026-09-19T03:00:00.000Z');
+    const fresh = await serving(store, () => new Date(Date.parse('2026-09-19T03:00:00.000Z') + MAINTENANCE_LEASE_TTL_MS - 1).toISOString());
+    const response = await fresh.inject({ method: 'POST', url: '/api/v1/anything' });
+    expect(response.statusCode).toBe(503);
+    await fresh.close();
   });
 });

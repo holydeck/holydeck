@@ -23,6 +23,13 @@ import type { Document, Filter } from './repositories.js';
 export const MAINTENANCE_COLLECTION = 'maintenance';
 const DOC_ID = 'maintenance';
 
+// The lease has no heartbeat of its own — the job holding it may run for a long time and nothing here
+// renews it mid-job. This TTL is a safety net, not a per-job timeout: generous enough that no real restore
+// or media migration ever hits it, so it only ever fires for a lease a crashed worker (SIGKILL, OOM,
+// container restart) left behind with no `finally` left to run. `releaseOrphanedLease` below is the other
+// half of the same problem, for the deployment's normal path back from that: a worker that restarts.
+export const MAINTENANCE_LEASE_TTL_MS = 60 * 60 * 1000;
+
 export interface MaintenanceState {
   readonly active: boolean;
   readonly reason?: string;
@@ -86,28 +93,50 @@ export function maintenanceDb(db: Db): MaintenanceDb {
   return { collection: (name) => db.collection(name) as unknown as MaintenanceCollection };
 }
 
+/**
+ * Clears a lease left behind by a worker process that never reached its handler's `finally` — the crash
+ * case `release()` there cannot cover. Safe to call unconditionally at worker startup: this deployment runs
+ * one worker, so a lease still active when a fresh process starts up was necessarily orphaned by whichever
+ * process held it before, never a sibling actually mid-job.
+ */
+export async function releaseOrphanedLease(store: MaintenanceStore, report: (line: string) => void): Promise<void> {
+  const state = await store.read();
+  if (!state.active) return;
+  await store.release();
+  report(`released an orphaned maintenance lease (${state.reason ?? 'no reason recorded'})`);
+}
+
 export interface GuardMaintenanceOptions {
   /** Absent in a deployment that keeps no durable records, which is a deployment no restore can apply to. */
   readonly maintenance: MaintenanceStore | undefined;
+  /** Compared against the lease's `startedAt` to age it out past `MAINTENANCE_LEASE_TTL_MS`. */
+  readonly now: () => string;
 }
 
 const REFUSED_MESSAGE = 'A restore is being applied to production. Try again once it finishes.';
+
+/** Never the lease's own `reason` — that can carry a filesystem path or a backupId, and this runs before auth. */
+const REFUSED_DETAIL = 'a restore is applying';
+
+/** A lease is stale once it has outlived `MAINTENANCE_LEASE_TTL_MS`, `startedAt` included. */
+const isStale = (state: MaintenanceState, now: string): boolean =>
+  state.startedAt !== undefined && Date.parse(now) - Date.parse(state.startedAt) > MAINTENANCE_LEASE_TTL_MS;
 
 /**
  * Refuses every mutating request while a restore holds the lease, the same reach `guardMutations` has —
  * every route registered after this one is covered, which is why `app.ts` installs it beside that guard.
  */
-export function guardMaintenance(app: FastifyInstance, { maintenance }: GuardMaintenanceOptions): void {
+export function guardMaintenance(app: FastifyInstance, { maintenance, now }: GuardMaintenanceOptions): void {
   if (maintenance === undefined) return;
   app.addHook('onRequest', async (request, reply) => {
     if (!mutates(request.method)) return;
     const state = await maintenance.read();
-    if (!state.active) return;
+    if (!state.active || isStale(state, now())) return;
     await reply
       .code(503)
       .send(
         errorEnvelope(MAINTENANCE_ACTIVE, REFUSED_MESSAGE, request.id, [
-          { path: 'maintenance', code: MAINTENANCE_ACTIVE, message: state.reason ?? 'a restore is applying' },
+          { path: 'maintenance', code: MAINTENANCE_ACTIVE, message: REFUSED_DETAIL },
         ]),
       );
   });

@@ -11,7 +11,7 @@ import { mediaMigrationStateDb, mediaMigrationStateOn } from '@holydeck/app/medi
 import { notificationDb, notificationStoreOn } from '@holydeck/app/notification-store';
 import { SCHEMA_VERSION } from '@holydeck/app/migrations';
 import { queueDb, queueOn, schedulerContext, workerContext } from '@holydeck/app/queue';
-import { maintenanceDb, maintenanceOn } from '@holydeck/app/maintenance';
+import { maintenanceDb, maintenanceOn, releaseOrphanedLease } from '@holydeck/app/maintenance';
 import { repositoriesOn, repositoryDb } from '@holydeck/app/repositories';
 import { rehearsalDatabaseName, restoreContext, restoreDb } from '@holydeck/app/restores';
 import { sessionDb, sessionsOn } from '@holydeck/app/sessions';
@@ -167,6 +167,9 @@ if (work.runs === 'nothing') {
   // The same lease `apps/app`'s `guardMaintenance` reads: both processes read and write the one
   // `maintenance` collection in the production database, so a job held here is a hold the app sees too.
   const maintenance = maintenanceOn(maintenanceDb(store.db()));
+  // A lease still active this early is one a previous process never got to release — see
+  // `releaseOrphanedLease`'s own comment for why that is always safe here.
+  await releaseOrphanedLease(maintenance, (line) => void process.stdout.write(`${line}\n`));
   const mediaMigrationState = mediaMigrationStateOn(mediaMigrationStateDb(store.db()));
   const handlers = handlersOn({
     mediaIngest: {
