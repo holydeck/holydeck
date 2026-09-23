@@ -1,9 +1,11 @@
 import { assembleEntries } from '@holydeck/core/assemble';
 
+import { conflictShelfOn, SHELF_PERMISSIONS } from './conflicts.js';
 import { requestContext } from './context.js';
 import { LIBRARY_PERMISSIONS, LibraryError, libraryOn } from './library.js';
 import { RepositoryError } from './repositories.js';
 import { REVISION_PERMISSIONS, RevisionError, revisionsOn } from './revisions.js';
+import { saveContent } from './save-content.js';
 import { nonempty, parseSermonBody } from './sermon-body.js';
 import { sermonFromYaml, sermonToYaml } from './sermon-yaml.js';
 import { SlideGroupError, slideGroupsOn } from './slide-groups.js';
@@ -89,7 +91,10 @@ export class SermonError extends Error {
 export function sermonContext(actor: string, correlationId: string): RequestContext {
   return requestContext({
     actor, correlationId,
-    permissions: [...Object.values(LIBRARY_PERMISSIONS), ...Object.values(REVISION_PERMISSIONS), LAYOUT_PERMISSIONS.read],
+    permissions: [
+      ...Object.values(LIBRARY_PERMISSIONS), ...Object.values(REVISION_PERMISSIONS),
+      ...Object.values(SHELF_PERMISSIONS), LAYOUT_PERMISSIONS.read,
+    ],
   });
 }
 
@@ -141,6 +146,7 @@ function boundText(body: SermonBody, entry: EntryData, index: number, binding: K
 export function sermonsOn(db: RepositoryDb, options: SermonOptions): SermonStore {
   const library = libraryOn(db, options);
   const revisions = revisionsOn(db, options);
+  const conflictShelf = conflictShelfOn(db, options);
   const layouts = slideLayoutsOn(db, options);
   const groups = slideGroupsOn(db, options);
 
@@ -163,7 +169,7 @@ export function sermonsOn(db: RepositoryDb, options: SermonOptions): SermonStore
     return record(row, held);
   };
   const save = async (context: unknown, row: LibraryRecord, body: SermonBody): Promise<SermonRecord> => {
-    const saved = await revisions.save(context, { contentId: row.stamp.id, body, origin: 'manual-checkpoint' });
+    const saved = await saveContent(revisions, conflictShelf)(context, { contentId: row.stamp.id, body, origin: 'manual-checkpoint' });
     return record(row, saved.revision);
   };
 

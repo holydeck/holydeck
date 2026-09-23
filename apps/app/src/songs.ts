@@ -22,9 +22,11 @@
 
 import { TITLE_LANGUAGE_KEYS, parseSongBody, exportSong, importSong } from '@holydeck/contracts/songs';
 
+import { conflictShelfOn, SHELF_PERMISSIONS } from './conflicts.js';
 import { requestContext } from './context.js';
 import { LibraryError, LIBRARY_PERMISSIONS, libraryOn } from './library.js';
 import { RevisionError, REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
+import { saveContent } from './save-content.js';
 import { SlideGroupError, slideGroupsOn } from './slide-groups.js';
 import { LAYOUT_PERMISSIONS, SlideLayoutError, slideLayoutsOn } from './slide-layouts.js';
 import { songFromYaml, songToYaml } from './song-yaml.js';
@@ -66,7 +68,10 @@ export class SongError extends Error {
 export function songContext(actor: string, correlationId: string): RequestContext {
   return requestContext({
     actor,
-    permissions: [...Object.values(LIBRARY_PERMISSIONS), ...Object.values(REVISION_PERMISSIONS), LAYOUT_PERMISSIONS.read],
+    permissions: [
+      ...Object.values(LIBRARY_PERMISSIONS), ...Object.values(REVISION_PERMISSIONS),
+      ...Object.values(SHELF_PERMISSIONS), LAYOUT_PERMISSIONS.read,
+    ],
     correlationId,
   });
 }
@@ -215,6 +220,7 @@ export function songsOn(db: RepositoryDb, options: SongOptions): SongStore {
   // Passed through whole: a song needs no identifier of its own beyond the one the library mints for it.
   const library = libraryOn(db, options);
   const revisions = revisionsOn(db, { now: options.now });
+  const conflictShelf = conflictShelfOn(db, { now: options.now });
   const layouts = slideLayoutsOn(db, options);
   const groups = slideGroupsOn(db, options);
 
@@ -239,7 +245,7 @@ export function songsOn(db: RepositoryDb, options: SongOptions): SongStore {
     id: string,
     body: SongBody,
   ): Promise<SongRecord> => {
-    const outcome = await revisions.save(context, { contentId: id, body, origin: 'manual-checkpoint' });
+    const outcome = await saveContent(revisions, conflictShelf)(context, { contentId: id, body, origin: 'manual-checkpoint' });
     return {
       stamp: listed.stamp,
       title: listed.title,

@@ -18,6 +18,7 @@ import {
   checkSchema,
   readSettingsText,
 } from './boot.js';
+import { conflictShelfOn } from './conflicts.js';
 import { contentLanguagesOn } from './content-languages.js';
 import { systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
@@ -50,6 +51,7 @@ import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
+import type { ConflictShelf } from './conflicts.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { LibraryStore } from './library.js';
 import type { MediaLibrary } from './media.js';
@@ -128,6 +130,10 @@ let presence: PresenceStore | undefined;
 // one has no earlier revision to read, compare or bring back, and its routes answer not-found the
 // same way.
 let revisions: RevisionStore | undefined;
+// The conflict shelf keeps a losing edit rather than discarding it (spec COLL-01), kept and administered
+// the same way: a deployment with nowhere to keep one has nothing here to settle, and its routes answer
+// not-found the same way.
+let conflictShelf: ConflictShelf | undefined;
 // Songs, Sermons and Slide Groups are durable content records too, kept and administered the same way: a
 // deployment with nowhere to keep one has none to create, edit or generate slides from, and its routes
 // answer not-found the same way.
@@ -162,6 +168,7 @@ if (settings.values.mongoUrl !== '') {
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   revisions = revisionsOn(repositoryDb(store.db()), { now });
+  conflictShelf = conflictShelfOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
   presence = presenceOn(presenceDb(store.db()), { now });
@@ -229,6 +236,7 @@ const app = buildApp({
   settingsAdmin,
   slideLayouts,
   revisions,
+  conflictShelf,
   media,
   translationOffsets,
   shownReferences,

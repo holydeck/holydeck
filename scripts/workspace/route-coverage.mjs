@@ -44,6 +44,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'accounts-routes.ts': 'no harness test drives the admin account lifecycle over HTTP',
   'audit-routes.ts': 'no harness test reads the audit trail over HTTP',
   'capability-routes.ts': 'no harness test issues or revokes a guest or output capability over HTTP',
+  'conflict-routes.ts': 'no harness test lists or settles a shelved conflict over HTTP',
   'order-routes.ts': 'no harness test reads the running order over HTTP',
   'passkey-routes.ts':
     'registration and authentication need a WebAuthn authenticator, which the harness (raw fetch, no ' +

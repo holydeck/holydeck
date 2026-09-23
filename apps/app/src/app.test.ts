@@ -25,6 +25,7 @@ import { attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
 import { needsOf } from './authorization.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
+import { CONFLICT_RESOLVE_PATH } from './conflict-routes.js';
 import { CONTENT_LANGUAGE_KEY_PATH, CONTENT_LANGUAGE_STATUS_PATH } from './content-language-routes.js';
 import { contentLanguagesOn } from './content-languages.js';
 import { libraryOn } from './library.js';
@@ -176,6 +177,9 @@ describe('every route that changes something', () => {
       // Restoring an earlier revision is the one change this surface makes; reading, listing and
       // comparing are not.
       { method: 'POST', url: REVISION_RESTORE_PATH },
+      // Settling a shelved conflict is the one change this surface makes; listing what is outstanding
+      // is not.
+      { method: 'POST', url: CONFLICT_RESOLVE_PATH },
       // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
       // Admin's, the same as a Slide Layout's own surface above is. Archiving, restoring and retrying a
       // failed item are the same permission's, the way a Slide Layout's own status route is.

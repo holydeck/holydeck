@@ -7,6 +7,7 @@ import { serveAccountRoutes } from './accounts-routes.js';
 import { serveAuditRoutes } from './audit-routes.js';
 import { enforceAuthorization } from './authorization.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
+import { serveConflictRoutes } from './conflict-routes.js';
 import { serveContentLanguageRoutes } from './content-language-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
@@ -37,6 +38,7 @@ import { serveWebClient, shellFallback, withSecurityHeaders } from './static.js'
 
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
+import type { ConflictShelf } from './conflicts.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { Fetching } from './corpus.js';
 import type { LibraryStore } from './library.js';
@@ -84,6 +86,8 @@ export interface AppOptions {
   slideLayouts?: SlideLayoutStore;
   /** Where an earlier revision of Slide Layouts and Service Templates is read, compared and restored. */
   revisions?: RevisionStore;
+  /** Where a losing edit is kept rather than discarded (spec COLL-01). Without it, there is none to settle. */
+  conflictShelf?: ConflictShelf;
   /** Where an uploaded file becomes a media asset. Without it, there is nowhere for one to be uploaded to. */
   media?: MediaLibrary;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
@@ -128,6 +132,7 @@ export function buildApp({
   settingsAdmin,
   slideLayouts,
   revisions,
+  conflictShelf,
   media,
   translationOffsets,
   shownReferences,
@@ -280,6 +285,10 @@ export function buildApp({
   // Behind a permission of its own, granted to Admin and Editor: reading, comparing and restoring an
   // earlier revision of whatever content already versions itself through `revisions.ts`.
   serveRevisionRoutes(app, { revisions, identity });
+
+  // Behind the same permission the content stores it shelves for already grant: what is still waiting
+  // to be settled for one piece of content, and the one way an editor settles it (spec COLL-01).
+  serveConflictRoutes(app, { conflictShelf, revisions });
 
   // Behind a permission of its own, Admin's alone: reading the administrative trail `audit.ts` writes.
   serveAuditRoutes(app, { identity });
