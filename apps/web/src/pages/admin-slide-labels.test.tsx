@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-// The slide-label catalogue is administered here, list plus archive/restore only. Its dependents
-// endpoint is hardcoded to always answer zero (slide-label-routes.ts: nothing references a label by id
-// yet), so the confirm dialog never shows a dependents count for this page, but still asks the server
-// so the page stays tied to the real contract rather than assuming the answer.
+// The slide-label catalogue is administered here: list with usage counts, create, edit with a shortcut
+// key and a collision warning, archive and restore. The confirm dialog asks the dependents route before
+// an archive and shows its count when a label is in use.
 
 import { render, screen, waitFor, fireEvent } from '@testing-library/preact';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -171,5 +170,104 @@ describe('AdminSlideLabelsPage', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Page not found' })).toBeTruthy();
     expect(fetching).not.toHaveBeenCalled();
+  });
+});
+
+describe('AdminSlideLabelsPage create and edit (COLAB-13)', () => {
+  beforeEach(() => { resetAppState(); session.value = signedIn(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const verse = () => label({ stamp: { id: 'label-2' }, name: 'Verse', shortcut: '2' });
+
+  it('shows how many slides use each label', async () => {
+    setFetching(async () => listReply([{ ...label(), usage: 4 }]));
+    await renderPage();
+
+    expect(await screen.findByRole('columnheader', { name: 'Usage' })).toBeTruthy();
+    expect(screen.getByRole('cell', { name: '4' })).toBeTruthy();
+  });
+
+  it('adds a label with a shortcut key and reloads the list', async () => {
+    const bridge = label({ stamp: { id: 'label-3' }, name: 'Bridge', shortcut: '3' });
+    const fetching = vi.fn<FetchLike>();
+    fetching.mockResolvedValueOnce(listReply([label()]));
+    fetching.mockResolvedValueOnce(reply(201, successEnvelope(bridge, 'request-create')));
+    fetching.mockResolvedValueOnce(listReply([label(), bridge]));
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add label' }));
+    expect(screen.getByRole('heading', { level: 2, name: 'New label' })).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Bridge' } });
+    fireEvent.change(screen.getByLabelText('Shortcut key'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Bridge')).toBeTruthy();
+    const [, createCall] = fetching.mock.calls;
+    expect(createCall?.[0]).toBe(SLIDE_LABELS_PATH);
+    expect(createCall?.[1]?.method).toBe('POST');
+    expect(JSON.parse(createCall?.[1]?.body ?? '{}')).toEqual({ name: 'Bridge', shortcut: '3' });
+  });
+
+  it('sends no shortcut when none is chosen', async () => {
+    const fetching = vi.fn<FetchLike>();
+    fetching.mockResolvedValueOnce(listReply([]));
+    fetching.mockResolvedValueOnce(reply(201, successEnvelope(label({ name: 'Tag', shortcut: undefined as unknown as string }), 'request-create')));
+    fetching.mockResolvedValueOnce(listReply([]));
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add label' }));
+    fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Tag' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(fetching.mock.calls).toHaveLength(3));
+    expect(JSON.parse(fetching.mock.calls[1]?.[1]?.body ?? '{}')).toEqual({ name: 'Tag' });
+  });
+
+  it('warns while a chosen key or name is already held by another live label', async () => {
+    setFetching(async () => listReply([label(), verse()]));
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Verse' }));
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Verse');
+    expect((screen.getByLabelText('Shortcut key') as HTMLSelectElement).value).toBe('2');
+    expect(screen.queryByText(/already/)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Shortcut key'), { target: { value: '1' } });
+    expect(screen.getByText('Key 1 is already held by Chorus.')).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Chorus' } });
+    expect(screen.getByText('Another label is already called Chorus.')).toBeTruthy();
+  });
+
+  it('does not warn about a key held only by an archived label', async () => {
+    setFetching(async () => listReply([label({ stamp: { archivedAt: '2026-09-10T00:00:00.000Z', archivedBy: 'account:a1' } })]));
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add label' }));
+    fireEvent.change(screen.getByLabelText('Shortcut key'), { target: { value: '1' } });
+
+    expect(screen.queryByText(/already held/)).toBeNull();
+  });
+
+  it('edits a label and shows a server collision beside the shortcut field', async () => {
+    const fetching = vi.fn<FetchLike>();
+    fetching.mockResolvedValueOnce(listReply([label(), verse()]));
+    fetching.mockResolvedValueOnce(reply(409, errorEnvelope('entity.conflict', 'Refused', 'request-edit', [
+      { path: 'shortcut', code: 'field.not_allowed', message: 'the shortcut 1 is already held by label-1' },
+    ])));
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Verse' }));
+    fireEvent.change(screen.getByLabelText('Shortcut key'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('the shortcut 1 is already held by label-1')).toBeTruthy();
+    expect(screen.getByLabelText('Shortcut key').getAttribute('aria-invalid')).toBe('true');
+    const [, editCall] = fetching.mock.calls;
+    expect(editCall?.[0]).toBe(`${SLIDE_LABELS_PATH}/label-2`);
+    expect(editCall?.[1]?.method).toBe('PUT');
+    expect(JSON.parse(editCall?.[1]?.body ?? '{}')).toEqual({ name: 'Verse', shortcut: '1' });
   });
 });

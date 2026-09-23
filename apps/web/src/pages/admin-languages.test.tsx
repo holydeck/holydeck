@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-// The content-language catalogue is administered here, list plus archive/restore only (creating and
-// editing a language is out of this screen's scope). Archiving is never refused for being in use
+// The content-language catalogue is administered here: list with usage counts, create, edit, archive
+// and restore. Archiving is never refused for being in use
 // (content-language-routes.ts), so the confirm dialog shows how many items currently use a language as
 // information, not as a gate.
 
@@ -180,5 +180,99 @@ describe('AdminLanguagesPage', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Page not found' })).toBeTruthy();
     expect(fetching).not.toHaveBeenCalled();
+  });
+});
+
+describe('AdminLanguagesPage create and edit (COLAB-13)', () => {
+  beforeEach(() => { resetAppState(); session.value = signedIn(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('shows how many items use each language', async () => {
+    setFetching(async () => listReply([{ ...language(), usage: 7 }]));
+    await renderPage();
+
+    expect(await screen.findByRole('columnheader', { name: 'Usage' })).toBeTruthy();
+    expect(screen.getByRole('cell', { name: '7' })).toBeTruthy();
+  });
+
+  it('adds a language with a key and reloads the list', async () => {
+    const created = language({ stamp: { id: 'de' }, displayName: 'German', script: 'Latin', fallbackFont: 'sans-serif' });
+    const fetching = vi.fn<FetchLike>();
+    fetching.mockResolvedValueOnce(listReply([language()]));
+    fetching.mockResolvedValueOnce(reply(201, successEnvelope(created, 'request-create')));
+    fetching.mockResolvedValueOnce(listReply([language(), created]));
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add language' }));
+    expect(screen.getByRole('heading', { level: 2, name: 'New language' })).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Key'), { target: { value: 'de' } });
+    fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'German' } });
+    fireEvent.input(screen.getByLabelText('Script'), { target: { value: 'Latin' } });
+    fireEvent.input(screen.getByLabelText('Fallback font'), { target: { value: 'sans-serif' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('German')).toBeTruthy();
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+    const [, createCall] = fetching.mock.calls;
+    expect(createCall?.[0]).toBe(LANGUAGES_PATH);
+    expect(createCall?.[1]?.method).toBe('POST');
+    expect(JSON.parse(createCall?.[1]?.body ?? '{}')).toEqual({ key: 'de', displayName: 'German', script: 'Latin', fallbackFont: 'sans-serif' });
+  });
+
+  it('edits a language under its fixed key', async () => {
+    const fetching = vi.fn<FetchLike>();
+    fetching.mockResolvedValueOnce(listReply([language()]));
+    fetching.mockResolvedValueOnce(reply(200, successEnvelope(language({ displayName: 'Tamil (India)' }), 'request-edit')));
+    fetching.mockResolvedValueOnce(listReply([language({ displayName: 'Tamil (India)' })]));
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Tamil' }));
+    expect(screen.getByRole('heading', { level: 2, name: 'Edit Tamil' })).toBeTruthy();
+    expect(screen.queryByLabelText('Key')).toBeNull();
+    expect((screen.getByLabelText('Script') as HTMLInputElement).value).toBe(language().script);
+    fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Tamil (India)' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Tamil (India)')).toBeTruthy();
+    const [, editCall] = fetching.mock.calls;
+    expect(editCall?.[0]).toBe(`${LANGUAGES_PATH}/ta`);
+    expect(editCall?.[1]?.method).toBe('PUT');
+    expect(JSON.parse(editCall?.[1]?.body ?? '{}')).toEqual({ displayName: 'Tamil (India)', script: language().script, fallbackFont: language().fallbackFont });
+  });
+
+  it('shows a field refusal beside its field and a conflict above the form', async () => {
+    const fetching = vi.fn<FetchLike>();
+    fetching.mockResolvedValueOnce(listReply([language()]));
+    fetching.mockResolvedValueOnce(reply(422, errorEnvelope('request.validation_failed', 'Refused', 'request-create', [
+      { path: 'contentLanguage.script', code: 'field.required', message: 'must not be empty' },
+    ])));
+    fetching.mockResolvedValueOnce(reply(409, errorEnvelope('entity.conflict', 'the key ta is already taken', 'request-create')));
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add language' }));
+    fireEvent.input(screen.getByLabelText('Key'), { target: { value: 'ta' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('must not be empty')).toBeTruthy();
+    expect(screen.getByLabelText('Script').getAttribute('aria-invalid')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('The change was refused: the key ta is already taken');
+    expect(screen.getByRole('heading', { level: 2, name: 'New language' })).toBeTruthy();
+  });
+
+  it('closes the form on Cancel without a request', async () => {
+    const fetching = vi.fn<FetchLike>();
+    fetching.mockResolvedValueOnce(listReply([language()]));
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add language' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+    expect(fetching.mock.calls).toHaveLength(1);
   });
 });
