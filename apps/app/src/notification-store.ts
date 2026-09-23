@@ -6,6 +6,11 @@ import type { Db } from 'mongodb';
 import type { AuditAction, AuditCategory, AuditOutcome } from './audit.js';
 import type { Notification, NotificationChannel, NotificationPreference, NotificationSeverity } from './notifications.js';
 
+// None of the three collections below are inventoried in `backups.ts`'s `MONGO_CONTENTS`, or excludable
+// through its `EXCLUDED_RECORDS` — see that file's own comment, right beside `EXCLUDED_RECORDS`, for why:
+// every row here is rewritten or physically deleted in place (`markRead`, `markDismissed`, `expireRead`
+// below), which neither `RecordKind` this deployment's backup census knows how to grade allows. A backup
+// today carries neither the notifications nor the per-account preferences this store keeps.
 export const NOTIFICATIONS_COLLECTION = 'notifications';
 export const NOTIFICATION_PREFERENCES_COLLECTION = 'notification_preferences';
 export const NOTIFICATION_WATERMARKS_COLLECTION = 'notification_watermarks';

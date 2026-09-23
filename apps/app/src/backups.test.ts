@@ -19,6 +19,7 @@ import {
   recordedBackups,
 } from './backups.js';
 import { requestContext } from './context.js';
+import { NOTIFICATIONS_COLLECTION, NOTIFICATION_PREFERENCES_COLLECTION, NOTIFICATION_WATERMARKS_COLLECTION } from './notification-store.js';
 import { RECORDS, RECORD_NAMES } from './records.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
@@ -213,6 +214,18 @@ describe('the census of what a backup carries', () => {
   it('carries every class by default, which is why nothing is excluded today', () => {
     expect(EXCLUDED_RECORDS).toEqual([]);
     expect(MONGO_CONTENTS).toHaveLength(RECORD_NAMES.length);
+  });
+
+  // `notification-store.ts`'s three collections cannot be a `RecordName` at all — see the comment beside
+  // `EXCLUDED_RECORDS` above for why — so neither `MONGO_CONTENTS` nor `EXCLUDED_RECORDS` can ever name
+  // them, and this census has no way to catch the gap on its own. This guards the one thing it can: that
+  // none of those three collection names is ever reused by an actual `RECORDS` entry, which would silently
+  // point a real backup at rows this store also rewrites and deletes in place.
+  it('never shares a collection name with the notification-store collections outside its census', () => {
+    const inventoried = Object.values(RECORDS).map((record) => record.collection);
+    for (const collection of [NOTIFICATIONS_COLLECTION, NOTIFICATION_PREFERENCES_COLLECTION, NOTIFICATION_WATERMARKS_COLLECTION]) {
+      expect(inventoried).not.toContain(collection);
+    }
   });
 
   it('inventories each class under its own name, so a dump file can be matched back to a collection', () => {
