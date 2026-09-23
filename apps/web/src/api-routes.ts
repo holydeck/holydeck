@@ -56,6 +56,8 @@ export const API = {
   library: (filter: LibraryQuery = {}) =>
     withQuery('/api/v1/library', { kind: filter.kind, q: filter.q, archived: filter.archived === true ? 'true' : undefined }),
   libraryEntry: (id: string) => `/api/v1/library/${enc(id)}`,
+  libraryStatus: (id: string) => `/api/v1/library/${enc(id)}/status`,
+  libraryDependents: (id: string) => `/api/v1/library/${enc(id)}/dependents`,
   songs: '/api/v1/songs',
   song: (id: string, revision?: number) => revisionQuery(songPath(id), revision),
   songRaw: (id: string, revision?: number) => revisionQuery(`${songPath(id)}/raw`, revision),

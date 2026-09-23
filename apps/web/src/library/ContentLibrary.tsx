@@ -4,8 +4,13 @@
 // that same pane and records `?open=<id>` in the address so a reload comes back to it — a sermon opens as a
 // read-only outline (D03-5). The list is read again whenever the window regains focus and after an editor
 // saves, so work done in another tab shows up without a manual refresh.
+//
+// Archive and Restore (DELT-01, COLAB-14) sit in the detail pane for whoever may edit content. Archiving
+// first asks the server what still uses the entry, so the confirmation can say "Used by 2 services and 1
+// template" before anything changes; restoring asks nothing, since bringing an entry back breaks nothing.
+// Either way the list is read again afterwards, and the detail shows the stamp the server answered with.
 
-import { LIBRARY_KINDS, type LibraryKind } from '@holydeck/contracts/library';
+import { LIBRARY_KINDS, parseLibraryDependents, type LibraryDependents, type LibraryKind } from '@holydeck/contracts/library';
 import { isRecord, type Parsed } from '@holydeck/contracts/problems';
 import type { MessageKey } from '@holydeck/localization/messages';
 import type { JSX } from 'preact';
@@ -13,10 +18,13 @@ import { useEffect, useState } from 'preact/hooks';
 
 import { UNREADABLE_RESPONSE } from '../api.js';
 import { API, type HistoryKind } from '../api-routes.js';
+import { can, csrf } from '../app-state.js';
+import { ConfirmDialog } from '../components/confirm-dialog.js';
 import { SlideGroupEditor } from '../editors/SlideGroupEditor.js';
 import { SongEditor } from '../editors/SongEditor.js';
-import { t } from '../i18n.js';
+import { t, tn } from '../i18n.js';
 import { request } from '../request.js';
+import { say } from '../status.js';
 import { useSource } from '../workspace/tabs/bible-sources.js';
 import { NoMatch, SourceError } from '../workspace/tabs/BibleTab.js';
 import { readSermon, type SermonPick } from '../workspace/tabs/SermonTab.js';
@@ -128,6 +136,82 @@ function Opened({ entry, onSaved }: { readonly entry: LibraryEntry; readonly onS
 
 const OPENABLE: readonly LibraryKind[] = ['song', 'slideGroup', 'sermon'];
 
+/** What the archive confirmation says about use: a count, nothing, or that it could not be checked. */
+function UsedBy({ dependents }: { readonly dependents: LibraryDependents | 'failed' }): JSX.Element {
+  if (dependents === 'failed') return <p>{t('library.dependentsFailed')}</p>;
+  if (dependents.count === 0) return <p>{t('library.unused')}</p>;
+  return (
+    <p>
+      {t('library.usedBy', {
+        services: tn('library.usedBy.services', dependents.services),
+        templates: tn('library.usedBy.templates', dependents.templates),
+      })}
+    </p>
+  );
+}
+
+/** The detail pane's Archive or Restore button, its confirmation, and the change it confirms. */
+function ArchiveAction({ entry, onChanged }: {
+  readonly entry: LibraryEntry;
+  readonly onChanged: (changed: LibraryEntry) => void;
+}): JSX.Element {
+  const [confirming, setConfirming] = useState(false);
+  const [dependents, setDependents] = useState<LibraryDependents | 'failed'>();
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string>();
+  const archiving = !entry.archived;
+
+  const ask = async (): Promise<void> => {
+    setRefusal(undefined);
+    setDependents(undefined);
+    setConfirming(true);
+    if (!archiving) return;
+    const answer = await request(API.libraryDependents(entry.id));
+    const parsed = answer.ok ? parseLibraryDependents(answer.data) : undefined;
+    setDependents(parsed?.ok === true ? parsed.value : 'failed');
+  };
+
+  const confirm = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const answer = await request(API.libraryStatus(entry.id), { method: 'PATCH', csrf: csrf() ?? '', body: { archived: archiving } });
+      const changed = answer.ok ? readEntry(answer.data) : undefined;
+      if (changed === undefined) {
+        const text = t('library.refused', { message: answer.ok ? UNREADABLE_RESPONSE : answer.message });
+        setRefusal(text);
+        say('assertive', text);
+        return;
+      }
+      setConfirming(false);
+      onChanged(changed);
+      say('polite', t(archiving ? 'library.announce.archived' : 'library.announce.restored', { title: entry.title }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button type="button" onClick={() => void ask()}>{t(archiving ? 'library.archive' : 'library.restore')}</button>
+      {confirming ? (
+        <ConfirmDialog
+          id="library-confirm"
+          title={t(archiving ? 'library.archiveConfirmTitle' : 'library.restoreConfirmTitle', { title: entry.title })}
+          body={t(archiving ? 'library.archiveConfirmBody' : 'library.restoreConfirmBody')}
+          confirmLabel={t('library.confirm')}
+          cancelLabel={t('library.cancel')}
+          busy={busy}
+          onConfirm={() => void confirm()}
+          onCancel={() => setConfirming(false)}
+        >
+          {archiving && dependents !== undefined ? <UsedBy dependents={dependents} /> : null}
+          {refusal === undefined ? null : <p role="alert">{refusal}</p>}
+        </ConfirmDialog>
+      ) : null}
+    </>
+  );
+}
+
 /** The Content Library screen: search, filters, results and the picked entry's detail. */
 export function ContentLibrary(): JSX.Element {
   const [query, setQuery] = useState('');
@@ -218,6 +302,16 @@ export function ContentLibrary(): JSX.Element {
           <Revisions entry={picked} />
           {OPENABLE.includes(picked.kind) && opened !== picked.id
             ? <button type="button" onClick={() => open(picked)}>{t('library.open')}</button> : null}
+          {can('content.edit') ? (
+            <ArchiveAction
+              key={picked.id}
+              entry={picked}
+              onChanged={(changed) => {
+                setPicked(changed);
+                retry();
+              }}
+            />
+          ) : null}
           {opened === picked.id ? <Opened entry={picked} onSaved={retry} /> : null}
         </section>
       )}
