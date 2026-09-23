@@ -198,6 +198,14 @@ describe('frames a client sends', () => {
     expect(parseCommandFrame(withArgs)).toEqual({ ok: true, value: withArgs });
   });
 
+  it.each([['a string', 'x'], ['an array', [1]], ['null', null], ['a number', 3]])(
+    'reads a command whose args are %s, leaving the refusal to the command handler (RUN-03 acks it invalid)',
+    (_label, args) => {
+      const odd = { ...command(), args };
+      expect(parseCommandFrame(odd)).toEqual({ ok: true, value: odd });
+    },
+  );
+
   it('round-trips a v1-shaped frame (no state, no args) unchanged', () => {
     const v1Snapshot = { kind: 'snapshot', channel: 'audience', stateRevision: 1, sequence: 1, at: NOW };
     expect(parseSnapshotFrame(v1Snapshot)).toEqual({ ok: true, value: v1Snapshot });

@@ -97,8 +97,8 @@ type Command =
   | { readonly type: 'theme'; readonly surface: ThemeSurface; readonly theme: Theme };
 
 const commandFrom = (frame: CommandFrame): Command | undefined => {
-  const args = typeof frame.args === 'object' && frame.args !== null && !Array.isArray(frame.args)
-    ? frame.args as Record<string, unknown> : {};
+  if ('args' in frame && (typeof frame.args !== 'object' || frame.args === null || Array.isArray(frame.args))) return undefined;
+  const args = (frame.args ?? {}) as Record<string, unknown>;
   const { type } = frame;
   switch (type) {
     case 'go-to':

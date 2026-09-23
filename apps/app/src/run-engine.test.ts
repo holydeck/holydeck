@@ -222,6 +222,15 @@ describe('run-engine command ordering', () => {
     expect(hub.publishToCalls).toHaveLength(0);
   });
 
+  it.each([['a string', 'x'], ['an array', []], ['null', null]])(
+    'acks invalid for a command whose args are %s, even one that takes none', async (_label, args) => {
+      const { engine, runs } = await started();
+      runs.resume.mockClear();
+      expect(await engine.command(CONTROL_MEMBER, frame('next', args))).toEqual({ outcome: 'invalid' });
+      expect(runs.resume).not.toHaveBeenCalled();
+    },
+  );
+
   it('acks invalid for a command missing required args, before touching the run store', async () => {
     const { engine, runs, runEvents, deck } = await started();
     runs.resume.mockClear();

@@ -217,9 +217,9 @@ export function parseCommandFrame(value: unknown): Parsed<CommandFrame> {
     idempotencyKey: reader.text('idempotencyKey'),
     type: readName(reader, 'type'),
     clientStateRevision: reader.wholeNumber('clientStateRevision'),
-    args: reader.optionalParsed('args', (raw, path) => isRecord(raw)
-      ? { ok: true, value: raw }
-      : { ok: false, problems: [{ path, code: FIELD_CODES.notAnObject, message: 'must be an object' }] }),
+    // Args are the command's own business: a frame with odd args is still a readable command, which the
+    // handler answers with an `invalid` ack (RUN-03) instead of the socket being closed as unreadable.
+    args: reader.optionalParsed('args', (raw) => ({ ok: true, value: raw })),
   }));
 }
 
