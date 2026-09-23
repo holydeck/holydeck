@@ -111,6 +111,24 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
   .service-workspace { grid-template-columns: 264px minmax(480px, 1fr) 336px; align-items: start; }
 }
 
+.order-panel { display: grid; gap: var(--space-4); }
+.order-section { display: grid; gap: var(--space-2); }
+.order-section-header { display: flex; align-items: center; gap: var(--space-2); }
+.order-item { display: flex; align-items: center; gap: var(--space-2); position: relative; }
+.order-item-actions { position: relative; margin-inline-start: auto; }
+.is-disabled { color: var(--color-text-muted); }
+.order-item-pending {
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  animation: order-item-pending-spin var(--motion-max) linear infinite;
+}
+@keyframes order-item-pending-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (width < 1200px) {
   .workspace:has(> .workspace-panel:not(#order):target, > .workspace-panel:not(#order) :target) > #order {
     display: none;

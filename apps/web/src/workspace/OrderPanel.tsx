@@ -1,0 +1,122 @@
+// The Order panel: the empty state Task 9 already showed, or every section and its items. It never
+// renders a position the server has not confirmed — a move keeps its old place, marked busy, until the
+// answer arrives (`order-actions.ts`) — and a section edit (rename, add, remove) always sends the whole
+// draft, because `parseServiceDraft` requires `title`/`date`/`site` even when only `sections` changed.
+
+import { useState } from 'preact/hooks';
+
+import type { ServiceSection } from '@holydeck/contracts/services';
+import type { JSX } from 'preact';
+
+import { API } from '../api-routes.js';
+import { useAutosave } from '../editors/use-autosave.js';
+import { t } from '../i18n.js';
+import { isReadOnly, mutate, service } from '../state/workspace-store.js';
+import { OrderItem } from './OrderItem.js';
+import { addSection, removeSection, renameSection } from './order-ops.js';
+import { itemsOf, type ServiceView } from './service-data.js';
+
+/** PATCHes the sections `sectionsFor` computes from the current service, alongside its unchanged facts. */
+async function patchSections(sectionsFor: (current: ServiceView) => ServiceView['sections']): Promise<boolean> {
+  const current = service.value;
+  if (current === undefined) return false;
+  const result = await mutate(API.service(current.id), {
+    method: 'PATCH',
+    body: { title: current.title, date: current.date, site: current.site, sections: sectionsFor(current) },
+  });
+  return result.ok;
+}
+
+function SectionRenameField({ sectionId, name, onDone }: {
+  readonly sectionId: string;
+  readonly name: string;
+  readonly onDone: () => void;
+}): JSX.Element {
+  const [draft, setDraft] = useState(name);
+  const { flush } = useAutosave(draft, (value) => patchSections((current) => renameSection(current, sectionId, value)));
+
+  return (
+    <input
+      aria-label={t('order.section.rename')}
+      value={draft}
+      onInput={(event) => setDraft(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onDone();
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          void flush().then(onDone);
+        }
+      }}
+    />
+  );
+}
+
+function Section({ section, readOnly }: { readonly section: ServiceSection; readonly readOnly: boolean }): JSX.Element {
+  const [expanded, setExpanded] = useState(true);
+  const [renaming, setRenaming] = useState(false);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  const itemsId = `order-section-items-${section.id}`;
+
+  const removeThisSection = async (): Promise<void> => {
+    const current = service.value;
+    if (current === undefined) return;
+    const result = removeSection(current, section.id);
+    if (result === 'not-empty') {
+      setNotice(t('order.section.notEmpty'));
+      return;
+    }
+    setNotice(undefined);
+    await patchSections(() => result);
+  };
+
+  return (
+    <div class="order-section">
+      <div class="order-section-header">
+        <button type="button" aria-expanded={expanded} aria-controls={itemsId} onClick={() => setExpanded(!expanded)}>
+          {section.name}
+        </button>
+        {renaming ? (
+          <SectionRenameField sectionId={section.id} name={section.name} onDone={() => setRenaming(false)} />
+        ) : (
+          <button type="button" disabled={readOnly} onClick={() => setRenaming(true)}>{t('order.section.rename')}</button>
+        )}
+        <button type="button" disabled={readOnly} onClick={() => void removeThisSection()}>{t('order.section.remove')}</button>
+      </div>
+      {notice === undefined ? null : <p role="alert">{notice}</p>}
+      <ol id={itemsId} hidden={!expanded}>
+        {section.items.map((item, index) => (
+          <OrderItem key={item.id} sectionId={section.id} item={item} index={index} total={section.items.length} />
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** The Order panel Task 9 left a placeholder for: the same empty state, or every section and its items. */
+export function OrderPanel({ view, onEmpty }: { readonly view: ServiceView; readonly onEmpty: () => void }): JSX.Element {
+  const readOnly = isReadOnly.value;
+
+  if (itemsOf(view).length === 0) {
+    return (
+      <div>
+        <p>{t('workspace.empty')}</p>
+        <button type="button" onClick={onEmpty}>{t('workspace.empty.add')}</button>
+      </div>
+    );
+  }
+
+  return (
+    <div class="order-panel">
+      {view.sections.map((section) => <Section key={section.id} section={section} readOnly={readOnly} />)}
+      <button
+        type="button"
+        disabled={readOnly}
+        onClick={() => void patchSections((current) => addSection(current, t('order.section.new'), globalThis.crypto.randomUUID()))}
+      >
+        {t('order.section.add')}
+      </button>
+    </div>
+  );
+}

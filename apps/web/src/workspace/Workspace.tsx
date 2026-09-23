@@ -16,9 +16,10 @@ import { t } from '../i18n.js';
 import {
   loadService, loadState, resetWorkspace, rightTab, selection, service,
 } from '../state/workspace-store.js';
+import { OrderPanel } from './OrderPanel.js';
 import { PropertiesPanel } from './PropertiesPanel.js';
 import { startPositionWriter } from './position-writer.js';
-import { findItem, itemsOf, type ServiceView } from './service-data.js';
+import { findItem } from './service-data.js';
 import { useConnection } from './use-connection.js';
 import { WorkspaceStatus } from './WorkspaceStatus.js';
 
@@ -99,31 +100,6 @@ const BOTTOM_TABS: readonly { readonly id: string; readonly region: BottomRegion
 ];
 const BOTTOM_IDS = BOTTOM_TABS.map((tab) => tab.id);
 const ASIDE_IDS = ['workspace-tab-properties-aside', 'workspace-tab-library-aside'];
-
-function OrderPlaceholder({ view }: { readonly view: ServiceView }): JSX.Element {
-  const items = itemsOf(view);
-  if (items.length === 0) {
-    return (
-      <div>
-        <p>{t('workspace.empty')}</p>
-        <button
-          type="button"
-          onClick={() => {
-            rightTab.value = 'library';
-            mobileRegion.value = 'details';
-          }}
-        >
-          {t('workspace.empty.add')}
-        </button>
-      </div>
-    );
-  }
-  return (
-    <ul>
-      {items.map(({ item }) => <li id={`workspace-item-${item.id}`} key={item.id}>{item.title}</li>)}
-    </ul>
-  );
-}
 
 function EditorPlaceholder(): JSX.Element {
   return <textarea aria-label={t('workspace.region.editor')} />;
@@ -302,7 +278,7 @@ export function Workspace({ id }: { readonly id: string }): JSX.Element {
     <div class="workspace-main">
       <h1 class="visually-hidden">{view.title}</h1>
       <WorkspaceFrame
-        order={<OrderPlaceholder view={view} />}
+        order={<OrderPanel view={view} onEmpty={() => { rightTab.value = 'library'; mobileRegion.value = 'details'; }} />}
         center={<EditorPlaceholder />}
         properties={<PropertiesPanel />}
         library={<LibraryPlaceholder />}
