@@ -1,7 +1,8 @@
 // The history behind a piece of content: what has been saved, one revision compared with another, and
-// an earlier one brought back (spec v1c-09, COLAB-02). No content-kind of its own — `revisions.ts`
-// already keys every revision by content id alone, so this reads and restores whatever wrote there,
-// today only Slide Layouts and Service Templates. No conflict handling: a restore this route offers
+// an earlier one brought back (spec v1c-09, COLAB-02). `revisions.ts` keys every revision by content id
+// alone, so the route itself asks which kind an id belongs to before it answers anything about it: a
+// Slide Layout's history is as much Admin's as the Layout is, and holding history alone opens nothing
+// the session could not already edit. No conflict handling: a restore this route offers
 // has already read the revision it names, so the only way `RevisionStore.restore()` could still refuse
 // it is a race this code cannot correct by retrying, and is answered as the fault it is.
 
@@ -12,10 +13,12 @@ import { diffRevisions } from '@holydeck/core/diff-revisions';
 
 import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
-import { provenSession } from './csrf.js';
+import { provenSession, refuseAsForbidden } from './csrf.js';
 import { notFound } from './failures.js';
 import { revisionContext } from './revisions.js';
-import { CONTENT_HISTORY_MANAGE } from './roles.js';
+import { CONTENT_EDIT, CONTENT_HISTORY_MANAGE, LAYOUTS_MANAGE, SERVICE_TEMPLATES_MANAGE } from './roles.js';
+import { serviceTemplateContext } from './service-templates.js';
+import { slideLayoutContext } from './slide-layouts.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { Identity } from './onboarding.js';
@@ -41,6 +44,42 @@ const ROUTES = [
   ['POST', REVISION_RESTORE_PATH],
 ] as const;
 
+/** Which surface a revised id belongs to — and so which permission it is administered under. */
+export type RevisedKind = 'slideLayout' | 'serviceTemplate' | 'content';
+
+/** The permission each kind already asks of its own routes; the history of one asks exactly the same. */
+const KIND_PERMISSION: Readonly<Record<RevisedKind, string>> = {
+  slideLayout: LAYOUTS_MANAGE,
+  serviceTemplate: SERVICE_TEMPLATES_MANAGE,
+  content: CONTENT_EDIT,
+};
+
+export type ContentKindOf = (contentId: string, actor: string, correlationId: string) => Promise<RevisedKind>;
+
+/** Anything that can say whether it holds an id: the two Admin-only stores both answer `preview()`. */
+interface Previewing {
+  preview(context: unknown, id: string): Promise<unknown>;
+}
+
+/**
+ * Asks the stores that own an Admin-only kind whether they hold the id, and reads anything neither
+ * holds as ordinary content — the strictest reading an unknown id can have without refusing Admin.
+ */
+export function contentKindResolver(stores: {
+  readonly slideLayouts: Previewing | undefined;
+  readonly serviceTemplates: Previewing | undefined;
+}): ContentKindOf {
+  return async (contentId, actor, correlationId) => {
+    if ((await stores.slideLayouts?.preview(slideLayoutContext(actor, correlationId), contentId)) !== undefined) {
+      return 'slideLayout';
+    }
+    if ((await stores.serviceTemplates?.preview(serviceTemplateContext(actor, correlationId), contentId)) !== undefined) {
+      return 'serviceTemplate';
+    }
+    return 'content';
+  };
+}
+
 function revisionNumberIn(raw: string): number | undefined {
   return REVISION_NUMBER.test(raw) ? Number(raw) : undefined;
 }
@@ -49,9 +88,14 @@ export interface RevisionRoutesOptions {
   readonly revisions: RevisionStore | undefined;
   /** Where the restore below is recorded. Without one, the restore still happens; nothing notes it happened. */
   readonly identity: Identity | undefined;
+  /** Which kind an id is. Absent, every id is ordinary content, which still needs content editing. */
+  readonly kindOf?: ContentKindOf;
 }
 
-export function serveRevisionRoutes(app: FastifyInstance, { revisions, identity }: RevisionRoutesOptions): void {
+export function serveRevisionRoutes(
+  app: FastifyInstance,
+  { revisions, identity, kindOf = () => Promise.resolve('content') }: RevisionRoutesOptions,
+): void {
   if (revisions === undefined) {
     for (const [method, url] of ROUTES) {
       app.route({
@@ -73,6 +117,31 @@ export function serveRevisionRoutes(app: FastifyInstance, { revisions, identity 
    * Written after the restore, and logged rather than answered when the trail refuses it: a restore
    * holds that it happened, whether or not this server managed to write it down.
    */
+  /**
+   * Whether the session may see this id's history at all, answered and recorded as the guard's own
+   * refusal when it may not: the same 403, the same `authorization.refuse` entry, one layer further in.
+   */
+  const admitted = async (request: FastifyRequest, reply: FastifyReply, contentId: string): Promise<boolean> => {
+    const { actor, permissions } = provenSession(request).record;
+    const need = KIND_PERMISSION[await kindOf(contentId, actor, correlationFor(REVISION_PREFIX, request.id))];
+    if (permissions.includes(need)) return true;
+    const detail = `this content's history needs ${need}`;
+    if (identity !== undefined) {
+      try {
+        await identity.audit.record(auditContext(actor, correlationFor(REVISION_PREFIX, request.id)), {
+          action: 'authorization.refuse',
+          subject: `${request.method} ${String(request.routeOptions.url)}`,
+          outcome: 'refused',
+          detail,
+        });
+      } catch (error: unknown) {
+        request.log.error({ err: error }, 'the revision trail refused an entry');
+      }
+    }
+    await refuseAsForbidden(request, reply, 'permission', detail);
+    return false;
+  };
+
   const note = async (request: FastifyRequest, actor: string, contentId: string, number: number): Promise<void> => {
     if (identity === undefined) return;
     try {
@@ -89,6 +158,7 @@ export function serveRevisionRoutes(app: FastifyInstance, { revisions, identity 
 
   app.get(REVISIONS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const { contentId } = request.params as { contentId: string };
+    if (!(await admitted(request, reply, contentId))) return reply;
     const context = call(request);
     const full = await store.history(context, contentId);
     if (full.length === 0) return reply.code(404).send(notFound(request));
@@ -109,6 +179,7 @@ export function serveRevisionRoutes(app: FastifyInstance, { revisions, identity 
 
   app.get(REVISION_COMPARE_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const { contentId } = request.params as { contentId: string };
+    if (!(await admitted(request, reply, contentId))) return reply;
     const parsed = parseRevisionCompareQuery(request.query as Record<string, string | undefined>, 'query');
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
 
@@ -125,6 +196,7 @@ export function serveRevisionRoutes(app: FastifyInstance, { revisions, identity 
 
   app.get(REVISION_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const { contentId, revision } = request.params as { contentId: string; revision: string };
+    if (!(await admitted(request, reply, contentId))) return reply;
     const number = revisionNumberIn(revision);
     if (number === undefined) return reply.code(404).send(notFound(request));
     const found = await store.read(call(request), contentId, number);
@@ -134,6 +206,7 @@ export function serveRevisionRoutes(app: FastifyInstance, { revisions, identity 
 
   app.post(REVISION_RESTORE_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const { contentId, revision } = request.params as { contentId: string; revision: string };
+    if (!(await admitted(request, reply, contentId))) return reply;
     const number = revisionNumberIn(revision);
     if (number === undefined) return reply.code(404).send(notFound(request));
 

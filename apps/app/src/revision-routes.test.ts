@@ -16,10 +16,11 @@ import {
   REVISION_PATH,
   REVISION_RESTORE_PATH,
   REVISIONS_PATH,
+  contentKindResolver,
   serveRevisionRoutes,
 } from './revision-routes.js';
 import { revisionContext, revisionsOn } from './revisions.js';
-import { CONTENT_HISTORY_MANAGE } from './roles.js';
+import { CONTENT_EDIT, CONTENT_HISTORY_MANAGE, LAYOUTS_MANAGE, SERVICE_TEMPLATES_MANAGE } from './roles.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
@@ -31,6 +32,7 @@ import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { Identity } from './onboarding.js';
 import type { Document } from './repositories.js';
+import type { RevisedKind } from './revision-routes.js';
 import type { RevisionStore } from './revisions.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
@@ -90,6 +92,10 @@ const restoring = (contentId: string, revision: string, held: StartedSession = e
     headers: withHeaders(held),
   });
 
+// Two ids stand for the Admin-only kinds; everything else is ordinary content, as it is in a deployment.
+const KINDS: Readonly<Record<string, RevisedKind>> = { 'layout:1': 'slideLayout', 'template:1': 'serviceTemplate' };
+const kindOf = (contentId: string): Promise<RevisedKind> => Promise.resolve(KINDS[contentId] ?? 'content');
+
 const serving = async (
   store: RevisionStore | undefined,
   held: Identity | undefined = undefined,
@@ -98,7 +104,7 @@ const serving = async (
   withSafeErrors(app);
   guardMutations(app, { sessions });
   enforceAuthorization(app, { sessions, identity: held });
-  serveRevisionRoutes(app, { revisions: store, identity: held });
+  serveRevisionRoutes(app, { revisions: store, identity: held, kindOf });
   await app.ready();
 };
 
@@ -124,7 +130,7 @@ beforeEach(async () => {
   await serving(revisions);
   editor = await sessions.start(sessionContext(CORRELATION), {
     actor: EDITOR,
-    permissions: [CONTENT_HISTORY_MANAGE],
+    permissions: [CONTENT_HISTORY_MANAGE, CONTENT_EDIT],
   });
 });
 
@@ -272,5 +278,66 @@ describe('restoring a revision, with an identity to audit against', () => {
     });
     const response = await restoring('song:1', '1');
     expect(response.statusCode).toBe(200);
+  });
+});
+
+describe('the content kind a revision belongs to', () => {
+  const holding = (permissions: readonly string[]) =>
+    sessions.start(sessionContext(CORRELATION), { actor: 'account:' + 'E'.repeat(22), permissions: [CONTENT_HISTORY_MANAGE, ...permissions] });
+
+  test('keeps an Editor out of a Slide Layout and a Service Template, on every route', async () => {
+    await seed('layout:1', 'A');
+    await seed('layout:1', 'B');
+    await seed('template:1', 'A');
+    for (const contentId of ['layout:1', 'template:1']) {
+      expect((await history(contentId)).statusCode).toBe(403);
+      expect((await comparing(contentId, '?from=1&to=1')).statusCode).toBe(403);
+      expect((await reading(contentId, '1')).statusCode).toBe(403);
+      expect((await restoring(contentId, '1')).statusCode).toBe(403);
+    }
+    expect(await revisions.history(revisionContext(EDITOR, CORRELATION), 'layout:1')).toHaveLength(2);
+  });
+
+  test('lets each kind in with the permission that administers it, and only that one', async () => {
+    await seed('layout:1', 'A');
+    await seed('template:1', 'A');
+    const layouts = await holding([LAYOUTS_MANAGE]);
+    const templates = await holding([SERVICE_TEMPLATES_MANAGE]);
+    expect((await history('layout:1', '', layouts)).statusCode).toBe(200);
+    expect((await history('template:1', '', layouts)).statusCode).toBe(403);
+    expect((await history('template:1', '', templates)).statusCode).toBe(200);
+    expect((await history('layout:1', '', templates)).statusCode).toBe(403);
+  });
+
+  test('needs content editing for ordinary content, history alone is not enough', async () => {
+    await seed('song:9', 'A');
+    const historian = await holding([]);
+    expect((await history('song:9', '', historian)).statusCode).toBe(403);
+    expect((await restoring('song:9', '1', historian)).statusCode).toBe(403);
+  });
+
+  test('records the refusal in the trail', async () => {
+    await serving(revisions, identity);
+    await seed('layout:1', 'A');
+    expect((await restoring('layout:1', '1')).statusCode).toBe(403);
+    expect(entries()).toEqual([
+      expect.objectContaining({ actor: EDITOR, action: 'authorization.refuse', outcome: 'refused' }),
+    ]);
+  });
+});
+
+describe('resolving a content kind from the stores that own one', () => {
+  const owning = (ids: readonly string[]) => ({ preview: (_context: unknown, id: string) => Promise.resolve(ids.includes(id) ? {} : undefined) });
+
+  test('names the store that knows the id, and ordinary content otherwise', async () => {
+    const resolve = contentKindResolver({ slideLayouts: owning(['l']), serviceTemplates: owning(['t']) });
+    expect(await resolve('l', EDITOR, CORRELATION)).toBe('slideLayout');
+    expect(await resolve('t', EDITOR, CORRELATION)).toBe('serviceTemplate');
+    expect(await resolve('s', EDITOR, CORRELATION)).toBe('content');
+  });
+
+  test('reads a deployment without either store as ordinary content', async () => {
+    const resolve = contentKindResolver({ slideLayouts: undefined, serviceTemplates: undefined });
+    expect(await resolve('l', EDITOR, CORRELATION)).toBe('content');
   });
 });
