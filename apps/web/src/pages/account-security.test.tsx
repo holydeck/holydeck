@@ -276,6 +276,42 @@ describe('SecurityPage', () => {
     expect(JSON.parse(created?.[1].body ?? '{}')).toMatchObject({ name: 'New key' });
   });
 
+  it.each([
+    ['auth.passkey_registered', 'This passkey is already registered to your account.'],
+    ['auth.passkey_limit', 'This account already has 20 passkeys. Remove one before adding another.'],
+  ])('says a %s refusal in the operator language rather than the server text', async (code, text) => {
+    session.value = signedIn();
+    setFetching(vi.fn<FetchLike>(async (path, init) => {
+      if (path === PASSKEY_PATH && init.method === undefined) return emptyPasskeys();
+      if (path === PASSKEY_OPTIONS_PATH && init.method === 'POST') return reply(201, successEnvelope(registrationOptions, 'r-options'));
+      if (path === PASSKEY_PATH && init.method === 'POST') return reply(409, errorEnvelope(code, 'server words', 'r-created'));
+      throw new Error(`unexpected request ${String(init.method)} ${path}`);
+    }));
+    withLiveRegions(supportedBrowser(vi.fn(async () => attestationCredential)));
+
+    await screen.findByText('No passkeys are registered yet.');
+    fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'New key' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Add a passkey' }).closest('form') as HTMLFormElement);
+
+    expect((await screen.findByRole('alert')).textContent).toBe(text);
+  });
+
+  it('says when each passkey was last used, or that it never was', async () => {
+    session.value = signedIn();
+    setFetching(vi.fn<FetchLike>(async (path, init) => {
+      if (path === PASSKEY_PATH && init.method === undefined) {
+        return reply(200, successEnvelope({
+          passkeys: [{ ...alicePasskey, lastUsedAt: '2026-09-20T08:00:00.000Z' }, phonePasskey],
+        }, 'r-list'));
+      }
+      throw new Error(`unexpected request ${String(init.method)} ${path}`);
+    }));
+    withLiveRegions();
+
+    await screen.findByText('Last used 2026-09-20T08:00:00.000Z');
+    expect(screen.getByText('Never used')).toBeTruthy();
+  });
+
   it('announces a cancelled passkey prompt without creating anything', async () => {
     session.value = signedIn();
     const create = vi.fn(async () => {

@@ -5,6 +5,7 @@
 import { SIGN_IN_REFUSED } from '@holydeck/contracts/sessions';
 import { TOTP_DIGITS, TOTP_PATH, TOTP_RECOVERY_PATH, TOTP_VERIFICATION_PATH } from '@holydeck/contracts/totp';
 import {
+  PASSKEY_LIMIT,
   PASSKEY_OPTIONS_PATH,
   PASSKEY_PATH,
   TRANSPORTS,
@@ -242,9 +243,13 @@ export function SecurityPage({ browser = defaultBrowser() }: SecurityPageProps):
       const credential = mappedCredential(ceremony.credential);
       const created = await request(PASSKEY_PATH, { method: 'POST', csrf: csrf() ?? '', body: { name: passkeyName, credential } });
       if (!created.ok) {
-        const message = created.code === PASSKEY_REGISTERED || created.code === PASSKEY_LIMIT_REACHED
-          ? created.message
-          : fieldErrors(created, []).other ?? t('security.passkeys.failed');
+        // The two refusals an operator can act on are said in their language; the server's own text is
+        // written for a log, and is English whatever the operator reads.
+        const message = created.code === PASSKEY_REGISTERED
+          ? t('security.passkeys.alreadyRegistered')
+          : created.code === PASSKEY_LIMIT_REACHED
+            ? t('security.passkeys.limitReached', { limit: PASSKEY_LIMIT })
+            : fieldErrors(created, []).other ?? t('security.passkeys.failed');
         setAddPasskeyError(message);
         say('assertive', message);
         return;
@@ -427,7 +432,12 @@ export function SecurityPage({ browser = defaultBrowser() }: SecurityPageProps):
                   <>
                     <span>{passkey.name}</span>{' '}
                     <span>{t('security.passkeys.registeredAt', { date: passkey.registeredAt })}</span>
-                    {passkey.synced ? <span> {t('security.passkeys.synced')}</span> : null}
+                    {passkey.synced ? <span> {t('security.passkeys.synced')}</span> : null}{' '}
+                    <span>
+                      {passkey.lastUsedAt === undefined
+                        ? t('security.passkeys.neverUsed')
+                        : t('security.passkeys.lastUsedAt', { date: passkey.lastUsedAt })}
+                    </span>
                     <button type="button" onClick={() => startRename(passkey)}>
                       {t('security.passkeys.rename', { name: passkey.name })}
                     </button>
