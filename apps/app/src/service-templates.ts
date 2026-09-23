@@ -125,8 +125,9 @@ export interface ServiceTemplateStore {
   list(context: unknown): Promise<readonly ServiceTemplateRecord[]>;
   /** The standing entries, or a named earlier ordinal. Nothing is written either way. */
   preview(context: unknown, id: string, revision?: number): Promise<ServiceTemplatePreview | undefined>;
-  /** Saves entries forward. Nothing for an unknown Template; nothing appended when they did not change. */
-  version(context: unknown, id: string, body: ServiceTemplateBody): Promise<VersionOutcome | undefined>;
+  /** Saves the name and entries forward. Nothing for an unknown Template; nothing appended when the
+   *  entries did not change, but a changed name is still saved onto a new stamp row either way. */
+  version(context: unknown, id: string, draft: ServiceTemplateDraft): Promise<VersionOutcome | undefined>;
   /** Stops offering it where Templates are chosen. Its entries and its history are untouched. */
   archive(context: unknown, id: string): Promise<ServiceTemplateRecord | undefined>;
   /** Offers it again. Its entries are untouched either way. */
@@ -288,6 +289,7 @@ export function serviceTemplatesOn(db: RepositoryDb, options: ServiceTemplateOpt
     context: unknown,
     id: string,
     row: StampRow,
+    name: string,
     hash: string,
     save: () => Promise<{ readonly appended: boolean; readonly revision: RevisionRecord }>,
   ): Promise<VersionOutcome> => {
@@ -301,8 +303,15 @@ export function serviceTemplatesOn(db: RepositoryDb, options: ServiceTemplateOpt
     if (held === undefined) {
       throw new ServiceTemplateError('corrupt', `${id} is stamped as a Service Template and holds no entries at all`);
     }
-    if (held.hash === hash) return { appended: false, revision: held.revision };
-    await stampOnto(context, touched, row.name, row.sequence + 1);
+    const entriesChanged = held.hash !== hash;
+    const renamed = name !== row.name;
+    // Neither changed: nothing to save, and nothing is written — not even a touch, matching how a save
+    // with unchanged entries alone always behaved here.
+    if (!entriesChanged && !renamed) return { appended: false, revision: held.revision };
+    // A stamp row is written whenever the name changed even if the entries did not, or a rename made
+    // through this same save would otherwise never reach the row that holds it.
+    await stampOnto(context, touched, name, row.sequence + 1);
+    if (!entriesChanged) return { appended: false, revision: held.revision };
     const outcome = await save();
     return { appended: outcome.appended, revision: outcome.revision.revision };
   };
@@ -370,12 +379,12 @@ export function serviceTemplatesOn(db: RepositoryDb, options: ServiceTemplateOpt
         return { stamp: row.stamp, name: row.name, revision: record.revision, at: record.at, body: bodyOf(record) };
       }),
 
-    version: (context, id, body) =>
+    version: (context, id, draft) =>
       own(async () => {
-        const entries = readBody(body);
+        const { name, body: entries } = readDraft(draft);
         const row = await standing(context, id);
         if (row === undefined) return undefined;
-        return saved(context, id, row, addressOf(entries), () =>
+        return saved(context, id, row, name, addressOf(entries), () =>
           revisions.save(context, { contentId: id, body: entries, origin: 'manual-checkpoint' }),
         );
       }),

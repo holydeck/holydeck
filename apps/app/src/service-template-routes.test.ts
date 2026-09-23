@@ -60,6 +60,8 @@ const OTHER_BODY: ServiceTemplateBody = { sections: [] };
 
 const DRAFT: ServiceTemplateDraft = { name: 'Sunday service', body: BODY };
 const WIRE_DRAFT = { name: DRAFT.name, ...DRAFT.body };
+const WIRE_BODY = { name: DRAFT.name, ...BODY };
+const WIRE_OTHER_BODY = { name: DRAFT.name, ...OTHER_BODY };
 
 const SERVICE_DRAFT = {
   title: 'Sunday Gathering',
@@ -238,7 +240,7 @@ describe('previewing a Service Template', () => {
 
   test('answers an earlier ordinal when one is asked for by name', async () => {
     const id = await created();
-    await versioning(id, OTHER_BODY);
+    await versioning(id, WIRE_OTHER_BODY);
     expect((await previewing(id)).json().data.revision).toBe(2);
     const first = await previewing(id, '?revision=1');
     expect(first.statusCode).toBe(200);
@@ -263,7 +265,7 @@ describe('previewing a Service Template', () => {
 describe('saving a Service Template forward', () => {
   test('appends the next ordinal, and a later preview reads it back', async () => {
     const id = await created();
-    const response = await versioning(id, OTHER_BODY);
+    const response = await versioning(id, WIRE_OTHER_BODY);
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toEqual({ appended: true, revision: 2 });
     expect((await previewing(id)).json().data.body).toEqual(OTHER_BODY);
@@ -271,29 +273,40 @@ describe('saving a Service Template forward', () => {
 
   test('appends nothing when the entries did not change, and says so', async () => {
     const id = await created();
-    const response = await versioning(id, BODY);
+    const response = await versioning(id, WIRE_BODY);
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toEqual({ appended: false, revision: 1 });
     expect(actions()).toEqual(['content.change']);
   });
 
+  test('saves a new name even when the entries did not change, and a later preview reads it back', async () => {
+    const id = await created();
+    const response = await versioning(id, { ...WIRE_BODY, name: 'Sunday service v2' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual({ appended: false, revision: 1 });
+    expect((await previewing(id)).json().data.name).toBe('Sunday service v2');
+  });
+
   test('records one entry per ordinal it appended, naming the ordinal', async () => {
     const id = await created();
-    await versioning(id, OTHER_BODY);
+    await versioning(id, WIRE_OTHER_BODY);
     expect(actions()).toEqual(['content.change', 'content.change']);
     expect(entries()[1]).toMatchObject({ subject: `serviceTemplate:${id}`, detail: 'saved revision 2' });
   });
 
   test('refuses entries that are not entries, and answers not-found for a Template nobody created', async () => {
     const id = await created();
-    expect((await versioning(id, { sections: [{ id: 's', name: 'S', entries: [{ id: 'x' }] }] })).statusCode).toBe(422);
-    expect((await versioning('template-99', BODY)).statusCode).toBe(404);
+    expect(
+      (await versioning(id, { name: 'Sunday service', sections: [{ id: 's', name: 'S', entries: [{ id: 'x' }] }] }))
+        .statusCode,
+    ).toBe(422);
+    expect((await versioning('template-99', WIRE_BODY)).statusCode).toBe(404);
   });
 
   test('refuses to change an archived Template, which is what archiving one means', async () => {
     const id = await created();
     await statusing(id, { archived: true });
-    const response = await versioning(id, OTHER_BODY);
+    const response = await versioning(id, WIRE_OTHER_BODY);
     expect(response.statusCode).toBe(409);
     expect(response.json().error.code).toBe(ENTITY_CONFLICT);
   });
@@ -348,7 +361,7 @@ describe('listing Service Templates', () => {
     expect(listed.json().data).toMatchObject([{ name: 'Sunday service' }]);
     expect((await creating(WIRE_DRAFT, editor)).statusCode).toBe(403);
     expect((await previewing(id, '', editor)).statusCode).toBe(403);
-    expect((await versioning(id, OTHER_BODY, editor)).statusCode).toBe(403);
+    expect((await versioning(id, WIRE_OTHER_BODY, editor)).statusCode).toBe(403);
     expect((await statusing(id, { archived: true }, editor)).statusCode).toBe(403);
   });
 
@@ -362,7 +375,7 @@ describe('listing Service Templates', () => {
 describe('the history a Service Template keeps', () => {
   test('lists every ordinal and how it came to exist, and never the entries themselves', async () => {
     const id = await created();
-    await versioning(id, OTHER_BODY);
+    await versioning(id, WIRE_OTHER_BODY);
     const response = await listing(id);
     expect(response.statusCode).toBe(200);
     expect(response.json().data.revisions).toEqual([
@@ -429,7 +442,7 @@ describe('who may ask any of it', () => {
     const guest = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [] });
     const refused = [
       await creating(WIRE_DRAFT, guest),
-      await versioning(id, OTHER_BODY, guest),
+      await versioning(id, WIRE_OTHER_BODY, guest),
       await statusing(id, { archived: true }, guest),
       await fromService('service-1', { name: 'Anything' }, guest),
     ];
@@ -448,7 +461,7 @@ describe('what this surface refuses to answer at all', () => {
     expect((await listTemplates())).toHaveProperty('statusCode', 404);
     expect((await previewing('template-1')).statusCode).toBe(404);
     expect((await listing('template-1')).statusCode).toBe(404);
-    expect((await versioning('template-1', OTHER_BODY)).statusCode).toBe(404);
+    expect((await versioning('template-1', WIRE_OTHER_BODY)).statusCode).toBe(404);
     expect((await statusing('template-1', { archived: true })).statusCode).toBe(404);
     expect((await fromService('service-1', { name: 'Anything' })).statusCode).toBe(404);
   });

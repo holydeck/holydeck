@@ -18,7 +18,6 @@ import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import { FIELD_CODES } from '@holydeck/contracts/problems';
 import {
-  parseServiceTemplateBody,
   parseServiceTemplateDraft,
   parseServiceTemplateName,
   parseServiceTemplateStatus,
@@ -175,7 +174,7 @@ export function serveServiceTemplateRoutes(
   });
 
   app.put(SERVICE_TEMPLATE_ID_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
-    const parsed = parseServiceTemplateBody(request.body);
+    const parsed = parseServiceTemplateDraft(request.body);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
     const answer = await settled(() => templates.version(call(request), id, parsed.value), isRefusal);

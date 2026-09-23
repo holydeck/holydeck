@@ -191,7 +191,10 @@ describe('first-run seed data (SEED-01)', () => {
     const template = await templates.preview(read, outcome.serviceTemplates[0]!);
     expect(template?.stamp.createdBy).toBe(SEED_ACTOR);
     expect(template?.revision).toBe(1);
-    const templateVersioned = await templates.version(adminContext('req-admin0000009e2'), outcome.serviceTemplates[0]!, template!.body);
+    const templateVersioned = await templates.version(adminContext('req-admin0000009e2'), outcome.serviceTemplates[0]!, {
+      name: template!.name,
+      body: template!.body,
+    });
     expect(templateVersioned).toBeDefined();
     expect((await templates.archive(adminContext('req-admin0000009e3'), outcome.serviceTemplates[0]!))?.stamp.archivedAt).toBeDefined();
 

@@ -151,7 +151,7 @@ describe('preview', () => {
   it('reads a named earlier revision, which is what previewing history is', async () => {
     const { templates } = store();
     const created = await templates.create(ADMIN, DRAFT);
-    await templates.version(ADMIN, created.stamp.id, OTHER_BODY);
+    await templates.version(ADMIN, created.stamp.id, { name: created.name, body: OTHER_BODY });
     expect((await templates.preview(ADMIN, created.stamp.id))?.body).toEqual(OTHER_BODY);
     expect((await templates.preview(ADMIN, created.stamp.id, 1))?.body).toEqual(BODY);
     expect(await templates.preview(ADMIN, created.stamp.id, 9)).toBeUndefined();
@@ -179,7 +179,10 @@ describe('version', () => {
   it('appends a second revision when the entries changed, and touches the stamp that owns them', async () => {
     const { db, templates } = store();
     const created = await templates.create(ADMIN, DRAFT);
-    expect(await templates.version(ADMIN, created.stamp.id, OTHER_BODY)).toEqual({ appended: true, revision: 2 });
+    expect(await templates.version(ADMIN, created.stamp.id, { name: created.name, body: OTHER_BODY })).toEqual({
+      appended: true,
+      revision: 2,
+    });
     expect(rows(db, REVISIONS)).toHaveLength(2);
     expect(rows(db, STAMPS)).toHaveLength(2);
     const preview = await templates.preview(ADMIN, created.stamp.id);
@@ -188,17 +191,32 @@ describe('version', () => {
     expect(preview?.name).toBe('Sunday Service');
   });
 
-  it('appends nothing at all when the entries did not change, not even a stamp', async () => {
+  it('appends nothing at all when neither the name nor the entries changed, not even a stamp', async () => {
     const { db, templates } = store();
     const created = await templates.create(ADMIN, DRAFT);
-    expect(await templates.version(ADMIN, created.stamp.id, BODY)).toEqual({ appended: false, revision: 1 });
+    expect(await templates.version(ADMIN, created.stamp.id, { name: created.name, body: BODY })).toEqual({
+      appended: false,
+      revision: 1,
+    });
     expect(rows(db, REVISIONS)).toHaveLength(1);
     expect(rows(db, STAMPS)).toHaveLength(1);
   });
 
+  it('saves a new name onto a new stamp row even when the entries did not change', async () => {
+    const { db, templates } = store();
+    const created = await templates.create(ADMIN, DRAFT);
+    expect(await templates.version(ADMIN, created.stamp.id, { name: 'Sunday Service v2', body: BODY })).toEqual({
+      appended: false,
+      revision: 1,
+    });
+    expect(rows(db, REVISIONS)).toHaveLength(1);
+    expect(rows(db, STAMPS)).toHaveLength(2);
+    expect((await templates.preview(ADMIN, created.stamp.id))?.name).toBe('Sunday Service v2');
+  });
+
   it('answers nothing for a Service Template nobody defined', async () => {
     const { templates } = store();
-    expect(await templates.version(ADMIN, 'template-404', BODY)).toBeUndefined();
+    expect(await templates.version(ADMIN, 'template-404', DRAFT)).toBeUndefined();
     expect(await templates.archive(ADMIN, 'template-404')).toBeUndefined();
     expect(await templates.unarchive(ADMIN, 'template-404')).toBeUndefined();
     expect(await templates.history(ADMIN, 'template-404')).toEqual([]);
@@ -209,9 +227,11 @@ describe('version', () => {
     const { templates } = store();
     const created = await templates.create(ADMIN, DRAFT);
     const badBody = { sections: [{ id: 's', name: 'S', entries: [{ id: 'x' }] }] } as unknown as ServiceTemplateBody;
-    expect((await refused(templates.version(ADMIN, created.stamp.id, badBody))).kind).toBe('schema');
+    expect((await refused(templates.version(ADMIN, created.stamp.id, { name: created.name, body: badBody }))).kind).toBe(
+      'schema',
+    );
     await templates.archive(ADMIN, created.stamp.id);
-    const archived = await refused(templates.version(ADMIN, created.stamp.id, OTHER_BODY));
+    const archived = await refused(templates.version(ADMIN, created.stamp.id, { name: created.name, body: OTHER_BODY }));
     expect(archived.kind).toBe('state');
     expect(archived.message).toContain(created.stamp.id);
   });
@@ -222,7 +242,7 @@ describe('version', () => {
     const before = await templates.history(ADMIN, created.stamp.id);
     db.failOn = (collection) => (collection === STAMPS ? duplicateKey() : undefined);
 
-    const error = await refused(templates.version(ADMIN, created.stamp.id, OTHER_BODY));
+    const error = await refused(templates.version(ADMIN, created.stamp.id, { name: created.name, body: OTHER_BODY }));
 
     expect(error.kind).toBe('conflict');
     db.failOn = undefined;
@@ -271,7 +291,7 @@ describe('history', () => {
   it('is every revision a Service Template has been saved forward with', async () => {
     const { templates } = store();
     const created = await templates.create(ADMIN, DRAFT);
-    await templates.version(ADMIN, created.stamp.id, OTHER_BODY);
+    await templates.version(ADMIN, created.stamp.id, { name: created.name, body: OTHER_BODY });
     const history = await templates.history(ADMIN, created.stamp.id);
     expect(history.map((revision) => revision.revision)).toEqual([1, 2]);
   });
