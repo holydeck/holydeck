@@ -3,6 +3,7 @@ import { ENTITY_CONFLICT } from '@holydeck/contracts/http';
 import { PPTX_IMPORTS_PATH } from '@holydeck/contracts/pptx';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
 import { HolyDeckError } from '@holydeck/core/messages';
+import { PPTX_MAX_ENTRIES, PPTX_MAX_ENTRY_BYTES, PPTX_MAX_TOTAL_BYTES } from '@holydeck/core/pptx';
 import Fastify from 'fastify';
 import { strToU8, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -83,6 +84,29 @@ function buildPptx(slides: string[]): Uint8Array {
 }
 
 const DECK = buildPptx([textShapeXml('Amazing grace', 2) + textShapeXml('How sweet the sound', 3), textShapeXml('x2', 2)]);
+
+// AUTH-13's own family of crafted archives, uploaded through the real (unstubbed) `pptxImport` store —
+// `openArchive`'s bounds (packages/core/src/pptx.ts) fire inside `unzipSync`'s own filter callback for
+// every entry, before any part is ever read, so none of these need a valid deck structure. Store mode
+// (`level: 0`, no DEFLATE) keeps the too-many-entries and single-entry-too-large fixtures cheap to build
+// while staying under the route's own 100 MB bodyLimit unchanged.
+const TOO_MANY_ENTRIES = zipSync(
+  Object.fromEntries(Array.from({ length: PPTX_MAX_ENTRIES + 1 }, (_, index) => [`f${index}.bin`, strToU8('')])),
+);
+const ENTRY_TOO_LARGE = zipSync({ 'big.bin': [new Uint8Array(PPTX_MAX_ENTRY_BYTES + 1), { level: 0 }] });
+const UNSAFE_ENTRY_NAME = zipSync({ '../evil.xml': strToU8('x') });
+
+// A real zip bomb, not just a big body (Fastify's own bodyLimit is tested separately above): highly
+// compressible zero-filled entries, each under the per-entry cap, whose declared total tips over
+// PPTX_MAX_TOTAL_BYTES once unzipped, while the physical upload stays a few hundred KB. Built lazily
+// (not at module scope) since the real DEFLATE pass over ~250 MB takes a couple of seconds.
+function buildArchiveTooLarge(): Uint8Array {
+  const perEntry = PPTX_MAX_ENTRY_BYTES - 1024;
+  const entryCount = Math.ceil(PPTX_MAX_TOTAL_BYTES / perEntry);
+  const files: Record<string, Uint8Array> = {};
+  for (let index = 0; index < entryCount; index += 1) files[`big${index}.bin`] = new Uint8Array(perEntry);
+  return zipSync(files);
+}
 const ALL_VERSE = { decisions: [
   { slideIndex: 0, blockIndex: 0, label: 'Verse' },
   { slideIndex: 0, blockIndex: 1, label: 'Verse' },
@@ -216,26 +240,29 @@ describe('POST /api/v1/pptx-imports', () => {
     expect((await upload()).statusCode).toBe(500);
   });
 
+  // These four go through the real (unstubbed) pptxImport store wired in beforeEach, uploading crafted
+  // archives that trip openArchive's own limits (packages/core/src/pptx.ts) rather than stubbing the
+  // store's rejection — proving the route really enforces them, not just that it maps the error codes.
   test('answers 413 pptx.too_large for an archive over the entry-count limit', async () => {
-    await app.close();
-    await serving({ pptxImport: { import: () => Promise.reject(new HolyDeckError('pptx_too_many_entries', { max: 2000 })) } });
-    const response = await upload();
+    const response = await upload(TOO_MANY_ENTRIES);
+    expect(response.statusCode).toBe(413);
+    expect(response.json().error.code).toBe('pptx.too_large');
+  });
+
+  test('answers 413 pptx.too_large for a single entry over the per-entry size limit', async () => {
+    const response = await upload(ENTRY_TOO_LARGE);
     expect(response.statusCode).toBe(413);
     expect(response.json().error.code).toBe('pptx.too_large');
   });
 
   test('answers 413 pptx.too_large for an archive over the total-decompressed-size limit', async () => {
-    await app.close();
-    await serving({ pptxImport: { import: () => Promise.reject(new HolyDeckError('pptx_archive_too_large', { max: 200 * 1024 * 1024 })) } });
-    const response = await upload();
+    const response = await upload(buildArchiveTooLarge());
     expect(response.statusCode).toBe(413);
     expect(response.json().error.code).toBe('pptx.too_large');
-  });
+  }, 20_000);
 
   test('answers 422 pptx.invalid_format for an unsafe entry name', async () => {
-    await app.close();
-    await serving({ pptxImport: { import: () => Promise.reject(new HolyDeckError('pptx_unsafe_entry_name', { name: '../evil.xml' })) } });
-    const response = await upload();
+    const response = await upload(UNSAFE_ENTRY_NAME);
     expect(response.statusCode).toBe(422);
     expect(response.json().error.code).toBe('pptx.invalid_format');
   });
