@@ -116,6 +116,21 @@ const healthy = (file) => {
   check(`${file}: every service is up, health-checked and the migration finished`, problems.length === 0, problems.join('; '));
 };
 
+// The mongo healthcheck itself already refuses to report healthy until an unauthenticated
+// `listDatabases` fails (see each compose file's own comment), so a passing `healthy(file)`
+// already implies this — but only as a side effect of a liveness check. This asserts it as its
+// own named, legible claim: attempting the same unauthenticated call directly and requiring it
+// to fail, rather than leaving auth enforcement to be inferred from why health passed.
+const refusesUnauthenticated = (file) => {
+  let refused = false;
+  try {
+    compose(file, ['exec', '-T', 'mongo', 'mongosh', '--quiet', '--eval', 'db.adminCommand("listDatabases")'], true);
+  } catch {
+    refused = true;
+  }
+  check(`${file}: mongo refuses an unauthenticated connection`, refused);
+};
+
 const ledger = (file) => ({
   rows: Number(mongo(file, 'db.schema_migrations.countDocuments()')),
   applied: mongo(file, 'db.schema_migrations.findOne({ _id: "v1.up.1.done" })?.at ?? "none"'),
@@ -204,6 +219,7 @@ try {
   say(`\n=== ${DEV_FILE}: first bring-up ===`);
   up(DEV_FILE);
   healthy(DEV_FILE);
+  refusesUnauthenticated(DEV_FILE);
   const first = ledger(DEV_FILE);
   // Not an exact row count, for the same reason the DEPLOY_FILE check below already avoids one: the
   // migration set has grown since this was written for a single migration.
@@ -230,6 +246,7 @@ try {
   say(`\n=== ${TEST_FILE}: first run ===`);
   up(TEST_FILE);
   healthy(TEST_FILE);
+  refusesUnauthenticated(TEST_FILE);
   const testFirst = ledger(TEST_FILE);
   check(`${TEST_FILE}: the test stack migrated its own database`, testFirst.rows > 0, `${testFirst.rows} ledger rows`);
   markProbe(TEST_FILE, 'first-run');
@@ -250,6 +267,7 @@ try {
   down(DEPLOY_FILE, { volumes: true });
   up(DEPLOY_FILE);
   healthy(DEPLOY_FILE);
+  refusesUnauthenticated(DEPLOY_FILE);
   const deployed = ledger(DEPLOY_FILE);
   // Not an exact row count: there is no prior run on this stack to compare against, and hardcoding
   // today's migration count would only go stale as the migration set grows. What "ran against an empty
