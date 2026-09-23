@@ -112,11 +112,27 @@ function probeUntilReachable(delayMs = PROBE_FIRST_MS): void {
   }, delayMs);
 }
 
-export async function mutate(path: string, change: Omit<Change, 'csrf'>, pendingId?: string): Promise<ApiResult<ServiceView>> {
+/** One service write: a fixed `body`, or `bodyFor`, which builds it from the service as it stands the
+ *  moment the write actually leaves — after every write queued before it has been answered. */
+export type ServiceChange = Omit<Change, 'csrf' | 'body'> & {
+  readonly body?: unknown;
+  readonly bodyFor?: (current: ServiceView) => unknown;
+};
+
+// Every write to the open service goes through this one chain, in order. The server's `edit` replaces the
+// whole sections tree, item bodies included, so a section edit or cross-section move built while an
+// editor's body save was still in flight would put the old body back; queued, it is built from the answer
+// that save produced instead.
+let writes: Promise<unknown> = Promise.resolve();
+
+export async function mutate(path: string, change: ServiceChange, pendingId?: string): Promise<ApiResult<ServiceView>> {
   if (pendingId !== undefined) pending.value = new Set(pending.value).add(pendingId);
   saveState.value = 'saving';
-  try {
-    const answer = await request(path, { ...change, csrf: csrf() ?? '' });
+  const send = async (): Promise<ApiResult<ServiceView>> => {
+    const { bodyFor, ...rest } = change;
+    const current = service.value;
+    const body = bodyFor === undefined ? rest.body : current === undefined ? undefined : bodyFor(current);
+    const answer = await request(path, { ...rest, ...(body === undefined ? {} : { body }), csrf: csrf() ?? '' });
     if (answer.ok) {
       const view = readServiceView(answer.data);
       saveState.value = 'saved';
@@ -129,6 +145,11 @@ export async function mutate(path: string, change: Omit<Change, 'csrf'>, pending
       if (answer.code === NETWORK_UNREACHABLE) probeUntilReachable();
     }
     return answer as ApiResult<ServiceView>;
+  };
+  const queued = writes.then(send, send);
+  writes = queued.catch(() => undefined);
+  try {
+    return await queued;
   } finally {
     if (pendingId !== undefined) {
       const next = new Set(pending.value);

@@ -18,13 +18,14 @@ import { addSection, removeSection, renameSection } from './order-ops.js';
 import { itemsOf, type ServiceView } from './service-data.js';
 import { WindowedList } from './windowed-list.js';
 
-/** PATCHes the sections `sectionsFor` computes from the current service, alongside its unchanged facts. */
+/** PATCHes the sections `sectionsFor` computes, alongside the service's unchanged facts. Both are read
+ *  only once the write leaves the store's queue, so an item body saved just before is carried, not reverted. */
 async function patchSections(sectionsFor: (current: ServiceView) => ServiceView['sections']): Promise<boolean> {
   const current = service.value;
   if (current === undefined) return false;
   const result = await mutate(API.service(current.id), {
     method: 'PATCH',
-    body: { title: current.title, date: current.date, site: current.site, sections: sectionsFor(current) },
+    bodyFor: (latest) => ({ title: latest.title, date: latest.date, site: latest.site, sections: sectionsFor(latest) }),
   });
   return result.ok;
 }
@@ -76,7 +77,10 @@ function Section({ section, readOnly }: { readonly section: ServiceSection; read
       return;
     }
     setNotice(undefined);
-    await patchSections(() => result);
+    await patchSections((latest) => {
+      const removed = removeSection(latest, section.id);
+      return removed === 'not-empty' ? latest.sections : removed;
+    });
   };
 
   return (

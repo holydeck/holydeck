@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { addSection, moveWithin, neighbours, removeSection, renameSection, reorderPlan } from './order-ops.js';
+import { addSection, movedSections, moveWithin, neighbours, removeSection, renameSection, reorderPlan } from './order-ops.js';
 import type { ServiceView } from './service-data.js';
 
 const item = (id: string) => ({ id, kind: 'custom-slide' as const, title: id, enabled: true, content: undefined });
@@ -71,15 +71,17 @@ describe('reorderPlan', () => {
       { id: 'sec-2', name: 'Response', items: ['x', 'y'] },
     ]);
     const plan = reorderPlan(crossed, 'a', { sectionId: 'sec-2', index: 1 });
-    expect(plan).toEqual([
-      {
-        kind: 'move',
-        sections: [
-          { id: 'sec-1', name: 'Welcome', items: [item('b')] },
-          { id: 'sec-2', name: 'Response', items: [item('x'), item('a'), item('y')] },
-        ],
-      },
+    expect(plan).toEqual([{ kind: 'move', itemId: 'a', sectionId: 'sec-2', index: 1 }]);
+    expect(movedSections(crossed, 'a', { sectionId: 'sec-2', index: 1 })).toEqual([
+      { id: 'sec-1', name: 'Welcome', items: [item('b')] },
+      { id: 'sec-2', name: 'Response', items: [item('x'), item('a'), item('y')] },
     ]);
+  });
+
+  it('computes no post-move sections for an item or section that is gone', () => {
+    const crossed = view([{ id: 'sec-1', name: 'Welcome', items: ['a'] }]);
+    expect(movedSections(crossed, 'z', { sectionId: 'sec-1', index: 0 })).toBeUndefined();
+    expect(movedSections(crossed, 'a', { sectionId: 'gone', index: 0 })).toBeUndefined();
   });
 
   it('returns nothing for an item the service does not have', () => {

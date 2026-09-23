@@ -42,13 +42,36 @@ export function neighbours(view: ServiceView, itemId: string): Neighbours {
 
 export type OrderStep =
   | { readonly kind: 'reorder'; readonly sectionId: string; readonly itemIds: readonly string[] }
-  | { readonly kind: 'move'; readonly sections: ServiceView['sections'] };
+  | { readonly kind: 'move'; readonly itemId: string; readonly sectionId: string; readonly index: number };
+
+/**
+ * The complete post-move `sections` for moving `itemId` into another section at `target.index`, or
+ * `undefined` when either no longer exists. Computed from whichever view the caller passes — the one the
+ * write is actually sent against — so the item bodies it carries are never older than the service's own.
+ */
+export function movedSections(
+  view: ServiceView, itemId: string, target: { sectionId: string; index: number },
+): ServiceView['sections'] | undefined {
+  const located = itemsOf(view).find(({ item }) => item.id === itemId);
+  const targetSection = view.sections.find((candidate) => candidate.id === target.sectionId);
+  if (located === undefined || targetSection === undefined) return undefined;
+  const withoutIt = view.sections.map((section) =>
+    section.id === located.sectionId ? { ...section, items: section.items.filter((item) => item.id !== itemId) } : section,
+  );
+  const remaining = withoutIt.find((section) => section.id === target.sectionId)?.items ?? [];
+  const at = Math.max(0, Math.min(target.index, remaining.length));
+  return withoutIt.map((section) =>
+    section.id === target.sectionId
+      ? { ...section, items: [...section.items.slice(0, at), located.item, ...section.items.slice(at)] }
+      : section,
+  );
+}
 
 /**
  * The one step that moves `itemId` to `target`: a same-section `reorder`, or — when it crosses into
- * another section — a `move` carrying the complete post-move `sections`, computed here so no
- * intermediate, cross-section-duplicate state is ever sent or read back. Returns `[]` for an unknown
- * item or target section rather than throwing — the caller decides whether that is reachable.
+ * another section — a `move`, whose complete post-move `sections` (`movedSections`) is computed only when
+ * it is sent, so no intermediate, cross-section-duplicate state is ever sent or read back. Returns `[]`
+ * for an unknown item or target section rather than throwing — the caller decides whether that is reachable.
  */
 export function reorderPlan(view: ServiceView, itemId: string, target: { sectionId: string; index: number }): OrderStep[] {
   const located = itemsOf(view).find(({ item }) => item.id === itemId);
@@ -59,17 +82,7 @@ export function reorderPlan(view: ServiceView, itemId: string, target: { section
     const ids = moveWithin(targetSection.items.map((item) => item.id), itemId, target.index);
     return [{ kind: 'reorder', sectionId: target.sectionId, itemIds: ids }];
   }
-
-  const withoutIt = view.sections.map((section) =>
-    section.id === located.sectionId ? { ...section, items: section.items.filter((item) => item.id !== itemId) } : section,
-  );
-  const at = Math.max(0, Math.min(target.index, targetSection.items.length));
-  const sections = withoutIt.map((section) =>
-    section.id === target.sectionId
-      ? { ...section, items: [...section.items.slice(0, at), located.item, ...section.items.slice(at)] }
-      : section,
-  );
-  return [{ kind: 'move', sections }];
+  return [{ kind: 'move', itemId, sectionId: target.sectionId, index: target.index }];
 }
 
 /** A copy of the service's sections with one section's name changed. */

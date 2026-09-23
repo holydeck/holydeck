@@ -152,6 +152,39 @@ describe('workspace store', () => {
     expect(calls).toEqual(['POST /save']);
   });
 
+  it('sends writes one at a time and builds a queued body from the answer before it', async () => {
+    const renamed = record('s1', ['a']);
+    renamed.sections[0]!.items[0]!.title = 'A2';
+    let releasePut: (() => void) | undefined;
+    const sent: { key: string; body: unknown }[] = [];
+    setFetching(async (url, init) => {
+      const key = `${init.method ?? 'GET'} ${url}`;
+      if (key === 'GET /api/v1/services/s1') return reply(200, successEnvelope(record('s1', ['a']), 'r1'));
+      if (key === 'GET /api/v1/services/s1/content-drift') return reply(200, successEnvelope([], 'r2'));
+      sent.push({ key, body: init.body === undefined ? undefined : JSON.parse(init.body as string) });
+      if (key === 'PUT /body') {
+        await new Promise<void>((resolve) => { releasePut = resolve; });
+        return reply(200, successEnvelope(renamed, 'r3'));
+      }
+      return reply(200, successEnvelope(renamed, 'r4'));
+    });
+    session.value = signedIn();
+    await loadService('s1');
+
+    const put = mutate('/body', { method: 'PUT', body: { title: 'A2' } });
+    const patch = mutate('/sections', {
+      method: 'PATCH',
+      bodyFor: (current) => ({ sections: current.sections.map((section) => section.items.map((item) => item.title)) }),
+    });
+    await vi.waitFor(() => expect(releasePut).toBeDefined());
+    expect(sent.map(({ key }) => key)).toEqual(['PUT /body']);
+
+    releasePut?.();
+    await Promise.all([put, patch]);
+    expect(sent.map(({ key }) => key)).toEqual(['PUT /body', 'PATCH /sections']);
+    expect(sent[1]?.body).toEqual({ sections: [['A2']] });
+  });
+
   it('persists rightTab to localStorage and survives a throwing storage', async () => {
     rightTab.value = 'library';
     await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
