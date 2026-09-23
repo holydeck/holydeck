@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { schedulerOn } from './scheduler.js';
 
 import type { SchedulerOptions } from './scheduler.js';
+import type { JobRecord } from '@holydeck/contracts/jobs';
 import type { SchedulerState } from '@holydeck/app/schedule';
 
 interface Call {
@@ -22,6 +23,27 @@ const QUIET_SETTINGS = {
 
 const NOW = new Date('2026-09-13T12:00:00.000Z'); // a Sunday
 
+/** A permanently-retired job, as `queue.list` would report one back to the scheduler. */
+const failedJob = (overrides: {
+  readonly id?: string;
+  readonly kind?: string;
+  readonly idempotencyKey?: string;
+  readonly queuedAt?: string;
+} = {}): JobRecord => ({
+  id: overrides.id ?? 'job-failed-1',
+  kind: overrides.kind ?? 'backup-run',
+  idempotencyKey: overrides.idempotencyKey ?? 'backup-run:2026-09-13',
+  payload: {},
+  state: 'failed',
+  attempt: 5,
+  retryLimit: 5,
+  queuedAt: overrides.queuedAt ?? '2026-09-12T00:00:00.000Z',
+  workers: ['worker-1'],
+  leaseExpiresAt: undefined,
+  heartbeatAt: undefined,
+  lastError: 'boom',
+});
+
 const open = (
   overrides: {
     readonly state?: SchedulerState;
@@ -29,6 +51,7 @@ const open = (
     readonly settings?: SchedulerOptions['settings'];
     readonly sleep?: (ms: number) => Promise<void>;
     readonly report?: (line: string) => void;
+    readonly list?: (context: unknown, input?: unknown) => Promise<readonly JobRecord[]>;
   } = {},
 ) => {
   const calls: Call[] = [];
@@ -48,10 +71,15 @@ const open = (
         calls.push({ op: 'enqueue', input });
         return { id: 'job-1', created: true };
       },
+      list: overrides.list ?? (async () => []),
+      requeue: async (_context, input) => {
+        calls.push({ op: 'requeue', input });
+        return failedJob({ idempotencyKey: `${input.idempotencyKey}#2` });
+      },
     },
     state: { read: async () => state, markBackup: async () => {}, markRestoreRehearsal: async () => {}, markRetentionSweep: async () => {} },
     settings: overrides.settings ?? QUIET_SETTINGS,
-    context: { actor: 'system', permissions: ['queue.enqueue'], correlationId: 'scheduler-test' },
+    context: { actor: 'system', permissions: ['queue.enqueue', 'queue.read', 'queue.requeue'], correlationId: 'scheduler-test' },
     changedSince,
     now: () => NOW,
     sleep:
@@ -145,5 +173,54 @@ describe('running until it is told to stop', () => {
     expect(calls).toBe(2);
     expect(world.waits).toEqual([60_000]);
     expect(world.reports).toEqual([expect.stringContaining('mongo blipped')]);
+  });
+});
+
+describe('retrying a job whose earlier attempt failed for good', () => {
+  const SETTINGS = { ...QUIET_SETTINGS, backupDailyAt: '00:00', backupMinimumGapMinutes: 60 };
+
+  test('requeues a same-family failed job once the retry gap has elapsed, instead of enqueuing a fresh one', async () => {
+    const failed = failedJob({ idempotencyKey: 'backup-run:2026-09-13', queuedAt: '2026-09-13T09:00:00.000Z' });
+    const world = open({ settings: SETTINGS, list: async () => [failed] });
+
+    await world.scheduler.tick();
+
+    expect(world.calls).toEqual([{ op: 'requeue', input: { id: failed.id, idempotencyKey: failed.idempotencyKey } }]);
+  });
+
+  test('waits rather than requeuing a same-family failed job before the retry gap has elapsed', async () => {
+    const failed = failedJob({ idempotencyKey: 'backup-run:2026-09-13', queuedAt: '2026-09-13T11:30:00.000Z' });
+    const world = open({ settings: SETTINGS, list: async () => [failed] });
+
+    await world.scheduler.tick();
+
+    expect(world.calls).toEqual([]);
+  });
+
+  test('a failed job of a different kind does not block enqueuing the one that is due', async () => {
+    const failed = failedJob({ kind: 'restore-run', idempotencyKey: 'restore-run:2026-09-13' });
+    const world = open({ settings: SETTINGS, list: async () => [failed] });
+
+    await world.scheduler.tick();
+
+    expect(world.calls).toEqual([
+      {
+        op: 'enqueue',
+        input: {
+          kind: 'backup-run',
+          idempotencyKey: 'backup-run:2026-09-13',
+          payload: { components: QUIET_SETTINGS.backupComponents, trigger: 'scheduled' },
+        },
+      },
+    ]);
+  });
+
+  test('matches a failed job already carrying a requeue suffix as the same family', async () => {
+    const failed = failedJob({ idempotencyKey: 'backup-run:2026-09-13#2', queuedAt: '2026-09-13T09:00:00.000Z' });
+    const world = open({ settings: SETTINGS, list: async () => [failed] });
+
+    await world.scheduler.tick();
+
+    expect(world.calls).toEqual([{ op: 'requeue', input: { id: failed.id, idempotencyKey: 'backup-run:2026-09-13#2' } }]);
   });
 });

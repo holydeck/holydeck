@@ -91,19 +91,32 @@ export function dueJobs(input: DueJobsInput): readonly JobRequest[] {
   const today = localParts(now, settings.timezone);
   const jobs: JobRequest[] = [];
 
-  const backupKey = `backup-run:${today.date}`;
+  const scheduledKey = `backup-run:${today.date}`;
+  // Keyed to the backup this gap is measured from, not the calendar date: unlike the scheduled backup,
+  // which is deliberately capped at once a day, a change-triggered one has to be able to fire more than
+  // once in a day whenever content keeps changing — sharing the scheduled key would let only the first of
+  // those through. Keying off `lastBackupAt` itself is what keeps two schedulers ticking at once from
+  // enqueueing two: they read the same state and agree on the same key from it, and the key changes on
+  // its own the moment either of them succeeds and moves the baseline forward.
+  const changedKey = `backup-run:changed:${state.lastBackupAt ?? 'never'}`;
   const backupAlreadyRanToday = isToday(state.lastBackupAt, settings.timezone, today.date);
   const pastDailyTime = today.minutesOfDay >= minutesOfDay(settings.backupDailyAt);
   const gapElapsed =
     state.lastBackupAt === undefined ||
     now.getTime() - Date.parse(state.lastBackupAt) >= settings.backupMinimumGapMinutes * 60_000;
   const scheduledBackupDue = !backupAlreadyRanToday && pastDailyTime;
-  const changeTriggeredBackupDue = !backupAlreadyRanToday && input.changedSinceLastBackup && gapElapsed;
-  if (scheduledBackupDue || changeTriggeredBackupDue) {
+  const changeTriggeredBackupDue = input.changedSinceLastBackup && gapElapsed;
+  if (scheduledBackupDue) {
     jobs.push({
       kind: 'backup-run',
-      idempotencyKey: backupKey,
-      payload: { components: settings.backupComponents, trigger: scheduledBackupDue ? 'scheduled' : 'changed' },
+      idempotencyKey: scheduledKey,
+      payload: { components: settings.backupComponents, trigger: 'scheduled' },
+    });
+  } else if (changeTriggeredBackupDue) {
+    jobs.push({
+      kind: 'backup-run',
+      idempotencyKey: changedKey,
+      payload: { components: settings.backupComponents, trigger: 'changed' },
     });
   }
 

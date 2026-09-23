@@ -118,9 +118,16 @@ export function workerContext(correlationId: string): RequestContext {
   });
 }
 
-/** The context the scheduler enqueues under: the product acting as itself, allowed to enqueue and nothing else. */
+/**
+ * The context the scheduler runs under: the product acting as itself, allowed to enqueue what is due, see
+ * what already failed, and requeue a due job whose earlier attempt was retired — never to run one itself.
+ */
 export function schedulerContext(correlationId: string): RequestContext {
-  return requestContext({ actor: 'system', permissions: [QUEUE_PERMISSIONS.enqueue], correlationId });
+  return requestContext({
+    actor: 'system',
+    permissions: [QUEUE_PERMISSIONS.enqueue, QUEUE_PERMISSIONS.read, QUEUE_PERMISSIONS.requeue],
+    correlationId,
+  });
 }
 
 // Mongo compares `leaseExpiresAt` as a string, which is the comparison of the instants it names only while

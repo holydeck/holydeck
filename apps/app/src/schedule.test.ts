@@ -63,18 +63,42 @@ describe('dueJobs', () => {
     ]);
   });
 
-  it('requests a changed backup before the daily time after the minimum gap', () => {
+  it('requests a changed backup before the daily time after the minimum gap, keyed off the last backup', () => {
     const now = new Date('2026-09-15T02:00:00.000Z');
 
-    for (const state of [{}, { lastBackupAt: '2026-09-14T23:00:00.000Z' }]) {
+    for (const [state, key] of [
+      [{}, 'backup-run:changed:never'],
+      [{ lastBackupAt: '2026-09-14T23:00:00.000Z' }, 'backup-run:changed:2026-09-14T23:00:00.000Z'],
+    ] as const) {
       expect(dueJobs({ now, settings: SETTINGS, state, changedSinceLastBackup: true })).toEqual([
         {
           kind: 'backup-run',
-          idempotencyKey: 'backup-run:2026-09-15',
+          idempotencyKey: key,
           payload: { components: ['settings', 'content'], trigger: 'changed' },
         },
       ]);
     }
+  });
+
+  it('requests another changed backup later the same day once the gap has elapsed again', () => {
+    // Unlike the scheduled backup, capped at once per local date, a change-triggered one must be able to
+    // fire again the same day the gap allows it — even past today's own scheduled backup.
+    const now = new Date('2026-09-14T06:00:00.000Z');
+
+    expect(
+      dueJobs({
+        now,
+        settings: SETTINGS,
+        state: { lastBackupAt: '2026-09-14T03:00:00.000Z', lastRetentionSweepAt: '2026-09-14T04:00:00.000Z' },
+        changedSinceLastBackup: true,
+      }),
+    ).toEqual([
+      {
+        kind: 'backup-run',
+        idempotencyKey: 'backup-run:changed:2026-09-14T03:00:00.000Z',
+        payload: { components: ['settings', 'content'], trigger: 'changed' },
+      },
+    ]);
   });
 
   it('rate-limits a changed backup when the previous local date backup is too recent', () => {

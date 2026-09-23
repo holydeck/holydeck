@@ -11,8 +11,14 @@ import type { SchedulerStateStore } from './scheduler-state.js';
 /** How often the scheduler checks what is due. A minute is fine resolution for jobs that fire daily/weekly. */
 const TICK_MS = 60_000;
 
+// A due job's own key names its family (`backup-run:2026-09-13`), never a requeued member of it
+// (`backup-run:2026-09-13#2`) — `queue.ts`'s `requeueKey` only ever adds one suffix, replacing rather than
+// stacking an earlier one, so stripping a single trailing `#<digits>` is enough to recognise a match.
+const SERIES = /#\d+$/u;
+const sameFamily = (candidate: string, key: string): boolean => candidate.replace(SERIES, '') === key;
+
 export interface SchedulerOptions {
-  readonly queue: Pick<Queue, 'enqueue'>;
+  readonly queue: Pick<Queue, 'enqueue' | 'list' | 'requeue'>;
   readonly state: SchedulerStateStore;
   readonly settings: DueJobsSettings;
   readonly context: unknown;
@@ -36,12 +42,31 @@ export function schedulerOn(options: SchedulerOptions): Scheduler {
     const state = await options.state.read();
     const changedSinceLastBackup = await options.changedSince(state.lastBackupAt);
     const jobs = dueJobs({ now: now(), settings: options.settings, state, changedSinceLastBackup });
+    if (jobs.length === 0) return;
+
+    // `enqueue` treats any family member as "already exists" regardless of its state (`queue.ts`), so a job
+    // that failed for good would otherwise block every future tick from ever enqueueing that family again —
+    // only a `requeue`, which bumps the key, can revive it. Reusing `backupMinimumGapMinutes` as the retry
+    // gap for every kind: there is no per-kind retry-gap setting, and this is the same "don't hammer it"
+    // cadence the backup gap already expresses.
+    const failed = await options.queue.list(options.context, {
+      states: ['failed'],
+      kinds: [...new Set(jobs.map((job) => job.kind))],
+    });
     for (const job of jobs) {
-      await options.queue.enqueue(options.context, {
-        kind: job.kind,
-        idempotencyKey: job.idempotencyKey,
-        payload: job.payload,
-      });
+      const stalled = failed.find((candidate) => candidate.kind === job.kind && sameFamily(candidate.idempotencyKey, job.idempotencyKey));
+      if (stalled === undefined) {
+        await options.queue.enqueue(options.context, {
+          kind: job.kind,
+          idempotencyKey: job.idempotencyKey,
+          payload: job.payload,
+        });
+        continue;
+      }
+      const gapElapsed = now().getTime() - Date.parse(stalled.queuedAt) >= options.settings.backupMinimumGapMinutes * 60_000;
+      if (gapElapsed) {
+        await options.queue.requeue(options.context, { id: stalled.id, idempotencyKey: stalled.idempotencyKey });
+      }
     }
   };
 
