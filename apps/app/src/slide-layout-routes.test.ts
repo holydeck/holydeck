@@ -11,6 +11,7 @@ import { auditOn } from './audit.js';
 import { enforceAuthorization } from './authorization.js';
 import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
+import { libraryOn } from './library.js';
 import { passkeysOn } from './passkeys.js';
 import { CONTENT_EDIT, LAYOUTS_MANAGE } from './roles.js';
 import {
@@ -21,6 +22,7 @@ import {
 } from './slide-layout-routes.js';
 import { slideLayoutsOn } from './slide-layouts.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { slideGroupContext, slideGroupsOn } from './slide-groups.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
@@ -30,10 +32,13 @@ import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { Identity } from './onboarding.js';
+import type { LibraryStore } from './library.js';
 import type { Document } from './repositories.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SessionStore, StartedSession } from './sessions.js';
+import type { SlideGroupStore } from './slide-groups.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
+import type { SlideGroupBody } from '@holydeck/contracts/slide-groups';
 import type { FastifyInstance } from 'fastify';
 
 const START = Date.parse('2026-09-13T09:30:00.000Z');
@@ -74,6 +79,8 @@ let sessions: SessionStore;
 let db: FakeDb;
 let identity: Identity;
 let layouts: SlideLayoutStore;
+let slideGroups: SlideGroupStore;
+let library: LibraryStore;
 let admin: StartedSession;
 let tick: number;
 
@@ -125,6 +132,9 @@ const restoring = (id: string, revision: string, held: StartedSession = admin) =
     payload: {} as never,
   });
 
+const dependents = (id: string, held: StartedSession = admin) =>
+  app.inject({ method: 'GET', url: `${at(LAYOUT_PATH, id)}/dependents`, headers: withHeaders(held) });
+
 /** One Layout, created through the surface, so every test below starts from a real stamp and revision. */
 const created = async (payload: unknown = DRAFT): Promise<string> => {
   const response = await creating(payload);
@@ -136,7 +146,7 @@ const serving = async (held: Identity | undefined, store: SlideLayoutStore | und
   withSafeErrors(app);
   guardMutations(app, { sessions });
   enforceAuthorization(app, { sessions, identity: undefined });
-  serveSlideLayoutRoutes(app, { slideLayouts: store, identity: held });
+  serveSlideLayoutRoutes(app, { slideLayouts: store, identity: held, slideGroups, library });
   await app.ready();
 };
 
@@ -158,6 +168,9 @@ beforeEach(async () => {
   };
   let serial = 0;
   layouts = slideLayoutsOn(db, { now, newId: () => `layout-${(serial += 1)}` });
+  let groupSerial = 0;
+  slideGroups = slideGroupsOn(db, { now, newId: () => `group-${(groupSerial += 1)}` });
+  library = libraryOn(db, { now });
   await serving(identity);
   admin = await sessions.start(sessionContext(CORRELATION), {
     actor: ADMINISTRATOR,
@@ -446,6 +459,17 @@ describe('the history a Slide Layout keeps', () => {
   });
 });
 
+describe('counting what references a Slide Layout', () => {
+  test('counts a real referencing slide group, zero when nothing references it, and not-found for an unknown id', async () => {
+    const id = await created();
+    expect((await dependents(id)).json().data).toEqual({ count: 0, approximate: true });
+    const body: SlideGroupBody = { mode: 'custom', enabled: true, slideLayoutId: id, slides: [] };
+    await slideGroups.create(slideGroupContext(ADMINISTRATOR, 'group-corr'), 'slideGroup', 'Test group', body);
+    expect((await dependents(id)).json().data).toEqual({ count: 1, approximate: true });
+    expect((await dependents('layout-99')).statusCode).toBe(404);
+  });
+});
+
 describe('who may ask any of it', () => {
   test('every route that changes a Layout is behind the guard, and the two that read are not', () => {
     expect(mutatingRoutesOf(app)).toEqual([
@@ -494,6 +518,7 @@ describe('what this surface refuses to answer at all', () => {
     expect((await versioning('layout-1', { boxes: [text] })).statusCode).toBe(404);
     expect((await restoring('layout-1', '1')).statusCode).toBe(404);
     expect((await statusing('layout-1', { archived: true })).statusCode).toBe(404);
+    expect((await dependents('layout-1')).statusCode).toBe(404);
   });
 
   test('answers not-found from the identity gate alone, even with a store configured', async () => {

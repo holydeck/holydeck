@@ -24,13 +24,17 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
+import { libraryContext } from './library.js';
 import { settled } from './refusals.js';
 import { CONTENT_EDIT, LAYOUTS_MANAGE } from './roles.js';
+import { slideGroupContext } from './slide-groups.js';
 import { SlideLayoutError, slideLayoutContext, subjectFor } from './slide-layouts.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
+import type { LibraryStore } from './library.js';
 import type { Identity } from './onboarding.js';
+import type { SlideGroupStore } from './slide-groups.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { RevisionRecord } from '@holydeck/contracts/revisions';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -52,6 +56,9 @@ const LAYOUT_REVISION_PATH = `${LAYOUT_REVISIONS_PATH}/:revision`;
 /** Whether it is offered where Layouts are chosen. Its boxes are untouched either way. */
 const LAYOUT_STATUS_PATH = `${LAYOUT_PATH}/status`;
 
+/** An approximate count of what references it. Never audited — it mutates nothing. */
+const LAYOUT_DEPENDENTS_PATH = `${LAYOUT_PATH}/dependents`;
+
 const PERMISSION: RouteNeed = { kind: 'permission', need: LAYOUTS_MANAGE };
 const LIST_PERMISSION: RouteNeed = { kind: 'any-permission', needs: [CONTENT_EDIT, LAYOUTS_MANAGE] };
 
@@ -64,6 +71,7 @@ const ROUTES = [
   ['PUT', LAYOUT_BOXES_PATH, PERMISSION],
   ['POST', LAYOUT_REVISION_PATH, PERMISSION],
   ['PATCH', LAYOUT_STATUS_PATH, PERMISSION],
+  ['GET', LAYOUT_DEPENDENTS_PATH, PERMISSION],
 ] as const;
 
 /** Counting from one, the same as history does. A leading zero is not an ordinal anything wrote. */
@@ -100,11 +108,14 @@ export interface SlideLayoutRoutesOptions {
   readonly slideLayouts: SlideLayoutStore | undefined;
   /** Absent in a deployment that keeps no identity, which has nothing here to audit a change against. */
   readonly identity: Identity | undefined;
+  /** Absent whenever `identity` is, per `main.ts`'s wiring — used only for the dependents scan below. */
+  readonly slideGroups: SlideGroupStore | undefined;
+  readonly library: LibraryStore | undefined;
 }
 
 export function serveSlideLayoutRoutes(
   app: FastifyInstance,
-  { slideLayouts, identity }: SlideLayoutRoutesOptions,
+  { slideLayouts, identity, slideGroups: slideGroupsOption, library: libraryOption }: SlideLayoutRoutesOptions,
 ): void {
   // A deployment with nowhere to keep an identity has nothing here to audit a change against. Every path
   // is still served, so the guard's table remains the complete shape of the surface in every deployment.
@@ -123,6 +134,8 @@ export function serveSlideLayoutRoutes(
   // Guaranteed by `main.ts`'s wiring, not by this module: an `identity` never exists without a Layout
   // store alongside it, so the gate above is this module's only check for either.
   const layouts = slideLayouts as SlideLayoutStore;
+  const slideGroups = slideGroupsOption as SlideGroupStore;
+  const library = libraryOption as LibraryStore;
 
   const call = (request: FastifyRequest) =>
     slideLayoutContext(provenSession(request).record.actor, correlationFor(LAYOUT_PREFIX, request.id));
@@ -227,5 +240,27 @@ export function serveSlideLayoutRoutes(
     // The direction is in the detail rather than in two actions, because the content surface names one.
     await note(request, id, 'allowed', parsed.value.archived ? 'archived' : 'brought back');
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  // An approximate count, not an audited action: a substring scan over every slide group's and reusable
+  // slide's body, the same crude-but-honest shape `content-language-routes.ts` and `media-routes.ts` use
+  // for theirs.
+  app.get(LAYOUT_DEPENDENTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const id = idIn(request);
+    const preview = await layouts.preview(call(request), id);
+    if (preview === undefined) return reply.code(404).send(notFound(request));
+    const actor = provenSession(request).record.actor;
+    const correlationId = correlationFor(LAYOUT_PREFIX, request.id);
+    const [groupRows, reusableRows] = await Promise.all([
+      library.list(libraryContext(actor, correlationId), { kind: 'slideGroup' }),
+      library.list(libraryContext(actor, correlationId), { kind: 'reusableSlide' }),
+    ]);
+    const records = await Promise.all(
+      [...groupRows, ...reusableRows].map((row) => slideGroups.current(slideGroupContext(actor, correlationId), row.stamp.id)),
+    );
+    const count = records
+      .filter((r): r is NonNullable<typeof r> => r !== undefined)
+      .filter((record) => JSON.stringify(record.body).includes(id)).length;
+    return reply.send(successEnvelope({ count, approximate: true }, request.id, CLIENT_WINDOW.current));
   });
 }

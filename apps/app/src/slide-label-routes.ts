@@ -38,6 +38,7 @@ const SLIDE_LABEL_PREFIX = 'slideLabel:';
 export const SLIDE_LABEL_ID_PATH = `${SLIDE_LABELS_PATH}/:id`;
 export const SLIDE_LABEL_STATUS_PATH = `${SLIDE_LABEL_ID_PATH}/status`;
 export const SLIDE_LABEL_CATALOGUE_PATH = `${SLIDE_LABELS_PATH}/catalogue`;
+export const SLIDE_LABEL_DEPENDENTS_PATH = `${SLIDE_LABEL_ID_PATH}/dependents`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: CATALOGUE_MANAGE };
 const CATALOGUE_PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
@@ -49,6 +50,7 @@ const ROUTES = [
   ['GET', SLIDE_LABEL_ID_PATH, PERMISSION],
   ['PUT', SLIDE_LABEL_ID_PATH, PERMISSION],
   ['PATCH', SLIDE_LABEL_STATUS_PATH, PERMISSION],
+  ['GET', SLIDE_LABEL_DEPENDENTS_PATH, PERMISSION],
 ] as const;
 
 const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
@@ -157,5 +159,13 @@ export function serveSlideLabelRoutes(app: FastifyInstance, { slideLabels, ident
     } catch (error) {
       return reply.code(409).send(refusalReply(error, request.id));
     }
+  });
+
+  // Nothing in this codebase references a slide label by id yet (SONG-01/T51's free-text label field is a
+  // different concept) — always zero is the honest answer, not a stub.
+  app.get(SLIDE_LABEL_DEPENDENTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const item = await labels.get(call(request), idIn(request));
+    if (item === undefined) return reply.code(404).send(notFound(request));
+    return reply.send(successEnvelope({ count: 0, approximate: true }, request.id, CLIENT_WINDOW.current));
   });
 }

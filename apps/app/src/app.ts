@@ -285,7 +285,7 @@ export function buildApp({
 
   // Behind the same permission again, by a vocabulary of its own: a Slide Layout is Admin's to create,
   // to save forward and to stop offering, and nobody else's to change.
-  serveSlideLayoutRoutes(app, { slideLayouts, identity });
+  serveSlideLayoutRoutes(app, { slideLayouts, identity, slideGroups, library });
 
   // Behind a permission of its own, granted to Admin and Editor: reading, comparing and restoring an
   // earlier revision of whatever content already versions itself through `revisions.ts`.
@@ -300,7 +300,7 @@ export function buildApp({
 
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
-  serveMediaRoutes(app, { media, identity });
+  serveMediaRoutes(app, { media, identity, slideGroups, library });
 
   // Reading is public, the same as the corpus routes above: BIBL-02 calls an offset inspectable, and
   // there is nothing in one worth a session. Setting one is behind the same permission once again.
@@ -329,7 +329,7 @@ export function buildApp({
   // Their own permission again, the same Admin's tier as the Slide Layout and media surfaces above but not
   // the same permission: administering the content-language registry and the slide-label catalogue is
   // gated behind `catalogue.manage`, read there behind `content.edit` the same as an Editor's other surfaces.
-  serveContentLanguageRoutes(app, { contentLanguages, identity });
+  serveContentLanguageRoutes(app, { contentLanguages, identity, songs, slideGroups, library });
   serveSlideLabelRoutes(app, { slideLabels, identity });
 
   if (web !== undefined) serveWebClient(app, web);

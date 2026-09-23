@@ -9,13 +9,16 @@ import { accountsOn } from './accounts.js';
 import { attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
 import { enforceAuthorization } from './authorization.js';
-import { serveContentLanguageRoutes, CONTENT_LANGUAGE_CATALOGUE_PATH, CONTENT_LANGUAGE_KEY_PATH, CONTENT_LANGUAGE_STATUS_PATH } from './content-language-routes.js';
+import { serveContentLanguageRoutes, CONTENT_LANGUAGE_CATALOGUE_PATH, CONTENT_LANGUAGE_DEPENDENTS_PATH, CONTENT_LANGUAGE_KEY_PATH, CONTENT_LANGUAGE_STATUS_PATH } from './content-language-routes.js';
 import { contentLanguagesOn } from './content-languages.js';
 import { guardMutations } from './csrf.js';
 import { withSafeErrors } from './failures.js';
+import { libraryOn } from './library.js';
 import { passkeysOn } from './passkeys.js';
 import { CATALOGUE_MANAGE, CONTENT_EDIT } from './roles.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { slideGroupsOn } from './slide-groups.js';
+import { songContext, songsOn } from './songs.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
@@ -26,7 +29,11 @@ import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { Identity } from './onboarding.js';
 import type { ContentLanguageStore } from './content-languages.js';
+import type { LibraryStore } from './library.js';
 import type { SessionStore, StartedSession } from './sessions.js';
+import type { SlideGroupStore } from './slide-groups.js';
+import type { SongStore } from './songs.js';
+import type { SongBody } from '@holydeck/contracts/songs';
 import type { FastifyInstance } from 'fastify';
 
 const START = Date.parse('2026-09-22T09:30:00.000Z');
@@ -34,15 +41,25 @@ const ORIGIN = 'https://holydeck.example.invalid';
 const HOST = 'holydeck.example.invalid';
 const ACTOR = `account:${'C'.repeat(22)}`;
 const DRAFT = { key: 'ta', displayName: 'Tamil', script: 'Tamil', fallbackFont: 'Latha' };
+const SONG_BODY: SongBody = {
+  titles: { tamil: 'பாடல்', romanized: 'Paadal' },
+  languages: ['ta'],
+  sections: [{ id: 'verse-1', label: 'Verse 1', text: [{ languageKey: 'ta', text: 'வரிகள்' }] }],
+  provenance: { source: 'manual' },
+};
 const ROUTES = [
   ['GET', CONTENT_LANGUAGES_PATH], ['POST', CONTENT_LANGUAGES_PATH], ['GET', CONTENT_LANGUAGE_CATALOGUE_PATH],
   ['GET', CONTENT_LANGUAGE_KEY_PATH], ['PUT', CONTENT_LANGUAGE_KEY_PATH], ['PATCH', CONTENT_LANGUAGE_STATUS_PATH],
+  ['GET', CONTENT_LANGUAGE_DEPENDENTS_PATH],
 ] as const;
 
 let app: FastifyInstance;
 let sessions: SessionStore;
 let identity: Identity;
 let languages: ContentLanguageStore;
+let songs: SongStore;
+let slideGroups: SlideGroupStore;
+let library: LibraryStore;
 let admin: StartedSession;
 let tick: number;
 const now = (): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString();
@@ -54,7 +71,7 @@ const creating = (payload: unknown = DRAFT, held: StartedSession = admin) => ask
 const statusing = (key: string, archived: boolean, held: StartedSession = admin) => ask('PATCH', at(CONTENT_LANGUAGE_STATUS_PATH, key), { archived }, held);
 const serving = async (held: Identity | undefined, store: ContentLanguageStore | undefined = languages) => {
   app = Fastify({ logger: false }); withSafeErrors(app); guardMutations(app, { sessions }); enforceAuthorization(app, { sessions, identity: undefined });
-  serveContentLanguageRoutes(app, { contentLanguages: store, identity: held }); await app.ready();
+  serveContentLanguageRoutes(app, { contentLanguages: store, identity: held, songs, slideGroups, library }); await app.ready();
 };
 
 beforeEach(async () => {
@@ -62,7 +79,11 @@ beforeEach(async () => {
   const db = fakeDb();
   sessions = sessionsOn(memorySessions().db, { now: () => new Date(START).toISOString() });
   identity = { accounts: accountsOn(memoryAccounts().db, { now, newId: () => 'A'.repeat(22), hash: async (value) => `hash:${value}`, verify: async (value, hash) => hash === `hash:${value}` }), audit: auditOn(db, { now, newId: () => 'audit' }), attempts: attemptsOn(memoryAttempts().db, { now }), totp: totpsOn(memoryTotp().db, { now }), passkeys: passkeysOn(memoryPasskeys().db, { now }) };
-  languages = contentLanguagesOn(db, { now }); await serving(identity);
+  languages = contentLanguagesOn(db, { now });
+  songs = songsOn(db, { now });
+  slideGroups = slideGroupsOn(db, { now });
+  library = libraryOn(db, { now });
+  await serving(identity);
   admin = await sessions.start(sessionContext('req-content-language'), { actor: ACTOR, permissions: [CATALOGUE_MANAGE, CONTENT_EDIT] });
 });
 afterEach(async () => { await app.close(); });
@@ -113,6 +134,14 @@ describe('content-language routes', () => {
     expect((await ask('GET', CONTENT_LANGUAGES_PATH, undefined, editor)).statusCode).toBe(403);
     expect((await ask('GET', CONTENT_LANGUAGE_CATALOGUE_PATH, undefined, manager)).statusCode).toBe(403);
     expect((await app.inject({ method: 'GET', url: CONTENT_LANGUAGES_PATH, headers: { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), host: HOST, origin: ORIGIN } })).statusCode).toBe(401);
+  });
+
+  test('counts a real referencing song, zero when nothing references it, and not-found for an unknown key', async () => {
+    await creating();
+    expect((await ask('GET', at(CONTENT_LANGUAGE_DEPENDENTS_PATH, 'ta'))).json().data).toEqual({ count: 0, approximate: true });
+    await songs.create(songContext(ACTOR, 'song-corr'), 'Test Song', SONG_BODY);
+    expect((await ask('GET', at(CONTENT_LANGUAGE_DEPENDENTS_PATH, 'ta'))).json().data).toEqual({ count: 1, approximate: true });
+    expect((await ask('GET', at(CONTENT_LANGUAGE_DEPENDENTS_PATH, 'missing'))).statusCode).toBe(404);
   });
 
   test.each(ROUTES)('answers not-found without the store: %s %s', async (method, path) => {

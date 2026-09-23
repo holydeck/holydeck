@@ -21,14 +21,20 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
+import { libraryContext } from './library.js';
 import { settled } from './refusals.js';
 import { CATALOGUE_MANAGE, CONTENT_EDIT } from './roles.js';
+import { slideGroupContext } from './slide-groups.js';
+import { songContext } from './songs.js';
 import { ContentLanguageError, contentLanguageContext, subjectFor } from './content-languages.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
 import type { ContentLanguageStore } from './content-languages.js';
+import type { LibraryStore } from './library.js';
 import type { Identity } from './onboarding.js';
+import type { SlideGroupStore } from './slide-groups.js';
+import type { SongStore } from './songs.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 const CONTENT_LANGUAGE_PREFIX = 'contentLanguage:';
@@ -36,6 +42,7 @@ const CONTENT_LANGUAGE_PREFIX = 'contentLanguage:';
 export const CONTENT_LANGUAGE_KEY_PATH = `${CONTENT_LANGUAGES_PATH}/:key`;
 export const CONTENT_LANGUAGE_STATUS_PATH = `${CONTENT_LANGUAGE_KEY_PATH}/status`;
 export const CONTENT_LANGUAGE_CATALOGUE_PATH = `${CONTENT_LANGUAGES_PATH}/catalogue`;
+export const CONTENT_LANGUAGE_DEPENDENTS_PATH = `${CONTENT_LANGUAGE_KEY_PATH}/dependents`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: CATALOGUE_MANAGE };
 const CATALOGUE_PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
@@ -47,6 +54,7 @@ const ROUTES = [
   ['GET', CONTENT_LANGUAGE_KEY_PATH, PERMISSION],
   ['PUT', CONTENT_LANGUAGE_KEY_PATH, PERMISSION],
   ['PATCH', CONTENT_LANGUAGE_STATUS_PATH, PERMISSION],
+  ['GET', CONTENT_LANGUAGE_DEPENDENTS_PATH, PERMISSION],
 ] as const;
 
 const keyIn = (request: FastifyRequest): string => (request.params as { readonly key: string }).key;
@@ -57,11 +65,15 @@ const isRefusal = (error: unknown): error is ContentLanguageError & { kind: 'sta
 export interface ContentLanguageRoutesOptions {
   readonly contentLanguages: ContentLanguageStore | undefined;
   readonly identity: Identity | undefined;
+  /** Absent whenever `identity` is, per `main.ts`'s wiring — used only for the dependents scan below. */
+  readonly songs: SongStore | undefined;
+  readonly slideGroups: SlideGroupStore | undefined;
+  readonly library: LibraryStore | undefined;
 }
 
 export function serveContentLanguageRoutes(
   app: FastifyInstance,
-  { contentLanguages, identity }: ContentLanguageRoutesOptions,
+  { contentLanguages, identity, songs: songsOption, slideGroups: slideGroupsOption, library: libraryOption }: ContentLanguageRoutesOptions,
 ): void {
   if (identity === undefined) {
     for (const [method, url, need] of ROUTES) {
@@ -75,6 +87,9 @@ export function serveContentLanguageRoutes(
     return;
   }
   const languages = contentLanguages as ContentLanguageStore;
+  const songs = songsOption as SongStore;
+  const slideGroups = slideGroupsOption as SlideGroupStore;
+  const library = libraryOption as LibraryStore;
   const call = (request: FastifyRequest) =>
     contentLanguageContext(provenSession(request).record.actor, correlationFor(CONTENT_LANGUAGE_PREFIX, request.id));
 
@@ -139,5 +154,26 @@ export function serveContentLanguageRoutes(
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     await note(request, key, 'allowed', parsed.value.archived ? 'archived' : 'brought back');
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  // An approximate count, not an audited action: a substring scan over every song's and slide group's
+  // body, the same crude-but-honest shape `media-routes.ts` and `slide-layout-routes.ts` use for theirs.
+  app.get(CONTENT_LANGUAGE_DEPENDENTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const key = keyIn(request);
+    const found = await languages.get(call(request), key);
+    if (found === undefined) return reply.code(404).send(notFound(request));
+    const actor = provenSession(request).record.actor;
+    const correlationId = correlationFor(CONTENT_LANGUAGE_PREFIX, request.id);
+    const [songRows, groupRows] = await Promise.all([
+      library.list(libraryContext(actor, correlationId), { kind: 'song' }),
+      library.list(libraryContext(actor, correlationId), { kind: 'slideGroup' }),
+    ]);
+    const [songRecords, groupRecords] = await Promise.all([
+      Promise.all(songRows.map((row) => songs.current(songContext(actor, correlationId), row.stamp.id))),
+      Promise.all(groupRows.map((row) => slideGroups.current(slideGroupContext(actor, correlationId), row.stamp.id))),
+    ]);
+    const bodies = [...songRecords, ...groupRecords].filter((r): r is NonNullable<typeof r> => r !== undefined);
+    const count = bodies.filter((record) => JSON.stringify(record.body).includes(key)).length;
+    return reply.send(successEnvelope({ count, approximate: true }, request.id, CLIENT_WINDOW.current));
   });
 }

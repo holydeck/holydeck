@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { accountsOn } from './accounts.js'; import { attemptsOn } from './attempts.js'; import { auditOn } from './audit.js'; import { enforceAuthorization } from './authorization.js';
 import { guardMutations } from './csrf.js'; import { withSafeErrors } from './failures.js'; import { passkeysOn } from './passkeys.js'; import { CATALOGUE_MANAGE, CONTENT_EDIT } from './roles.js';
-import { serveSlideLabelRoutes, SLIDE_LABEL_CATALOGUE_PATH, SLIDE_LABEL_ID_PATH, SLIDE_LABEL_STATUS_PATH } from './slide-label-routes.js';
+import { serveSlideLabelRoutes, SLIDE_LABEL_CATALOGUE_PATH, SLIDE_LABEL_DEPENDENTS_PATH, SLIDE_LABEL_ID_PATH, SLIDE_LABEL_STATUS_PATH } from './slide-label-routes.js';
 import { slideLabelsOn } from './slide-labels.js'; import { sessionContext, sessionsOn } from './sessions.js'; import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js'; import { memoryAttempts } from '../test/helpers/attempts.js'; import { fakeDb } from '../test/helpers/fake-db.js'; import { memoryPasskeys } from '../test/helpers/passkeys.js'; import { memorySessions } from '../test/helpers/sessions.js'; import { memoryTotp } from '../test/helpers/totp.js';
 
@@ -15,7 +15,7 @@ import type { Identity } from './onboarding.js'; import type { SlideLabelStore }
 
 const START = Date.parse('2026-09-22T09:30:00.000Z'); const ORIGIN = 'https://holydeck.example.invalid'; const HOST = 'holydeck.example.invalid'; const ACTOR = `account:${'C'.repeat(22)}`;
 const DRAFT = { name: 'Praise', shortcut: '1' };
-const ROUTES = [['GET', SLIDE_LABELS_PATH], ['POST', SLIDE_LABELS_PATH], ['GET', SLIDE_LABEL_CATALOGUE_PATH], ['GET', SLIDE_LABEL_ID_PATH], ['PUT', SLIDE_LABEL_ID_PATH], ['PATCH', SLIDE_LABEL_STATUS_PATH]] as const;
+const ROUTES = [['GET', SLIDE_LABELS_PATH], ['POST', SLIDE_LABELS_PATH], ['GET', SLIDE_LABEL_CATALOGUE_PATH], ['GET', SLIDE_LABEL_ID_PATH], ['PUT', SLIDE_LABEL_ID_PATH], ['PATCH', SLIDE_LABEL_STATUS_PATH], ['GET', SLIDE_LABEL_DEPENDENTS_PATH]] as const;
 let app: FastifyInstance; let sessions: SessionStore; let identity: Identity; let labels: SlideLabelStore; let admin: StartedSession; let tick: number;
 const now = (): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString(); const at = (path: string, id: string) => path.replace(':id', id);
 const headers = (held: StartedSession = admin) => ({ [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), host: HOST, 'x-forwarded-proto': 'https', origin: ORIGIN, cookie: sessionCookie(held.token, 60), [CSRF_HEADER]: held.record.csrf });
@@ -33,5 +33,6 @@ describe('slide-label routes', () => {
   test('reports conflicts when restoring a name claimed while archived', async () => { await creating(); await statusing('label-1', true); await creating({ name: 'Praise' }); const response = await statusing('label-1', false); expect(response.statusCode).toBe(409); expect(response.json().error.fields).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'name', code: 'field.not_allowed' })])); });
   test('reports conflicts when editing a label onto a name another label already holds', async () => { await creating(); await creating({ name: 'Other', shortcut: '2' }); const response = await ask('PUT', at(SLIDE_LABEL_ID_PATH, 'label-2'), { name: 'Praise' }); expect(response.statusCode).toBe(409); expect(response.json().error.fields).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'name', code: 'field.not_allowed' })])); });
   test('enforces both permission surfaces and a session', async () => { const editor = await sessions.start(sessionContext('req-editor'), { actor: ACTOR, permissions: [CONTENT_EDIT] }); const manager = await sessions.start(sessionContext('req-manager'), { actor: ACTOR, permissions: [CATALOGUE_MANAGE] }); expect((await ask('GET', SLIDE_LABELS_PATH, undefined, editor)).statusCode).toBe(403); expect((await ask('GET', SLIDE_LABEL_CATALOGUE_PATH, undefined, manager)).statusCode).toBe(403); expect((await app.inject({ method: 'GET', url: SLIDE_LABELS_PATH, headers: { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), host: HOST, origin: ORIGIN } })).statusCode).toBe(401); });
+  test('counts zero for an existing label and answers not-found for a missing one', async () => { await creating(); expect((await ask('GET', at(SLIDE_LABEL_DEPENDENTS_PATH, 'label-1'))).json().data).toEqual({ count: 0, approximate: true }); expect((await ask('GET', at(SLIDE_LABEL_DEPENDENTS_PATH, 'nope'))).statusCode).toBe(404); });
   test.each(ROUTES)('answers not-found without the store: %s %s', async (method, path) => { await app.close(); await serving(undefined, undefined); expect((await ask(method, at(path, 'label-1'), method === 'POST' ? DRAFT : method === 'PUT' ? { name: 'Praise' } : method === 'PATCH' ? { archived: true } : undefined)).statusCode).toBe(404); });
 });

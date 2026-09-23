@@ -52,6 +52,7 @@ const ROUTES: readonly (readonly [Method, string, unknown])[] = [
   ['POST', `${ITEMS}/reorder`, { itemIds: ['item-1'] }],
   ['POST', `${ITEM_ACTIONS}/item-1/revise`, { revision: 2 }],
   ['GET', `${ROOT}/content-drift`, undefined],
+  ['GET', `${ROOT}/dependents`, undefined],
 ] as const;
 
 const store = (): { db: FakeDb; services: ServiceStore } => {
@@ -258,6 +259,13 @@ describe('service workspace routes', () => {
     expect(revised.json().data.sections[0].items[1].content).toEqual({ id: 'song-1', revision: 2, hash: second.revision.hash });
     expect((await asking('GET', `${ROOT}/content-drift`)).json().data[0].drifted).toBe(false);
     expect(entries().filter((entry) => entry['action'] === 'service.item.revise')).toHaveLength(1);
+  });
+
+  test('answers zero dependents for an existing service, always, since nothing downstream references one', async () => {
+    await creating();
+    const response = await asking('GET', `${ROOT}/dependents`);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual({ count: 0, approximate: true });
   });
 
   test.each(ROUTES)('gates %s %s before calling the store', async (method, url, payload) => {
