@@ -36,6 +36,8 @@ export const KNOWN_INTEGRATION_GAPS = {
   'content-language-routes.ts GET CONTENT_LANGUAGE_KEY_PATH CATALOGUE_MANAGE': 'no harness test refuses a content language read to a non-admin',
   'content-language-routes.ts PUT CONTENT_LANGUAGE_KEY_PATH CATALOGUE_MANAGE': 'no harness test refuses a content language edit to a non-admin',
   'content-language-routes.ts PATCH CONTENT_LANGUAGE_STATUS_PATH CATALOGUE_MANAGE': 'no harness test refuses content language archival to a non-admin',
+  'integration-routes.ts GET INTEGRATIONS_PATH INTEGRATIONS_MANAGE': 'no harness test refuses the integration list to a non-admin',
+  'integration-routes.ts PATCH INTEGRATION_ID_PATH INTEGRATIONS_MANAGE': 'no harness test refuses toggling an integration to a non-admin',
   'library-routes.ts GET LIBRARY_PATH CONTENT_EDIT': 'no harness test refuses the library list without content.edit',
   'library-routes.ts GET LIBRARY_ID_PATH CONTENT_EDIT': 'no harness test refuses a library entry read without content.edit',
   'live.ts GET LIVE_CONNECTIONS_PATH PRESENTATION_CONTROL': 'no harness test refuses live connection counts without Control presentation',

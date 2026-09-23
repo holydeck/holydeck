@@ -17,6 +17,7 @@ export default defineConfig({
     'src/live-theme.ts',
     'src/jobs.ts',
     'src/entities.ts',
+    'src/integrations.ts',
     'src/layouts.ts',
     'src/library.ts',
     'src/media.ts',

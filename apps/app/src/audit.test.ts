@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn } from './audit.js';
+import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn, integrationCallAudit } from './audit.js';
 import { ContextError, requestContext } from './context.js';
 import { RepositoryError } from './repositories.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -218,5 +218,23 @@ describe('what an entry could never be made to carry', () => {
     // @ts-expect-error -- body is not a field AuditEntry declares, and it never should be
     const withBody: AuditEntry = { action: 'settings.update', subject: 'x', outcome: 'allowed', body: 'raw' };
     expect([withPrompt, withHeaders, withBody]).toHaveLength(3);
+  });
+});
+
+describe('integrationCallAudit', () => {
+  it('records an integration.call entry with token/duration fields from the call info', async () => {
+    const db = fakeDb();
+    const record = integrationCallAudit(trailOn(db), 'account:1', CORRELATION);
+    await record({
+      action: 'integration.call',
+      subject: 'sermon-ai',
+      outcome: 'allowed',
+      detail: 'generate-sermon',
+      requestTokens: 120,
+      responseTokens: 340,
+      durationMs: 890,
+    });
+    const [stored] = entries(db);
+    expect(stored).toMatchObject({ requestTokens: 120, responseTokens: 340, durationMs: 890 });
   });
 });

@@ -6,6 +6,7 @@ import {
   CATALOGUE_MANAGE,
   CONTENT_EDIT,
   CONTENT_HISTORY_MANAGE,
+  INTEGRATIONS_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
   PRESENCE_USE,
@@ -31,7 +32,7 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, content, catalogues, presence, history and audit', () => {
+  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, content, catalogues, presence, history, audit and integrations', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
@@ -44,6 +45,7 @@ describe('what a role grants', () => {
       PRESENCE_USE,
       CONTENT_HISTORY_MANAGE,
       AUDIT_READ,
+      INTEGRATIONS_MANAGE,
     ]);
   });
 
@@ -97,6 +99,7 @@ describe('what Control presentation is', () => {
       PRESENCE_USE,
       CONTENT_HISTORY_MANAGE,
       AUDIT_READ,
+      INTEGRATIONS_MANAGE,
       PRESENTATION_CONTROL,
     ]);
   });

@@ -12,6 +12,7 @@ import { serveContentLanguageRoutes } from './content-language-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
+import { serveIntegrationRoutes } from './integration-routes.js';
 import { serveLibraryRoutes } from './library-routes.js';
 import { isUpgrade } from './live.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
@@ -277,6 +278,10 @@ export function buildApp({
   // Behind the same permission as the account surface: reading or changing the settings file is Admin's
   // alone, the same as administering an account is.
   serveSettingsRoutes(app, { settingsAdmin, identity });
+
+  // Its own permission, Admin's alone: viewing and toggling a third-party integration is administering
+  // this deployment, the same reach as the settings file above but not the same permission.
+  serveIntegrationRoutes(app, { settingsAdmin, identity });
 
   // Behind the same permission again, by a vocabulary of its own: a Slide Layout is Admin's to create,
   // to save forward and to stop offering, and nobody else's to change.

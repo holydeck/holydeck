@@ -18,6 +18,7 @@ import { RepositoryError, repositoriesOn } from './repositories.js';
 import type { RequestContext } from './context.js';
 import type { RecordName } from './records.js';
 import type { Document, Filter, RepositoryDb } from './repositories.js';
+import type { IntegrationCallInfo } from '@holydeck/core/sermon-ai';
 
 /** Every action this release records. One entry per thing an administrator can be answerable for. */
 export const AUDIT_ACTIONS = [
@@ -197,6 +198,9 @@ export interface AuditEntry {
   readonly outcome: AuditOutcome;
   /** Why, for a person reading the trail later. Never a secret. */
   readonly detail?: string;
+  readonly requestTokens?: number;
+  readonly responseTokens?: number;
+  readonly durationMs?: number;
 }
 
 /** One written entry, read back: everything `AuditEntry` carries, plus what `record()` stamped on it. */
@@ -340,6 +344,9 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
         subject: entry.subject,
         outcome: entry.outcome,
         ...(entry.detail === undefined ? {} : { detail: entry.detail }),
+        ...(entry.requestTokens === undefined ? {} : { requestTokens: entry.requestTokens }),
+        ...(entry.responseTokens === undefined ? {} : { responseTokens: entry.responseTokens }),
+        ...(entry.durationMs === undefined ? {} : { durationMs: entry.durationMs }),
       });
     },
     async list(context, query) {
@@ -378,4 +385,29 @@ export function auditContext(actor: string, correlationId: string): RequestConte
 /** The context an admin reads the trail under: able to list it, and to do nothing else. */
 export function auditReadContext(actor: string, correlationId: string): RequestContext {
   return requestContext({ actor, permissions: [permissionsFor('auditEvents').read], correlationId });
+}
+
+/**
+ * Adapts sermon-ai.ts's (spec v1c-08, package @holydeck/core) onIntegrationCall callback shape onto this
+ * file's own AuditTrail.record(), so a future HTTP call site only has to pass this closure through, not
+ * build an AuditEntry by hand. No caller wires this into a live sermon-ai invocation yet in this app —
+ * that lands with spec v1c-08's own app-layer task — this file only has to provide the adapter and prove
+ * it against a fake trail.
+ */
+export function integrationCallAudit(
+  trail: AuditTrail,
+  actor: string,
+  correlationId: string,
+): (call: IntegrationCallInfo) => Promise<void> {
+  return async (call) => {
+    await trail.record(auditContext(actor, correlationId), {
+      action: call.action,
+      subject: call.subject,
+      outcome: call.outcome,
+      detail: call.detail,
+      requestTokens: call.requestTokens,
+      responseTokens: call.responseTokens,
+      durationMs: call.durationMs,
+    });
+  };
 }

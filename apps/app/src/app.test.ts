@@ -28,6 +28,7 @@ import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from
 import { CONFLICT_RESOLVE_PATH } from './conflict-routes.js';
 import { CONTENT_LANGUAGE_KEY_PATH, CONTENT_LANGUAGE_STATUS_PATH } from './content-language-routes.js';
 import { contentLanguagesOn } from './content-languages.js';
+import { INTEGRATION_ID_PATH } from './integration-routes.js';
 import { libraryOn } from './library.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { passkeysOn } from './passkeys.js';
@@ -168,6 +169,8 @@ describe('every route that changes something', () => {
       { method: 'DELETE', url: `${CAPABILITIES_PATH}/:capabilityId` },
       // Behind the same permission as the account surface: changing the settings file is Admin's alone.
       { method: 'PATCH', url: SETTINGS_PATH },
+      // Behind its own permission: toggling an integration on or off is the one change this surface makes.
+      { method: 'PATCH', url: INTEGRATION_ID_PATH },
       // And the Layouts a service is drawn from: creating one, saving its boxes forward, bringing an
       // earlier version back and taking one out of use are all Admin's, by a permission of their own.
       { method: 'POST', url: SLIDE_LAYOUTS_PATH },

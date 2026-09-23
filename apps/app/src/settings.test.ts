@@ -388,6 +388,11 @@ describe('the sermon-AI integration', () => {
     ]);
   });
 
+  it('is administrable through the file, unlike a protected setting, reading YAML\'s own boolean', () => {
+    expect(load('sermonAiEnabled: true\n').values.sermonAiEnabled).toBe(true);
+    expect(load('sermonAiEnabled: false\n').values.sermonAiEnabled).toBe(false);
+  });
+
   it('has an empty API key until the deployment supplies one, and treats it as secret', () => {
     expect(load().values.anthropicApiKey).toBe('');
     expect(load(undefined, { HOLYDECK_ANTHROPIC_API_KEY: 'sk-ant-example-key' }).values.anthropicApiKey).toBe(

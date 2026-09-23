@@ -37,6 +37,10 @@
       "types": "./dist/http.d.ts",
       "import": "./dist/http.js"
     },
+    "./integrations": {
+      "types": "./dist/integrations.d.ts",
+      "import": "./dist/integrations.js"
+    },
     "./clients": {
       "types": "./dist/clients.d.ts",
       "import": "./dist/clients.js"

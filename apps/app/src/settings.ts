@@ -191,6 +191,15 @@ function parseRetentionDays(field: string, min: number, max: number) {
 const parseAuditRetentionDays = parseRetentionDays('auditRetentionDays', 30, 3650);
 const parseAutosaveRetentionDays = parseRetentionDays('autosaveRetentionDays', 1, 365);
 
+// Unlike parseFlag, this setting is administrable through the file, not protected — and the file layer
+// hands YAML's own parsed boolean rather than text, so both a real boolean and the environment's string
+// are accepted here.
+const parseSermonAiEnabled = (raw: unknown): Parsed<boolean> => {
+  if (raw === true || raw === 'true') return { ok: true, value: true };
+  if (raw === false || raw === 'false') return { ok: true, value: false };
+  return { ok: false, problem: `expected true or false, got ${JSON.stringify(raw)}` };
+};
+
 const parseAnthropicApiKey = (raw: unknown): Parsed<string> => {
   if (typeof raw !== 'string') return { ok: false, problem: `expected a string, got ${JSON.stringify(raw)}` };
   return { ok: true, value: raw.trim() };
@@ -420,7 +429,7 @@ export function loadSettings(input: {
     parseAutosaveRetentionDays,
     layers,
   );
-  const sermonAiEnabled = resolve('sermonAiEnabled', DEFAULT_SETTINGS.sermonAiEnabled, parseFlag, layers);
+  const sermonAiEnabled = resolve('sermonAiEnabled', DEFAULT_SETTINGS.sermonAiEnabled, parseSermonAiEnabled, layers);
   const anthropicApiKey = resolve(
     'anthropicApiKey',
     DEFAULT_SETTINGS.anthropicApiKey,

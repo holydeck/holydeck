@@ -39,6 +39,7 @@ import {
   CATALOGUE_MANAGE,
   CONTENT_EDIT,
   CONTENT_HISTORY_MANAGE,
+  INTEGRATIONS_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
   PRESENCE_USE,
@@ -369,6 +370,7 @@ describe('signing in', () => {
         PRESENCE_USE,
         CONTENT_HISTORY_MANAGE,
         AUDIT_READ,
+        INTEGRATIONS_MANAGE,
       ],
     });
     const cookie = String(response.headers['set-cookie']);
@@ -450,6 +452,7 @@ describe('signing in with a passkey', () => {
         PRESENCE_USE,
         CONTENT_HISTORY_MANAGE,
         AUDIT_READ,
+        INTEGRATIONS_MANAGE,
       ],
     });
     const cookie = String(response.headers['set-cookie']);

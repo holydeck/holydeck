@@ -75,6 +75,9 @@ export const CONTENT_HISTORY_MANAGE = 'contentHistory.manage';
 /** Reads the audit trail (spec v1c-09, ADMN-03/ADMN-04). Admin's alone, by role — the same reach as accounts and settings. */
 export const AUDIT_READ = 'audit.read';
 
+/** Views status and toggles integrations on/off (spec v1c-09, ADMN-04). Admin's alone, by role. */
+export const INTEGRATIONS_MANAGE = 'integrations.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -88,6 +91,7 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     PRESENCE_USE,
     CONTENT_HISTORY_MANAGE,
     AUDIT_READ,
+    INTEGRATIONS_MANAGE,
   ],
   editor: [SERVICES_MANAGE, CONTENT_EDIT, PRESENCE_USE, CONTENT_HISTORY_MANAGE],
   member: [PRESENCE_USE],

@@ -11,6 +11,7 @@ import {
   ACCOUNTS_MANAGE,
   AUDIT_READ,
   CONTENT_HISTORY_MANAGE,
+  INTEGRATIONS_MANAGE,
   PRESENTATION_CONTROL,
   SERVICE_TEMPLATES_MANAGE,
   permissionsFor,
@@ -644,6 +645,7 @@ describe('the Operator override', () => {
       'presence.use',
       CONTENT_HISTORY_MANAGE,
       AUDIT_READ,
+      INTEGRATIONS_MANAGE,
     ]);
   });
 
