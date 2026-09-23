@@ -175,6 +175,21 @@ describe('ContentLibrary', () => {
     expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull();
   });
 
+  it('links a session that may manage history to the revision history, and no other', async () => {
+    session.value = { ...session.value!, permissions: ['content.edit', 'contentHistory.manage'] };
+    const { unmount } = render(<ContentLibrary />);
+    fireEvent.click(await screen.findByRole('button', { name: /Grace/u }));
+    await screen.findByText('Revision 3');
+    expect(screen.getByRole('link', { name: 'Revision history' }).getAttribute('href')).toBe('/content/c/history');
+    unmount();
+
+    session.value = { ...session.value!, permissions: ['content.edit'] };
+    render(<ContentLibrary />);
+    fireEvent.click(await screen.findByRole('button', { name: /Grace/u }));
+    await screen.findByText('Revision 3');
+    expect(screen.queryByRole('link', { name: 'Revision history' })).toBeNull();
+  });
+
   it('refetches on focus', async () => {
     render(<ContentLibrary />);
     await screen.findByText('Grace');

@@ -99,7 +99,14 @@ function Revisions({ entry }: { readonly entry: LibraryEntry }): JSX.Element | n
     });
     return (): void => { current = false; };
   }, [entry.id, entry.kind]);
-  return count === undefined || count === 0 ? null : <p>{t('library.revision', { n: count })}</p>;
+  if (count === undefined || count === 0) return null;
+  // The history page is reached from here and nowhere else, so only a session that may restore is sent.
+  return (
+    <p>
+      {t('library.revision', { n: count })}
+      {can('contentHistory.manage') ? <> <a href={`/content/${encodeURIComponent(entry.id)}/history`}>{t('history.heading')}</a></> : null}
+    </p>
+  );
 }
 
 function SermonOutline({ id }: { readonly id: string }): JSX.Element {
