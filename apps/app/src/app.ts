@@ -16,6 +16,7 @@ import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveOrderRoutes } from './order-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
+import { servePptxRoutes } from './pptx-routes.js';
 import { servePreparationRoutes } from './preparation-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
 import { serveScriptureSearchRoutes } from './scripture-routes.js';
@@ -39,6 +40,10 @@ import type { Fetching } from './corpus.js';
 import type { LibraryStore } from './library.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { PptxCommit } from './pptx-commit.js';
+import type { PptxImport } from './pptx-import.js';
+import type { PptxReview } from './pptx-review.js';
+import type { PptxSessionStore } from './pptx-sessions.js';
 import type { SermonStore } from './sermons.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
@@ -98,6 +103,14 @@ export interface AppOptions {
   library?: LibraryStore;
   /** Where the content-language registry is kept. Without it, there is none to create, edit or archive. */
   contentLanguages?: ContentLanguageStore;
+  /** Where an uploaded `.pptx` is extracted. Without it, and the three below, there is no import to run. */
+  pptxImport?: PptxImport;
+  /** Where an import's blocks are graded against the slide-label catalogue. */
+  pptxReview?: PptxReview;
+  /** Where a reviewed import becomes a Song, or is appended to one. */
+  pptxCommit?: PptxCommit;
+  /** Where an import is held between upload, review and commit. */
+  pptxSessions?: PptxSessionStore;
   /** Bare ANTHROPIC_API_KEY, optional, never logged — absent disables the sermon import resolver. */
   anthropicApiKey?: string | undefined;
 }
@@ -133,6 +146,10 @@ export function buildApp({
   slideGroups,
   library,
   contentLanguages,
+  pptxImport,
+  pptxReview,
+  pptxCommit,
+  pptxSessions,
   anthropicApiKey,
 }: AppOptions): FastifyInstance {
   // HTTPS makes Fastify infer a specialised server, while the routes below use its common interface.
@@ -144,6 +161,13 @@ export function buildApp({
   // its body is still streaming in, never buffered whole before `media-routes.ts` ever sees it. Fastify
   // defers every registration below to boot, so this needs no `await` to take effect before a route does.
   app.register(multipart, { limits: { fileSize: MEDIA_SIZE_CEILING_BYTES } });
+  // A `.pptx` upload arrives as its own raw bytes, not as a multipart form: this one content type only,
+  // so no other route's body is read any differently. Its size ceiling is the import route's own.
+  app.addContentTypeParser(
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    { parseAs: 'buffer' },
+    (_request, payload, done) => done(null, payload),
+  );
   // Before every route, so a fault in one of them answers with a code and not with what it threw. The
   // one exception is a deployment that set `developmentDiagnostics` in its own environment, which the
   // settings file cannot do and an administrator's request therefore cannot either.
@@ -298,6 +322,10 @@ export function buildApp({
   // gated behind `catalogue.manage`, read there behind `content.edit` the same as an Editor's other surfaces.
   serveContentLanguageRoutes(app, { contentLanguages, identity });
   serveSlideLabelRoutes(app, { slideLabels, identity });
+
+  // Behind `services.manage`, the same as the sermon import preview: bringing a PowerPoint deck in is a
+  // service integration rather than content editing, even though what it ends in is a Song.
+  servePptxRoutes(app, { pptxImport, pptxReview, pptxCommit, pptxSessions, identity });
 
   if (web !== undefined) serveWebClient(app, web);
 

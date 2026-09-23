@@ -8,6 +8,7 @@ import { CONTENT_LANGUAGES_PATH } from '@holydeck/contracts/content-languages';
 import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { SLIDE_LAYOUTS_PATH } from '@holydeck/contracts/layouts';
 import { LIBRARY_PATH } from '@holydeck/contracts/library';
+import { PPTX_IMPORTS_PATH } from '@holydeck/contracts/pptx';
 import { SCRIPTURE_SEARCH_PATH } from '@holydeck/contracts/scripture';
 import { SERMON_IMPORT_PREVIEW_PATH } from '@holydeck/contracts/sermon-import';
 import { SERMONS_PATH } from '@holydeck/contracts/sermons';
@@ -31,6 +32,7 @@ import { contentLanguagesOn } from './content-languages.js';
 import { libraryOn } from './library.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { passkeysOn } from './passkeys.js';
+import { PPTX_COMMIT_PATH, PPTX_ID_PATH, PPTX_REVIEW_PATH } from './pptx-routes.js';
 import { PREPARATION_OVERRIDE_PATH, PREPARATION_PREPARE_PATH } from './preparation-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
 import { CATALOGUE_MANAGE, CONTENT_EDIT, PRESENTATION_CONTROL } from './roles.js';
@@ -243,6 +245,10 @@ describe('every route that changes something', () => {
       { method: 'POST', url: SLIDE_LABELS_PATH },
       { method: 'PUT', url: SLIDE_LABEL_ID_PATH },
       { method: 'PATCH', url: SLIDE_LABEL_STATUS_PATH },
+      { method: 'POST', url: PPTX_IMPORTS_PATH },
+      { method: 'POST', url: PPTX_REVIEW_PATH },
+      { method: 'POST', url: PPTX_COMMIT_PATH },
+      { method: 'DELETE', url: PPTX_ID_PATH },
     ]);
   });
 

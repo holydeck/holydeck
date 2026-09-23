@@ -34,6 +34,7 @@ export default defineConfig({
     'src/songs.ts',
     'src/sermons.ts',
     'src/sermon-import.ts',
+    'src/pptx.ts',
     'src/scripture.ts',
     'src/totp.ts',
     'src/translation-offsets.ts',

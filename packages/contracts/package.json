@@ -133,6 +133,10 @@
       "types": "./dist/sermon-import.d.ts",
       "import": "./dist/sermon-import.js"
     },
+    "./pptx": {
+      "types": "./dist/pptx.d.ts",
+      "import": "./dist/pptx.js"
+    },
     "./scripture": {
       "types": "./dist/scripture.d.ts",
       "import": "./dist/scripture.js"

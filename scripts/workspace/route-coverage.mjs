@@ -26,6 +26,7 @@ export const ROUTE_INTEGRATION_TESTS = {
   'content-language-routes.ts': 'tests/harness/e2e/content.spec.ts',
   'library-routes.ts': 'tests/harness/e2e/content.spec.ts',
   'media-routes.ts': 'tests/harness/e2e/content.spec.ts',
+  'pptx-routes.ts': 'tests/harness/integration/pptx-import.test.ts',
   'scripture-routes.ts': 'tests/harness/e2e/content.spec.ts',
   'slide-group-routes.ts': 'tests/harness/e2e/content.spec.ts',
   'slide-label-routes.ts': 'tests/harness/e2e/content.spec.ts',
