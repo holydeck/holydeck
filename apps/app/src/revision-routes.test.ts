@@ -8,6 +8,7 @@ import { accountsOn } from './accounts.js';
 import { attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
 import { enforceAuthorization } from './authorization.js';
+import { contentKindResolver } from './content-kind.js';
 import { guardMutations } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { passkeysOn } from './passkeys.js';
@@ -16,7 +17,6 @@ import {
   REVISION_PATH,
   REVISION_RESTORE_PATH,
   REVISIONS_PATH,
-  contentKindResolver,
   serveRevisionRoutes,
 } from './revision-routes.js';
 import { RevisionError, revisionContext, revisionsOn } from './revisions.js';
@@ -32,7 +32,7 @@ import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { Identity } from './onboarding.js';
 import type { Document } from './repositories.js';
-import type { RevisedKind } from './revision-routes.js';
+import type { RevisedKind } from './content-kind.js';
 import type { RevisionStore } from './revisions.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';

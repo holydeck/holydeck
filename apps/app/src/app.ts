@@ -8,6 +8,7 @@ import { serveAuditRoutes } from './audit-routes.js';
 import { enforceAuthorization } from './authorization.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
 import { serveConflictRoutes } from './conflict-routes.js';
+import { contentKindResolver } from './content-kind.js';
 import { serveContentLanguageRoutes } from './content-language-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
@@ -25,7 +26,7 @@ import { servePptxRoutes } from './pptx-routes.js';
 import { servePresenceRoutes } from './presence-routes.js';
 import { servePreparationRoutes } from './preparation-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
-import { contentKindResolver, serveRevisionRoutes } from './revision-routes.js';
+import { serveRevisionRoutes } from './revision-routes.js';
 import { serveRunRoutes } from './run-routes.js';
 import { serveScriptureSearchRoutes } from './scripture-routes.js';
 import { serveSermonRoutes } from './sermon-routes.js';
@@ -329,6 +330,10 @@ export function buildApp({
   serveTotpRoutes(app, { identity });
   servePasskeyRoutes(app, { identity });
 
+  // Presence, history and the conflict shelf are all keyed by a content id alone; this says which surface
+  // an id belongs to, so each of them asks that surface's own permission before answering for it.
+  const kindOf = contentKindResolver({ slideLayouts, serviceTemplates });
+
   // Presence is gated by a permission like everything below, but one every role is granted — Member
   // included — so nothing here narrows who may say they are editing something.
   servePresenceRoutes(app, { presence });
@@ -355,11 +360,11 @@ export function buildApp({
 
   // Behind a permission of its own, granted to Admin and Editor: reading, comparing and restoring an
   // earlier revision of whatever content already versions itself through `revisions.ts`.
-  serveRevisionRoutes(app, { revisions, identity, kindOf: contentKindResolver({ slideLayouts, serviceTemplates }) });
+  serveRevisionRoutes(app, { revisions, identity, kindOf });
 
   // Behind the same permission the content stores it shelves for already grant: what is still waiting
   // to be settled for one piece of content, and the one way an editor settles it (spec COLL-01).
-  serveConflictRoutes(app, { conflictShelf, revisions });
+  serveConflictRoutes(app, { conflictShelf, revisions, identity, kindOf });
 
   // Behind a permission of its own, Admin's alone: reading the administrative trail `audit.ts` writes.
   serveAuditRoutes(app, { identity });

@@ -1,24 +1,36 @@
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { shelfKey } from '@holydeck/contracts/collaboration';
-import { VALIDATION_FAILED } from '@holydeck/contracts/http';
+import { ENTITY_CONFLICT, VALIDATION_FAILED } from '@holydeck/contracts/http';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
+import { accountsOn } from './accounts.js';
+import { attemptsOn } from './attempts.js';
+import { auditOn } from './audit.js';
 import { enforceAuthorization } from './authorization.js';
 import { CONFLICTS_PATH, CONFLICT_RESOLVE_PATH, serveConflictRoutes } from './conflict-routes.js';
-import { SHELF_PERMISSIONS, conflictShelfOn } from './conflicts.js';
+import { ConflictError, SHELF_PERMISSIONS, conflictShelfOn } from './conflicts.js';
 import { requestContext } from './context.js';
 import { guardMutations } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { RECORDS } from './records.js';
 import { REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
-import { CONTENT_EDIT } from './roles.js';
+import { CONTENT_EDIT, LAYOUTS_MANAGE } from './roles.js';
+import { passkeysOn } from './passkeys.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { totpsOn } from './totp.js';
+import { memoryAccounts } from '../test/helpers/accounts.js';
+import { memoryAttempts } from '../test/helpers/attempts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
+import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
+import { memoryTotp } from '../test/helpers/totp.js';
 
+import type { RevisedKind } from './content-kind.js';
 import type { ConflictShelf } from './conflicts.js';
+import type { Identity } from './onboarding.js';
+import type { Document } from './repositories.js';
 import type { RevisionBody } from '@holydeck/contracts/revisions';
 import type { RevisionStore } from './revisions.js';
 import type { SessionStore, StartedSession } from './sessions.js';
@@ -72,15 +84,24 @@ const resolving = (contentId: string, shelfEntryId: string, payload: unknown, he
     payload: payload as never,
   });
 
+// One id stands for a Slide Layout; everything else is ordinary content, as it is in a deployment.
+const kindOf = (contentId: string): Promise<RevisedKind> =>
+  Promise.resolve(contentId === 'layout:1' ? 'slideLayout' : 'content');
+
+let trail: FakeDb;
+let identity: Identity;
+const entriesIn = (): Document[] => trail.rows.get('audit_events') ?? [];
+
 const serving = async (
   shelf: ConflictShelf | undefined,
   store: RevisionStore | undefined,
+  held: Identity | undefined = undefined,
 ): Promise<void> => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
-  enforceAuthorization(app, { sessions, identity: undefined });
-  serveConflictRoutes(app, { conflictShelf: shelf, revisions: store });
+  enforceAuthorization(app, { sessions, identity: held });
+  serveConflictRoutes(app, { conflictShelf: shelf, revisions: store, identity: held, kindOf });
   await app.ready();
 };
 
@@ -105,6 +126,19 @@ beforeEach(async () => {
   db = fakeDb();
   revisions = revisionsOn(db, { now });
   conflictShelf = conflictShelfOn(db, { now });
+  trail = fakeDb();
+  identity = {
+    accounts: accountsOn(memoryAccounts().db, {
+      now,
+      newId: () => 'A'.repeat(22),
+      hash: async (password) => `test-hash:${password}`,
+      verify: async (password, stored) => stored === `test-hash:${password}`,
+    }),
+    audit: auditOn(trail, { now, newId: (() => { let n = 0; return () => `e${n++}`; })() }),
+    attempts: attemptsOn(memoryAttempts().db, { now }),
+    totp: totpsOn(memoryTotp().db, { now }),
+    passkeys: passkeysOn(memoryPasskeys().db, { now }),
+  };
   await serving(conflictShelf, revisions);
   editor = await sessions.start(sessionContext(CORRELATION), {
     actor: EDITOR,
@@ -204,5 +238,68 @@ describe('resolving a conflict', () => {
     const guest = await sessions.start(sessionContext(CORRELATION), { actor: 'account:' + 'D'.repeat(22), permissions: [] });
     const response = await resolving('song:1', 'does-not-exist', { strategy: 'keep-theirs' }, guest);
     expect(response.statusCode).toBe(403);
+  });
+});
+
+describe('resolving a conflict, with an identity to audit against', () => {
+  beforeEach(async () => {
+    await app.close();
+    await serving(conflictShelf, revisions, identity);
+  });
+
+  test('records a content.conflict.resolve entry naming who settled it and which revision won', async () => {
+    await revisions.save(direct(), { contentId: 'song:1', body: { title: 'held' }, origin: 'autosave' });
+    await seedShelved('song:1', 1, { title: 'mine' });
+    const response = await resolving('song:1', shelfKey('song:1', 1), { strategy: 'keep-mine' });
+    expect(response.statusCode).toBe(200);
+    expect(entriesIn()).toEqual([
+      expect.objectContaining({ actor: EDITOR, action: 'content.conflict.resolve', subject: 'song:1', outcome: 'allowed' }),
+    ]);
+    expect(entriesIn()[0]?.['detail']).toBe('keep-mine: revision 2 over revision 1');
+  });
+
+  test('records nothing for a resolve that was refused', async () => {
+    const response = await resolving('song:1', 'does-not-exist', { strategy: 'keep-theirs' });
+    expect(response.statusCode).toBe(404);
+    expect(entriesIn()).toEqual([]);
+  });
+
+  test('a trail that refuses an entry does not cost the resolution', async () => {
+    await app.close();
+    await serving(conflictShelf, revisions, {
+      ...identity,
+      audit: { record: () => Promise.reject(new Error('the trail is unavailable')), list: () => Promise.resolve({ entries: [] }) },
+    });
+    await revisions.save(direct(), { contentId: 'song:1', body: { title: 'held' }, origin: 'autosave' });
+    await seedShelved('song:1', 1, { title: 'mine' });
+    expect((await resolving('song:1', shelfKey('song:1', 1), { strategy: 'keep-mine' })).statusCode).toBe(200);
+  });
+});
+
+describe('a shelf this code cannot read', () => {
+  test('answers the resolve as a conflict the editor can see, not a server fault', async () => {
+    await app.close();
+    await serving({
+      ...conflictShelf,
+      resolveConflict: () => Promise.reject(new ConflictError('corrupt', 'song:1 has a shelved conflict and no revision')),
+    }, revisions);
+    const response = await resolving('song:1', shelfKey('song:1', 1), { strategy: 'combine', resolvedBody: { title: 'x' } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe(ENTITY_CONFLICT);
+  });
+});
+
+describe('the content kind a conflict belongs to', () => {
+  test('keeps an Editor off a Slide Layout\'s shelf, listing and resolving alike', async () => {
+    await seedShelved('layout:1', 1, { title: 'mine' });
+    expect((await listing('layout:1')).statusCode).toBe(403);
+    const combined = await resolving('layout:1', shelfKey('layout:1', 1), { strategy: 'combine', resolvedBody: { title: 'x' } });
+    expect(combined.statusCode).toBe(403);
+    expect(await revisions.history(direct(), 'layout:1')).toEqual([]);
+  });
+
+  test('lets the Layout\'s own administrator in', async () => {
+    const admin = await sessions.start(sessionContext(CORRELATION), { actor: 'account:' + 'F'.repeat(22), permissions: [LAYOUTS_MANAGE] });
+    expect((await listing('layout:1', admin)).statusCode).toBe(200);
   });
 });
