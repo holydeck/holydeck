@@ -94,9 +94,13 @@ const live = async (): Promise<Live> => {
     review: runReviewOn(events),
     runId: run.runId,
     pins: record!.snapshot.pins,
+    // Added, then put up: adding logs `item-added` and claims nothing shown; the slide the engine logs
+    // when the operator shows it is what the review reads back.
     addMidService: async (title) => {
       const outcome = await additions.add(SESSION, { runId: run.runId, kind: 'reading', title, body: { text: title } });
-      return outcome.addition.contentId;
+      const { contentId } = outcome.addition;
+      await runReviewOn(events).show(SESSION, { runId: run.runId, itemId: contentId, reference: title, pinnedRevisions: record!.snapshot.pins });
+      return contentId;
     },
     startAnother: async () => {
       // A service is never run twice at once, so the prior run (e.g. last Sunday) ends before this one starts.
@@ -188,7 +192,7 @@ describe('the references a run showed', () => {
     const shown = await review.review(READER, runId);
 
     expect(shown.map((entry) => entry.reference)).toEqual(['Psalm 23:1-6', 'Psalm 121']);
-    expect(shown[1]).toMatchObject({ itemId: contentId, reference: 'Psalm 121', sequence: 2 });
+    expect(shown[1]).toMatchObject({ itemId: contentId, reference: 'Psalm 121', sequence: 3 });
   });
 
   it('leaves out every event that put nothing in front of the room', async () => {

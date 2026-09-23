@@ -360,15 +360,21 @@ export function serveRunRoutes(
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const runId = runIdIn(request);
     const session = operatorSession(request, 'run:additions:');
-    const answer = await settledMidService(() =>
-      midService.add(session, {
+    let answer;
+    try {
+      answer = await settledMidService(() => runEngine.add(session, {
         runId,
         kind: parsed.value.kind as LibraryKind,
         title: parsed.value.title,
         body: { text: parsed.value.body },
         ...(parsed.value.saveToLibrary === undefined ? {} : { saveToLibrary: parsed.value.saveToLibrary }),
-      }),
-    );
+      }));
+    } catch (error) {
+      // Only the additions-revision bump refuses this way, and only by losing a race: the run ended, or
+      // kept moving, between the addition landing and the views being told.
+      if (error instanceof RunError && error.kind !== 'corrupt') return refusedEnd(request, reply, { ok: false, kind: error.kind, message: error.message });
+      throw error;
+    }
     if (!answer.ok) return refusedMidService(request, reply, answer);
     await note(request, 'run.addition', session.actor, subjectFor(runId), `Added a ${parsed.value.kind} mid-service`);
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));

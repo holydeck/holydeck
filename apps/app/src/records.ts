@@ -112,10 +112,11 @@ export const RECORDS = {
   // `contentId` is the same word `contentRevisions` uses, and names the same key space: the body is saved
   // there under exactly this identifier. `libraryId` is the separate identifier `contentLibrary` minted
   // for the one addition somebody explicitly decided to keep, and is absent for every addition nobody did.
+  // `title` and `revision` are what the run deck names the item and builds its slides from (RUN-08).
   midServiceAdditions: {
     collection: 'mid_service_additions',
     kind: 'immutable',
-    fields: { ...HISTORY, contentId: 'required', runId: 'required', at: 'required', libraryId: 'optional' },
+    fields: { ...HISTORY, contentId: 'required', runId: 'required', title: 'required', revision: 'required', at: 'required', libraryId: 'optional' },
   },
   // Spec PREP-01: the manifest pinning everything a run replays from, including the resolved geometry.
   preparedSnapshots: {

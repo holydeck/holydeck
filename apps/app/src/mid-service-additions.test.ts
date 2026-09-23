@@ -120,7 +120,7 @@ const refused = async (call: Promise<unknown>): Promise<MidServiceError> => {
 };
 
 describe('content added while a run is on', () => {
-  it('joins the run and appends a run event the way any shown content does', async () => {
+  it('joins the run and appends an item-added run event', async () => {
     const { db, store, runId, pins } = await live();
 
     const outcome = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
@@ -128,7 +128,7 @@ describe('content added while a run is on', () => {
     expect(outcome.event).toMatchObject({
       runId,
       sequence: 1,
-      kind: LIVE_EVENT_TYPES.slide,
+      kind: LIVE_EVENT_TYPES.itemAdded,
       actor: OPERATOR,
       pinnedRevisions: pins,
     });
@@ -136,15 +136,15 @@ describe('content added while a run is on', () => {
     expect(log).toEqual([outcome.event]);
   });
 
-  it('names what it put in front of the room, so a run’s review reads it back (LIVE-13)', async () => {
+  it('claims nothing shown: adding is not showing, and LIVE-13 reviews only what reached the room', async () => {
     const { store, runId } = await live();
 
     const outcome = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
 
-    // The title a person gave it, under the identifier the body was saved as: the addition is a reference
-    // shown, and the log is where a review of one is read from — never the Service definition, which
-    // never held this content at all.
-    expect(outcome.event.shown).toEqual({ itemId: outcome.addition.contentId, reference: 'Psalm 23' });
+    // The row keeps the title a person gave it and the revision its body was saved as, so the run deck
+    // can name and build the item; the run log says it was shown only once the engine puts it up.
+    expect(outcome.event.shown).toBeUndefined();
+    expect(outcome.addition).toMatchObject({ title: 'Psalm 23', revision: outcome.revision.revision });
   });
 
   it('carries the run’s own standing pins through unchanged, content pin included', async () => {
@@ -217,11 +217,11 @@ describe('the provenance a mid-service addition leaves', () => {
 
     const outcome = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
 
-    expect(outcome.addition).toEqual({ contentId: CONTENT_ID, runId, actor: OPERATOR, at: ADDED_AT });
+    expect(outcome.addition).toEqual({ contentId: CONTENT_ID, runId, title: 'Psalm 23', revision: 1, actor: OPERATOR, at: ADDED_AT });
     // A row of its own is the whole of what says "added mid-service": one per addition, and nothing on
     // the revision or the run is asked to carry the fact instead.
     expect(rows(db, ADDITIONS)).toEqual([
-      { _id: CONTENT_ID, contentId: CONTENT_ID, runId, actor: OPERATOR, at: ADDED_AT, correlationId: CORRELATION },
+      { _id: CONTENT_ID, contentId: CONTENT_ID, runId, title: 'Psalm 23', revision: 1, actor: OPERATOR, at: ADDED_AT, correlationId: CORRELATION },
     ]);
   });
 

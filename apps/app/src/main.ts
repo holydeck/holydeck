@@ -30,7 +30,7 @@ import { MID_SERVICE_PERMISSIONS, midServiceOn } from './mid-service-additions.j
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
-import { REVISION_PERMISSIONS } from './revisions.js';
+import { REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
 import { deriveDeck } from './run-deck.js';
 import { runEngineOn } from './run-engine.js';
 import { runEventsOn } from './run-events.js';
@@ -172,6 +172,7 @@ if (settings.values.mongoUrl !== '') {
   const manifests = preparation;
   const additions = midService;
   const groups = slideGroups;
+  const bodies = revisionsOn(repositoryDb(store.db()), { now });
   const deckFor = async (context: unknown, run: RunRecord): Promise<RunDeck> => {
     const held = context as RequestContext;
     const deckContext = requestContext({
@@ -185,7 +186,7 @@ if (settings.values.mongoUrl !== '') {
     });
     const snapshot = await manifests.snapshot(deckContext, run.snapshotId);
     if (snapshot === undefined) throw new Error(`${run.snapshotId} is not a manifest this server holds`);
-    return deriveDeck(deckContext, { slideGroups: groups }, snapshot, await additions.additions(deckContext, run.runId));
+    return deriveDeck(deckContext, { slideGroups: groups, revisions: bodies }, snapshot, await additions.additions(deckContext, run.runId));
   };
   deck = deckFor;
   engine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });

@@ -17,8 +17,9 @@
 // never rewrites it, and a run is past preparation by the time anything is added mid-service, so the seven
 // pinned revisions a run event carries are read back from the run's own manifest and passed through
 // unchanged — the `content` pin included, which is a digest over what preparation baked in rather than a
-// running tally of what has been shown since. The addition joins the run the way any shown item does, by
-// appending `live-events.ts`'s `current-slide-changed` to the immutable log in `run-events.ts`, and the
+// running tally of what has been shown since. The addition joins the run by appending `live-events.ts`'s
+// `item-added` to the immutable log in `run-events.ts` — added is not shown: the run engine logs a shown
+// slide only when one reaches the room, so LIVE-13's review never lists an addition nobody put up — and the
 // record that it was added mid-service is this module's own row rather than a flag on something else:
 // `revisions.ts`'s `RevisionOrigin` says how a save was triggered, never when in a service's life it
 // happened, and folding the two together would leave neither answerable on its own.
@@ -122,6 +123,10 @@ export interface MidServiceRequest {
 export interface MidServiceAddition {
   readonly contentId: string;
   readonly runId: string;
+  /** What a person called it, so the run deck and a review name it the way they did. */
+  readonly title: string;
+  /** The revision its body was saved as, which the run deck builds the item's slides from. */
+  readonly revision: number;
   readonly actor: string;
   readonly at: string;
   /** The library item an explicit save decision created, and nothing at all when none was made. */
@@ -132,7 +137,7 @@ export interface MidServiceOutcome {
   readonly addition: MidServiceAddition;
   /** The body as history holds it, saved under the identifier this module minted. */
   readonly revision: RevisionRecord;
-  /** The run event this addition appended, the same one any shown item appends. */
+  /** The `item-added` run event this addition appended; it claims nothing shown. */
   readonly event: RunEventRecord;
 }
 
@@ -196,17 +201,19 @@ export function midServiceOn(db: RepositoryDb, options: MidServiceOptions): MidS
   const newId = options.newId ?? ((): string => randomBytes(CONTENT_ID_BYTES).toString('base64url'));
 
   const rowFrom = (found: Record<string, unknown>): MidServiceAddition => {
-    const { contentId, runId, at, actor, libraryId } = found;
+    const { contentId, runId, title, revision, at, actor, libraryId } = found;
     if (
       typeof contentId !== 'string' ||
       typeof runId !== 'string' ||
+      typeof title !== 'string' ||
+      typeof revision !== 'number' ||
       typeof at !== 'string' ||
       typeof actor !== 'string' ||
       (libraryId !== undefined && typeof libraryId !== 'string')
     ) {
       throw new MidServiceError('corrupt', `${String(contentId)} holds a mid-service addition this code cannot read`);
     }
-    return { contentId, runId, actor, at, ...(typeof libraryId === 'string' ? { libraryId } : {}) };
+    return { contentId, runId, title, revision, actor, at, ...(typeof libraryId === 'string' ? { libraryId } : {}) };
   };
 
   const standing = async (context: unknown, contentId: string): Promise<MidServiceAddition | undefined> => {
@@ -267,20 +274,16 @@ export function midServiceOn(db: RepositoryDb, options: MidServiceOptions): MidS
           throw new MidServiceError('conflict', `${contentId} is content another writer added first`);
         }
         const saved = await revisions.save(context, { contentId, body: request.body, origin: 'manual-checkpoint' });
-        // The run event names the addition the way it names any shown item, so LIVE-13's review of what a
-        // run showed reads this back from the log alone — which is the only place it could be read from:
-        // no Service definition ever held this content.
-        const event = await runEvents.record(session, {
-          runId: run.runId,
-          kind: LIVE_EVENT_TYPES.slide,
-          pinnedRevisions,
-          shown: { itemId: contentId, reference: parsed.value.title },
-        });
+        // Added, not shown: the event carries no `shown`. The run engine logs that, under the title below,
+        // only once the operator actually puts the addition in front of the room.
+        const event = await runEvents.record(session, { runId: run.runId, kind: LIVE_EVENT_TYPES.itemAdded, pinnedRevisions });
         const libraryId =
           request.saveToLibrary === true ? (await library.create(context, parsed.value)).stamp.id : undefined;
         const addition: MidServiceAddition = {
           contentId,
           runId: run.runId,
+          title: parsed.value.title,
+          revision: saved.revision.revision,
           actor: session.actor,
           at: options.now(),
           ...(libraryId === undefined ? {} : { libraryId }),

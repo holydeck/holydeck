@@ -1,11 +1,13 @@
 import { actorFor } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
+import { LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
 import { DEFAULT_SAFE_AREA_MARGINS } from '@holydeck/contracts/snapshots';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { buildApp } from './app.js';
 import { capabilitiesOn, capabilityContext } from './capabilities.js';
+import { grantFor } from './live-protocol.js';
 import { themesOn } from './live-theme.js';
 import { midServiceOn } from './mid-service-additions.js';
 import { PRESENTATION_CONTROL, PRESENTATION_VIEW, SERVICE_READ, SETTINGS_MANAGE } from './roles.js';
@@ -32,9 +34,12 @@ import { fakeDb } from '../test/helpers/fake-db.js';
 import { memoryCapabilities } from '../test/helpers/capabilities.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 
+import type { CommandFrame } from '@holydeck/contracts/live';
 import type { ServiceDraft } from '@holydeck/contracts/services';
 import type { CapabilityStore } from './capabilities.js';
+import type { LiveChange, LiveMember } from './live-protocol.js';
 import type { RunDeck } from './run-deck.js';
+import type { RunEngine } from './run-engine.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { PreparationInputs } from './snapshots.js';
 import type { FastifyInstance } from 'fastify';
@@ -71,7 +76,11 @@ const DECK: RunDeck = {
   safeAreaMargins: DEFAULT_SAFE_AREA_MARGINS,
   items: [],
 };
-const deckFor = (): Promise<RunDeck> => Promise.resolve(DECK);
+// What the deck holds follows what a test added mid-service, the way `main.ts`'s real deck does.
+let deckItems: RunDeck['items'] = [];
+const deckFor = (): Promise<RunDeck> => Promise.resolve({ ...DECK, items: deckItems });
+let runEngine: RunEngine;
+let changes: LiveChange[] = [];
 
 let app: FastifyInstance;
 let operator: StartedSession;
@@ -94,13 +103,18 @@ const building = async (): Promise<void> => {
     publish: (): { sequence: number; stateRevision: number } => ({ sequence: 1, stateRevision: 1 }),
     seedStateRevision: (): void => {},
     publishTo: (): { sequence: number; stateRevision: number } => ({ sequence: 1, stateRevision: 1 }),
-    publishChange: (): { sequence: number; stateRevision: number } => ({ sequence: 1, stateRevision: 1 }),
+    publishChange: (change: LiveChange): { sequence: number; stateRevision: number } => {
+      changes.push(change);
+      return { sequence: 1, stateRevision: 1 };
+    },
     seedStates: (): void => {},
     stateRevision: (): number => 0,
   };
   const themes = themesOn(runEvents);
   const runReview = runReviewOn(runEvents);
-  const runEngine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });
+  deckItems = [];
+  changes = [];
+  runEngine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });
   capabilities = capabilitiesOn(memoryCapabilities().db, { now });
   sessions = sessionsOn(memorySessions().db, { now });
 
@@ -316,6 +330,22 @@ describe('adding content mid-service, reviewing and exporting a recap', () => {
       kind: 'reading', title: 'An added reading', body: 'The text of the reading',
     }, operator);
     expect(added.statusCode).toBe(201);
+    const { contentId, title } = added.json().data.addition as { contentId: string; title: string };
+    expect(title).toBe('An added reading');
+    // RUN-08: every view hears of it, and a client keyed on additionsRevision refetches its deck.
+    expect(changes.at(-1)).toMatchObject({ type: 'item-added', everyone: true });
+    expect((await asking('GET', runPath(RUN_ID_PATH, runId), undefined, operator)).json().data.live.additionsRevision).toBe(1);
+
+    // Added is not shown: LIVE-13 reviews only what reached the room, so the review is empty until the
+    // operator puts the addition up.
+    expect((await asking('GET', runPath(RUN_REVIEW_PATH, runId), undefined, operator)).json().data).toEqual([]);
+    deckItems = [{ itemId: contentId, kind: 'mid-service', title, slides: [{ slideId: `${contentId}:0`, boxes: [] }] }];
+    const member: LiveMember = { channel: LIVE_CONTROL_CHANNEL, grant: grantFor([PRESENTATION_CONTROL]), identity: OPERATOR };
+    const command: CommandFrame = {
+      kind: 'command', channel: LIVE_CONTROL_CHANNEL, id: 'show-addition', idempotencyKey: 'show-addition',
+      type: 'go-to', args: { itemId: contentId, slideIndex: 0 }, clientStateRevision: 0,
+    };
+    expect(await runEngine.command(member, command)).toEqual({ outcome: 'applied' });
 
     const reviewed = await asking('GET', runPath(RUN_REVIEW_PATH, runId), undefined, operator);
     expect(reviewed.statusCode).toBe(200);

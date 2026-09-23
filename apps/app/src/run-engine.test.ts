@@ -14,6 +14,7 @@ import type { CommandFrame, LiveChannel } from '@holydeck/contracts/live';
 import type { ChannelState, LiveState } from '@holydeck/contracts/live-state';
 import type { SnapshotPin } from '@holydeck/contracts/snapshots';
 import type { LiveMember } from './live-protocol.js';
+import type { MidServiceStore } from './mid-service-additions.js';
 import type { RunEngineOptions } from './run-engine.js';
 import type { RunRecord, RunStore } from './runs.js';
 
@@ -89,7 +90,7 @@ const setup = () => {
     })),
     themesFor: vi.fn(() => undefined),
   };
-  const midService = { add: vi.fn(), additions: vi.fn(async () => []) };
+  const midService = { add: vi.fn<MidServiceStore['add']>(), additions: vi.fn(async () => []) };
   const deck = vi.fn(async () => ({
     snapshotId: 'snapshot-1', pinnedRevisions: PINS, aspectRatio: '16:9',
     safeAreaMargins: { top: 0, right: 0, bottom: 0, left: 0, unit: 'percent' as const },
@@ -408,6 +409,65 @@ describe('run-engine lifecycle', () => {
     runs.end.mockResolvedValue(undefined);
     expect(await engine.end(SESSION, 'missing')).toBeUndefined();
     expect(hub.publishChange).toHaveBeenCalledOnce();
+  });
+});
+
+describe('run-engine mid-service additions', () => {
+  const REQUEST = { runId: 'run-1', kind: 'reading' as const, title: 'Psalm 23', body: { text: 'The Lord is my shepherd' } };
+  const OUTCOME = {
+    addition: { contentId: 'addition-1', runId: 'run-1', title: 'Psalm 23', revision: 1, actor: SESSION.actor, at: AT },
+    revision: {} as never,
+    event: { runId: 'run-1', kind: LIVE_EVENT_TYPES.itemAdded, pinnedRevisions: PINS, actor: SESSION.actor, at: AT, sequence: 2 },
+  };
+
+  it('bumps additionsRevision through CAS and tells every view an item was added', async () => {
+    const { engine, midService, runs, hub, order } = await started();
+    midService.add.mockImplementation(async () => { order.push('add'); return OUTCOME; });
+    expect(await engine.add(SESSION, REQUEST)).toBe(OUTCOME);
+    expect(order).toEqual(['add', 'advance', 'publish']);
+    expect(runs.advance).toHaveBeenCalledWith(expect.anything(), 'run-1', 7, expect.objectContaining({ additionsRevision: 1 }), 9);
+    expect(hub.changes).toEqual([expect.objectContaining({ type: LIVE_EVENT_TYPES.itemAdded, everyone: true, stateRevision: 8 })]);
+    expect(hub.publishToCalls.find((c) => c.channel === 'audience')?.state).toMatchObject({ additionsRevision: 1 });
+    expect(engine.state('run-1')?.additionsRevision).toBe(1);
+  });
+
+  it('re-reads and retries when a live command wins the CAS race', async () => {
+    const { engine, midService, runs } = await started();
+    midService.add.mockResolvedValue(OUTCOME);
+    runs.advance.mockResolvedValueOnce('stale');
+    await engine.add(SESSION, REQUEST);
+    expect(runs.advance).toHaveBeenCalledTimes(2);
+    expect(runs.resume).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses with a conflict when it keeps losing, the addition itself already durable', async () => {
+    const { engine, midService, runs, hub } = await started();
+    midService.add.mockResolvedValue(OUTCOME);
+    runs.advance.mockResolvedValue('stale');
+    await expect(engine.add(SESSION, REQUEST)).rejects.toMatchObject({ kind: 'conflict' });
+    expect(hub.publishChange).not.toHaveBeenCalled();
+  });
+
+  it('passes a mid-service refusal through untouched and bumps nothing', async () => {
+    const { engine, midService, runs } = await started();
+    midService.add.mockRejectedValue(new Error('refused'));
+    await expect(engine.add(SESSION, REQUEST)).rejects.toThrow('refused');
+    expect(runs.advance).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the run ended between the addition and the bump', async () => {
+    const { engine, midService, runs } = await started();
+    midService.add.mockResolvedValue(OUTCOME);
+    runs.resume.mockResolvedValueOnce({ ...RECORD, phase: 'ended' });
+    await expect(engine.add(SESSION, REQUEST)).rejects.toMatchObject({ kind: 'state' });
+  });
+
+  it('still announces the addition when the deck cannot be derived', async () => {
+    const { engine, midService, deck, hub } = await started();
+    midService.add.mockResolvedValue(OUTCOME);
+    deck.mockRejectedValue(new Error('no slide group revision 3'));
+    await engine.add(SESSION, REQUEST);
+    expect(hub.changes).toHaveLength(1);
   });
 });
 

@@ -6,6 +6,7 @@ import type { LivePosition, LiveState } from '@holydeck/contracts/live-state';
 import type { SafeAreaMargins, PreparedSnapshot } from '@holydeck/contracts/snapshots';
 
 import type { MidServiceAddition } from './mid-service-additions.js';
+import type { RevisionStore } from './revisions.js';
 import type { SlideGroupRecord, SlideGroupStore } from './slide-groups.js';
 
 export type DeckSlide = {
@@ -49,6 +50,8 @@ export type DeckView = 'audience' | 'stage' | 'singer' | 'control';
 
 export interface DeckStores {
   readonly slideGroups: Pick<SlideGroupStore, 'history'>;
+  /** Where a mid-service addition's body is read back from, at the revision its row names. */
+  readonly revisions?: Pick<RevisionStore, 'read'>;
 }
 
 const decks = new Map<string, RunDeck>();
@@ -70,13 +73,21 @@ const itemFrom = (record: SlideGroupRecord): DeckItem => {
   };
 };
 
-const additionItem = (addition: MidServiceAddition): DeckItem => ({
-  itemId: addition.contentId,
-  kind: 'mid-service',
-  title: addition.contentId,
-  slides: [],
-  provenance: { origin: 'mid-service', actor: addition.actor, at: addition.at },
-});
+// An addition's body is free text (`{text}`, RUN-08); each blank-line-separated paragraph becomes one
+// slide, so a reading added from the front can be stepped through like any prepared item. A body this
+// cannot read still joins the deck under its title, with nothing to step through.
+const additionItem = async (context: unknown, stores: DeckStores, addition: MidServiceAddition): Promise<DeckItem> => {
+  const saved = await stores.revisions?.read(context, addition.contentId, addition.revision);
+  const text = saved?.body['text'];
+  const paragraphs = typeof text === 'string' ? text.split(/\n\s*\n/u).map((part) => part.trim()).filter((part) => part !== '') : [];
+  return {
+    itemId: addition.contentId,
+    kind: 'mid-service',
+    title: addition.title,
+    slides: paragraphs.map((paragraph, index) => ({ slideId: `${addition.contentId}:${index}`, boxes: [{ id: 'text', text: paragraph }] })),
+    provenance: { origin: 'mid-service', actor: addition.actor, at: addition.at },
+  };
+};
 
 export async function deriveDeck(
   context: unknown,
@@ -102,7 +113,10 @@ export async function deriveDeck(
     aspectRatio: snapshot.resolved.aspectRatio,
     safeAreaMargins: snapshot.resolved.safeAreaMargins,
     standbyScreens: [],
-    items: [...generated.filter((item): item is DeckItem => item !== undefined), ...additions.map(additionItem)],
+    items: [
+      ...generated.filter((item): item is DeckItem => item !== undefined),
+      ...await Promise.all(additions.map((addition) => additionItem(context, stores, addition))),
+    ],
   };
   decks.set(cacheKey, deck);
   return deck;

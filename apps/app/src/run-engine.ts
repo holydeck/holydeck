@@ -26,7 +26,7 @@ import type { RunStartBody } from '@holydeck/contracts/runs';
 import type { LiveEventType } from './live-events.js';
 import type { LiveHub, LiveMember } from './live-protocol.js';
 import type { ThemeChangeResult, ThemeStore } from './live-theme.js';
-import type { MidServiceStore } from './mid-service-additions.js';
+import type { MidServiceOutcome, MidServiceRequest, MidServiceStore } from './mid-service-additions.js';
 import type { RunDeck } from './run-deck.js';
 import type { RunEventStore } from './run-events.js';
 import type { RunRecord, RunStore } from './runs.js';
@@ -51,9 +51,16 @@ export interface RunEngine {
    *  Refuses with a `RunError` — `state` for a run that is not the active one presented here, `conflict`
    *  when the run moved while the change was being made. */
   changeTheme(session: OperatorSession, runId: string, surface: ThemeSurface, theme: Theme): Promise<ThemeChangeResult>;
+  /** RUN-08: content added mid-service. `midService.add` makes it durable first; then `additionsRevision`
+   *  moves through the same CAS as a command, and every view hears `item-added` so a client keyed on it
+   *  refetches its deck. Refuses with a `RunError` — `state` once the run has ended, `conflict` when the
+   *  bump keeps losing to live commands (the addition itself has already joined the run by then). */
+  add(session: OperatorSession, request: MidServiceRequest): Promise<MidServiceOutcome>;
   state(runId: string): LiveState | undefined;
   restore(): Promise<void>;
 }
+
+const ADDITION_ATTEMPTS = 3;
 
 const EMPTY_SCREEN: LivePosition = { itemId: '', slideIndex: 0 };
 
@@ -296,6 +303,31 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
       const result = await retheme(session, run, deck, surface, theme);
       if (result === 'stale') throw new RunError('conflict', `${runId} moved while its theme was being changed`);
       return result;
+    },
+    add: async (session, request) => {
+      const outcome = await options.midService.add(session, request);
+      const context = runContext(session.actor, session.correlationId);
+      for (let attempt = 0; attempt < ADDITION_ATTEMPTS; attempt += 1) {
+        const run = await options.runs.resume(context, request.runId);
+        if (run === undefined || run.phase !== 'active') throw new RunError('state', `${request.runId} is not a run that is on`);
+        const next: LiveState = { ...run.live, additionsRevision: run.live.additionsRevision + 1 };
+        const advanced = await options.runs.advance(context, run.runId, run.stateRevision, next, nextRevision());
+        if (advanced === 'stale') continue;
+        if (advanced === undefined) throw new RunError('state', `${request.runId} is not a run that is on`);
+        states.set(run.runId, next);
+        let deck: RunDeck | undefined;
+        try {
+          deck = await options.deck(context, advanced);
+        } catch {
+          // The views still learn that the deck moved; they refetch it and see for themselves.
+          deck = undefined;
+        }
+        options.hub.publishChange({
+          type: LIVE_EVENT_TYPES.itemAdded, states: statesFor(next, deck, LIVE_CHANNELS), everyone: true, stateRevision: advanced.stateRevision,
+        });
+        return outcome;
+      }
+      throw new RunError('conflict', `${request.runId} kept moving while its additions revision was bumped`);
     },
     state: (runId) => states.get(runId),
     restore: async () => {

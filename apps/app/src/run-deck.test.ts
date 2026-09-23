@@ -4,6 +4,8 @@ import { adjacentPosition, deriveDeck, projectDeck } from './run-deck.js';
 
 import type { PreparedSnapshot, SnapshotPin } from '@holydeck/contracts/snapshots';
 
+import type { RevisionRecord } from '@holydeck/contracts/revisions';
+
 import type { MidServiceAddition } from './mid-service-additions.js';
 import type { DeckItem, RunDeck } from './run-deck.js';
 import type { SlideGroupRecord, SlideGroupStore } from './slide-groups.js';
@@ -98,19 +100,34 @@ describe('deriveDeck', () => {
     const addition: MidServiceAddition = {
       contentId: 'addition-1',
       runId: 'run-1',
+      title: 'Psalm 23',
+      revision: 1,
       actor: ACTOR,
       at: AT,
     };
+    const revisions = {
+      read: async (_context: unknown, contentId: string, revision: number) => contentId === 'addition-1' && revision === 1
+        ? { body: { text: 'The Lord is my shepherd\n\n  He makes me lie down  \n\n\n' } } as unknown as RevisionRecord : undefined,
+    };
 
-    const deck = await deriveDeck({}, { slideGroups: slideGroups() }, snapshot('snapshot-with-addition'), [addition]);
+    const deck = await deriveDeck({}, { slideGroups: slideGroups(), revisions }, snapshot('snapshot-with-addition'), [addition]);
 
     expect(deck.items.at(-1)).toEqual({
       itemId: 'addition-1',
       kind: 'mid-service',
-      title: 'addition-1',
-      slides: [],
+      title: 'Psalm 23',
+      slides: [
+        { slideId: 'addition-1:0', boxes: [{ id: 'text', text: 'The Lord is my shepherd' }] },
+        { slideId: 'addition-1:1', boxes: [{ id: 'text', text: 'He makes me lie down' }] },
+      ],
       provenance: { origin: 'mid-service', actor: ACTOR, at: AT },
     });
+  });
+
+  it('builds no slides for an addition whose body it cannot read', async () => {
+    const addition: MidServiceAddition = { contentId: 'addition-2', runId: 'run-1', title: 'Lost', revision: 1, actor: ACTOR, at: AT };
+    const deck = await deriveDeck({}, { slideGroups: slideGroups(), revisions: { read: async () => undefined } }, snapshot('snapshot-lost'), [addition]);
+    expect(deck.items.at(-1)).toMatchObject({ itemId: 'addition-2', title: 'Lost', slides: [] });
   });
 
   it('memoises by snapshotId + additionsRevision: a second call with the same inputs returns the same object reference', async () => {
