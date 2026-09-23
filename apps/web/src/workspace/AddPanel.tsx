@@ -1,8 +1,7 @@
 // WS-08's Add panel, in the Library slot of the workspace: one search box above a tablist of content
 // sources. The tabs use manual activation — arrow keys, Home and End only move focus, Enter or Space opens
 // the focused source — so a keyboard user can pass over a source without it loading. Every panel stays
-// mounted, so a half-picked passage survives a look at another source. Sermon and Media arrive with Task
-// 24; until then their panels say so.
+// mounted, so a half-picked passage survives a look at another source.
 
 import type { MessageKey } from '@holydeck/localization/messages';
 import type { JSX } from 'preact';
@@ -11,6 +10,8 @@ import { useState } from 'preact/hooks';
 import { t } from '../i18n.js';
 import { BibleTab } from './tabs/BibleTab.js';
 import { BlankSlideTab } from './tabs/BlankSlideTab.js';
+import { MediaTab } from './tabs/MediaTab.js';
+import { SermonTab } from './tabs/SermonTab.js';
 import { SongTab } from './tabs/SongTab.js';
 
 export type AddSource = 'bible' | 'song' | 'sermon' | 'media' | 'blank';
@@ -32,8 +33,9 @@ const panelId = (source: AddSource): string => `add-panel-${source}`;
 function panelFor(source: AddSource, query: string): JSX.Element {
   if (source === 'bible') return <BibleTab query={query} />;
   if (source === 'song') return <SongTab query={query} />;
-  if (source === 'blank') return <BlankSlideTab />;
-  return <p>{t('add.later')}</p>;
+  if (source === 'sermon') return <SermonTab query={query} />;
+  if (source === 'media') return <MediaTab query={query} />;
+  return <BlankSlideTab />;
 }
 
 export interface AddPanelProps {

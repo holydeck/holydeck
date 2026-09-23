@@ -2,17 +2,23 @@
 // more translations to show alongside, read the passage stacked per translation with its verse offset, and
 // only then Insert it where `InsertLocation` says. The search box narrows the book list. An offset is a
 // setting of the whole installation, so its editor is shown only to someone who holds `settings.manage` (P-7).
+// Search Scripture (BIBL-03) finds a remembered phrase in the translations being read and opens its passage.
 
 import type { CorpusCanonBook } from '@holydeck/contracts/corpus';
+import { isRecord, type Parsed } from '@holydeck/contracts/problems';
 import type { ServiceItem } from '@holydeck/contracts/services';
 import type { JSX } from 'preact';
 import { useState } from 'preact/hooks';
 
+import { UNREADABLE_RESPONSE } from '../../api.js';
+import { API } from '../../api-routes.js';
 import { can } from '../../app-state.js';
 import { t } from '../../i18n.js';
 import { isReadOnly } from '../../state/workspace-store.js';
 import { insertAndSelect, InsertLocation, useInsertTarget } from '../InsertLocation.js';
-import { readingIsValid, saveOffset, useBooks, useOffsets, usePassage, useTranslations, type Loaded, type ReadingDraft } from './bible-sources.js';
+import {
+  readingIsValid, saveOffset, useBooks, useOffsets, usePassage, useSource, useTranslations, type Loaded, type ReadingDraft,
+} from './bible-sources.js';
 import { ReadingFields } from './ReadingFields.js';
 
 /** A source that could not be read: what happened, a way to try again, and the code for support. */
@@ -58,6 +64,68 @@ function Passage({ abbr, title, draft, offset }: { readonly abbr: string; readon
           <p key={verse}><sup>{verse}</sup> {text}</p>
         ))}
     </section>
+  );
+}
+
+/** One phrase-search hit: where it is and the verse text around it. */
+export type ScriptureHit = { readonly abbr: string; readonly book: string; readonly chapter: number; readonly verses: readonly number[]; readonly text: string };
+
+/** Search answers (`[{reference: {abbr, book, chapter, verses}, text}]`) as hits; an unreadable entry fails the list. */
+export function readScriptureHits(data: unknown): Parsed<readonly ScriptureHit[]> {
+  const fail: Parsed<never> = { ok: false, problems: [{ path: 'scripture', code: UNREADABLE_RESPONSE, message: 'unreadable' }] };
+  if (!Array.isArray(data)) return fail;
+  const hits: ScriptureHit[] = [];
+  for (const entry of data) {
+    const reference = isRecord(entry) ? entry['reference'] : undefined;
+    if (!isRecord(entry) || !isRecord(reference)) return fail;
+    const { abbr, book, chapter, verses } = reference;
+    const text = entry['text'];
+    if (typeof abbr !== 'string' || typeof book !== 'string' || typeof chapter !== 'number' || typeof text !== 'string' ||
+      !Array.isArray(verses) || !verses.every((verse) => typeof verse === 'number')) return fail;
+    hits.push({ abbr, book, chapter, verses, text });
+  }
+  return { ok: true, value: hits };
+}
+
+const EXCERPT = 80;
+const excerptOf = (text: string): string => (text.length <= EXCERPT ? text : `${text.slice(0, EXCERPT - 1).trimEnd()}…`);
+
+function ScriptureSearch({ reading, books, onOpen }: {
+  readonly reading: ReadingDraft;
+  readonly books: readonly CorpusCanonBook[];
+  readonly onOpen: (hit: ScriptureHit) => void;
+}): JSX.Element {
+  const [phrase, setPhrase] = useState('');
+  const [asked, setAsked] = useState('');
+  const [hits, retry] = useSource(asked === '' ? undefined : API.scriptureSearch(asked), readScriptureHits);
+  const shown = [reading.translation, ...reading.compare];
+  return (
+    <div class="bible-search">
+      <form role="search" onSubmit={(event) => { event.preventDefault(); setAsked(phrase.trim()); }}>
+        <label for="bible-search">{t('bible.search')}</label>
+        <input id="bible-search" type="search" value={phrase} onInput={(event) => setPhrase(event.currentTarget.value)} />
+        <button type="submit">{t('bible.search.go')}</button>
+      </form>
+      {asked === '' ? null
+        : hits.status === 'loading' ? <p role="status">{t('app.loading')}</p>
+        : hits.status === 'error' ? <SourceError code={hits.code} retry={retry} />
+        : (() => {
+          const found = hits.value.filter((hit) => shown.includes(hit.abbr));
+          return found.length === 0 ? <NoMatch /> : (
+            <ul class="bible-search-results" aria-label={t('bible.search')}>
+              {found.map((hit) => {
+                const reference = readingTitle({ ...reading, book: hit.book, chapter: hit.chapter, verses: hit.verses.join(',') }, books);
+                const label = t('bible.search.result', { reference: `${hit.abbr} ${reference}`, excerpt: excerptOf(hit.text) });
+                return (
+                  <li key={`${hit.abbr}:${hit.book}:${hit.chapter}:${hit.verses.join(',')}`}>
+                    <button type="button" class="truncate" title={hit.text} onClick={() => onOpen(hit)}>{label}</button>
+                  </li>
+                );
+              })}
+            </ul>
+          );
+        })()}
+    </div>
   );
 }
 
@@ -120,6 +188,12 @@ export function BibleTab({ query }: { readonly query: string }): JSX.Element {
   return (
     <div class="bible-tab">
       {books.status === 'error' ? <SourceError code={books.code} retry={retryBooks} /> : null}
+      {reading.translation === '' ? null : (
+        <ScriptureSearch
+          reading={reading} books={bookList}
+          onOpen={(hit) => setDraft({ ...reading, book: hit.book, chapter: hit.chapter, verses: hit.verses.join(',') })}
+        />
+      )}
       <ReadingFields
         idPrefix="bible" value={reading} translations={translationList} books={matching}
         onChange={(field, next) => setDraft({ ...reading, [field]: next })}

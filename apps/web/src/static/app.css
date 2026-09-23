@@ -319,3 +319,10 @@ button, a { min-inline-size: 44px; min-block-size: 44px; }
 .canvas-handle-nw, .canvas-handle-se { cursor: nwse-resize; }
 .canvas-handle-ne, .canvas-handle-sw { cursor: nesw-resize; }
 .canvas-inline-text { position: absolute; box-sizing: border-box; z-index: 10000; }
+.truncate { display: inline-block; max-inline-size: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.media-list { list-style: none; margin: 0; padding: 0; }
+.media-row { display: flex; gap: 8px; align-items: center; padding-block: 4px; padding-inline: 8px; cursor: pointer; }
+.media-row[aria-selected="true"] { outline: 2px solid Highlight; }
+.media-row[aria-disabled="true"] { cursor: not-allowed; }
+.media-row:focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
+.media-name { flex: 1; min-inline-size: 0; }

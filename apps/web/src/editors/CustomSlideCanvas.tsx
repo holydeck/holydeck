@@ -14,17 +14,14 @@ import { signal, type Signal } from '@preact/signals';
 import type { JSX } from 'preact';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { UNREADABLE_RESPONSE } from '../api.js';
 import { API } from '../api-routes.js';
 import { can } from '../app-state.js';
 import { showToast } from '../components/toast.js';
 import { t } from '../i18n.js';
-import { intrinsicSizeOf } from '../preview/media-size.js';
 import { placeholderRatio } from '../preview/preview-model.js';
-import { request } from '../request.js';
 import { isReadOnly, mutate, service } from '../state/workspace-store.js';
 import { findItem } from '../workspace/service-data.js';
-import type { Loaded } from '../workspace/tabs/bible-sources.js';
+import { MediaTab, type MediaPick } from '../workspace/tabs/MediaTab.js';
 import {
   apply, clampFrame, duplicateBox, invert, nextLayer, nudge, relayer, resize, type CanvasOp, type CanvasPx, type ResizeHandle,
 } from './canvas-ops.js';
@@ -83,32 +80,6 @@ export const readMediaChoices = (data: unknown): MediaChoice[] | undefined => {
   });
 };
 
-function MediaPicker({ onPick }: { readonly onPick: (choice: MediaChoice) => void }): JSX.Element {
-  const [state, setState] = useState<Loaded<MediaChoice[]>>({ status: 'loading' });
-  useEffect(() => {
-    let current = true;
-    void request(API.mediaUpload).then((answer) => {
-      if (!current) return;
-      const choices = answer.ok ? readMediaChoices(answer.data) : undefined;
-      setState(choices !== undefined ? { status: 'ready', value: choices }
-        : { status: 'error', code: answer.ok ? UNREADABLE_RESPONSE : answer.code });
-    });
-    return (): void => {
-      current = false;
-    };
-  }, []);
-  if (state.status === 'loading') return <p role="status">{t('app.loading')}</p>;
-  if (state.status === 'error') return <p role="alert">{t('add.error')} <code>{state.code}</code></p>;
-  return (
-    <fieldset class="canvas-media-picker">
-      <legend>{t('canvas.media.pick')}</legend>
-      {state.value.length === 0 ? <p>{t('canvas.media.none')}</p> : state.value.map((choice) => (
-        <button key={choice.id} type="button" onClick={() => onPick(choice)}>{choice.id}</button>
-      ))}
-    </fieldset>
-  );
-}
-
 function InlineText({ box, onDone }: { readonly box: CustomSlideBox & { kind: 'text' }; readonly onDone: (text: string | undefined) => void }): JSX.Element {
   const { frame } = box;
   const field = useRef<HTMLTextAreaElement>(null);
@@ -148,7 +119,6 @@ export function CustomSlideCanvas({ itemId }: { readonly itemId: string }): JSX.
   const [zoom, setZoom] = useState<number>(ZOOM.initial);
   const [live, setLive] = useState<{ readonly id: string; readonly frame: CustomSlideBox['frame'] } | undefined>(undefined);
   const [picking, setPicking] = useState(false);
-  const [mediaRefusal, setMediaRefusal] = useState<string | undefined>(undefined);
   const stack = useMemo(() => createUndoStack<Step>(), []);
   const root = useRef<HTMLDivElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
@@ -248,19 +218,12 @@ export function CustomSlideCanvas({ itemId }: { readonly itemId: string }): JSX.
     style: { fontFamily: 'var(--font-latin)', fontWeight: 400, sizeRatio: 0.08, lineHeight: 1.2, align: 'center', verticalAlign: 'center' },
   });
 
-  const addMedia = async (choice: MediaChoice): Promise<void> => {
+  const addMedia = (pick: MediaPick): void => {
     setPicking(false);
-    try {
-      const size = await intrinsicSizeOf(choice.id, choice.kind);
-      setMediaRefusal(undefined);
-      add({
-        id: globalThis.crypto.randomUUID(), kind: 'media', layer: nextLayer(latest.current), mediaId: choice.id,
-        mediaKind: choice.kind, fit: 'contain', frame: { x: 0, y: 0, width: 1, height: 1 },
-        intrinsicSize: { width: size.width, height: size.height },
-      });
-    } catch {
-      setMediaRefusal('media.unreadable');
-    }
+    add({
+      id: globalThis.crypto.randomUUID(), kind: 'media', layer: nextLayer(latest.current), mediaId: pick.mediaId,
+      mediaKind: pick.mediaKind, fit: 'contain', frame: { x: 0, y: 0, width: 1, height: 1 }, intrinsicSize: pick.intrinsicSize,
+    });
   };
 
   const startDrag = (event: PointerEvent, box: CustomSlideBox, handle: ResizeHandle | undefined): void => {
@@ -339,8 +302,7 @@ export function CustomSlideCanvas({ itemId }: { readonly itemId: string }): JSX.
         </div>
       )}
       {readOnly || canPickMedia ? null : <p id="canvas-media-later">{t('canvas.media.later')}</p>}
-      {picking && canPickMedia && !readOnly ? <MediaPicker onPick={(choice) => void addMedia(choice)} /> : null}
-      {mediaRefusal === undefined ? null : <p role="alert">{t('add.error')} <code>{mediaRefusal}</code></p>}
+      {picking && canPickMedia && !readOnly ? <MediaTab mode="pick" onPick={addMedia} /> : null}
       <div class="canvas-zoom">
         <button type="button" onClick={fit}>{t('canvas.fit')}</button>
         <button type="button" disabled={zoom <= ZOOM.min} onClick={() => setZoom(Math.max(ZOOM.min, Math.ceil(zoom / ZOOM.step) * ZOOM.step - ZOOM.step))}>

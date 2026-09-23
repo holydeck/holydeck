@@ -280,11 +280,11 @@ describe('CustomSlideCanvas', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add Media' }));
     expect(screen.getByText('Loading…')).toBeTruthy();
     await settle();
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(expect.arrayContaining(['img1', 'vid1']));
-    expect(screen.queryByRole('button', { name: 'bad' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'doc' })).toBeNull();
+    expect(screen.getByRole('option', { name: /img1.*Ready/u }).getAttribute('aria-disabled')).toBe('false');
+    expect(screen.getByRole('option', { name: /bad.*Failed/u }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('option', { name: /doc/u }).getAttribute('aria-disabled')).toBe('true');
 
-    fireEvent.click(screen.getByRole('button', { name: 'vid1' }));
+    fireEvent.click(screen.getByRole('option', { name: /vid1/u }));
     await settle();
     await settle(800);
     expect(intrinsic).toHaveBeenCalledWith('vid1', 'video');
@@ -294,7 +294,7 @@ describe('CustomSlideCanvas', () => {
     intrinsic.mockRejectedValueOnce(new Error('broken'));
     fireEvent.click(screen.getByRole('button', { name: 'Add Media' }));
     await settle();
-    fireEvent.click(screen.getByRole('button', { name: 'img1' }));
+    fireEvent.click(screen.getByRole('option', { name: /img1/u }));
     await settle();
     expect(screen.getByText('media.unreadable')).toBeTruthy();
   });
