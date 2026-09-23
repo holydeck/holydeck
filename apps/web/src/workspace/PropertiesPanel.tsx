@@ -1,10 +1,12 @@
 // The Details tab's Properties view: the service's own facts first, always read-only here because a
 // title, date or site can only ever change through `NewService`'s duplicate flow or `/schedule` (P-9),
-// then whatever an item or box under selection adds beneath it (later tasks).
+// then whatever an item or box under selection adds beneath it — the Custom Slide canvas's selected box
+// among them.
 
 import type { ComponentChildren, JSX } from 'preact';
 
 import { locale } from '../app-state.js';
+import { BoxProperties } from '../editors/BoxProperties.js';
 import { t } from '../i18n.js';
 import { drift, selection, service } from '../state/workspace-store.js';
 import { DriftNotice } from './DriftNotice.js';
@@ -48,6 +50,7 @@ export function PropertiesPanel({ children }: { readonly children?: ComponentChi
           <DriftNotice itemId={item.id} />
         </div>
       )}
+      <BoxProperties />
       {children}
     </div>
   );

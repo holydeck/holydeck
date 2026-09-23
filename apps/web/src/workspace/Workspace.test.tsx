@@ -190,6 +190,23 @@ describe('the service workspace', () => {
     expect(await screen.findByRole('heading', { name: 'Reading', hidden: true })).toBeTruthy();
   });
 
+  it('opens the Custom Slide canvas and its box properties for a selected custom slide', async () => {
+    const withSlide = record('s1', ['a']);
+    const sections = [{ ...withSlide.sections[0], items: [{
+      id: 'c', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined,
+      body: { kind: 'custom-slide', boxes: [] },
+    }] }];
+    setFetching(fakeFetch({
+      'GET /api/v1/services/s1': reply(200, successEnvelope({ ...withSlide, sections }, 'r1')),
+      'GET /api/v1/services/s1/content-drift': noDrift,
+    }));
+    await renderAt('/services/s1?item=c');
+
+    expect(await screen.findByRole('heading', { name: 'Custom slide', hidden: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Add Text', hidden: true }));
+    expect(await screen.findByRole('group', { name: 'Selected box', hidden: true })).toBeTruthy();
+  });
+
   it('shows the missing state with a link back to Services', async () => {
     setFetching(fakeFetch({
       'GET /api/v1/services/s1': reply(404, errorEnvelope('resource.not_found', 'none', 'r1')),

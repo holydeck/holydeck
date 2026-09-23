@@ -13,6 +13,7 @@ import { joinAllowedFor } from '@holydeck/contracts/services';
 import type { MessageKey } from '@holydeck/localization/messages';
 import type { ComponentChildren, JSX } from 'preact';
 
+import { CustomSlideCanvas } from '../editors/CustomSlideCanvas.js';
 import { ReadingEditor } from '../editors/ReadingEditor.js';
 import { t } from '../i18n.js';
 import { ExactPreview } from '../preview/ExactPreview.js';
@@ -120,6 +121,7 @@ function EditorCenter(): JSX.Element {
   return (
     <>
       {kind === 'reading' ? <ReadingEditor key={itemId} itemId={itemId} /> : null}
+      {kind === 'custom-slide' ? <CustomSlideCanvas key={itemId} itemId={itemId} /> : null}
       <ExactPreview key={itemId} itemId={itemId} />
     </>
   );

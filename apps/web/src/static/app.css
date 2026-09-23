@@ -299,3 +299,23 @@ button, a { min-inline-size: 44px; min-block-size: 44px; }
     transform: none !important;
   }
 }
+
+.canvas-toolbar, .canvas-zoom { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.canvas-viewport { overflow: auto; max-inline-size: 100%; }
+.canvas-slide { position: relative; overflow: hidden; direction: ltr; }
+.canvas-box { position: absolute; box-sizing: border-box; outline: 1px dashed rgb(255 255 255 / 40%); color: #fff; cursor: move; touch-action: none; }
+.canvas-box[aria-pressed="true"] { outline: 2px solid Highlight; }
+.canvas-box:focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
+.canvas-box[aria-disabled="true"] { cursor: default; }
+.canvas-box > span { display: block; overflow: hidden; block-size: 100%; }
+.canvas-box > img { inline-size: 100%; block-size: 100%; }
+.canvas-handle { position: absolute; inline-size: 12px; block-size: 12px; background: Highlight; touch-action: none; }
+.canvas-handle-nw, .canvas-handle-n, .canvas-handle-ne { inset-block-start: -6px; }
+.canvas-handle-sw, .canvas-handle-s, .canvas-handle-se { inset-block-end: -6px; }
+.canvas-handle-nw, .canvas-handle-w, .canvas-handle-sw { inset-inline-start: -6px; }
+.canvas-handle-ne, .canvas-handle-e, .canvas-handle-se { inset-inline-end: -6px; }
+.canvas-handle-n, .canvas-handle-s { inset-inline-start: calc(50% - 6px); cursor: ns-resize; }
+.canvas-handle-e, .canvas-handle-w { inset-block-start: calc(50% - 6px); cursor: ew-resize; }
+.canvas-handle-nw, .canvas-handle-se { cursor: nwse-resize; }
+.canvas-handle-ne, .canvas-handle-sw { cursor: nesw-resize; }
+.canvas-inline-text { position: absolute; box-sizing: border-box; z-index: 10000; }
