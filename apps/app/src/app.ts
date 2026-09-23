@@ -45,6 +45,7 @@ import type { Identity } from './onboarding.js';
 import type { MongoHealthDb } from './operational-sources.js';
 import type { Queue } from './queue.js';
 import type { RepositoryDb } from './repositories.js';
+import type { RestoreCompatibility } from './csrf.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { SlideLabelStore } from './slide-labels.js';
@@ -70,6 +71,9 @@ export interface AppOptions {
   sessions?: SessionStore;
   /** Where accounts are kept and what is done to them is recorded. Without it, there is nothing to claim. */
   identity?: Identity;
+  /** Whether a restore was recently applied (OPS-06). Without it, a session a restore ended is refused
+   * with an ordinary sign-in-again rather than told to update, the same as before this store existed. */
+  compatibility?: RestoreCompatibility;
   /** The same database as the audit trail, with the notification store’s mutation methods. */
   notificationDb?: NotificationDb;
   /** Where a Guest's invitation or an output window's capability is kept. Without it, there is none to grant. */
@@ -121,6 +125,7 @@ export function buildApp({
   web,
   sessions,
   identity,
+  compatibility,
   notificationDb,
   capabilities,
   settingsAdmin,
@@ -171,7 +176,7 @@ export function buildApp({
 
   // Installed before the first route is registered, which is what makes `mutatingRoutesOf` the whole
   // list of the routes that change something: a route registered above this line would be missing from it.
-  guardMutations(app, { sessions });
+  guardMutations(app, { sessions, compatibility });
 
   // Installed beside the guard above, the same reach: a restore mid-apply refuses every mutation until
   // its lease is released, whichever route below would otherwise have handled it.
@@ -179,7 +184,7 @@ export function buildApp({
 
   // Installed right after: a mutating route's session is already proved by the guard above by the time
   // this asks for it, and every route registered from here down is one this check was on for.
-  enforceAuthorization(app, { sessions, identity });
+  enforceAuthorization(app, { sessions, identity, compatibility });
 
   app.setNotFoundHandler((request, reply) => reply.code(404).send(notFound(request)));
 

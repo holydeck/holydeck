@@ -138,6 +138,7 @@ const options = (over: Partial<Parameters<typeof restoreApplyOn>[0]> = {}): Para
   target: fakeTarget(),
   sessions: { revokeEvery: async () => 3 },
   capabilities: { revokeEvery: async () => 6 },
+  compatibility: { record: async () => undefined },
   maintenance: fakeMaintenance(),
   restic: RESTIC,
   settingsPath: '/never/set/in/a/test/that/does/not/touch/it',
@@ -169,9 +170,19 @@ describe('applying a recorded backup to production', () => {
     const target = fakeTarget();
     const revokeEvery = vi.fn(async () => 3);
     const revokeEveryCapability = vi.fn(async () => 6);
+    const record = vi.fn(async () => undefined);
     const maintenance = fakeMaintenance();
     const handler = restoreApplyOn(
-      options({ db, target, sessions: { revokeEvery }, capabilities: { revokeEvery: revokeEveryCapability }, maintenance, settingsPath, mediaRoot }),
+      options({
+        db,
+        target,
+        sessions: { revokeEvery },
+        capabilities: { revokeEvery: revokeEveryCapability },
+        compatibility: { record },
+        maintenance,
+        settingsPath,
+        mediaRoot,
+      }),
     );
 
     const running = handler(job(['mongo', 'settings', 'media']), new AbortController().signal);
@@ -222,6 +233,7 @@ describe('applying a recorded backup to production', () => {
     expect(maintenance.released).toHaveLength(1);
     expect(revokeEvery).toHaveBeenCalledOnce();
     expect(revokeEveryCapability).toHaveBeenCalledOnce();
+    expect(record).toHaveBeenCalledOnce();
 
     await expect(readFile(settingsPath, 'utf8')).resolves.toBe('new-settings');
     await expect(readFile(join(mediaRoot, 'new.jpg'), 'utf8')).resolves.toBe('new-media');

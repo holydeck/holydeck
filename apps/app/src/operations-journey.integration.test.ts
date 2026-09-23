@@ -37,6 +37,7 @@ import { queueDb, queueOn, workerContext } from './queue.js';
 import { RECORDS } from './records.js';
 import { repositoryDb } from './repositories.js';
 import { applyRestore, fileRestoreTarget } from './restore-apply.js';
+import { restoreCompatibilityDb, restoreCompatibilityOn } from './restore-compatibility.js';
 import { RESTORES_PATH } from './restore-routes.js';
 import { rehearsalDatabaseName, rehearseRestore, restoreContext, restoreDb } from './restores.js';
 import { BACKUP_MANAGE, JOBS_MANAGE, NOTIFICATIONS_USE, OPERATIONS_READ, RESTORE_MANAGE } from './roles.js';
@@ -50,6 +51,7 @@ import type { Db, MongoClient } from 'mongodb';
 import type { ReplicaSetMongo } from '../test/helpers/mongo.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { Identity } from './onboarding.js';
+import type { RestoreCompatibilityStore } from './restore-compatibility.js';
 import type { LoadedSettings } from './settings.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { FastifyInstance } from 'fastify';
@@ -112,6 +114,7 @@ let dumpDir: string;
 let mediaLiveRoot: string;
 let sessions: SessionStore;
 let capabilities: CapabilityStore;
+let compatibility: RestoreCompatibilityStore;
 let identity: Identity;
 let app: FastifyInstance;
 
@@ -136,7 +139,16 @@ beforeEach(async () => {
     await live.collection(collection).deleteMany({});
     await rehearsalDb.collection(collection).deleteMany({});
   }
-  for (const collection of ['sessions', 'capabilities', 'jobs', 'notifications', 'notification_watermarks', 'accounts', 'sign_in_attempts']) {
+  for (const collection of [
+    'sessions',
+    'capabilities',
+    'restore_compatibility',
+    'jobs',
+    'notifications',
+    'notification_watermarks',
+    'accounts',
+    'sign_in_attempts',
+  ]) {
     await live.collection(collection).deleteMany({});
   }
 
@@ -146,6 +158,7 @@ beforeEach(async () => {
 
   sessions = sessionsOn(sessionDb(live), { now });
   capabilities = capabilitiesOn(capabilityDb(live), { now });
+  compatibility = restoreCompatibilityOn(restoreCompatibilityDb(live), { now });
   identity = {
     accounts: accountsOn(accountDb(live), {
       now,
@@ -167,6 +180,7 @@ beforeEach(async () => {
     fetching: refusing,
     sessions,
     identity,
+    compatibility,
     capabilities,
     backups: { db: repositoryDb(live), queue },
     notificationDb: notificationDb(live),
@@ -290,6 +304,7 @@ describe('operations, end to end against a real database', () => {
       },
       sessions,
       capabilities,
+      compatibility,
       now,
     });
     await queue.succeed(workerContext('req-claim-restore'), { worker: 'test-worker', id: leasedRestore!.id });
@@ -301,5 +316,9 @@ describe('operations, end to end against a real database', () => {
       name: 'Sunday Gathering',
     });
     await expect(readFile(join(mediaLiveRoot, MEDIA_FILE), 'utf8')).resolves.toBe('a song, in bytes');
+
+    // The restore just applied recorded itself against the real store — OPS-06's grace window, proved
+    // here against Mongo rather than a fake standing in for it.
+    await expect(compatibility.restoredRecently()).resolves.toBe(true);
   });
 });

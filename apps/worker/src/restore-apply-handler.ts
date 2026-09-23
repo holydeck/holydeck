@@ -22,7 +22,7 @@ import { checkRepository, restoreSnapshot } from './restic.js';
 
 import type { MaintenanceStore } from '@holydeck/app/maintenance';
 import type { RepositoryDb } from '@holydeck/app/repositories';
-import type { RestoreApplyTargets } from '@holydeck/app/restore-apply';
+import type { RestoreApplyTargets, RestoreCompatibilityRecorder } from '@holydeck/app/restore-apply';
 import type { RestoreCapabilities, RestoreDb, RestoreSessions } from '@holydeck/app/restores';
 import type { BackupProduction, RestoreClass } from '@holydeck/contracts/backups';
 import type { ResticOptions } from './restic.js';
@@ -35,6 +35,9 @@ export interface RestoreApplyHandlerOptions {
   readonly target: RestoreDb;
   readonly sessions: RestoreSessions;
   readonly capabilities: RestoreCapabilities;
+  /** Recorded once `mongo` is among the classes restored, so a session this restore ended is told to
+   *  update rather than merely to sign in again — see `@holydeck/app/restore-compatibility`. */
+  readonly compatibility: RestoreCompatibilityRecorder;
   /** Acquired before the first byte moves and released once this job is fully done, success or failure. */
   readonly maintenance: MaintenanceStore;
   readonly restic: ResticOptions;
@@ -127,6 +130,7 @@ export function restoreApplyOn(options: RestoreApplyHandlerOptions): Handler {
         targets,
         sessions: options.sessions,
         capabilities: options.capabilities,
+        compatibility: options.compatibility,
         now: options.now,
       });
 

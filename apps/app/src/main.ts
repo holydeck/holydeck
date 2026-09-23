@@ -23,6 +23,7 @@ import { probeCorpusIsClosed } from './corpus.js';
 import { serveLive } from './live.js';
 import { maintenanceDb, maintenanceOn } from './maintenance.js';
 import { schemaStatus } from './migrations.js';
+import { restoreCompatibilityDb, restoreCompatibilityOn } from './restore-compatibility.js';
 import { mediaMigrationStateDb, mediaMigrationStateOn } from './media-migration-state.js';
 import { mediaLibraryOn, mediaPurgeDb } from './media.js';
 import { queueDb, queueOn } from './queue.js';
@@ -51,6 +52,7 @@ import type { Identity } from './onboarding.js';
 import type { Queue } from './queue.js';
 import type { NotificationDb } from './notification-store.js';
 import type { RepositoryDb } from './repositories.js';
+import type { RestoreCompatibilityStore } from './restore-compatibility.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { SettingsAdmin } from './settings-admin.js';
@@ -108,6 +110,10 @@ let backups: { readonly db: RepositoryDb; readonly queue: Queue } | undefined;
 // The restore-apply lease is kept the same way: a deployment with nowhere to keep one has no worker
 // applying a restore to it either, so `guardMaintenance` has nothing it could ever find held.
 let maintenance: MaintenanceStore | undefined;
+// Whether a restore was recently applied is kept the same way: a deployment with nowhere to keep one has
+// no worker recording a restore against it either, so a session a restore ends is simply refused, the
+// same as before this store existed.
+let compatibility: RestoreCompatibilityStore | undefined;
 // The last media storage-root migration is kept the same way: a deployment with nowhere to keep one has
 // no worker migrating its media to a new root either, and its routes answer not-found the same way.
 let migrationState: MediaMigrationStateStore | undefined;
@@ -177,6 +183,7 @@ if (settings.values.mongoUrl !== '') {
   backups = { db: repositoryDb(store.db()), queue };
   notificationDatabase = notificationDb(store.db());
   maintenance = maintenanceOn(maintenanceDb(store.db()));
+  compatibility = restoreCompatibilityOn(restoreCompatibilityDb(store.db()), { now });
   migrationState = mediaMigrationStateOn(mediaMigrationStateDb(store.db()));
   settingsAdmin = settingsAdminOn(settings, {
     readFile: (path) => readFile(path, 'utf8'),
@@ -209,6 +216,7 @@ const app = buildApp({
   web,
   sessions,
   identity,
+  compatibility,
   capabilities,
   settingsAdmin,
   slideLayouts,

@@ -111,6 +111,7 @@ test('an entry point supplying its dependencies replaces every placeholder with 
     target: {} as RestoreApplyHandlerOptions['target'],
     sessions: {} as RestoreApplyHandlerOptions['sessions'],
     capabilities: {} as RestoreApplyHandlerOptions['capabilities'],
+    compatibility: {} as RestoreApplyHandlerOptions['compatibility'],
     maintenance: {} as RestoreApplyHandlerOptions['maintenance'],
     restic: { repository: '/data/holydeck/restic', password: 'p'.repeat(64) },
     settingsPath: '/data/holydeck/config/settings.yaml',

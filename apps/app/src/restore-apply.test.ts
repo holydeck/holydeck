@@ -13,7 +13,7 @@ import { fakeDb } from '../test/helpers/fake-db.js';
 
 import type { BackupContent, BackupProduction, RestoreClass, RestoreSelection } from '@holydeck/contracts/backups';
 import type { Document } from './repositories.js';
-import type { MongoRestoreTarget, RestoreApplyTargets, RestoreFileTarget } from './restore-apply.js';
+import type { MongoRestoreTarget, RestoreApplyOptions, RestoreApplyTargets, RestoreFileTarget } from './restore-apply.js';
 import type { RestoreCapabilities, RestoreCollection, RestoreDb, RestoreSessions } from './restores.js';
 
 const NOW = '2026-09-21T03:00:00.000Z';
@@ -117,6 +117,12 @@ const fakeCapabilities = (log: string[] = []): RestoreCapabilities => ({
   },
 });
 
+const fakeCompatibility = (log: string[] = []): RestoreApplyOptions['compatibility'] => ({
+  async record() {
+    log.push('record restore compatibility');
+  },
+});
+
 const refusal = async (run: () => Promise<unknown>): Promise<RestoreApplyError | RestoreError> => {
   try {
     await run();
@@ -185,6 +191,7 @@ describe('selecting which classes a restore replaces', () => {
       targets,
       sessions: fakeSessions(log),
       capabilities: fakeCapabilities(log),
+      compatibility: fakeCompatibility(log),
       now: () => NOW,
     });
 
@@ -206,6 +213,7 @@ describe('selecting which classes a restore replaces', () => {
 
     expect(log.includes('end every session')).toBe(classes.includes('mongo'));
     expect(log.includes('revoke every capability')).toBe(classes.includes('mongo'));
+    expect(log.includes('record restore compatibility')).toBe(classes.includes('mongo'));
     expect(applied.sessionsEnded).toBe(classes.includes('mongo') ? 4 : undefined);
     expect(applied.capabilitiesRevoked).toBe(classes.includes('mongo') ? 6 : undefined);
   });
@@ -221,6 +229,7 @@ describe('what a production restore refuses before writing anything', () => {
         targets,
         sessions: fakeSessions(log),
         capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
         now: () => NOW,
       }),
     );
@@ -239,6 +248,7 @@ describe('what a production restore refuses before writing anything', () => {
         targets: withoutSettings,
         sessions: fakeSessions(log),
         capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
         now: () => NOW,
       }),
     );
@@ -252,7 +262,7 @@ describe('what a production restore refuses before writing anything', () => {
     const { log, mongoTarget, targets } = await rigFor(root);
     const merge = { mode: 'merge', classes: ['mongo'] } as unknown as RestoreSelection;
     const error = await refusal(() =>
-      applyRestore(fakeDb(), CONTEXT, production, { selection: merge, targets, sessions: fakeSessions(log), capabilities: fakeCapabilities(log), now: () => NOW }),
+      applyRestore(fakeDb(), CONTEXT, production, { selection: merge, targets, sessions: fakeSessions(log), capabilities: fakeCapabilities(log), compatibility: fakeCompatibility(log), now: () => NOW }),
     );
     expect(error.kind).toBe('mode');
     expect(log).toEqual([]);
@@ -269,6 +279,7 @@ describe('what a production restore refuses before writing anything', () => {
         targets,
         sessions: fakeSessions(log),
         capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
         now: () => NOW,
       }),
     );
@@ -290,6 +301,7 @@ describe('what a production restore refuses before writing anything', () => {
         targets,
         sessions: fakeSessions(log),
         capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
         now: () => NOW,
       }),
     );
@@ -305,6 +317,7 @@ describe('what a production restore refuses before writing anything', () => {
         targets,
         sessions: fakeSessions(log),
         capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
         now: () => NOW,
       }),
     );
@@ -322,6 +335,7 @@ describe('what a production restore leaves behind', () => {
       targets,
       sessions: fakeSessions(log),
       capabilities: fakeCapabilities(log),
+      compatibility: fakeCompatibility(log),
       now: () => NOW,
     });
     const audited = db.rows.get(RECORDS.auditEvents.collection) ?? [];
@@ -338,7 +352,7 @@ describe('what a production restore leaves behind', () => {
     const { log, targets } = await rigFor(root);
     const merge = { mode: 'merge', classes: ['mongo'] } as unknown as RestoreSelection;
     await refusal(() =>
-      applyRestore(db, CONTEXT, production, { selection: merge, targets, sessions: fakeSessions(log), capabilities: fakeCapabilities(log), now: () => NOW }),
+      applyRestore(db, CONTEXT, production, { selection: merge, targets, sessions: fakeSessions(log), capabilities: fakeCapabilities(log), compatibility: fakeCompatibility(log), now: () => NOW }),
     );
     const audited = db.rows.get(RECORDS.auditEvents.collection) ?? [];
     expect(audited[0]).toMatchObject({ action: 'restore.run', outcome: 'refused' });
@@ -359,6 +373,7 @@ describe('what a production restore leaves behind', () => {
         targets,
         sessions: fakeSessions(log),
         capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
         now: () => NOW,
       }),
     );
@@ -377,6 +392,7 @@ describe('what a production restore leaves behind', () => {
         targets,
         sessions: fakeSessions(log),
         capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
         now: () => NOW,
       }),
     );
@@ -399,6 +415,7 @@ describe('what a production restore leaves behind', () => {
         targets: { ...targets, settings: failingSettings },
         sessions: fakeSessions(log),
         capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
         now: () => NOW,
       }),
     ).rejects.toThrow('disk is full');

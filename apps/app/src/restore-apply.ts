@@ -32,7 +32,11 @@ import { RESTORE_RECORD, RestoreError, replaceCollection, verifyMongoArchive } f
 import type { BackupProduction, RestoreClass, RestoreSelection } from '@holydeck/contracts/backups';
 import type { RequestContext } from './context.js';
 import type { RepositoryDb } from './repositories.js';
+import type { RestoreCompatibilityStore } from './restore-compatibility.js';
 import type { RestoreCapabilities, RestoreDb, RestoreSessions } from './restores.js';
+
+/** What this module needs from `restore-compatibility.ts`: only the write half — `csrf.ts` reads it back. */
+export type RestoreCompatibilityRecorder = Pick<RestoreCompatibilityStore, 'record'>;
 
 export type RestoreApplyRefusal = 'context' | 'permission' | 'mode' | 'archive' | 'target';
 
@@ -97,6 +101,9 @@ export interface RestoreApplyOptions {
   readonly sessions: RestoreSessions;
   /** Revoked only when `mongo` is part of the selection, the same as `sessions`. */
   readonly capabilities: RestoreCapabilities;
+  /** Recorded only when `mongo` is part of the selection, the same as `sessions` and `capabilities` — so a
+   *  client whose session this restore just ended is told to update rather than merely to sign in again. */
+  readonly compatibility: RestoreCompatibilityRecorder;
   readonly now: () => string;
 }
 
@@ -217,6 +224,9 @@ async function run(
     sessionsEnded = mongoTarget === undefined ? undefined : await options.sessions.revokeEvery(checked);
     // A capability outlives no restore either, for the same reason a session does not.
     capabilitiesRevoked = mongoTarget === undefined ? undefined : await options.capabilities.revokeEvery(checked);
+    // Marks when this happened, so a session ended by *this* restore is told to update rather than to sign
+    // in again the next time it is presented — see `restore-compatibility.ts`.
+    if (mongoTarget !== undefined) await options.compatibility.record();
   } catch (error) {
     if (applied.length > 0) {
       await auditOn(db, { now: options.now }).record(checked, {

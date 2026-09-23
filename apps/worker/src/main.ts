@@ -13,6 +13,7 @@ import { SCHEMA_VERSION } from '@holydeck/app/migrations';
 import { queueDb, queueOn, schedulerContext, workerContext } from '@holydeck/app/queue';
 import { maintenanceDb, maintenanceOn, releaseOrphanedLease } from '@holydeck/app/maintenance';
 import { repositoriesOn, repositoryDb } from '@holydeck/app/repositories';
+import { restoreCompatibilityDb, restoreCompatibilityOn } from '@holydeck/app/restore-compatibility';
 import { rehearsalDatabaseName, restoreContext, restoreDb } from '@holydeck/app/restores';
 import { sessionDb, sessionsOn } from '@holydeck/app/sessions';
 import { ensureResticPassword } from '@holydeck/app/settings-admin';
@@ -226,6 +227,9 @@ if (work.runs === 'nothing') {
       target: restoreDb(store.db()),
       sessions: sessionsOn(sessionDb(store.db()), { now }),
       capabilities: capabilitiesOn(capabilityDb(store.db()), { now }),
+      // Production only — a rehearsal never leaves `rehearsal`, so no session `apps/app` ever proves is
+      // ended by one, and there is nothing here for a rehearsal to record.
+      compatibility: restoreCompatibilityOn(restoreCompatibilityDb(store.db()), { now }),
       maintenance,
       restic,
       settingsPath: path,

@@ -73,6 +73,10 @@
       "types": "./dist/maintenance.d.ts",
       "import": "./dist/maintenance.js"
     },
+    "./restore-compatibility": {
+      "types": "./dist/restore-compatibility.d.ts",
+      "import": "./dist/restore-compatibility.js"
+    },
     "./media-migration-state": {
       "types": "./dist/media-migration-state.d.ts",
       "import": "./dist/media-migration-state.js"
