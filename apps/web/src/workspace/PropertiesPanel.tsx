@@ -1,7 +1,7 @@
 // The Details tab's Properties view: the service's own facts first, always read-only here because a
 // title, date or site can only ever change through `NewService`'s duplicate flow or `/schedule` (P-9),
 // then whatever an item or box under selection adds beneath it — the Custom Slide canvas's selected box
-// among them.
+// among them, and the slide group editor's open slide with its Layout and background overrides.
 
 import type { ComponentChildren, JSX } from 'preact';
 
@@ -10,6 +10,7 @@ import type { ServiceItem } from '@holydeck/contracts/services';
 import type { HistoryKind } from '../api-routes.js';
 import { locale } from '../app-state.js';
 import { BoxProperties } from '../editors/BoxProperties.js';
+import { SlideOverrides } from '../editors/SlideOverrides.js';
 import { t } from '../i18n.js';
 import { drift, selection, service } from '../state/workspace-store.js';
 import { ContentCompare } from './ContentCompare.js';
@@ -52,6 +53,7 @@ export function PropertiesPanel({ children }: { readonly children?: ComponentChi
         </div>
       )}
       <BoxProperties />
+      <SlideOverrides />
       {children}
     </div>
   );

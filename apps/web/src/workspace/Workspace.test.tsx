@@ -207,6 +207,33 @@ describe('the service workspace', () => {
     expect(await screen.findByRole('group', { name: 'Selected box', hidden: true })).toBeTruthy();
   });
 
+  it('opens a slide group item\'s slides behind Edit Slides, with the open slide\'s overrides in Properties', async () => {
+    session.value = signedIn(['services.manage', 'content.edit']);
+    const withGroup = record('s1', ['a']);
+    const sections = [{ ...withGroup.sections[0], items: [{
+      id: 'g', kind: 'slide-group', title: 'Welcome', enabled: true, content: { id: 'grp', revision: 1 },
+    }] }];
+    const groupBody = {
+      mode: 'custom', enabled: true, slideLayoutId: 'L1',
+      slides: [{ id: 's1', enabled: true, label: 'One', languageBlocks: [{ id: 'b', languageKey: 'ta', text: 'வரி' }] }],
+    };
+    setFetching(fakeFetch({
+      'GET /api/v1/services/s1': reply(200, successEnvelope({ ...withGroup, sections }, 'r1')),
+      'GET /api/v1/services/s1/content-drift': noDrift,
+      'GET /api/v1/slide-groups/grp': reply(200, successEnvelope({ stamp: { id: 'grp' }, title: 'Welcome', body: groupBody }, 'r')),
+      'GET /api/v1/content-languages/catalogue': reply(200, successEnvelope([], 'r')),
+      'GET /api/v1/slide-layouts': reply(200, successEnvelope([], 'r')),
+      'GET /api/v1/media': reply(200, successEnvelope([], 'r')),
+    }));
+    await renderAt('/services/s1?item=g');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Slides', hidden: true }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit slide 1', hidden: true }));
+    expect(await screen.findByRole('combobox', { name: 'Layout', hidden: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Slides', hidden: true }));
+    expect(screen.queryByRole('button', { name: 'Edit slide 1', hidden: true })).toBeNull();
+  });
+
   it('shows the missing state with a link back to Services', async () => {
     setFetching(fakeFetch({
       'GET /api/v1/services/s1': reply(404, errorEnvelope('resource.not_found', 'none', 'r1')),

@@ -15,6 +15,7 @@ import type { ComponentChildren, JSX } from 'preact';
 
 import { CustomSlideCanvas } from '../editors/CustomSlideCanvas.js';
 import { ReadingEditor } from '../editors/ReadingEditor.js';
+import { SlideGroupEditor } from '../editors/SlideGroupEditor.js';
 import { SongItemEditor } from '../editors/SongItemEditor.js';
 import { t } from '../i18n.js';
 import { ExactPreview } from '../preview/ExactPreview.js';
@@ -114,6 +115,23 @@ function EditorPlaceholder(): JSX.Element {
 
 /** The center region: the selected item's editor where it has one, above its exact preview; the bare
  *  editor until something is selected. Keyed by item, so switching items never carries an edit across. */
+/** A song or slide group item: its song (for a song) or, behind `Edit Slides`, the slide group it pins. */
+function GroupItemEditor({ itemId }: { readonly itemId: string }): JSX.Element {
+  const [slides, setSlides] = useState(false);
+  const view = service.value;
+  const item = view === undefined ? undefined : findItem(view, itemId);
+  const groupId = item?.content?.id;
+  return (
+    <>
+      {groupId === undefined ? null : (
+        <button type="button" aria-pressed={slides} onClick={() => setSlides(!slides)}>{t('slides.edit.open')}</button>
+      )}
+      {slides && groupId !== undefined ? <SlideGroupEditor groupId={groupId} />
+        : item?.kind === 'song' ? <SongItemEditor itemId={itemId} /> : null}
+    </>
+  );
+}
+
 function EditorCenter(): JSX.Element {
   const itemId = selection.value.itemId;
   if (itemId === undefined) return <EditorPlaceholder />;
@@ -123,7 +141,7 @@ function EditorCenter(): JSX.Element {
     <>
       {kind === 'reading' ? <ReadingEditor key={itemId} itemId={itemId} /> : null}
       {kind === 'custom-slide' ? <CustomSlideCanvas key={itemId} itemId={itemId} /> : null}
-      {kind === 'song' ? <SongItemEditor key={itemId} itemId={itemId} /> : null}
+      {kind === 'song' || kind === 'slide-group' ? <GroupItemEditor key={itemId} itemId={itemId} /> : null}
       <ExactPreview key={itemId} itemId={itemId} />
     </>
   );

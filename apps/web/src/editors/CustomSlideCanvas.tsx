@@ -61,7 +61,8 @@ export const activeCanvas: Signal<CanvasController | undefined> = signal(undefin
 
 type Step = { readonly ops: readonly CanvasOp[]; readonly label: MessageKey };
 type Drag = { readonly box: CustomSlideBox; readonly handle: ResizeHandle | undefined; readonly x: number; readonly y: number; readonly px: CanvasPx };
-type MediaChoice = { readonly id: string; readonly kind: 'image' | 'video' };
+/** An image or video from the media library that a box or background can show. */
+export type MediaChoice = { readonly id: string; readonly kind: 'image' | 'video' };
 
 /** A box's accessible name: its kind and the first few words it says, or the asset it shows. */
 export function boxLabel(box: CustomSlideBox): string {
@@ -71,7 +72,8 @@ export function boxLabel(box: CustomSlideBox): string {
 
 const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
-const readMediaChoices = (data: unknown): MediaChoice[] | undefined => {
+/** The usable images and videos in a media listing, or undefined when the listing is unreadable. */
+export const readMediaChoices = (data: unknown): MediaChoice[] | undefined => {
   if (!Array.isArray(data)) return undefined;
   return data.flatMap((record): MediaChoice[] => {
     const parsed = parseMediaManifestEntry(isRecord(record) ? record.manifest : undefined, 'media');
