@@ -181,6 +181,12 @@ const en = {
   'users.announce.updated': 'Account {name} updated.',
   'users.refused': 'The change was refused: {message}',
   'users.loadFailed': 'The accounts could not be loaded.',
+  'presence.activeEditors': 'People editing this now',
+  'presence.editingLabel': '{actor} is editing',
+  'conflicts.shelfLabel': 'Conflicting changes',
+  'conflicts.shelfHeading': 'Someone else changed this while you were editing. Choose which version to keep.',
+  'conflicts.keepMine': 'Keep mine',
+  'conflicts.keepTheirs': 'Keep theirs',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -358,6 +364,12 @@ const de: Catalog = {
   'users.announce.updated': 'Konto {name} aktualisiert.',
   'users.refused': 'Die Änderung wurde abgelehnt: {message}',
   'users.loadFailed': 'Die Konten konnten nicht geladen werden.',
+  'presence.activeEditors': 'Personen, die dies gerade bearbeiten',
+  'presence.editingLabel': '{actor} bearbeitet dies',
+  'conflicts.shelfLabel': 'Widersprüchliche Änderungen',
+  'conflicts.shelfHeading': 'Jemand anderes hat dies geändert, während Sie bearbeitet haben. Wählen Sie, welche Version erhalten bleiben soll.',
+  'conflicts.keepMine': 'Meine Version behalten',
+  'conflicts.keepTheirs': 'Andere Version behalten',
 };
 
 const ta: Catalog = {
@@ -529,6 +541,12 @@ const ta: Catalog = {
   'users.announce.updated': '{name} கணக்கு புதுப்பிக்கப்பட்டது.',
   'users.refused': 'மாற்றம் மறுக்கப்பட்டது: {message}',
   'users.loadFailed': 'கணக்குகளை ஏற்ற முடியவில்லை.',
+  'presence.activeEditors': 'இதைத் தற்போது திருத்துபவர்கள்',
+  'presence.editingLabel': '{actor} திருத்திக் கொண்டிருக்கிறார்',
+  'conflicts.shelfLabel': 'முரண்பட்ட மாற்றங்கள்',
+  'conflicts.shelfHeading': 'நீங்கள் திருத்திக் கொண்டிருந்தபோது வேறு ஒருவர் இதை மாற்றியுள்ளார். எந்தப் பதிப்பை வைத்திருக்க வேண்டும் எனத் தேர்ந்தெடுக்கவும்.',
+  'conflicts.keepMine': 'எனது பதிப்பை வைத்திருக்கவும்',
+  'conflicts.keepTheirs': 'அவரது பதிப்பை வைத்திருக்கவும்',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */
