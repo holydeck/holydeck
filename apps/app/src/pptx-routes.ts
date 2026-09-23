@@ -44,7 +44,22 @@ export const PPTX_COMMIT_PATH = `${PPTX_ID_PATH}/commit`;
 /** The ceiling spec AUTH-04 sets on one uploaded deck, enforced by Fastify on this route alone. */
 export const PPTX_BODY_LIMIT_BYTES = 100 * 1024 * 1024;
 
-const INVALID_FORMAT_CODES: ReadonlySet<string> = new Set(['pptx_empty', 'pptx_corrupt', 'pptx_unsupported']);
+const INVALID_FORMAT_CODES: ReadonlySet<string> = new Set([
+  'pptx_empty',
+  'pptx_corrupt',
+  'pptx_unsupported',
+  'pptx_unsafe_entry_name',
+]);
+
+// AUTH-13: `openArchive`'s own bounds (packages/core/src/pptx.ts) refuse an archive that decompresses
+// past its entry-count/entry-size/total-size limits. That is a body the client sent us too much of, same
+// as the raw-byte-count check the route's own `bodyLimit` already answers 413 for below — so map it the
+// same way, distinct from a merely malformed/unsupported file (422).
+const SIZE_LIMIT_CODES: ReadonlySet<string> = new Set([
+  'pptx_too_many_entries',
+  'pptx_entry_too_large',
+  'pptx_archive_too_large',
+]);
 
 const DEFAULT_FILE_NAME = 'import.pptx';
 
@@ -176,6 +191,9 @@ export function servePptxRoutes(
       try {
         result = await importStore.import(call(request), request.body);
       } catch (error: unknown) {
+        if (error instanceof HolyDeckError && SIZE_LIMIT_CODES.has(error.code)) {
+          return reply.code(413).send(errorEnvelope('pptx.too_large', error.message, request.id));
+        }
         if (error instanceof HolyDeckError && INVALID_FORMAT_CODES.has(error.code)) {
           return reply.code(422).send(errorEnvelope('pptx.invalid_format', error.message, request.id));
         }

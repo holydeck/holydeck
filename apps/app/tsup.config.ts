@@ -18,6 +18,7 @@ export default defineConfig({
     'src/sessions.ts',
     'src/capabilities.ts',
     'src/migrations.ts',
+    'src/pptx-worker-entry.ts',
   ],
   format: ['esm'],
   target: 'node24',

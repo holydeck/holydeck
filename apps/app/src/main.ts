@@ -28,6 +28,7 @@ import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
 import { pptxCommitOn } from './pptx-commit.js';
 import { pptxImportOn } from './pptx-import.js';
+import { workerPptxRunner } from './pptx-isolated.js';
 import { pptxReviewOn } from './pptx-review.js';
 import { pptxSessionsOn } from './pptx-sessions.js';
 import { queueDb, queueOn } from './queue.js';
@@ -193,7 +194,7 @@ if (settings.values.mongoUrl !== '') {
     },
   };
   media = mediaLibraryOn(repositoryDb(store.db()), mediaOptions);
-  pptxImport = pptxImportOn(repositoryDb(store.db()), mediaOptions);
+  pptxImport = pptxImportOn(repositoryDb(store.db()), { ...mediaOptions, runner: workerPptxRunner() });
   pptxReview = pptxReviewOn(repositoryDb(store.db()), { now });
   pptxCommit = pptxCommitOn(repositoryDb(store.db()), { now, newId });
   pptxSessions = pptxSessionsOn(repositoryDb(store.db()), { now, newId });

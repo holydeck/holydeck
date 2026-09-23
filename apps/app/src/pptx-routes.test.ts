@@ -2,6 +2,7 @@ import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/client
 import { ENTITY_CONFLICT } from '@holydeck/contracts/http';
 import { PPTX_IMPORTS_PATH } from '@holydeck/contracts/pptx';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
+import { HolyDeckError } from '@holydeck/core/messages';
 import Fastify from 'fastify';
 import { strToU8, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -213,6 +214,30 @@ describe('POST /api/v1/pptx-imports', () => {
     await app.close();
     await serving({ pptxImport: { import: () => Promise.reject(new Error('disk full')) } });
     expect((await upload()).statusCode).toBe(500);
+  });
+
+  test('answers 413 pptx.too_large for an archive over the entry-count limit', async () => {
+    await app.close();
+    await serving({ pptxImport: { import: () => Promise.reject(new HolyDeckError('pptx_too_many_entries', { max: 2000 })) } });
+    const response = await upload();
+    expect(response.statusCode).toBe(413);
+    expect(response.json().error.code).toBe('pptx.too_large');
+  });
+
+  test('answers 413 pptx.too_large for an archive over the total-decompressed-size limit', async () => {
+    await app.close();
+    await serving({ pptxImport: { import: () => Promise.reject(new HolyDeckError('pptx_archive_too_large', { max: 200 * 1024 * 1024 })) } });
+    const response = await upload();
+    expect(response.statusCode).toBe(413);
+    expect(response.json().error.code).toBe('pptx.too_large');
+  });
+
+  test('answers 422 pptx.invalid_format for an unsafe entry name', async () => {
+    await app.close();
+    await serving({ pptxImport: { import: () => Promise.reject(new HolyDeckError('pptx_unsafe_entry_name', { name: '../evil.xml' })) } });
+    const response = await upload();
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe('pptx.invalid_format');
   });
 
   test('refuses a second concurrent import for the same account with 409 pptx.import_in_progress', async () => {

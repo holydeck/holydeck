@@ -92,6 +92,17 @@ export interface ExtractedPptx {
 const PRESENTATION_PART = 'ppt/presentation.xml';
 const RELATIONSHIPS_PART = 'ppt/_rels/presentation.xml.rels';
 
+/** Bounds on `openArchive`'s own decompression (AUTH-13): more entries than `PPTX_MAX_ENTRIES`, any
+ *  single entry decompressing past `PPTX_MAX_ENTRY_BYTES`, or the whole archive decompressing past
+ *  `PPTX_MAX_TOTAL_BYTES`, is refused rather than decompressed — bounding what a malformed or hostile
+ *  `.pptx` can do to the process parsing it. Checked twice: once against fflate's own declared
+ *  `originalSize` while unzipping (cheap, catches the common case immediately), and again against every
+ *  entry's actual inflated `byteLength` once `unzipSync` returns, since `originalSize` is attacker-declared
+ *  per fflate's own docs and a crafted archive could under-declare it. */
+export const PPTX_MAX_ENTRIES = 2000;
+export const PPTX_MAX_ENTRY_BYTES = 50 * 1024 * 1024;
+export const PPTX_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
+
 const decoder = new TextDecoder('utf-8');
 
 /**
@@ -120,12 +131,56 @@ export function extractPptx(bytes: Uint8Array): ExtractedPptx {
   return { slides, skippedMedia, provenance: extractProvenance(entries, titlePlaceholder) };
 }
 
+/** Rejects an entry name that, once normalized, is absolute or escapes upward out of the archive (path
+ *  traversal), or that carries a NUL byte or a backslash — a Windows-style separator this package's
+ *  POSIX-only path handling never expects. */
+function isSafeEntryName(name: string): boolean {
+  if (name.includes('\0') || name.includes('\\')) return false;
+  const normalized = posix.normalize(name);
+  return !normalized.startsWith('/') && normalized !== '..' && !normalized.startsWith('../');
+}
+
 function openArchive(bytes: Uint8Array): Record<string, Uint8Array> {
+  let entryCount = 0;
+  let declaredTotal = 0;
+  let entries: Record<string, Uint8Array>;
   try {
-    return unzipSync(bytes);
+    entries = unzipSync(bytes, {
+      filter(file) {
+        entryCount += 1;
+        if (entryCount > PPTX_MAX_ENTRIES) {
+          throw new HolyDeckError('pptx_too_many_entries', { max: PPTX_MAX_ENTRIES });
+        }
+        if (file.originalSize > PPTX_MAX_ENTRY_BYTES) {
+          throw new HolyDeckError('pptx_entry_too_large', { name: file.name, max: PPTX_MAX_ENTRY_BYTES });
+        }
+        declaredTotal += file.originalSize;
+        if (declaredTotal > PPTX_MAX_TOTAL_BYTES) {
+          throw new HolyDeckError('pptx_archive_too_large', { max: PPTX_MAX_TOTAL_BYTES });
+        }
+        if (!isSafeEntryName(file.name)) {
+          throw new HolyDeckError('pptx_unsafe_entry_name', { name: file.name });
+        }
+        return true;
+      },
+    });
   } catch (error) {
+    if (error instanceof HolyDeckError) throw error;
     throw new HolyDeckError('pptx_corrupt', { reason: reasonOf(error) });
   }
+  // TOCTOU re-check: `originalSize` above is attacker-declared, so re-verify the limits against what
+  // actually came out of the archive before trusting it any further.
+  let actualTotal = 0;
+  for (const [name, entryBytes] of Object.entries(entries)) {
+    if (entryBytes.byteLength > PPTX_MAX_ENTRY_BYTES) {
+      throw new HolyDeckError('pptx_entry_too_large', { name, max: PPTX_MAX_ENTRY_BYTES });
+    }
+    actualTotal += entryBytes.byteLength;
+    if (actualTotal > PPTX_MAX_TOTAL_BYTES) {
+      throw new HolyDeckError('pptx_archive_too_large', { max: PPTX_MAX_TOTAL_BYTES });
+    }
+  }
+  return entries;
 }
 
 function requirePresentationPart(entries: Record<string, Uint8Array>): CheerioAPI {
