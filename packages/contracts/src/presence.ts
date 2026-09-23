@@ -27,6 +27,11 @@ export interface PresenceEntry {
   readonly enteredAt: string;
   readonly heartbeatAt: string;
   readonly expiresAt: string;
+  /**
+   * The editor's name as their account gives it, added by a listing and never stored: the store keeps
+   * who, a reader is told what to call them. Absent when no account answers for the actor.
+   */
+  readonly displayName?: string;
 }
 
 /** The identity of an entry as the database stores it, so re-entering refreshes rather than duplicates. */
@@ -59,6 +64,7 @@ export const parsePresenceEntry: ParseFn<PresenceEntry> = (value, path) =>
     enteredAt: reader.time('enteredAt'),
     heartbeatAt: reader.time('heartbeatAt'),
     expiresAt: reader.time('expiresAt'),
+    ...(reader.names.includes('displayName') ? { displayName: reader.text('displayName') } : {}),
   }));
 
 /** What an editor names when entering: enough to find their one lease without claiming any write. */

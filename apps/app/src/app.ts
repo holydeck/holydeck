@@ -336,7 +336,7 @@ export function buildApp({
 
   // Presence is gated by a permission like everything below, but one every role is granted — Member
   // included — so nothing here narrows who may say they are editing something.
-  servePresenceRoutes(app, { presence });
+  servePresenceRoutes(app, { presence, identity, kindOf });
 
   // The first route this server asks a permission of, and not merely a proved session: administering
   // another account is Admin's alone, by the roles this server enforces.

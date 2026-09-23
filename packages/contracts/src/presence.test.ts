@@ -38,6 +38,11 @@ describe('what an entry says somebody is doing', () => {
     expect([...PRESENCE_FIELDS]).toEqual(['contentId', 'actor', 'enteredAt', 'heartbeatAt', 'expiresAt']);
   });
 
+  it('reads back the name a listing gives the editor, and leaves it out when there is none', () => {
+    expect(read(stored({ displayName: 'Chioma Obi' })).displayName).toBe('Chioma Obi');
+    expect(read(stored())).not.toHaveProperty('displayName');
+  });
+
   it('reads back the content, the editor and the three instants', () => {
     expect(read(stored())).toEqual({
       contentId: 'song-1',
