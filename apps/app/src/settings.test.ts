@@ -54,6 +54,8 @@ describe('precedence', () => {
       notificationReadRetentionDays: 'default',
       autosaveRetentionDays: 'default',
       auditRetentionDays: 'default',
+      mediaUploadLimitBytes: 'default',
+      mediaFreeSpaceReserveBytes: 'default',
     });
     expect(loaded.path).toBe(CANONICAL_SETTINGS_PATH);
   });
@@ -83,6 +85,8 @@ describe('precedence', () => {
       notificationReadRetentionDays: 'default',
       autosaveRetentionDays: 'default',
       auditRetentionDays: 'default',
+      mediaUploadLimitBytes: 'default',
+      mediaFreeSpaceReserveBytes: 'default',
     });
   });
 
@@ -115,6 +119,8 @@ describe('precedence', () => {
       HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS: '31',
       HOLYDECK_AUTOSAVE_RETENTION_DAYS: '32',
       HOLYDECK_AUDIT_RETENTION_DAYS: '401',
+      HOLYDECK_MEDIA_UPLOAD_LIMIT_BYTES: '2147483648',
+      HOLYDECK_MEDIA_FREE_SPACE_RESERVE_BYTES: '10737418240',
     });
     expect(loaded.values).toEqual({
       port: 8080,
@@ -136,8 +142,10 @@ describe('precedence', () => {
       notificationReadRetentionDays: 31,
       autosaveRetentionDays: 32,
       auditRetentionDays: 401,
+      mediaUploadLimitBytes: 2_147_483_648,
+      mediaFreeSpaceReserveBytes: 10_737_418_240,
     });
-    expect(Object.values(loaded.sources)).toEqual(Array(19).fill('env'));
+    expect(Object.values(loaded.sources)).toEqual(Array(21).fill('env'));
   });
 });
 
@@ -249,6 +257,7 @@ describe('the media root and the Restic repository accept a filesystem path only
       'mongoUrl', 'timezone', 'developmentDiagnostics',
       'backupDailyAt', 'backupComponents', 'backupMinimumGapMinutes', 'backupRehearsalWeekday',
       'retentionSweepAt', 'notificationReadRetentionDays', 'autosaveRetentionDays', 'auditRetentionDays',
+      'mediaUploadLimitBytes', 'mediaFreeSpaceReserveBytes',
     ]);
   });
 
@@ -409,6 +418,66 @@ describe('operations settings', () => {
   });
 
   it('does not treat operations settings as secrets', () => {
+    for (const field of fields) expect(SETTINGS_SECRET_FIELDS).not.toContain(field);
+  });
+});
+
+describe('media settings', () => {
+  const fields = ['mediaUploadLimitBytes', 'mediaFreeSpaceReserveBytes'] as const;
+
+  it('defaults every media setting when neither layer sets it', () => {
+    const loaded = load();
+    for (const field of fields) {
+      expect(loaded.values[field]).toEqual(DEFAULT_SETTINGS[field]);
+      expect(loaded.sources[field]).toBe('default');
+    }
+  });
+
+  it('reads every media setting from the file', () => {
+    const loaded = load([
+      'mediaUploadLimitBytes: 2147483648',
+      'mediaFreeSpaceReserveBytes: 10737418240',
+    ].join('\n'));
+    expect(loaded.values).toMatchObject({
+      mediaUploadLimitBytes: 2_147_483_648,
+      mediaFreeSpaceReserveBytes: 10_737_418_240,
+    });
+    for (const field of fields) expect(loaded.sources[field]).toBe('file');
+  });
+
+  it('lets the environment override every media setting from the file', () => {
+    const loaded = load([
+      'mediaUploadLimitBytes: 2147483648',
+      'mediaFreeSpaceReserveBytes: 10737418240',
+    ].join('\n'), {
+      HOLYDECK_MEDIA_UPLOAD_LIMIT_BYTES: '3221225472',
+      HOLYDECK_MEDIA_FREE_SPACE_RESERVE_BYTES: '21474836480',
+    });
+    expect(loaded.values).toMatchObject({
+      mediaUploadLimitBytes: 3_221_225_472,
+      mediaFreeSpaceReserveBytes: 21_474_836_480,
+    });
+    for (const field of fields) expect(loaded.sources[field]).toBe('env');
+  });
+
+  it('bounds the upload limit to whole bytes from 1 up to 10 GiB', () => {
+    for (const raw of [0, -1, 10_737_418_240 + 1, '12.5']) {
+      expect(problemsOf(`mediaUploadLimitBytes: ${raw}\n`)[0]).toContain(
+        'expected a whole number between 1 and 10737418240',
+      );
+    }
+  });
+
+  it('bounds the free-space reserve to whole bytes from zero up to 1 TiB, zero meaning no reserve', () => {
+    expect(load('mediaFreeSpaceReserveBytes: 0\n').values.mediaFreeSpaceReserveBytes).toBe(0);
+    for (const raw of [-1, 1_099_511_627_776 + 1, '12.5']) {
+      expect(problemsOf(`mediaFreeSpaceReserveBytes: ${raw}\n`)[0]).toContain(
+        'expected a whole number between 0 and 1099511627776',
+      );
+    }
+  });
+
+  it('does not treat media settings as secrets', () => {
     for (const field of fields) expect(SETTINGS_SECRET_FIELDS).not.toContain(field);
   });
 });

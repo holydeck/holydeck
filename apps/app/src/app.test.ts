@@ -67,6 +67,8 @@ const sources: LoadedSettings['sources'] = {
   notificationReadRetentionDays: 'default',
   autosaveRetentionDays: 'default',
   auditRetentionDays: 'default',
+  mediaUploadLimitBytes: 'default',
+  mediaFreeSpaceReserveBytes: 'default',
 };
 
 const settings: LoadedSettings = {

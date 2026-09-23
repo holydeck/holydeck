@@ -1,3 +1,7 @@
+import { mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT } from '@holydeck/contracts/http';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
@@ -16,6 +20,7 @@ import { mediaContext, mediaLibraryOn } from './media.js';
 import { MEDIA_PATH, MEDIA_PIXEL_CEILING, serveMediaRoutes } from './media-routes.js';
 import { passkeysOn } from './passkeys.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { DEFAULT_SETTINGS } from './settings.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
@@ -28,6 +33,7 @@ import { memoryTotp } from '../test/helpers/totp.js';
 import type { Identity } from './onboarding.js';
 import type { MediaLibrary } from './media.js';
 import type { Document } from './repositories.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 import type { FastifyInstance } from 'fastify';
@@ -71,6 +77,8 @@ let identity: Identity;
 let media: MediaLibrary;
 let upload: ReturnType<typeof vi.fn>;
 let admin: StartedSession;
+let mediaRoot: string;
+let freeSpaceReserveBytes: number;
 
 const entries = (): Document[] => trail.rows.get('audit_events') ?? [];
 
@@ -89,6 +97,14 @@ const uploading = (
   held: StartedSession = admin,
 ) => app.inject({ method: 'POST', url: MEDIA_PATH, headers: withHeaders(held), payload: multipartBody(file) });
 
+const settingsAdmin: Pick<SettingsAdmin, 'current'> = {
+  current: () => ({
+    values: { ...DEFAULT_SETTINGS, mediaRoot, mediaFreeSpaceReserveBytes: freeSpaceReserveBytes },
+    sources: {} as never,
+    path: '/data/holydeck/config/settings.yaml',
+  }),
+};
+
 const served = async (options: {
   readonly media: MediaLibrary | undefined;
   readonly noIdentity?: boolean;
@@ -99,7 +115,12 @@ const served = async (options: {
   built.register(multipart, { limits: { fileSize: options.ceiling ?? 10_000_000 } });
   guardMutations(built, { sessions });
   enforceAuthorization(built, { sessions, identity: undefined });
-  serveMediaRoutes(built, { media: options.media, identity: options.noIdentity === true ? undefined : identity });
+  serveMediaRoutes(built, {
+    media: options.media,
+    identity: options.noIdentity === true ? undefined : identity,
+    mediaRoot,
+    settingsAdmin,
+  });
   await built.ready();
   return built;
 };
@@ -107,6 +128,9 @@ const served = async (options: {
 beforeEach(async () => {
   trail = fakeDb();
   sessions = sessionsOn(memorySessions().db, { now });
+  mediaRoot = join(tmpdir(), `holydeck-media-routes-${Math.random().toString(36).slice(2)}`);
+  await mkdir(mediaRoot, { recursive: true });
+  freeSpaceReserveBytes = 0;
   const accounts = accountsOn(memoryAccounts().db, {
     now,
     newId: () => 'A'.repeat(22),
@@ -125,7 +149,7 @@ beforeEach(async () => {
   const real = mediaLibraryOn(fakeDb(), {
     now,
     newId: () => `media-${(serial += 1)}`,
-    mediaRoot: '/media',
+    mediaRoot,
     write: io.write,
     read: io.read,
     queue: { enqueue: async (_context, input) => ({ id: `job-${input.idempotencyKey}`, created: true }) },
@@ -223,6 +247,24 @@ describe('the pixel-count ceiling', () => {
     const response = await uploading({ filename: 'a.woff2', contentType: 'font/woff2', bytes: new Uint8Array([0x77, 0x4f, 0x46, 0x32, 0, 0, 0, 0]) });
     expect(response.statusCode).toBe(201);
     expect(upload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the free-space reserve', () => {
+  test('accepts an upload when free space comfortably clears the reserve', async () => {
+    freeSpaceReserveBytes = 0;
+    const response = await uploading({ filename: 'a.png', contentType: 'image/png', bytes: png(4, 4) });
+    expect(response.statusCode).toBe(201);
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
+
+  test('refuses an upload that would leave free space under the reserve, and never reaches upload()', async () => {
+    freeSpaceReserveBytes = Number.MAX_SAFE_INTEGER;
+    const response = await uploading({ filename: 'a.png', contentType: 'image/png', bytes: png(4, 4) });
+    expect(response.statusCode).toBe(507);
+    expect(response.json().error.code).toBe('media.insufficient_space');
+    expect(upload).not.toHaveBeenCalled();
+    expect(entries()).toEqual([]);
   });
 });
 

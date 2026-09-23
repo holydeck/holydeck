@@ -7,10 +7,17 @@
 //
 // THR-07's three defenses live here, in the order a request meets them, each refusing before the next
 // would even see the bytes: `@fastify/multipart`'s own `limits.fileSize` (registered in `app.ts`, against
-// `MEDIA_SIZE_CEILING_BYTES`) refuses an oversized body while it is still streaming in, never buffered
-// whole; `imageDimensionsOf` refuses a pixel-count bomb from its header alone, before `upload()` — and so
-// before anything is decoded or stored; and `upload()` itself sniffs the real type from bytes, never from
-// what a client claims a file is named or typed.
+// the deployment's configured `mediaUploadLimitBytes`) refuses an oversized body while it is still
+// streaming in, never buffered whole; `imageDimensionsOf` refuses a pixel-count bomb from its header
+// alone, before `upload()` — and so before anything is decoded or stored; and `upload()` itself sniffs
+// the real type from bytes, never from what a client claims a file is named or typed.
+//
+// A fourth check, added for OPS-13, is not one of THR-07's three: it is a capacity guard, not a security
+// one. After every defense above, this route confirms accepting a file would not push this deployment's
+// media filesystem under its configured `mediaFreeSpaceReserveBytes` margin, via a fresh `fs.statfs` read
+// against `mediaRoot` — the same directory `MediaLibrary` itself was constructed to write into.
+
+import { statfs } from 'node:fs/promises';
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
@@ -28,18 +35,12 @@ import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 const MEDIA_PREFIX = 'media:';
 
 export const MEDIA_PATH = '/api/v1/media';
-
-/**
- * MEDI-01's stated default for the per-file ceiling: 1 GB. The full configurable 1 GB/5 GB policy system
- * stays out of this task's scope — this is the real, enforced, hardcoded-reasonable number THR-07 asks
- * for, not the deployment-tunable surface around it.
- */
-export const MEDIA_SIZE_CEILING_BYTES = 1_073_741_824;
 
 /**
  * The pixel count a decoder would have to hold for one image, read from its header alone. 100 megapixels
@@ -59,9 +60,24 @@ export interface MediaRoutesOptions {
   readonly media: MediaLibrary | undefined;
   /** Absent in a deployment that keeps no identity, which has nothing here to audit an upload against. */
   readonly identity: Identity | undefined;
+  /**
+   * The directory `media`'s own library was constructed to write into. Boot-time-frozen on purpose, the
+   * same as `mediaUploadLimitBytes` is in `app.ts`'s multipart registration: `main.ts` never rebuilds
+   * `MediaLibrary` when a settings hot-reload changes `mediaRoot` live, so reading this from `settingsAdmin`
+   * instead would risk statfs-ing a path the library has already stopped writing into. `app.ts` passes the
+   * same static `settings.values.mediaRoot` expression `main.ts` already builds `media` from.
+   */
+  readonly mediaRoot: string;
+  /**
+   * Absent exactly when `media`/`identity` are, per the same `main.ts` wiring. Read live, unlike
+   * `mediaRoot` above: unlike the upload ceiling (fixed at `@fastify/multipart`'s boot-time registration),
+   * nothing about the free-space reserve is technically bound to boot time, so an administrator's change
+   * to it takes effect on the next upload rather than needing a restart.
+   */
+  readonly settingsAdmin: Pick<SettingsAdmin, 'current'> | undefined;
 }
 
-export function serveMediaRoutes(app: FastifyInstance, { media, identity }: MediaRoutesOptions): void {
+export function serveMediaRoutes(app: FastifyInstance, { media, identity, mediaRoot, settingsAdmin }: MediaRoutesOptions): void {
   // A deployment with nowhere to keep an identity has nothing here to audit an upload against. Every path
   // is still served, so the guard's table remains the complete shape of the surface in every deployment.
   if (identity === undefined) {
@@ -79,6 +95,8 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity }: Medi
   // Guaranteed by `main.ts`'s wiring, not by this module: an `identity` never exists without a `media`
   // library alongside it, so the gate above is this module's only check for either.
   const library = media as MediaLibrary;
+  // Guaranteed by the same `main.ts` wiring as `media` above.
+  const admin = settingsAdmin as Pick<SettingsAdmin, 'current'>;
 
   /**
    * Written after the change, and logged rather than answered when the trail refuses it: an upload holds
@@ -138,6 +156,34 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity }: Medi
         validationFailure(request.id, [
           { path: 'file', code: FIELD_CODES.tooLarge, message: `must not exceed ${MEDIA_PIXEL_CEILING} pixels` },
         ]),
+      );
+    }
+
+    // OPS-13's capacity guard, not one of THR-07's three defenses above: confirms accepting these bytes
+    // would not leave this deployment under its configured free-space reserve. A statfs failure — an
+    // unreadable or missing `mediaRoot` — fails closed, the same direction an unverifiable ceiling would.
+    let free: number;
+    try {
+      const disk = await statfs(mediaRoot);
+      free = disk.bavail * disk.bsize;
+    } catch (error) {
+      request.log.error({ err: error }, 'could not read free space on the media filesystem before an upload');
+      return reply.code(507).send(
+        errorEnvelope(
+          'media.insufficient_space',
+          'this deployment could not verify enough free space for the upload',
+          request.id,
+        ),
+      );
+    }
+    if (free - bytes.byteLength < admin.current().values.mediaFreeSpaceReserveBytes) {
+      return reply.code(507).send(
+        errorEnvelope(
+          'media.insufficient_space',
+          'accepting this file would leave less free space than this deployment’s reserve — free some up ' +
+            'from the media cleanup view before trying again',
+          request.id,
+        ),
       );
     }
 

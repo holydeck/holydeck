@@ -55,6 +55,22 @@ export interface Settings {
   notificationReadRetentionDays: number;
   autosaveRetentionDays: number;
   auditRetentionDays: number;
+  /**
+   * The per-file ceiling `@fastify/multipart` enforces (OPS-13). Read once, at `app.ts`'s boot-time
+   * `app.register(multipart, ...)` call — a Fastify plugin's own options cannot change after registration,
+   * so raising or lowering this needs a restart to take effect, same as every other setting a route reads
+   * directly out of the static `settings` snapshot rather than through `settingsAdmin`. Formerly the
+   * hardcoded `MEDIA_SIZE_CEILING_BYTES` in `media-routes.ts`; the default below carries that same value
+   * forward unchanged.
+   */
+  mediaUploadLimitBytes: number;
+  /**
+   * How much free space `media-routes.ts`'s upload route insists an accepted file leave behind on the
+   * media filesystem, checked fresh per request via `fs.statfs` on `mediaRoot` (OPS-13). Zero means a
+   * deployment has chosen to enforce no reserve at all. Unlike `mediaUploadLimitBytes` above, nothing
+   * about this one is fixed at boot — `media-routes.ts` reads it live through `settingsAdmin`.
+   */
+  mediaFreeSpaceReserveBytes: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -77,6 +93,8 @@ export const DEFAULT_SETTINGS: Settings = {
   notificationReadRetentionDays: 30,
   autosaveRetentionDays: 30,
   auditRetentionDays: 400,
+  mediaUploadLimitBytes: 1_073_741_824,
+  mediaFreeSpaceReserveBytes: 5_368_709_120,
 };
 
 /**
@@ -140,6 +158,8 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   notificationReadRetentionDays: 'HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS',
   autosaveRetentionDays: 'HOLYDECK_AUTOSAVE_RETENTION_DAYS',
   auditRetentionDays: 'HOLYDECK_AUDIT_RETENTION_DAYS',
+  mediaUploadLimitBytes: 'HOLYDECK_MEDIA_UPLOAD_LIMIT_BYTES',
+  mediaFreeSpaceReserveBytes: 'HOLYDECK_MEDIA_FREE_SPACE_RESERVE_BYTES',
 };
 
 // Normalized so a relative or non-canonical override still matches, byte for byte, the mount table
@@ -441,6 +461,18 @@ export function loadSettings(input: {
     layers,
   );
   const auditRetentionDays = resolve('auditRetentionDays', DEFAULT_SETTINGS.auditRetentionDays, parseBoundedInteger(1, 3_650), layers);
+  const mediaUploadLimitBytes = resolve(
+    'mediaUploadLimitBytes',
+    DEFAULT_SETTINGS.mediaUploadLimitBytes,
+    parseBoundedInteger(1, 10_737_418_240),
+    layers,
+  );
+  const mediaFreeSpaceReserveBytes = resolve(
+    'mediaFreeSpaceReserveBytes',
+    DEFAULT_SETTINGS.mediaFreeSpaceReserveBytes,
+    parseBoundedInteger(0, 1_099_511_627_776),
+    layers,
+  );
 
   if (problems.length > 0) throw new SettingsError(problems);
 
@@ -465,6 +497,8 @@ export function loadSettings(input: {
       notificationReadRetentionDays: notificationReadRetentionDays.value,
       autosaveRetentionDays: autosaveRetentionDays.value,
       auditRetentionDays: auditRetentionDays.value,
+      mediaUploadLimitBytes: mediaUploadLimitBytes.value,
+      mediaFreeSpaceReserveBytes: mediaFreeSpaceReserveBytes.value,
     },
     sources: {
       port: port.source,
@@ -486,6 +520,8 @@ export function loadSettings(input: {
       notificationReadRetentionDays: notificationReadRetentionDays.source,
       autosaveRetentionDays: autosaveRetentionDays.source,
       auditRetentionDays: auditRetentionDays.source,
+      mediaUploadLimitBytes: mediaUploadLimitBytes.source,
+      mediaFreeSpaceReserveBytes: mediaFreeSpaceReserveBytes.source,
     },
     path,
   };

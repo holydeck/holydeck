@@ -88,6 +88,8 @@ const sources: LoadedSettings['sources'] = {
   notificationReadRetentionDays: 'default',
   autosaveRetentionDays: 'default',
   auditRetentionDays: 'default',
+  mediaUploadLimitBytes: 'default',
+  mediaFreeSpaceReserveBytes: 'default',
 };
 const settings: LoadedSettings = { values: { ...DEFAULT_SETTINGS, locale: 'de' }, sources, path: '/data/holydeck/config/settings.yaml' };
 const refusing: Fetching = () => Promise.reject(new Error('nothing in this test may leave the process'));

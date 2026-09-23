@@ -13,7 +13,7 @@ import { notFound, withSafeErrors } from './failures.js';
 import { serveJobRoutes } from './job-routes.js';
 import { isUpgrade } from './live.js';
 import { guardMaintenance } from './maintenance.js';
-import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
+import { serveMediaRoutes } from './media-routes.js';
 import { serveNotificationRoutes } from './notification-routes.js';
 import { notificationStoreOn } from './notification-store.js';
 import { repositoriesOn } from './repositories.js';
@@ -127,7 +127,7 @@ export function buildApp({
   // A real, enforced ceiling on the request body itself (THR-07): an oversized upload is refused while
   // its body is still streaming in, never buffered whole before `media-routes.ts` ever sees it. Fastify
   // defers every registration below to boot, so this needs no `await` to take effect before a route does.
-  app.register(multipart, { limits: { fileSize: MEDIA_SIZE_CEILING_BYTES } });
+  app.register(multipart, { limits: { fileSize: settings.values.mediaUploadLimitBytes } });
   // Before every route, so a fault in one of them answers with a code and not with what it threw. The
   // one exception is a deployment that set `developmentDiagnostics` in its own environment, which the
   // settings file cannot do and an administrator's request therefore cannot either.
@@ -252,7 +252,7 @@ export function buildApp({
 
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
-  serveMediaRoutes(app, { media, identity });
+  serveMediaRoutes(app, { media, identity, mediaRoot: settings.values.mediaRoot, settingsAdmin });
 
   // Behind its own Admin permission: listing recorded backups and asking for an on-demand run.
   serveBackupRoutes(app, {

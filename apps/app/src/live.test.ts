@@ -56,6 +56,8 @@ const settings: LoadedSettings = {
     notificationReadRetentionDays: 'default',
     autosaveRetentionDays: 'default',
     auditRetentionDays: 'default',
+    mediaUploadLimitBytes: 'default',
+    mediaFreeSpaceReserveBytes: 'default',
   },
   path: '/data/holydeck/config/settings.yaml',
 };
