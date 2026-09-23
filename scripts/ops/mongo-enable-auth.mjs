@@ -106,13 +106,16 @@ export function ensureUsers(container, { rootPassword, appPassword }) {
   if (hasUser(container, 'holydeck', 'holydeck')) {
     report.app = 'already exists (left untouched)';
   } else {
-    // Same readWrite + dbAdmin shape as deploy/mongo-init/01-app-user.js: readWrite for normal
-    // operation, dbAdmin because migrate.js changes schema/indexes.
+    // Same shape as deploy/mongo-init/01-app-user.js: readWrite + dbAdmin on 'holydeck' for normal
+    // operation and migrate.js's schema/index changes, and the same pair again on
+    // 'holydeck__restore_rehearsal' (rehearsalDatabaseName('holydeck')) so the weekly rehearsal and
+    // restore-apply's precondition can write there too.
     mongoEval(
       container,
       'holydeck',
       "db.createUser({ user: 'holydeck', pwd: process.env.HOLYDECK_MONGO_PASSWORD, roles: [" +
-        "{ role: 'readWrite', db: 'holydeck' }, { role: 'dbAdmin', db: 'holydeck' }] })",
+        "{ role: 'readWrite', db: 'holydeck' }, { role: 'dbAdmin', db: 'holydeck' }, " +
+        "{ role: 'readWrite', db: 'holydeck__restore_rehearsal' }, { role: 'dbAdmin', db: 'holydeck__restore_rehearsal' }] })",
       { HOLYDECK_MONGO_PASSWORD: appPassword },
       secrets,
     );

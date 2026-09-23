@@ -101,6 +101,31 @@ const canAuthenticate = (container, db, user, password) => {
   }
 };
 
+/** Pinging only proves authentication, not a role grant — any authenticated user can run it. A rehearsal
+ * or a restore-apply needs to write, so this is the check that actually exercises the readWrite grant. */
+const canWrite = (container, db, user, password) => {
+  try {
+    docker([
+      'exec',
+      container,
+      'mongosh',
+      db,
+      '-u',
+      user,
+      '-p',
+      password,
+      '--authenticationDatabase',
+      'holydeck',
+      '--quiet',
+      '--eval',
+      "db.getCollection('mongo_enable_auth_smoke_test').insertOne({ ok: 1 })",
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const unauthenticatedListDatabasesFails = (container) => {
   try {
     docker(['exec', container, 'mongosh', '--quiet', '--eval', "db.adminCommand('listDatabases')"]);
@@ -130,6 +155,11 @@ test('a fresh unauthenticated volume gets both users created', () => {
   const check = startAuthEnforcedMongo(volume);
   assert.equal(canAuthenticate(check, 'admin', 'root', rootPassword), true);
   assert.equal(canAuthenticate(check, 'holydeck', 'holydeck', appPassword), true);
+  assert.equal(
+    canWrite(check, 'holydeck__restore_rehearsal', 'holydeck', appPassword),
+    true,
+    'the app user can write to the restore rehearsal database, which the weekly rehearsal and restore-apply need',
+  );
   assert.equal(unauthenticatedListDatabasesFails(check), true);
 });
 
