@@ -9,6 +9,7 @@ import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { SLIDE_LAYOUTS_PATH } from '@holydeck/contracts/layouts';
 import { LIBRARY_PATH } from '@holydeck/contracts/library';
 import { SCRIPTURE_SEARCH_PATH } from '@holydeck/contracts/scripture';
+import { SERMON_IMPORT_PREVIEW_PATH } from '@holydeck/contracts/sermon-import';
 import { SERMONS_PATH } from '@holydeck/contracts/sermons';
 import { SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
 import { SLIDE_GROUPS_PATH } from '@holydeck/contracts/slide-groups';
@@ -213,6 +214,9 @@ describe('every route that changes something', () => {
       { method: 'PUT', url: SERMON_ID_PATH },
       { method: 'PUT', url: `${SERMON_ID_PATH}/raw` },
       { method: 'POST', url: `${SERMON_ID_PATH}/slides` },
+      // Previewing a sermon import calls out to the Anthropic resolver, which is a service integration
+      // rather than content editing, so it is gated behind its own permission.
+      { method: 'POST', url: SERMON_IMPORT_PREVIEW_PATH },
       // A Slide Group and the slides within it change behind the same permission again: creating one,
       // editing it, duplicating it, enabling or disabling it, regenerating it, reordering its slides, and
       // every per-slide change — enable, duplicate, a layout or background override, and a language

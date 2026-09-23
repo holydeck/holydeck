@@ -202,6 +202,10 @@ const https = settings.values.tlsCertFile === ''
   ? undefined
   : { cert: readFileSync(settings.values.tlsCertFile), key: readFileSync(settings.values.tlsKeyFile) };
 
+// Read bare, never through settings.ts: a deployment without this key simply has no resolver, and the
+// key itself is never worth persisting to the settings file it would then have to be redacted out of.
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+
 const app = buildApp({
   settings,
   // Every secret this deployment was configured with is replaced wherever it appears in a log line: a
@@ -228,6 +232,7 @@ const app = buildApp({
   slideGroups,
   library,
   contentLanguages,
+  anthropicApiKey,
 });
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.

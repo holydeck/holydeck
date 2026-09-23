@@ -92,6 +92,7 @@ export const AUDIT_ACTIONS = [
   'backup.run',
   // Reserved for the restore surface T101+ builds. Exercised only by this task's own tests today.
   'restore.run',
+  'integration.call',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -158,6 +159,7 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'readiness.override': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',
+  'integration.call': 'integration',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */

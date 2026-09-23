@@ -129,6 +129,10 @@
       "types": "./dist/sermons.d.ts",
       "import": "./dist/sermons.js"
     },
+    "./sermon-import": {
+      "types": "./dist/sermon-import.d.ts",
+      "import": "./dist/sermon-import.js"
+    },
     "./scripture": {
       "types": "./dist/scripture.d.ts",
       "import": "./dist/scripture.js"

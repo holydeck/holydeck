@@ -150,6 +150,7 @@ describe('the context the trail is written under', () => {
       'readiness.override',
       'backup.run',
       'restore.run',
+      'integration.call',
     ]);
   });
 });
@@ -172,14 +173,10 @@ describe('the category taxonomy', () => {
     expect(Object.keys(CATEGORY_OF).sort()).toEqual([...AUDIT_ACTIONS].sort());
   });
 
-  it('gives every category except the reserved integration category at least one member action', () => {
+  it('gives every category at least one member action', () => {
     for (const category of AUDIT_CATEGORIES) {
       const members = AUDIT_ACTIONS.filter((action) => CATEGORY_OF[action] === category);
-      if (category === 'integration') {
-        expect(members).toEqual([]);
-      } else {
-        expect(members.length, `category ${category} has no member action`).toBeGreaterThan(0);
-      }
+      expect(members.length, `category ${category} has no member action`).toBeGreaterThan(0);
     }
   });
 });

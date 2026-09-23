@@ -1,14 +1,16 @@
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import { FIELD_CODES } from '@holydeck/contracts/problems';
+import { SERMON_IMPORT_PREVIEW_PATH, parseSermonImportRequest } from '@holydeck/contracts/sermon-import';
 import { SERMONS_PATH, parseSermonGenerationRequest } from '@holydeck/contracts/sermons';
+import { generateSermonFromText } from '@holydeck/core/sermon-ai';
 
 import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
 import { settled, staleRevision } from './refusals.js';
-import { CONTENT_EDIT } from './roles.js';
+import { CONTENT_EDIT, SERVICES_MANAGE } from './roles.js';
 import { SERMON_PATH, parseSermonDraft, parseSermonEdit } from './sermon-body.js';
 import { sermonStoreFilesFromCorpus } from './sermon-corpus.js';
 import { SermonError, sermonContext, subjectFor } from './sermons.js';
@@ -20,6 +22,7 @@ import type { Identity } from './onboarding.js';
 import type { Answer } from './refusals.js';
 import type { SermonRefusal, SermonStore } from './sermons.js';
 import type { LocatedProblem } from './sermon-yaml.js';
+import type { HttpPost } from '@holydeck/core/anthropic';
 import type { TranslationStoreFile } from '@holydeck/core/storage';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -29,13 +32,15 @@ export const SERMON_ID_PATH = `${SERMONS_PATH}/:id`;
 const SERMON_RAW_PATH = `${SERMON_ID_PATH}/raw`;
 const SERMON_HISTORY_PATH = `${SERMON_ID_PATH}/history`;
 const SERMON_SLIDES_PATH = `${SERMON_ID_PATH}/slides`;
+const CONTENT_PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
+const IMPORT_PERMISSION: RouteNeed = { kind: 'permission', need: SERVICES_MANAGE };
 const ROUTES = [
-  ['POST', SERMONS_PATH], ['GET', SERMON_ID_PATH], ['PUT', SERMON_ID_PATH],
-  ['GET', SERMON_RAW_PATH], ['PUT', SERMON_RAW_PATH],
-  ['GET', SERMON_HISTORY_PATH], ['POST', SERMON_SLIDES_PATH],
+  ['POST', SERMONS_PATH, CONTENT_PERMISSION], ['GET', SERMON_ID_PATH, CONTENT_PERMISSION],
+  ['PUT', SERMON_ID_PATH, CONTENT_PERMISSION],
+  ['GET', SERMON_RAW_PATH, CONTENT_PERMISSION], ['PUT', SERMON_RAW_PATH, CONTENT_PERMISSION],
+  ['GET', SERMON_HISTORY_PATH, CONTENT_PERMISSION], ['POST', SERMON_SLIDES_PATH, CONTENT_PERMISSION],
+  ['POST', SERMON_IMPORT_PREVIEW_PATH, IMPORT_PERMISSION],
 ] as const;
-
-const PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
 const ORDINAL = /^[1-9][0-9]*$/u;
 const ordinalIn = (value: unknown): number | undefined =>
   typeof value === 'string' && ORDINAL.test(value) ? Number(value) : undefined;
@@ -70,12 +75,19 @@ export interface SermonRoutesOptions {
   readonly sermons: SermonStore | undefined;
   readonly corpus: ReturnType<typeof corpusClient>;
   readonly identity: Identity | undefined;
+  /** Bare ANTHROPIC_API_KEY, optional, never logged — absent disables the resolver. */
+  readonly anthropicApiKey?: string | undefined;
+  /** Test-only override for the resolver's HTTP client; production never sets this (core defaults to real fetch). */
+  readonly httpPost?: HttpPost | undefined;
 }
 
-export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, identity }: SermonRoutesOptions): void {
+export function serveSermonRoutes(
+  app: FastifyInstance,
+  { sermons, corpus, identity, anthropicApiKey, httpPost }: SermonRoutesOptions,
+): void {
   if (identity === undefined) {
-    for (const [method, url] of ROUTES) {
-      app.route({ method, url, config: { need: PERMISSION }, handler: (request, reply) => reply.code(404).send(notFound(request)) });
+    for (const [method, url, need] of ROUTES) {
+      app.route({ method, url, config: { need }, handler: (request, reply) => reply.code(404).send(notFound(request)) });
     }
     return;
   }
@@ -94,7 +106,7 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
     }
   };
 
-  app.post(SERMONS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.post(SERMONS_PATH, { config: { need: CONTENT_PERMISSION } }, async (request, reply) => {
     const parsed = parseSermonDraft(request.body, SERMON_PATH);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const answer = await settled(() => store.create(call(request), parsed.value.title, parsed.value.body), isSermonRefusal);
@@ -103,7 +115,7 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
-  app.get(SERMON_ID_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.get(SERMON_ID_PATH, { config: { need: CONTENT_PERMISSION } }, async (request, reply) => {
     const asked = (request.query as { readonly revision?: string }).revision;
     const revision = ordinalIn(asked);
     if (asked !== undefined && revision === undefined) return reply.code(422).send(validationFailure(request.id, NOT_AN_ORDINAL));
@@ -112,7 +124,7 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
     return reply.send(successEnvelope(current, request.id, CLIENT_WINDOW.current));
   });
 
-  app.put(SERMON_ID_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.put(SERMON_ID_PATH, { config: { need: CONTENT_PERMISSION } }, async (request, reply) => {
     const parsed = parseSermonEdit(request.body, SERMON_PATH);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
@@ -128,7 +140,7 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
-  app.get(SERMON_RAW_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.get(SERMON_RAW_PATH, { config: { need: CONTENT_PERMISSION } }, async (request, reply) => {
     const asked = (request.query as { readonly revision?: string }).revision;
     const revision = ordinalIn(asked);
     if (asked !== undefined && revision === undefined) return reply.code(422).send(validationFailure(request.id, NOT_AN_ORDINAL));
@@ -137,7 +149,7 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
     return reply.type('text/yaml').send(text);
   });
 
-  app.put(SERMON_RAW_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.put(SERMON_RAW_PATH, { config: { need: CONTENT_PERMISSION } }, async (request, reply) => {
     if (typeof request.body !== 'string') {
       return reply.code(422).send(validationFailure(request.id, [{ path: 'body', code: FIELD_CODES.notText, message: 'must be sent as text' }]));
     }
@@ -157,13 +169,13 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
-  app.get(SERMON_HISTORY_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.get(SERMON_HISTORY_PATH, { config: { need: CONTENT_PERMISSION } }, async (request, reply) => {
     const history = await store.history(call(request), idIn(request));
     if (history.length === 0) return reply.code(404).send(notFound(request));
     return reply.send(successEnvelope(history, request.id, CLIENT_WINDOW.current));
   });
 
-  app.post(SERMON_SLIDES_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.post(SERMON_SLIDES_PATH, { config: { need: CONTENT_PERMISSION } }, async (request, reply) => {
     const parsed = parseSermonGenerationRequest(request.body, SERMON_PATH);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
@@ -179,5 +191,48 @@ export function serveSermonRoutes(app: FastifyInstance, { sermons, corpus, ident
     if (!answer.ok) return refused(request, reply, answer);
     await note(request, id, 'allowed', 'generated slides');
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  // Per-account, per-process throttle on the preview: nothing else in this build needs a shared rate
+  // limit store, and a pastor pasting the same message ten times inside a minute is already unusual.
+  const previewLimiter = new Map<string, { count: number; windowStart: number }>();
+  const PREVIEW_WINDOW_MS = 60_000;
+  const PREVIEW_LIMIT = 10;
+
+  app.post(SERMON_IMPORT_PREVIEW_PATH, { config: { need: IMPORT_PERMISSION } }, async (request, reply) => {
+    const parsed = parseSermonImportRequest(request.body);
+    if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
+    const actor = provenSession(request).record.actor;
+    const now = Date.now();
+    const window = previewLimiter.get(actor);
+    if (window !== undefined && now - window.windowStart < PREVIEW_WINDOW_MS) {
+      if (window.count >= PREVIEW_LIMIT) {
+        return reply.code(429).send(errorEnvelope('sermon.import_rate_limited', 'too many previews, try again shortly', request.id));
+      }
+      window.count += 1;
+    } else {
+      previewLimiter.set(actor, { count: 1, windowStart: now });
+    }
+    const generated = await generateSermonFromText(parsed.value.text, {
+      translations: [...parsed.value.translations],
+      now: new Date(),
+      apiKey: anthropicApiKey,
+      httpPost,
+      onIntegrationCall: async (call) => {
+        try {
+          await identity.audit.record(
+            auditContext(actor, correlationFor(SERMON_PREFIX, request.id)),
+            { action: 'integration.call', subject: call.subject, outcome: call.outcome, detail: call.detail },
+          );
+        } catch (error) {
+          request.log.error({ err: error }, 'the resolver trail refused an entry');
+        }
+      },
+    });
+    return reply.send(successEnvelope(
+      { suggestedTitle: generated.title, yaml: generated.yaml, notices: generated.notices, resolver: generated.resolver, resolvedTokens: generated.resolvedTokens },
+      request.id,
+      CLIENT_WINDOW.current,
+    ));
   });
 }

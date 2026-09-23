@@ -57,6 +57,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'sermon-routes.ts PUT SERMON_RAW_PATH CONTENT_EDIT': 'no harness test refuses a sermon raw edit without content.edit',
   'sermon-routes.ts GET SERMON_HISTORY_PATH CONTENT_EDIT': 'no harness test refuses sermon history without content.edit',
   'sermon-routes.ts POST SERMON_SLIDES_PATH CONTENT_EDIT': 'no harness test refuses sermon slide generation without content.edit',
+  'sermon-routes.ts POST SERMON_IMPORT_PREVIEW_PATH SERVICES_MANAGE': 'no harness test refuses the sermon import preview without services.manage',
   'service-routes.ts POST SERVICE_PATH SERVICES_MANAGE': 'no harness test refuses service creation without services.manage',
   'service-routes.ts GET SERVICE_PATH SERVICES_MANAGE': 'no harness test refuses the service list without services.manage',
   'service-routes.ts GET SERVICE_CURRENT_PATH SERVICES_MANAGE': 'no harness test refuses the current service without services.manage',

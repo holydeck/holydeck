@@ -78,6 +78,8 @@ export interface GeneratedSermon {
   title?: string;
   yaml: string;
   notices: string[];
+  resolver: 'not-needed' | 'used' | 'unavailable' | 'not-configured';
+  resolvedTokens: { token: string; book: string; source: 'ai' }[];
 }
 
 /** A dash or bullet in front of a passage; no book name starts with one, so it is always decoration. */
@@ -326,14 +328,14 @@ async function askResolver(
   tokens: string[],
   canon: Canon,
   options: GenerateSermonOptions,
-): Promise<{ codes: Record<string, string>; notice?: string }> {
+): Promise<{ codes: Record<string, string>; notice?: string; state: 'used' | 'unavailable' | 'not-configured' }> {
   const apiKey = options.apiKey?.trim() ?? '';
   // Checked here rather than caught below, so a run with no key makes no call and records no audit
   // entry: an integration that was never contacted is not an integration call.
-  if (apiKey === '') return { codes: {}, notice: formatMessage('ai_api_key_missing') };
+  if (apiKey === '') return { codes: {}, notice: formatMessage('ai_api_key_missing'), state: 'not-configured' };
   const started = Date.now();
   let call: IntegrationCallInfo;
-  let outcome: { codes: Record<string, string>; notice?: string };
+  let outcome: { codes: Record<string, string>; notice?: string; state: 'used' | 'unavailable' };
   try {
     const answer = await resolveBookCodes(tokens, canon.books, {
       apiKey,
@@ -349,7 +351,7 @@ async function askResolver(
     };
     if (answer.requestTokens !== undefined) call.requestTokens = answer.requestTokens;
     if (answer.responseTokens !== undefined) call.responseTokens = answer.responseTokens;
-    outcome = { codes: answer.codes };
+    outcome = { codes: answer.codes, state: 'used' };
   } catch (error) {
     // `resolveBookCodes` reports every failure as a `HolyDeckError`; nothing else leaves it.
     const failure = error as HolyDeckError;
@@ -364,7 +366,7 @@ async function askResolver(
     if (typeof failure.params?.['responseTokens'] === 'number') {
       call.responseTokens = failure.params['responseTokens'];
     }
-    outcome = { codes: {}, notice: failure.message };
+    outcome = { codes: {}, notice: failure.message, state: 'unavailable' };
   }
   // The callback belongs to the caller, not the resolver: whether it throws, rejects, or does
   // neither must never change which outcome was already decided above, never fire a second call, and
@@ -390,13 +392,19 @@ export async function generateSermonFromText(
   const message = parsePastorMessage(rawText);
   const canon = bundledCanon();
   const unresolved = unresolvedBookTokens(message, canon);
-  const resolver: { codes: Record<string, string>; notice?: string } =
-    unresolved.length === 0 ? { codes: {} } : await askResolver(unresolved, canon, options);
-  const built = buildSermonYaml(message, options.translations, resolver.codes);
+  const resolverOutcome: {
+    codes: Record<string, string>;
+    notice?: string;
+    state: 'not-needed' | 'used' | 'unavailable' | 'not-configured';
+  } = unresolved.length === 0 ? { codes: {}, state: 'not-needed' } : await askResolver(unresolved, canon, options);
+  const built = buildSermonYaml(message, options.translations, resolverOutcome.codes);
   // The resolver's notice explains the per-line ones that follow it, so it is read first.
-  const notices = resolver.notice === undefined ? built.notices : [resolver.notice, ...built.notices];
+  const notices = resolverOutcome.notice === undefined ? built.notices : [resolverOutcome.notice, ...built.notices];
   const filename = resolveSermonFilename(message.title, options.now);
+  const resolvedTokens = unresolved
+    .filter((token) => resolverOutcome.codes[token] !== undefined)
+    .map((token) => ({ token, book: resolverOutcome.codes[token]!, source: 'ai' as const }));
   return message.title === undefined
-    ? { filename, yaml: built.yaml, notices }
-    : { filename, title: message.title, yaml: built.yaml, notices };
+    ? { filename, yaml: built.yaml, notices, resolver: resolverOutcome.state, resolvedTokens }
+    : { filename, title: message.title, yaml: built.yaml, notices, resolver: resolverOutcome.state, resolvedTokens };
 }

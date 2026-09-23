@@ -98,6 +98,8 @@ export interface AppOptions {
   library?: LibraryStore;
   /** Where the content-language registry is kept. Without it, there is none to create, edit or archive. */
   contentLanguages?: ContentLanguageStore;
+  /** Bare ANTHROPIC_API_KEY, optional, never logged — absent disables the sermon import resolver. */
+  anthropicApiKey?: string | undefined;
 }
 
 /**
@@ -131,6 +133,7 @@ export function buildApp({
   slideGroups,
   library,
   contentLanguages,
+  anthropicApiKey,
 }: AppOptions): FastifyInstance {
   // HTTPS makes Fastify infer a specialised server, while the routes below use its common interface.
   const app = Fastify({ logger, ...(https === undefined ? {} : { https }) }) as unknown as FastifyInstance;
@@ -285,7 +288,7 @@ export function buildApp({
   // what an Admin administers the catalogue with. Scripture search sits beside them but is reachable by
   // either `content.edit` or `presentation.control`, since Control presentation searches mid-service too.
   serveSongRoutes(app, { songs, chords, identity });
-  serveSermonRoutes(app, { sermons, corpus, identity });
+  serveSermonRoutes(app, { sermons, corpus, identity, anthropicApiKey });
   serveSlideGroupRoutes(app, { slideGroups, identity });
   serveLibraryRoutes(app, { library, identity });
   serveScriptureSearchRoutes(app, { corpus });
