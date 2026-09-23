@@ -298,6 +298,13 @@ describe('authoritative live state', () => {
     expect(await runs.end(OPERATOR_SESSION, started.runId, 50)).toMatchObject({ phase: 'ended', stateRevision: 50 });
   });
 
+  it('refuses to advance a run that has ended', async () => {
+    const { runs, serviceId } = await prepared();
+    const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+    const ended = await runs.end(OPERATOR_SESSION, started.runId);
+    await expect(runs.advance(READ_CONTEXT, started.runId, ended?.stateRevision ?? 0, started.live)).rejects.toMatchObject({ kind: 'state' });
+  });
+
   it('moves the revision by one when a run ends without a named revision', async () => {
     const { runs, serviceId } = await prepared();
     const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });

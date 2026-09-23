@@ -472,6 +472,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
       own(async () => {
         const row = await standing(context, runId);
         if (row === undefined) return undefined;
+        if (row.phase !== 'active') throw new RunError('state', `${runId} has ended, and an ended run's state never moves`);
         if (row.stateRevision !== expectedRevision) return 'stale';
         try {
           return await append(context, {

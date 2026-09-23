@@ -377,6 +377,32 @@ describe('run-engine lifecycle', () => {
   });
 });
 
+describe('run-engine after a run ends', () => {
+  it('refuses every command once the run it was presenting has ended', async () => {
+    const { engine, runs, runEvents, hub } = await started();
+    await engine.end(SESSION, 'run-1');
+    hub.publishChange.mockClear();
+    expect(await engine.command(CONTROL_MEMBER, frame('next'))).toEqual({ outcome: 'failed' });
+    expect(runs.resume).not.toHaveBeenCalled();
+    await expect(engine.changeTheme(SESSION, 'run-1', 'stage', DEFAULT_THEMES.stage)).rejects.toMatchObject({ kind: 'state' });
+    expect(runEvents.record).not.toHaveBeenCalled();
+    expect(hub.publishChange).not.toHaveBeenCalled();
+  });
+
+  it('refuses a command against a run the store reports ended', async () => {
+    const { engine, runs, runEvents } = await started();
+    runs.resume.mockResolvedValueOnce({ ...RECORD, phase: 'ended' });
+    expect(await engine.command(CONTROL_MEMBER, frame('next'))).toEqual({ outcome: 'failed' });
+    expect(runEvents.record).not.toHaveBeenCalled();
+  });
+
+  it('keeps presenting the current run when a different run ends', async () => {
+    const { engine } = await started();
+    await engine.end(SESSION, 'run-other');
+    expect(await engine.command(CONTROL_MEMBER, { ...frame('next'), clientStateRevision: 9 })).toEqual({ outcome: 'applied' });
+  });
+});
+
 describe('run-engine restore', () => {
   it('seeds the hub from the highest revision of any run and each view from the latest active run', async () => {
     const { engine, runs, hub, runEvents } = setup();

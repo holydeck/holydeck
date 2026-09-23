@@ -214,7 +214,8 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
     };
     const context = runContext(session.actor, session.correlationId);
     const run = await options.runs.resume(context, runId);
-    if (run === undefined) return { outcome: 'failed' };
+    // An ended run is history, not a screen: nothing more is logged against it or shown from it.
+    if (run === undefined || run.phase !== 'active') return { outcome: 'failed' };
     const deck = await options.deck(context, run);
     if (command.type === 'theme') {
       try {
@@ -259,6 +260,7 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
       const record = await options.runs.end(session, runId, nextRevision());
       if (record !== undefined) {
         states.set(runId, record.live);
+        if (currentRunId === runId) currentRunId = undefined;
         // Every view is told, and none keeps showing the run that ended.
         options.hub.publishChange({ type: LIVE_EVENT_TYPES.runState, states: {}, everyone: true, stateRevision: record.stateRevision });
       }
