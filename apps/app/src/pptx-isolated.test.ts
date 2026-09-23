@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 
 import { inProcessPptxRunner, workerPptxRunner } from './pptx-isolated.js';
 
+import type { WorkerFactory, WorkerLike } from './pptx-isolated.js';
+
 // Minimal OOXML fixture builder, the same minimal shape `pptx-import.test.ts` and `pptx-routes.test.ts`
 // already use — just enough for `extractPptx` to read one slide with one text block.
 const P_NS = 'http://schemas.openxmlformats.org/presentationml/2006/main';
@@ -60,6 +62,39 @@ function buildPptx(slides: string[]): Uint8Array {
 const DECK = buildPptx([textShapeXml('Amazing grace', 2)]);
 const NOT_A_ZIP = strToU8('this is plain text, not a zip archive of any kind');
 
+// Tuning a real resourceLimits/payload pair to reliably crash a Worker's heap proved environment-fragile
+// (it depends on the vitest worker pool's own memory pressure, not just the numbers passed in) — so the
+// crash- and exit-recovery tests below drive `WorkerLike`'s `error`/`exit` handlers directly through a
+// fake `WorkerFactory`, one queued behavior per `run()` call, rather than provoking a real OOM.
+type FakeWorkerBehavior = (handlers: {
+  message?: (message: unknown) => void;
+  error?: (error: Error) => void;
+  exit?: (code: number) => void;
+}) => void;
+
+function fakeWorkerFactory(behaviors: readonly FakeWorkerBehavior[]): WorkerFactory {
+  let call = 0;
+  return () => {
+    const handlers: {
+      message?: (message: unknown) => void;
+      error?: (error: Error) => void;
+      exit?: (code: number) => void;
+    } = {};
+    const behavior = behaviors[call++];
+    const worker: WorkerLike = {
+      once: (event, listener) => {
+        (handlers as Record<string, unknown>)[event] = listener;
+      },
+      terminate: () => undefined,
+    };
+    queueMicrotask(() => behavior?.(handlers));
+    return worker;
+  };
+}
+
+const SUCCEEDS_WITH_DECK: FakeWorkerBehavior = (handlers) =>
+  handlers.message?.({ ok: true, result: { slides: [{ textBlocks: ['Amazing grace'], media: [] }] } });
+
 describe('inProcessPptxRunner', () => {
   it('extracts a valid deck directly, with no isolation', async () => {
     const extracted = await inProcessPptxRunner().run(DECK);
@@ -87,5 +122,33 @@ describe('workerPptxRunner', () => {
       name: 'HolyDeckError',
       code: 'pptx_corrupt',
     });
+  });
+
+  // AUTH-13's own point, proven end to end: a Worker's crash takes down that Worker's heap, never the
+  // runner that spawned it. main.ts wires one `workerPptxRunner()` instance up for the whole process's
+  // life, so the same instance — not a fresh one — has to keep working for whatever job comes next. These
+  // two tests drive the runner's `error`/`exit` handlers directly (see `fakeWorkerFactory` above) — the
+  // corrupt-archive test above already proves a caught-in-worker throw stays graceful; these prove an
+  // actual Worker crash/unexpected exit is survived too, not just a thrown error inside the parser.
+  it('stays healthy for the next job after a Worker actually crashes on the one before it', async () => {
+    const runner = workerPptxRunner(
+      {},
+      fakeWorkerFactory([(handlers) => handlers.error?.(new Error('simulated worker crash')), SUCCEEDS_WITH_DECK]),
+    );
+
+    await expect(runner.run(DECK)).rejects.toMatchObject({ name: 'HolyDeckError', code: 'pptx_corrupt' });
+
+    await expect(runner.run(DECK)).resolves.toEqual({ slides: [{ textBlocks: ['Amazing grace'], media: [] }] });
+  });
+
+  it('stays healthy for the next job after a Worker exits unexpectedly on the one before it', async () => {
+    const runner = workerPptxRunner(
+      {},
+      fakeWorkerFactory([(handlers) => handlers.exit?.(1), SUCCEEDS_WITH_DECK]),
+    );
+
+    await expect(runner.run(DECK)).rejects.toMatchObject({ name: 'HolyDeckError', code: 'pptx_corrupt' });
+
+    await expect(runner.run(DECK)).resolves.toEqual({ slides: [{ textBlocks: ['Amazing grace'], media: [] }] });
   });
 });

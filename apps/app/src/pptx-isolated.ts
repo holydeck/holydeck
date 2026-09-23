@@ -55,15 +55,36 @@ const WORKER_ENTRY_URL = new URL(
   import.meta.url,
 );
 
+/** The slice of `node:worker_threads`' `Worker` that `workerPptxRunner` actually depends on — narrow
+ *  enough that a test can implement it with a plain object, so a real Worker crash/exit can be driven
+ *  directly instead of provoked by tuning a resource limit against an environment-specific heavy payload. */
+export interface WorkerLike {
+  once(event: 'message', listener: (message: unknown) => void): void;
+  once(event: 'error', listener: (error: Error) => void): void;
+  once(event: 'exit', listener: (code: number) => void): void;
+  terminate(): void | Promise<number>;
+}
+
+export type WorkerFactory = (
+  url: URL,
+  options: { readonly workerData: Uint8Array; readonly resourceLimits: { readonly maxOldGenerationSizeMb: number } },
+) => WorkerLike;
+
+const defaultWorkerFactory: WorkerFactory = (url, options) => new Worker(url, options);
+
 /** Runs extraction inside a real node:worker_threads Worker with resource limits, so a hostile or
- *  malformed archive cannot crash or hang the main app process. Wired in production (main.ts). */
-export function workerPptxRunner(options: WorkerPptxRunnerOptions = {}): IsolatedPptxRunner {
+ *  malformed archive cannot crash or hang the main app process. Wired in production (main.ts).
+ *  `createWorker` defaults to a real Worker and only exists as a seam for tests. */
+export function workerPptxRunner(
+  options: WorkerPptxRunnerOptions = {},
+  createWorker: WorkerFactory = defaultWorkerFactory,
+): IsolatedPptxRunner {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxOldGenerationSizeMb = options.maxOldGenerationSizeMb ?? DEFAULT_MAX_OLD_GENERATION_MB;
   return {
     run(bytes) {
       return new Promise<ExtractedPptx>((resolve, reject) => {
-        const worker = new Worker(WORKER_ENTRY_URL, {
+        const worker = createWorker(WORKER_ENTRY_URL, {
           workerData: bytes,
           resourceLimits: { maxOldGenerationSizeMb },
         });
