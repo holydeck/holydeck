@@ -1,6 +1,6 @@
 import { constants, readFileSync, watch } from 'node:fs';
 import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { MongoClient } from 'mongodb';
@@ -146,23 +146,31 @@ if (settings.values.mongoUrl !== '') {
   media = mediaLibraryOn(repositoryDb(store.db()), {
     now,
     queue,
-    mediaRoot: settings.values.mediaRoot,
+    // `settingsAdmin` is assigned later in this same block, but read lazily here: by the time this
+    // getter is actually called, boot has long finished and a storage-root migration (OPS-16) may
+    // have already rewritten `mediaRoot` — the live value, not the one read at construction, is
+    // what every write and purge must see.
+    mediaRoot: () => settingsAdmin?.current().values.mediaRoot ?? settings.values.mediaRoot,
     purge: mediaPurgeDb(store.db()),
+    // The storageKey a write() hands back is bare — never root-prefixed — so a later storage-root
+    // migration (OPS-16) leaves every asset uploaded under the old root still readable under the new
+    // one. read()/remove() still accept an absolute key: the append-only architecture (ADR 0009)
+    // forbids rewriting a storageKey already recorded, so an asset uploaded before this change keeps
+    // its old absolute key forever, and resolving it against the live root would look in the wrong place.
     write: async (root, key, bytes) => {
       await mkdir(root, { recursive: true });
-      const path = join(root, key);
-      await writeFile(path, bytes);
-      return path;
+      await writeFile(join(root, key), bytes);
+      return key;
     },
-    async read(_root, key) {
-      return new Uint8Array(await readFile(key));
+    async read(root, key) {
+      return new Uint8Array(await readFile(isAbsolute(key) ? key : join(root, key)));
     },
     // OPS-14: no content model in this deployment tracks media references yet — the same gap
     // retention-sweep-handler.ts already documents and defers for autosave-revision. Every asset
     // purges as unreferenced until that model exists; a maintainer building it wires this resolver
     // for real.
-    async remove(_root, key) {
-      await rm(key, { force: true });
+    async remove(root, key) {
+      await rm(isAbsolute(key) ? key : join(root, key), { force: true });
     },
   });
   backups = { db: repositoryDb(store.db()), queue };

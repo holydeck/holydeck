@@ -61,23 +61,15 @@ export interface MediaRoutesOptions {
   /** Absent in a deployment that keeps no identity, which has nothing here to audit an upload against. */
   readonly identity: Identity | undefined;
   /**
-   * The directory `media`'s own library was constructed to write into. Boot-time-frozen on purpose, the
-   * same as `mediaUploadLimitBytes` is in `app.ts`'s multipart registration: `main.ts` never rebuilds
-   * `MediaLibrary` when a settings hot-reload changes `mediaRoot` live, so reading this from `settingsAdmin`
-   * instead would risk statfs-ing a path the library has already stopped writing into. `app.ts` passes the
-   * same static `settings.values.mediaRoot` expression `main.ts` already builds `media` from.
-   */
-  readonly mediaRoot: string;
-  /**
-   * Absent exactly when `media`/`identity` are, per the same `main.ts` wiring. Read live, unlike
-   * `mediaRoot` above: unlike the upload ceiling (fixed at `@fastify/multipart`'s boot-time registration),
-   * nothing about the free-space reserve is technically bound to boot time, so an administrator's change
-   * to it takes effect on the next upload rather than needing a restart.
+   * Absent exactly when `media`/`identity` are, per the same `main.ts` wiring. Read live: `MediaLibrary`
+   * itself now reads `mediaRoot` live on every write too (a media storage-root migration, OPS-16, has to
+   * be seen without a restart), so the free-space check below statfs-es the same live value `media` is
+   * about to write into, via `admin.current().values.mediaRoot`.
    */
   readonly settingsAdmin: Pick<SettingsAdmin, 'current'> | undefined;
 }
 
-export function serveMediaRoutes(app: FastifyInstance, { media, identity, mediaRoot, settingsAdmin }: MediaRoutesOptions): void {
+export function serveMediaRoutes(app: FastifyInstance, { media, identity, settingsAdmin }: MediaRoutesOptions): void {
   // A deployment with nowhere to keep an identity has nothing here to audit an upload against. Every path
   // is still served, so the guard's table remains the complete shape of the surface in every deployment.
   if (identity === undefined) {
@@ -164,7 +156,7 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity, mediaR
     // unreadable or missing `mediaRoot` — fails closed, the same direction an unverifiable ceiling would.
     let free: number;
     try {
-      const disk = await statfs(mediaRoot);
+      const disk = await statfs(admin.current().values.mediaRoot);
       free = disk.bavail * disk.bsize;
     } catch (error) {
       request.log.error({ err: error }, 'could not read free space on the media filesystem before an upload');

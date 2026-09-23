@@ -119,7 +119,6 @@ const served = async (options: {
   serveMediaRoutes(built, {
     media: options.media,
     identity: options.noIdentity === true ? undefined : identity,
-    mediaRoot,
     settingsAdmin,
   });
   await built.ready();
@@ -151,7 +150,7 @@ beforeEach(async () => {
   const real = mediaLibraryOn(db, {
     now,
     newId: () => `media-${(serial += 1)}`,
-    mediaRoot,
+    mediaRoot: () => mediaRoot,
     write: io.write,
     read: io.read,
     remove: io.remove,

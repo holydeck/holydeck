@@ -80,7 +80,7 @@ test('an entry point supplying its dependencies replaces every placeholder with 
     context: undefined,
     media: {} as MediaIngestOptions['media'],
     storage: {} as MediaIngestOptions['storage'],
-    mediaRoot: '/media',
+    mediaRoot: () => '/media',
     poster: {} as MediaIngestOptions['poster'],
   };
   const backupProducer = {

@@ -7,7 +7,12 @@ export interface MediaMigrationRequest {
   readonly targetRoot: string;
 }
 
-const looksAbsolute = (value: string): boolean => value.startsWith('/') && value.trim() === value && value !== '/';
+const looksAbsolute = (value: string): boolean =>
+  value.startsWith('/') &&
+  value.trim() === value &&
+  value !== '/' &&
+  !value.endsWith('/') &&
+  !value.split('/').includes('..');
 
 export function parseMediaMigrationRequest(value: unknown): Parsed<MediaMigrationRequest> {
   return parseObject(value, 'mediaMigration', (reader) => {

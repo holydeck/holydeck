@@ -1,6 +1,6 @@
 import { accessSync, constants, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 
 import { checkOwnSettingsMount, readSettingsText } from '@holydeck/app/boot';
 import { AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditReadContext, retentionSweepContext } from '@holydeck/app/audit';
@@ -46,6 +46,16 @@ const settings = loadSettings({
 });
 
 const paths = workerPaths(settings.values);
+
+// The worker keeps no settings-admin watcher of its own (unlike `apps/app`): it re-reads the settings
+// file fresh on every call instead, so a storage-root migration (OPS-16) that switches `mediaRoot` while
+// this process is already running is seen by the very next job, not held stale until it restarts.
+const currentMediaRoot = (): string =>
+  loadSettings({
+    fileText: readSettingsText((file) => readFileSync(file, 'utf8'), path),
+    env: process.env,
+    path,
+  }).values.mediaRoot;
 
 const isUsable = (candidate: string): boolean => {
   try {
@@ -112,18 +122,21 @@ if (work.runs === 'nothing') {
   const name = `worker-${process.pid}`;
   const store = new MongoClient(settings.values.mongoUrl);
   await store.connect();
+  // The storageKey a write() hands back is bare — never root-prefixed — so a later storage-root migration
+  // (OPS-16) leaves every asset uploaded under the old root still readable under the new one. read()/
+  // remove() still accept an absolute key: the append-only architecture (ADR 0009) forbids rewriting a
+  // storageKey already recorded, so an asset uploaded before this change keeps its old absolute key forever.
   const mediaStorage = {
     async write(root: string, key: string, bytes: Uint8Array): Promise<string> {
       mkdirSync(root, { recursive: true });
-      const path = join(root, key);
-      await writeFile(path, bytes);
-      return path;
+      await writeFile(join(root, key), bytes);
+      return key;
     },
-    async read(_root: string, key: string): Promise<Uint8Array> {
-      return new Uint8Array(await readFile(key));
+    async read(root: string, key: string): Promise<Uint8Array> {
+      return new Uint8Array(await readFile(isAbsolute(key) ? key : join(root, key)));
     },
-    async remove(_root: string, key: string): Promise<void> {
-      await rm(key, { force: true });
+    async remove(root: string, key: string): Promise<void> {
+      await rm(isAbsolute(key) ? key : join(root, key), { force: true });
     },
   };
   const queue = queueOn(queueDb(store.db()), { now });
@@ -161,12 +174,12 @@ if (work.runs === 'nothing') {
       media: mediaLibraryOn(repositoryDb(store.db()), {
         now,
         queue,
-        mediaRoot: settings.values.mediaRoot,
+        mediaRoot: currentMediaRoot,
         purge: mediaPurgeDb(store.db()),
         ...mediaStorage,
       }),
       storage: mediaStorage,
-      mediaRoot: settings.values.mediaRoot,
+      mediaRoot: currentMediaRoot,
       poster: ffmpegPosterGenerator(),
     },
     backupProducer: {

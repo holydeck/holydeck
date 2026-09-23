@@ -160,7 +160,10 @@ export interface MediaLibrary {
 export interface MediaLibraryOptions extends MediaStorageIO {
   readonly queue: Pick<Queue, 'enqueue'>;
   readonly now: () => string;
-  readonly mediaRoot: string;
+  /** Read live on every write and purge, not captured once at construction: a settings hot-reload —
+   *  including one a media storage-root migration (OPS-16) just wrote — has to be seen by the very
+   *  next call, not held stale until this process restarts. */
+  readonly mediaRoot: () => string;
   readonly newId?: () => string;
   readonly purge: MediaPurgeDb;
 }
@@ -304,7 +307,7 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
         const manifest: MediaManifestEntry = { id, bytes: upload.bytes.byteLength, hash, type, processingState: 'pending', derivatives: [] };
         const parsed = parseMediaManifestEntry(manifest, 'manifest');
         if (!parsed.ok) throw new MediaError('schema', 'the generated media manifest is invalid');
-        const storageKey = await options.write(options.mediaRoot, id, upload.bytes);
+        const storageKey = await options.write(options.mediaRoot(), id, upload.bytes);
         const record = await append(
           context,
           { stamp: createdStamp({ id, kind: 'mediaAsset', at: options.now(), by: actor }), manifest: parsed.value, storageKey },
@@ -391,7 +394,7 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
           const row = rows.find((candidate) => candidate.stamp.id === id);
           if (row === undefined) continue;
           await options.purge.collection(RECORDS.mediaAssets.collection).deleteMany({ assetId: id });
-          await options.remove(options.mediaRoot, row.storageKey);
+          await options.remove(options.mediaRoot(), row.storageKey);
           purged.push(id);
         }
         return { purged, retained };

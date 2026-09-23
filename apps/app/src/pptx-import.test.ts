@@ -125,7 +125,7 @@ const setup = (): { db: FakeDb; io: FakeMediaStorageIO; importer: PptxImport; ca
   const importer = pptxImportOn(db, {
     now,
     newId,
-    mediaRoot: '/media',
+    mediaRoot: () => '/media',
     write: io.write,
     read: io.read,
     remove: io.remove,

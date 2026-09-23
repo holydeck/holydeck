@@ -40,4 +40,16 @@ describe('what an operator asks when moving media storage to a new root', () => 
     expect(parsed.ok).toBe(false);
     expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('mediaMigration.targetRoot');
   });
+
+  it('refuses a target root with a parent-directory segment', () => {
+    const parsed = parseMediaMigrationRequest({ targetRoot: '/mnt/media/../etc' });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('mediaMigration.targetRoot');
+  });
+
+  it('refuses a target root with a trailing slash', () => {
+    const parsed = parseMediaMigrationRequest({ targetRoot: '/mnt/media-new/' });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? [] : parsed.problems.map((problem) => problem.path)).toContain('mediaMigration.targetRoot');
+  });
 });

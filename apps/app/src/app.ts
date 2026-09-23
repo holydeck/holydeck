@@ -259,7 +259,7 @@ export function buildApp({
 
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
-  serveMediaRoutes(app, { media, identity, mediaRoot: settings.values.mediaRoot, settingsAdmin });
+  serveMediaRoutes(app, { media, identity, settingsAdmin });
 
   // Behind the same permission once more: reporting what is safe to remove from the media library,
   // and performing a reviewed purge of it. Reuses the media surface's own `media` — the same source
@@ -306,6 +306,7 @@ export function buildApp({
     migrationState,
     now: () => new Date().toISOString(),
     identity,
+    settingsAdmin,
   });
 
   // Behind its own Admin permission: the operational health report OPS-09 defines. Reuses the backup

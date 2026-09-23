@@ -11,16 +11,17 @@
 // that runs after the first, chained from whatever root the first one left `mediaRoot` at — not
 // data loss, since Ruling 2/6/7's copy-verify-then-switch order makes that outcome safe either way.
 //
-// The cleanup route deletes a known-good duplicate of what is already live and verified — `fromRoot`
-// is confirmed-redundant data at that point, an entirely different safety class from deleting a
-// possibly-still-referenced media asset — so it is a plain recursive removal, not routed through
-// any retention/guardRemoval machinery.
+// The cleanup route only runs once the live `mediaRoot` has actually reloaded onto `toRoot` — checked
+// against `settingsAdmin` below — because until then `fromRoot` is still what `MediaLibrary` writes
+// and purges into, and deleting it would be deleting live data, not a redundant duplicate.
 
 import { rm } from 'node:fs/promises';
+import { resolve, sep } from 'node:path';
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import { parseMediaMigrationRequest } from '@holydeck/contracts/media-migration';
+import { FIELD_CODES } from '@holydeck/contracts/problems';
 
 import { auditContext } from './audit.js';
 import { correlationFor, requestContext } from './context.js';
@@ -36,7 +37,15 @@ import type { RequestContext } from './context.js';
 import type { MediaMigrationStateStore } from './media-migration-state.js';
 import type { Identity } from './onboarding.js';
 import type { Queue } from './queue.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+
+/** True when `a` and `b` name the same directory, or either is nested inside the other. */
+const overlaps = (a: string, b: string): boolean => {
+  const left = resolve(a);
+  const right = resolve(b);
+  return left === right || left.startsWith(`${right}${sep}`) || right.startsWith(`${left}${sep}`);
+};
 
 const MEDIA_MIGRATION_PREFIX = 'media-migration:';
 
@@ -57,6 +66,8 @@ export interface MediaMigrationRoutesOptions {
   readonly migrationState: MediaMigrationStateStore | undefined;
   readonly now: () => string;
   readonly identity: Identity | undefined;
+  /** Absent exactly when `identity` is, per the same `main.ts` wiring — both come from the same boot block. */
+  readonly settingsAdmin: Pick<SettingsAdmin, 'current'> | undefined;
 }
 
 /** What the trigger route needs beyond `auditContext`'s own grant: to enqueue a job. */
@@ -70,12 +81,12 @@ function routeContext(actor: string, correlationId: string): RequestContext {
 
 export function serveMediaMigrationRoutes(
   app: FastifyInstance,
-  { queue, migrationState, now, identity }: MediaMigrationRoutesOptions,
+  { queue, migrationState, now, identity, settingsAdmin }: MediaMigrationRoutesOptions,
 ): void {
   // A deployment with nowhere to keep an identity has nothing here to audit a migration against.
   // Every path is still served, so the guard's table remains the complete shape of the surface in
   // every deployment.
-  if (identity === undefined || queue === undefined || migrationState === undefined) {
+  if (identity === undefined || queue === undefined || migrationState === undefined || settingsAdmin === undefined) {
     for (const [method, url] of ROUTES) {
       app.route({
         method,
@@ -111,6 +122,15 @@ export function serveMediaMigrationRoutes(
     const parsed = parseMediaMigrationRequest(request.body ?? {});
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
 
+    const live = settingsAdmin.current().values;
+    if (overlaps(parsed.value.targetRoot, live.mediaRoot) || overlaps(parsed.value.targetRoot, live.dataDir)) {
+      return reply.code(422).send(
+        validationFailure(request.id, [
+          { path: 'targetRoot', code: FIELD_CODES.notAllowed, message: 'must not overlap the live media root or data directory' },
+        ]),
+      );
+    }
+
     const actor = provenSession(request).record.actor;
     const correlationId = correlationFor(MEDIA_MIGRATION_PREFIX, request.id);
     const context = routeContext(actor, correlationId);
@@ -136,6 +156,15 @@ export function serveMediaMigrationRoutes(
     if (record === undefined || record.cleanedUpAt !== undefined) {
       return reply.code(409).send(
         errorEnvelope(ENTITY_CONFLICT, 'no completed migration is waiting to be cleaned up', request.id),
+      );
+    }
+    if (settingsAdmin.current().values.mediaRoot !== record.toRoot) {
+      return reply.code(409).send(
+        errorEnvelope(
+          ENTITY_CONFLICT,
+          'the live media root has not reloaded onto the migrated root yet — wait for the settings watcher to pick it up',
+          request.id,
+        ),
       );
     }
 

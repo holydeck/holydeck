@@ -20,6 +20,7 @@ import { passkeysOn } from './passkeys.js';
 import { queueOn } from './queue.js';
 import { MEDIA_MANAGE } from './roles.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { DEFAULT_SETTINGS } from './settings.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
@@ -33,6 +34,7 @@ import type { MediaMigrationRecord, MediaMigrationStateStore } from './media-mig
 import type { Queue, QueueDb } from './queue.js';
 import type { Document } from './repositories.js';
 import type { SessionStore, StartedSession } from './sessions.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 import type { FastifyInstance } from 'fastify';
 
@@ -53,6 +55,16 @@ let queue: Queue;
 let migrationState: MediaMigrationStateStore;
 let admin: StartedSession;
 let jobs: Document[];
+let liveMediaRoot: string;
+let dataDir: string;
+
+const settingsAdmin: Pick<SettingsAdmin, 'current'> = {
+  current: () => ({
+    values: { ...DEFAULT_SETTINGS, mediaRoot: liveMediaRoot, dataDir },
+    sources: {} as never,
+    path: '/data/holydeck/config/settings.yaml',
+  }),
+};
 
 /** A minimal in-memory `MediaMigrationStateStore` — no Mongo doc shape needed for a route test. */
 const fakeMigrationState = (): MediaMigrationStateStore & { readonly cleanups: string[] } => {
@@ -85,7 +97,9 @@ const withHeaders = (held: StartedSession = admin) => ({
 const requesting = (url: string, payload: unknown = {}, held: StartedSession = admin) =>
   app.inject({ method: 'POST', url, headers: withHeaders(held), payload: payload as never });
 
-const served = async (missing?: 'queue' | 'migrationState' | 'identity' | 'all'): Promise<FastifyInstance> => {
+const served = async (
+  missing?: 'queue' | 'migrationState' | 'identity' | 'settingsAdmin' | 'all',
+): Promise<FastifyInstance> => {
   const built = Fastify({ logger: false });
   withSafeErrors(built);
   guardMutations(built, { sessions });
@@ -94,6 +108,7 @@ const served = async (missing?: 'queue' | 'migrationState' | 'identity' | 'all')
     queue: missing === 'queue' || missing === 'all' ? undefined : queue,
     migrationState: missing === 'migrationState' || missing === 'all' ? undefined : migrationState,
     identity: missing === 'identity' || missing === 'all' ? undefined : identity,
+    settingsAdmin: missing === 'settingsAdmin' || missing === 'all' ? undefined : settingsAdmin,
     now,
   });
   await built.ready();
@@ -139,6 +154,8 @@ beforeEach(async () => {
   };
   queue = queueOn(db, { now, newId: () => 'job-1' });
   migrationState = fakeMigrationState();
+  liveMediaRoot = DEFAULT_SETTINGS.mediaRoot;
+  dataDir = DEFAULT_SETTINGS.dataDir;
   app = await served();
   admin = await sessions.start(sessionContext(CORRELATION), { actor: actorFor(ID), permissions: [MEDIA_MANAGE] });
 });
@@ -178,6 +195,22 @@ describe('asking this deployment to migrate its media storage root', () => {
     expect(entries()).toEqual([]);
   });
 
+  test('refuses a target root that overlaps the live media root, before anything is queued', async () => {
+    const response = await requesting(MEDIA_MIGRATION_PATH, { targetRoot: `${liveMediaRoot}/nested` });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+    expect(jobs).toEqual([]);
+    expect(entries()).toEqual([]);
+  });
+
+  test('refuses a target root that overlaps the live data directory, before anything is queued', async () => {
+    const response = await requesting(MEDIA_MIGRATION_PATH, { targetRoot: dataDir });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+    expect(jobs).toEqual([]);
+    expect(entries()).toEqual([]);
+  });
+
   test('a failed audit append does not lose an accepted request', async () => {
     identity = { ...identity, audit: { record: vi.fn(async () => { throw new Error('trail unavailable'); }) } };
     await app.close();
@@ -199,6 +232,7 @@ describe('cleaning up the previous media root after a migration', () => {
 
   test('removes the old root, records the cleanup, and audits it', async () => {
     await migrationState.recordCompletion({ fromRoot, toRoot: '/mnt/media-new', completedAt: '2026-09-23T04:00:00.000Z' });
+    liveMediaRoot = '/mnt/media-new';
     const response = await requesting(MEDIA_MIGRATION_CLEANUP_PATH);
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toEqual({ fromRoot, cleanedUpAt: NOW });
@@ -224,10 +258,20 @@ describe('cleaning up the previous media root after a migration', () => {
 
   test('refuses a second cleanup of an already-cleaned-up migration', async () => {
     await migrationState.recordCompletion({ fromRoot, toRoot: '/mnt/media-new', completedAt: '2026-09-23T04:00:00.000Z' });
+    liveMediaRoot = '/mnt/media-new';
     await migrationState.recordCleanup('2026-09-23T04:30:00.000Z');
     const response = await requesting(MEDIA_MIGRATION_CLEANUP_PATH);
     expect(response.statusCode).toBe(409);
     expect(response.json().error.code).toBe(ENTITY_CONFLICT);
+  });
+
+  test('refuses cleanup until the live media root has actually reloaded onto the migrated root', async () => {
+    await migrationState.recordCompletion({ fromRoot, toRoot: '/mnt/media-new', completedAt: '2026-09-23T04:00:00.000Z' });
+    const response = await requesting(MEDIA_MIGRATION_CLEANUP_PATH);
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe(ENTITY_CONFLICT);
+    await expect(readFile(join(fromRoot, 'leftover.jpg'), 'utf8')).resolves.toBe('leftover-bytes');
+    expect((migrationState as ReturnType<typeof fakeMigrationState>).cleanups).toEqual([]);
   });
 });
 
@@ -247,7 +291,7 @@ describe('who may ask for a media storage migration', () => {
     expect(jobs).toEqual([]);
   });
 
-  test.each(['queue', 'migrationState', 'identity', 'all'] as const)('answers not-found without %s', async (missing) => {
+  test.each(['queue', 'migrationState', 'identity', 'settingsAdmin', 'all'] as const)('answers not-found without %s', async (missing) => {
     await app.close();
     app = await served(missing);
     const trigger = await requesting(MEDIA_MIGRATION_PATH, { targetRoot: '/mnt/media-new' });

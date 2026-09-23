@@ -28,7 +28,7 @@ const store = (): { db: FakeDb; io: FakeMediaStorageIO; jobs: Array<Parameters<Q
     media: mediaLibraryOn(db, {
       now: () => new Date(Date.parse('2026-09-17T09:30:00.000Z') + (tick += 1) * 1000).toISOString(),
       newId: () => `media-${(serial += 1)}`,
-      mediaRoot: '/media',
+      mediaRoot: () => '/media',
       write: io.write,
       read: io.read,
       remove: io.remove,
@@ -72,6 +72,29 @@ describe('the media library', () => {
     expect(jobs).toEqual([{ kind: 'media-ingest', idempotencyKey: 'media-ingest:media-1', payload: { assetId: 'media-1' } }]);
     expect(await media.inspect(ADMIN, 'media-1')).toEqual(uploaded);
     expect(await media.list(ADMIN)).toEqual([uploaded]);
+  });
+
+  it('reads the storage root live from the getter on every write, not once at construction', async () => {
+    const db = fakeDb();
+    const io = fakeMediaStorageIO();
+    let root = '/media/first';
+    let serial = 0;
+    const media = mediaLibraryOn(db, {
+      now: () => '2026-09-17T09:30:00.000Z',
+      newId: () => `media-${(serial += 1)}`,
+      mediaRoot: () => root,
+      write: io.write,
+      read: io.read,
+      remove: io.remove,
+      purge: fakeMediaPurgeDb(db),
+      queue: { async enqueue() { return { id: 'job-1', created: true }; } },
+    });
+
+    await media.upload(ADMIN, { bytes: png() });
+    root = '/media/second';
+    await media.upload(ADMIN, { bytes: new Uint8Array([...png(), 0x01]) });
+
+    expect(io.writes.map((write) => write.root)).toEqual(['/media/first', '/media/second']);
   });
 
   it('archives and restores an asset without changing its manifest or stored bytes', async () => {
