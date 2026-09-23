@@ -28,10 +28,12 @@ const open = (
     readonly changedSince?: (since: string | undefined) => Promise<boolean>;
     readonly settings?: SchedulerOptions['settings'];
     readonly sleep?: (ms: number) => Promise<void>;
+    readonly report?: (line: string) => void;
   } = {},
 ) => {
   const calls: Call[] = [];
   const waits: number[] = [];
+  const reports: string[] = [];
   const state = overrides.state ?? {};
   const changedSinceCalls: (string | undefined)[] = [];
   const changedSince =
@@ -57,8 +59,9 @@ const open = (
       (async (ms) => {
         waits.push(ms);
       }),
+    report: overrides.report ?? ((line) => reports.push(line)),
   });
-  return { scheduler, calls, waits, changedSinceCalls };
+  return { scheduler, calls, waits, changedSinceCalls, reports };
 };
 
 describe('a tick', () => {
@@ -123,5 +126,24 @@ describe('running until it is told to stop', () => {
 
     expect(world.changedSinceCalls).toEqual([]);
     expect(world.waits).toEqual([]);
+  });
+
+  test('reports a tick that throws and keeps looping instead of dying with it', async () => {
+    const stop = new AbortController();
+    let calls = 0;
+    const world = open({
+      changedSince: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('mongo blipped');
+        stop.abort();
+        return false;
+      },
+    });
+
+    await world.scheduler.run(stop.signal);
+
+    expect(calls).toBe(2);
+    expect(world.waits).toEqual([60_000]);
+    expect(world.reports).toEqual([expect.stringContaining('mongo blipped')]);
   });
 });

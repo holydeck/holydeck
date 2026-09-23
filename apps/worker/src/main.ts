@@ -280,6 +280,7 @@ if (work.runs === 'nothing') {
     },
     now: () => new Date(),
     sleep,
+    report: (line) => void process.stdout.write(`${line}\n`),
   });
   try {
     await Promise.all([runner.run(stopping.signal), scheduler.run(stopping.signal)]);

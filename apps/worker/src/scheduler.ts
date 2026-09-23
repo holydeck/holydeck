@@ -21,6 +21,7 @@ export interface SchedulerOptions {
   readonly now?: () => Date;
   /** Injected so a test drives the loop without waiting out a real minute. */
   readonly sleep: (ms: number) => Promise<void>;
+  readonly report: (line: string) => void;
 }
 
 export interface Scheduler {
@@ -46,7 +47,14 @@ export function schedulerOn(options: SchedulerOptions): Scheduler {
 
   const run = async (stop: AbortSignal): Promise<void> => {
     while (!stop.aborted) {
-      await tick();
+      // A tick failing (a transient Mongo error from `state.read()`/`changedSince()`/`queue.enqueue()`)
+      // must not take the loop down with it: `main.ts` runs this alongside the job runner under one
+      // `Promise.all`, so an uncaught rejection here would kill that too. Report it and try again next tick.
+      try {
+        await tick();
+      } catch (error) {
+        options.report(`scheduler: tick failed, trying again next tick: ${(error as Error).message}`);
+      }
       if (stop.aborted) return;
       await options.sleep(TICK_MS);
     }
