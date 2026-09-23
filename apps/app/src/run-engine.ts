@@ -157,6 +157,57 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
     }
   };
 
+  const apply: RunEngine['command'] = async (member, frame) => {
+    if (!member.grant.command) return { outcome: 'unauthorized' };
+    if (currentRunId === undefined) return { outcome: 'failed' };
+    // Validate before any store read as well as before writes: a malformed command has no run work.
+    const command = commandFrom(frame);
+    if (command === undefined) return { outcome: 'invalid' };
+    const runId = currentRunId;
+    const session: OperatorSession = {
+      actor: member.identity ?? 'live-control',
+      permissions: [PRESENTATION_CONTROL],
+      // A member's identity and a client-chosen frame id are both unbounded in practice; `correlationFor`
+      // is the same guard every other route builds one through, so a long real-world identity plus a
+      // client's own id can never overflow `context.ts`'s 64-character limit and crash the command path.
+      correlationId: correlationFor('live:', `${member.identity ?? 'anonymous'}:${frame.id}`),
+    };
+    const context = runContext(session.actor, session.correlationId);
+    const run = await options.runs.resume(context, runId);
+    if (run === undefined) return { outcome: 'failed' };
+    const deck = await options.deck(context, run);
+    if (command.type === 'theme') {
+      try {
+        await options.themes.changeTheme(session, {
+          runId, surface: command.surface, theme: command.theme, pinnedRevisions: deck.pinnedRevisions,
+        });
+        states.set(runId, { ...run.live, themes: { ...run.live.themes, [command.surface]: command.theme.id } });
+        return { outcome: 'applied' };
+      } catch (error) {
+        return { outcome: error instanceof RunEventError && (error.kind === 'schema' || error.kind === 'permission') ? 'invalid' : 'failed' };
+      }
+    }
+    const nextMode = reduce(command, toModeState(run.live), deck);
+    if (nextMode === undefined) return { outcome: 'invalid' };
+    const next = fromModeState(run.live, nextMode);
+    const kind = kindFor(command.type);
+    await options.runEvents.record(session, {
+      runId, kind, pinnedRevisions: deck.pinnedRevisions,
+      ...(kind === LIVE_EVENT_TYPES.slide ? {
+        shown: {
+          itemId: next.selected.itemId,
+          reference: deck.items.find((item) => item.itemId === next.selected.itemId)?.title ?? next.selected.itemId,
+        },
+      } : {}),
+    });
+    const advanced = await options.runs.advance(context, runId, run.stateRevision, next);
+    if (advanced === 'stale') return { outcome: 'stale' };
+    if (advanced === undefined) return { outcome: 'failed' };
+    states.set(runId, next);
+    publish(run.live, next, deck, kind);
+    return { outcome: 'applied' };
+  };
+
   const engine: RunEngine = {
     start: async (session, request) => {
       const record = await options.runs.start(session, request);
@@ -175,58 +226,14 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
       return record;
     },
     command: async (member, frame) => {
-      if (!member.grant.command) return { outcome: 'unauthorized' };
-      if (currentRunId === undefined) return { outcome: 'failed' };
-      // Validate before any store read as well as before writes: a malformed command has no run work.
-      const command = commandFrom(frame);
-      if (command === undefined) return { outcome: 'invalid' };
-      const runId = currentRunId;
-      const session: OperatorSession = {
-        actor: member.identity ?? 'live-control',
-        permissions: [PRESENTATION_CONTROL],
-        // A member's identity and a client-chosen frame id are both unbounded in practice; `correlationFor`
-        // is the same guard every other route builds one through, so a long real-world identity plus a
-        // client's own id can never overflow `context.ts`'s 64-character limit and crash the command path.
-        correlationId: correlationFor('live:', `${member.identity ?? 'anonymous'}:${frame.id}`),
-      };
-      const context = runContext(session.actor, session.correlationId);
-      const run = await options.runs.resume(context, runId);
-      if (run === undefined) return { outcome: 'failed' };
-      const deck = await options.deck(context, run);
-      if (command.type === 'theme') {
-        try {
-          await options.themes.changeTheme(session, {
-            runId, surface: command.surface, theme: command.theme, pinnedRevisions: deck.pinnedRevisions,
-          });
-          states.set(runId, { ...run.live, themes: { ...run.live.themes, [command.surface]: command.theme.id } });
-          return { outcome: 'applied' };
-        } catch (error) {
-          return { outcome: error instanceof RunEventError && (error.kind === 'schema' || error.kind === 'permission') ? 'invalid' : 'failed' };
-        }
-      }
-      const nextMode = reduce(command, toModeState(run.live), deck);
-      if (nextMode === undefined) return { outcome: 'invalid' };
-      const next = fromModeState(run.live, nextMode);
-      const kind = kindFor(command.type);
+      // Any store read, deck derivation or write below may throw (a transient Mongo error, a snapshot
+      // missing a pinned revision). None of those is the client's fault and none of them may escape: the
+      // hub runs commands detached from the socket, so an escaped rejection would end the whole process.
       try {
-        await options.runEvents.record(session, {
-          runId, kind, pinnedRevisions: deck.pinnedRevisions,
-          ...(kind === LIVE_EVENT_TYPES.slide ? {
-            shown: {
-              itemId: next.selected.itemId,
-              reference: deck.items.find((item) => item.itemId === next.selected.itemId)?.title ?? next.selected.itemId,
-            },
-          } : {}),
-        });
+        return await apply(member, frame);
       } catch {
         return { outcome: 'failed' };
       }
-      const advanced = await options.runs.advance(context, runId, run.stateRevision, next);
-      if (advanced === 'stale') return { outcome: 'stale' };
-      if (advanced === undefined) return { outcome: 'failed' };
-      states.set(runId, next);
-      publish(run.live, next, deck, kind);
-      return { outcome: 'applied' };
     },
     state: (runId) => states.get(runId),
     restore: async () => {

@@ -396,7 +396,15 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     }
     if (commandHandler !== undefined) {
       const liveMember: LiveMember = { channel: member.channel, grant: member.grant, identity: member.identity };
-      const { outcome } = await commandHandler(liveMember, frame);
+      let outcome: AckOutcome;
+      try {
+        ({ outcome } = await commandHandler(liveMember, frame));
+      } catch {
+        // `void command(...)` below has no one to hand a rejection to, and an unhandled one ends the whole
+        // process — every view of the run, not just this command. A handler that threw moved nothing it
+        // could vouch for, so it is answered the way any other command that could not be carried out is.
+        outcome = 'failed';
+      }
       if (!member.open) return;
       const at = standing();
       if (outcome === 'applied') remember(landedKey(member, frame.idempotencyKey), at);

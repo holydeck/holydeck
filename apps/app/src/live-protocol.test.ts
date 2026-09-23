@@ -991,6 +991,18 @@ describe('delegated commands', () => {
     expect(far.frames().at(-1)).toMatchObject({ outcome: 'unauthorized' });
   });
 
+  it('acks failed, and keeps serving, when the command handler rejects', async () => {
+    const hub = hubAt();
+    hub.useCommands(async () => { throw new Error('mongo went away'); });
+    const { connection, far } = joined(hub, 'live-control', OPERATOR);
+    const watcher = joined(hub, 'audience');
+    connection?.receive(command({ type: 'pause' }));
+    await vi.waitFor(() => expect(far.frames().at(-1)).toMatchObject({ kind: 'ack', outcome: 'failed' }));
+    expect(far.ended()).toBeUndefined();
+    hub.publish('run-state-changed');
+    expect(watcher.far.kinds()).toEqual(['snapshot', 'event']);
+  });
+
   it('does not acknowledge a connection that closes while the command is pending', async () => {
     const hub = hubAt();
     let finish: (() => void) | undefined;

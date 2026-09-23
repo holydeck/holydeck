@@ -243,6 +243,17 @@ describe('run-engine command ordering', () => {
     expect(hub.publishToCalls).toEqual([]);
   });
 
+  it.each([
+    ['resume', (built: ReturnType<typeof setup>) => built.runs.resume.mockRejectedValue(new Error('mongo down'))],
+    ['deck', (built: ReturnType<typeof setup>) => built.deck.mockRejectedValue(new Error('no slide group revision 3'))],
+    ['advance', (built: ReturnType<typeof setup>) => built.runs.advance.mockRejectedValue(new Error('write concern failed'))],
+  ] as const)('acks failed rather than throwing when %s throws', async (_step, fail) => {
+    const built = await started();
+    fail(built);
+    await expect(built.engine.command(CONTROL_MEMBER, frame('go-to', SECOND))).resolves.toEqual({ outcome: 'failed' });
+    expect(built.hub.publishToCalls).toEqual([]);
+  });
+
   it('uses freshly read state for navigation and CAS', async () => {
     const { engine, runs } = await started();
     runs.resume.mockResolvedValue({ ...RECORD, stateRevision: 12, live: { ...LIVE, public: SECOND, selected: SECOND } });
