@@ -144,7 +144,8 @@ describe('song routes', () => {
     expect(refused.json().error.fields).not.toHaveLength(0);
     const unknownLabel = await ask('PUT', `${at(SONG_ID_PATH, id)}/raw`, `${raw.body}sections: bad\n`, admin, { 'content-type': 'text/plain' });
     expect(unknownLabel.statusCode).toBe(422);
-    expect(unknownLabel.json().error.fields.some((field: { line?: number; column?: number }) => field.line !== undefined && field.column !== undefined)).toBe(true);
+    const fields = unknownLabel.json().error.fields as readonly { line?: number; column?: number }[];
+    expect(fields.some((field) => field.line !== undefined && field.column !== undefined)).toBe(true);
   });
 
   test('keeps the raw YAML round trip byte-identical', async () => {
