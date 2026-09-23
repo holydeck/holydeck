@@ -38,6 +38,7 @@ const entry = (overrides: Partial<{
   actor: string;
   subject: string;
   outcome: string;
+  detail: string;
 }> = {}) => ({
   id: 'audit-1',
   at: '2026-09-22T00:00:00.000Z',
@@ -93,6 +94,74 @@ describe('AdminAuditPage', () => {
 
     fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'refused' } });
     await waitFor(() => expect(fetching.mock.calls.at(-1)?.[0]).toBe(`${AUDIT_PATH}?outcome=refused`));
+  });
+
+  it('shows each entry’s detail in its own column', async () => {
+    setFetching(async () => pageReply([entry({ detail: 'changed locale, port' })]));
+    await renderPage();
+
+    expect(await screen.findByRole('columnheader', { name: 'Detail' })).toBeTruthy();
+    expect(screen.getByText('changed locale, port')).toBeTruthy();
+  });
+
+  it('narrows by a from and a to date with a fresh request', async () => {
+    const fetching = vi.fn<FetchLike>(async () => pageReply([]));
+    setFetching(fetching);
+    await renderPage();
+
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-09-01' } });
+    await waitFor(() => expect(fetching.mock.calls.at(-1)?.[0]).toBe(`${AUDIT_PATH}?from=2026-09-01`));
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-09-30' } });
+    await waitFor(() => expect(fetching.mock.calls.at(-1)?.[0]).toBe(`${AUDIT_PATH}?from=2026-09-01&to=2026-09-30`));
+  });
+
+  it('exports every page of the current filter as CSV, made in the browser from what the server answered', async () => {
+    const fetching = vi.fn<FetchLike>(async (path) => {
+      if (path.includes('cursorId=audit-1')) {
+        return pageReply([entry({ id: 'audit-2', action: 'session.lock', detail: '=HYPERLINK("x")' })]);
+      }
+      return pageReply([entry({ detail: 'said "hello", twice' })], { at: '2026-09-22T00:00:00.000Z', id: 'audit-1' });
+    });
+    setFetching(fetching);
+    const kept: Blob[] = [];
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', class extends URL {
+      static override createObjectURL = vi.fn((blob: Blob) => {
+        kept.push(blob);
+        return 'blob:audit';
+      });
+      static override revokeObjectURL = revokeObjectURL;
+    });
+    await renderPage();
+    fireEvent.change(screen.getByLabelText('Outcome'), { target: { value: 'allowed' } });
+    await waitFor(() => expect(fetching.mock.calls.at(-1)?.[0]).toBe(`${AUDIT_PATH}?outcome=allowed`));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+
+    await waitFor(() => expect(kept).toHaveLength(1));
+    expect(fetching.mock.calls.slice(-2).map(([path]) => path)).toEqual([
+      `${AUDIT_PATH}?outcome=allowed&limit=100`,
+      `${AUDIT_PATH}?outcome=allowed&cursorAt=2026-09-22T00%3A00%3A00.000Z&cursorId=audit-1&limit=100`,
+    ]);
+    expect(await kept[0]?.text()).toBe([
+      'at,category,action,actor,subject,outcome,detail',
+      '2026-09-22T00:00:00.000Z,authentication,session.signIn,account:a1,service:s1,allowed,"said ""hello"", twice"',
+      '2026-09-22T00:00:00.000Z,authentication,session.lock,account:a1,service:s1,allowed,"\'=HYPERLINK(""x"")"',
+      '',
+    ].join('\r\n'));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:audit');
+    vi.unstubAllGlobals();
+  });
+
+  it('says so when the export cannot be read, and makes no file', async () => {
+    setFetching(async (path) => path.includes('limit=100')
+      ? reply(500, errorEnvelope('server.failed', 'Failed', 'request-audit'))
+      : pageReply([entry()]));
+    await renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+
+    expect((await screen.findByRole('alert')).textContent).toBe('The audit log could not be exported.');
   });
 
   it('loads another page from the cursor the server named', async () => {

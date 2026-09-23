@@ -1,6 +1,6 @@
 // Reading the administrative trail the server keeps (spec v1c-09, ADMN-03/ADMN-04, task 09-6's route).
-// A read-only, cursor-paginated view: newest first, narrowed by category and outcome, exactly what
-// `audit-routes.ts` accepts and nothing it does not. Gated on `audit.read`, kept in sync by hand with
+// A read-only, cursor-paginated view: newest first, narrowed by category, outcome and a from/to date,
+// exactly what `audit-routes.ts` accepts and nothing it does not, and exportable as CSV (COLAB-11). Gated on `audit.read`, kept in sync by hand with
 // `apps/app/src/audit.ts`'s `AUDIT_CATEGORIES` the same way `admin-settings.tsx` repeats `Settings`'s
 // field list — the web client has no package boundary into `apps/app`.
 
@@ -36,6 +36,7 @@ interface AuditEntryView {
   readonly actor: string;
   readonly subject: string;
   readonly outcome: string;
+  readonly detail: string | undefined;
 }
 
 interface Cursor {
@@ -69,6 +70,7 @@ const parsedEntry = (value: unknown): AuditEntryView | undefined => {
     actor: value['actor'],
     subject: value['subject'],
     outcome: value['outcome'],
+    detail: typeof value['detail'] === 'string' ? value['detail'] : undefined,
   };
 };
 
@@ -86,23 +88,57 @@ const parsedPage = (value: unknown): AuditPageView => {
   return { entries, nextCursor: isCursor(value['nextCursor']) ? value['nextCursor'] : undefined };
 };
 
-const queryFor = (category: string, outcome: string, cursor: Cursor | undefined): string => {
+interface AuditFilter {
+  readonly category: string;
+  readonly outcome: string;
+  /** Plain `YYYY-MM-DD` dates: `parseAuditQuery` reads `from` as that day's start and `to` as its end. */
+  readonly from: string;
+  readonly to: string;
+}
+
+const queryFor = (filter: AuditFilter, cursor: Cursor | undefined, limit?: number): string => {
   const params = new URLSearchParams();
-  if (category !== '') params.set('category', category);
-  if (outcome !== '') params.set('outcome', outcome);
+  for (const name of ['category', 'outcome', 'from', 'to'] as const) {
+    if (filter[name] !== '') params.set(name, filter[name]);
+  }
   if (cursor !== undefined) {
     params.set('cursorAt', cursor.at);
     params.set('cursorId', cursor.id);
   }
+  if (limit !== undefined) params.set('limit', String(limit));
   const query = params.toString();
   return query === '' ? AUDIT_PATH : `${AUDIT_PATH}?${query}`;
 };
 
-/** The administrative trail, newest first, narrowed by category and outcome, one page at a time. */
+/** The most `audit-routes.ts` answers in one page, which an export asks for to need the fewest requests. */
+const EXPORT_PAGE = 100;
+
+const CSV_COLUMNS = ['at', 'category', 'action', 'actor', 'subject', 'outcome', 'detail'] as const;
+
+/**
+ * One CSV cell. A value a spreadsheet would read as a formula (`=`, `+`, `-`, `@`) is led with an
+ * apostrophe first: `subject` and `detail` are prose some caller wrote, and an export opened in a
+ * spreadsheet must not run any of it.
+ */
+const csvCell = (value: string): string => {
+  const safe = /^[=+\-@]/u.test(value) ? `'${value}` : value;
+  return /[",\r\n']/u.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+};
+
+const csvOf = (entries: readonly AuditEntryView[]): string =>
+  [CSV_COLUMNS.join(','), ...entries.map((entry) => CSV_COLUMNS.map((column) => csvCell(entry[column] ?? '')).join(','))]
+    .map((line) => `${line}\r\n`)
+    .join('');
+
+/** The administrative trail, newest first, narrowed by category, outcome and date, one page at a time. */
 export function AdminAuditPage(): JSX.Element {
   const permitted = can('audit.read');
   const [category, setCategory] = useState('');
   const [outcome, setOutcome] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportFailed, setExportFailed] = useState(false);
   const [cursor, setCursor] = useState<Cursor | undefined>(undefined);
   const [entries, setEntries] = useState<readonly AuditEntryView[]>([]);
   const [nextCursor, setNextCursor] = useState<Cursor | undefined>(undefined);
@@ -115,7 +151,7 @@ export function AdminAuditPage(): JSX.Element {
     setLoading(true);
     setLoadFailed(false);
     void (async () => {
-      const result = await request(queryFor(category, outcome, cursor));
+      const result = await request(queryFor({ category, outcome, from, to }, cursor));
       if (!current) return;
       if (!result.ok) {
         setLoadFailed(true);
@@ -131,7 +167,7 @@ export function AdminAuditPage(): JSX.Element {
     return () => {
       current = false;
     };
-  }, [permitted, category, outcome, cursor]);
+  }, [permitted, category, outcome, from, to, cursor]);
 
   if (!permitted) return <NotFoundPage />;
 
@@ -143,6 +179,45 @@ export function AdminAuditPage(): JSX.Element {
   const changeOutcome = (value: string): void => {
     setOutcome(value);
     setCursor(undefined);
+  };
+
+  const changeFrom = (value: string): void => {
+    setFrom(value);
+    setCursor(undefined);
+  };
+
+  const changeTo = (value: string): void => {
+    setTo(value);
+    setCursor(undefined);
+  };
+
+  // Every page of the filter on screen, not only the pages scrolled to so far, read the same way the
+  // table reads them: the server has already redacted each entry, and the file is made here from that.
+  const exportCsv = async (): Promise<void> => {
+    setExporting(true);
+    setExportFailed(false);
+    try {
+      const all: AuditEntryView[] = [];
+      let next: Cursor | undefined;
+      do {
+        const result = await request(queryFor({ category, outcome, from, to }, next, EXPORT_PAGE));
+        if (!result.ok) {
+          setExportFailed(true);
+          return;
+        }
+        const page = parsedPage(result.data);
+        all.push(...page.entries);
+        next = page.nextCursor;
+      } while (next !== undefined);
+      const address = URL.createObjectURL(new Blob([csvOf(all)], { type: 'text/csv' }));
+      const link = document.createElement('a');
+      link.href = address;
+      link.download = 'holydeck-audit.csv';
+      link.click();
+      URL.revokeObjectURL(address);
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -166,6 +241,16 @@ export function AdminAuditPage(): JSX.Element {
           ))}
         </select>
       </div>
+      <div class="form-field">
+        <label for="audit-from">{t('audit.fromLabel')}</label>
+        <input id="audit-from" type="date" value={from} max={to === '' ? undefined : to} onChange={(event) => changeFrom(event.currentTarget.value)} />
+      </div>
+      <div class="form-field">
+        <label for="audit-to">{t('audit.toLabel')}</label>
+        <input id="audit-to" type="date" value={to} min={from === '' ? undefined : from} onChange={(event) => changeTo(event.currentTarget.value)} />
+      </div>
+      <button type="button" disabled={exporting} onClick={() => void exportCsv()}>{t('audit.export')}</button>
+      {exportFailed ? <p role="alert">{t('audit.exportFailed')}</p> : null}
       {loadFailed ? <p role="alert">{t('audit.loadFailed')}</p> : null}
       {loading && entries.length === 0 && !loadFailed ? <p role="status">{t('app.loading')}</p> : (
         <div class="table-scroll">
@@ -179,6 +264,7 @@ export function AdminAuditPage(): JSX.Element {
                 <th scope="col">{t('audit.column.actor')}</th>
                 <th scope="col">{t('audit.column.subject')}</th>
                 <th scope="col">{t('audit.column.outcome')}</th>
+                <th scope="col">{t('audit.column.detail')}</th>
               </tr>
             </thead>
             <tbody>
@@ -190,6 +276,7 @@ export function AdminAuditPage(): JSX.Element {
                   <td>{entry.actor}</td>
                   <td>{entry.subject}</td>
                   <td>{entry.outcome === 'allowed' ? t('audit.outcome.allowed') : t('audit.outcome.refused')}</td>
+                  <td>{entry.detail ?? ''}</td>
                 </tr>
               ))}
             </tbody>
