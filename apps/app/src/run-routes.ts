@@ -396,7 +396,8 @@ export function serveRunRoutes(
     const correlationId = correlationFor('run:recap:', request.id);
     const record = await runs.resume(runContext(actor, correlationId), runId);
     if (record === undefined) return reply.code(404).send(notFound(request));
-    const recap = await runReview.recap(runReviewContext(actor, correlationId), runId);
+    const includeRehearsal = (request.query as Record<string, unknown>).includeRehearsal === 'true';
+    const recap = await runReview.recap(runReviewContext(actor, correlationId), runId, { mode: record.mode, includeRehearsal });
     await note(request, 'run.recap.export', actor, subjectFor(runId), 'Exported a run recap');
     return reply.type('text/markdown; charset=utf-8').send(recap.lines.join('\n'));
   });

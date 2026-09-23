@@ -359,6 +359,19 @@ describe('adding content mid-service, reviewing and exporting a recap', () => {
     expect(recapped.body).toBe('1. An added reading');
   });
 
+  test('leaves a rehearsal out of its recap unless asked to include it (RUN-06)', async () => {
+    const runId = (await asking('POST', RUN_PATH, { serviceId: preparedServiceId, mode: 'rehearsal' }, operator)).json().data.runId as string;
+    deckItems = [{ itemId: 'item-1', kind: 'song', title: 'Practised song', slides: [{ slideId: 'slide-1', boxes: [] }] }];
+    const member: LiveMember = { channel: LIVE_CONTROL_CHANNEL, grant: grantFor([PRESENTATION_CONTROL]), identity: OPERATOR };
+    await runEngine.command(member, {
+      kind: 'command', channel: LIVE_CONTROL_CHANNEL, id: 'practise', idempotencyKey: 'practise',
+      type: 'go-to', args: { itemId: 'item-1', slideIndex: 0 }, clientStateRevision: 0,
+    });
+
+    expect((await asking('GET', runPath(RUN_RECAP_PATH, runId), undefined, operator)).body).toBe('');
+    expect((await asking('GET', `${runPath(RUN_RECAP_PATH, runId)}?includeRehearsal=true`, undefined, operator)).body).toBe('1. Practised song');
+  });
+
   test('gates an addition from a session without Control presentation', async () => {
     const runId = await startRun();
     const response = await asking('POST', runPath(RUN_ADDITIONS_PATH, runId), {

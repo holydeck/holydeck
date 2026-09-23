@@ -46,6 +46,7 @@ import { requestContext } from './context.js';
 import { LIVE_EVENT_TYPES } from './live-events.js';
 import { RUN_EVENT_PERMISSIONS } from './run-events.js';
 
+import type { RunMode } from '@holydeck/contracts/runs';
 import type { SnapshotPin } from '@holydeck/contracts/snapshots';
 import type { RequestContext } from './context.js';
 import type { RunEventRecord, RunEventStore, ShownItem } from './run-events.js';
@@ -79,6 +80,13 @@ export interface RunRecap {
   readonly lines: readonly string[];
 }
 
+/** RUN-06: a run's mode is fixed for its whole life and held on its own row, so the recap is told it
+ *  rather than every log row repeating it. A rehearsal recaps to nothing unless it is asked for. */
+export interface RecapOptions {
+  readonly mode?: RunMode;
+  readonly includeRehearsal?: boolean;
+}
+
 export interface RunReviewStore {
   /** Records that the Operator put one reference in front of the room: one `current-slide-changed` in the
    *  run's log, carrying what was shown. Refused for a session without Control presentation (THR-11). */
@@ -86,7 +94,7 @@ export interface RunReviewStore {
   /** Exactly the references this run showed, oldest first — during the run and after it alike. */
   review(context: unknown, runId: string): Promise<readonly ReviewedReference[]>;
   /** The optional recap, rendered from the log at the moment it is asked for and stored nowhere. */
-  recap(context: unknown, runId: string): Promise<RunRecap>;
+  recap(context: unknown, runId: string, options?: RecapOptions): Promise<RunRecap>;
 }
 
 const shownIn = (log: readonly RunEventRecord[]): readonly ReviewedReference[] =>
@@ -112,11 +120,14 @@ export function runReviewOn(runEvents: Pick<RunEventStore, 'record' | 'log'>): R
 
     review: async (context, runId) => shownIn(await runEvents.log(context, runId)),
 
-    recap: async (context, runId) => ({
-      runId,
-      // Numbered as the run showed them, which is the log's order and not the plan's.
-      lines: shownIn(await runEvents.log(context, runId)).map((entry, index) => `${index + 1}. ${entry.reference}`),
-    }),
+    recap: async (context, runId, options = {}) => {
+      if (options.mode === 'rehearsal' && options.includeRehearsal !== true) return { runId, lines: [] };
+      return {
+        runId,
+        // Numbered as the run showed them, which is the log's order and not the plan's.
+        lines: shownIn(await runEvents.log(context, runId)).map((entry, index) => `${index + 1}. ${entry.reference}`),
+      };
+    },
   };
   return Object.freeze(store);
 }

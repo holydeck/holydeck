@@ -254,6 +254,18 @@ describe('the references a run showed', () => {
     expect(await review.recap(READER, runId)).toEqual({ runId, lines: ['1. Psalm 23:1-6', '2. Welcome'] });
   });
 
+  // RUN-06: a rehearsal is practice, not a service; its recap is empty unless someone asks for it.
+  it('leaves a rehearsal out of the recap by default, and includes it only when asked', async () => {
+    const { review, runId, pins } = await live();
+    await review.show(SESSION, { runId, itemId: 'item-2', reference: 'Psalm 23:1-6', pinnedRevisions: pins });
+
+    expect(await review.recap(READER, runId, { mode: 'rehearsal' })).toEqual({ runId, lines: [] });
+    expect(await review.recap(READER, runId, { mode: 'rehearsal', includeRehearsal: true })).toEqual({ runId, lines: ['1. Psalm 23:1-6'] });
+    expect(await review.recap(READER, runId, { mode: 'live' })).toEqual({ runId, lines: ['1. Psalm 23:1-6'] });
+    // The review itself is the operator's own record of the run, rehearsal or not.
+    expect(await review.review(READER, runId)).toHaveLength(1);
+  });
+
   it('is empty for a run that has shown nothing yet', async () => {
     const { review, runId } = await live();
 
