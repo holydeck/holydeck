@@ -56,6 +56,26 @@ const signedIn = (permissions: string[]) => {
   };
 };
 
+const coEditing = (contentId: string): Record<string, () => unknown> => ({
+  [`POST /api/v1/presence/${encodeURIComponent(contentId)}`]: () => reply(200, successEnvelope({}, 'r')),
+  [`GET /api/v1/presence/${encodeURIComponent(contentId)}`]: () =>
+    reply(200, successEnvelope([{
+      contentId, actor: 'account:other', displayName: 'Chioma Obi',
+      enteredAt: '2026-09-14T09:00:00.000Z', heartbeatAt: '2026-09-14T09:00:00.000Z', expiresAt: '2026-09-14T09:01:00.000Z',
+    }], 'r')),
+  [`DELETE /api/v1/presence/${encodeURIComponent(contentId)}`]: () => ({ status: 204, json: async (): Promise<unknown> => undefined }),
+  [`GET /api/v1/content/${encodeURIComponent(contentId)}/conflicts`]: () =>
+    reply(200, successEnvelope({
+      outstanding: [{
+        kind: 'shelved', contentId, sequence: 1, attempted: 3, origin: 'autosave', body: {},
+        at: '2026-09-14T09:00:00.000Z', actor: 'account:other', correlationId: 'req-1',
+      }],
+      entries: [],
+    }, 'r')),
+  [`POST /api/v1/content/${encodeURIComponent(contentId)}/conflicts/${encodeURIComponent(`${contentId}#1`)}/resolve`]: () =>
+    reply(200, successEnvelope({ appended: true, revision: 3 }, 'r')),
+});
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   calls = [];
@@ -269,5 +289,19 @@ describe('SlideGroupEditor', () => {
     await settle(800);
     await settle();
     expect(screen.getByText('auth.forbidden')).toBeTruthy();
+  });
+
+  it('shows who else is editing and the conflicts left to settle, and reloads after one is settled', async () => {
+    Object.assign(routes, coEditing('g'));
+    render(<SlideGroupEditor groupId="g" />);
+    await settle();
+    await settle();
+    expect(screen.getByText('Also editing')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Chioma Obi is editing' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep theirs' }));
+    await settle();
+    await settle();
+    expect(sent(`GET ${API.slideGroup('g')}`)).toHaveLength(2);
   });
 });

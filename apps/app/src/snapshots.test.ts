@@ -7,7 +7,15 @@ import { CATEGORY_OF } from './audit.js';
 import { RECORDS, RECORD_ACTIONS } from './records.js';
 import { repositoriesOn } from './repositories.js';
 import { revisionsOn } from './revisions.js';
-import { ACCOUNTS_MANAGE, PRESENTATION_CONTROL, SERVICE_TEMPLATES_MANAGE, permissionsFor } from './roles.js';
+import {
+  ACCOUNTS_MANAGE,
+  AUDIT_READ,
+  CONTENT_HISTORY_MANAGE,
+  INTEGRATIONS_MANAGE,
+  PRESENTATION_CONTROL,
+  SERVICE_TEMPLATES_MANAGE,
+  permissionsFor,
+} from './roles.js';
 import { serviceContext, servicesOn } from './services.js';
 import { slideGroupsOn } from './slide-groups.js';
 import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
@@ -634,6 +642,10 @@ describe('the Operator override', () => {
       'services.manage',
       'content.edit',
       'catalogue.manage',
+      'presence.use',
+      CONTENT_HISTORY_MANAGE,
+      AUDIT_READ,
+      INTEGRATIONS_MANAGE,
     ]);
   });
 

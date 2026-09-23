@@ -18,7 +18,7 @@ import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
 import { redactorFor, secretsIn } from './redaction.js';
 import { SETTINGS_MANAGE } from './roles.js';
-import { SettingsError } from './settings.js';
+import { DEFAULT_SETTINGS, ENV_KEYS, SettingsError } from './settings.js';
 
 import type { AuditAction, AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
@@ -46,6 +46,18 @@ export interface SettingsRoutesOptions {
   /** Absent in a deployment that keeps no identity, which has nothing here to audit a change against. */
   readonly identity: Identity | undefined;
 }
+
+/**
+ * The one setting a loader problem is about, read off the name it starts with — a setting's own name for
+ * a value from the file or this request, its environment variable for one from the deployment. A problem
+ * naming two settings at once ("tlsCertFile and tlsKeyFile: ...") belongs to neither input alone, and
+ * neither does one this cannot place, so both answer undefined and stay on the form as a whole.
+ */
+const settingNamed = (problem: string): string | undefined => {
+  const name = problem.slice(0, Math.max(0, problem.indexOf(':')));
+  if (name in DEFAULT_SETTINGS) return name;
+  return Object.entries(ENV_KEYS).find(([, variable]) => variable === name)?.[0];
+};
 
 export function serveSettingsRoutes(app: FastifyInstance, { settingsAdmin, identity }: SettingsRoutesOptions): void {
   // A deployment with nowhere to keep an identity has nothing here to audit a change against. Every path
@@ -124,11 +136,14 @@ export function serveSettingsRoutes(app: FastifyInstance, { settingsAdmin, ident
       );
     } catch (error) {
       if (error instanceof SettingsError) {
-        const problems: Problem[] = error.problems.map((problem) => ({
-          path: 'settings',
-          code: FIELD_CODES.notAllowed,
-          message: problem,
-        }));
+        const problems: Problem[] = error.problems.map((problem) => {
+          const setting = settingNamed(problem);
+          return {
+            path: setting === undefined ? 'settings' : `settings.${setting}`,
+            code: FIELD_CODES.notAllowed,
+            message: problem,
+          };
+        });
         return reply.code(422).send(validationFailure(request.id, problems));
       }
       throw error;

@@ -170,10 +170,18 @@ export function serveTotpRoutes(app: FastifyInstance, { identity }: TotpRoutesOp
     return reply.send(successEnvelope({ recoveryCodes: codes }, request.id, CLIENT_WINDOW.current));
   });
 
+  // A fresh set of codes is a way back into the account without the authenticator, so it takes the same
+  // step-up as giving the factor up (COLAB-06): a session left open on a shared machine is not enough.
   app.post(TOTP_RECOVERY_PATH, { config: { need: SESSION } }, async (request, reply) => {
     const id = await asker(request, reply);
     if (id === undefined) return reply;
     const correlation = correlationFor(TOTP_PREFIX, request.id);
+    if (!await passwordConfirmed(identity, id, request.body, correlation)) {
+      await note(request, provenSession(request).record.actor, 'totp.regenerate', 'refused');
+      return reply.code(401).send(errorEnvelope(
+        'auth.sign_in_refused', 'Confirm your password and try again in a few minutes.', request.id,
+      ));
+    }
     let codes;
     try {
       codes = await identity.totp.regenerate(totpContext(correlation), id);

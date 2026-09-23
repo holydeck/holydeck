@@ -10,7 +10,7 @@
 // apart by; `expiresAt` is when the entry stops counting and is the only one a reader compares against,
 // so a reader never has to know how long a lease is to know whether one is still good.
 
-import { FIELD_CODES, type FieldReader, type ParseFn, parseObject } from './problems.js';
+import { FIELD_CODES, type FieldReader, type Parsed, type ParseFn, parseObject } from './problems.js';
 
 /** Every field a presence entry carries, in the order a record reads. */
 export const PRESENCE_FIELDS = ['contentId', 'actor', 'enteredAt', 'heartbeatAt', 'expiresAt'] as const;
@@ -27,6 +27,11 @@ export interface PresenceEntry {
   readonly enteredAt: string;
   readonly heartbeatAt: string;
   readonly expiresAt: string;
+  /**
+   * The editor's name as their account gives it, added by a listing and never stored: the store keeps
+   * who, a reader is told what to call them. Absent when no account answers for the actor.
+   */
+  readonly displayName?: string;
 }
 
 /** The identity of an entry as the database stores it, so re-entering refreshes rather than duplicates. */
@@ -59,4 +64,15 @@ export const parsePresenceEntry: ParseFn<PresenceEntry> = (value, path) =>
     enteredAt: reader.time('enteredAt'),
     heartbeatAt: reader.time('heartbeatAt'),
     expiresAt: reader.time('expiresAt'),
+    ...(reader.names.includes('displayName') ? { displayName: reader.text('displayName') } : {}),
   }));
+
+/** What an editor names when entering: enough to find their one lease without claiming any write. */
+export interface PresenceEnterInput {
+  readonly contentId: string;
+}
+
+/** Reads an enter request through the same key rule the store relies on when it refreshes an entry. */
+export function parsePresenceEnter(value: unknown, path = 'params'): Parsed<PresenceEnterInput> {
+  return parseObject(value, path, (reader) => ({ contentId: keyPart(reader, 'contentId') }));
+}

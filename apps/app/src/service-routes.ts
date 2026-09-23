@@ -40,6 +40,7 @@ export const SERVICE_ITEM_DUPLICATE_PATH = `${SERVICE_ITEM_PATH}/duplicate`;
 export const SERVICE_ITEMS_REORDER_PATH = `${SERVICE_ITEMS_PATH}/reorder`;
 export const SERVICE_ITEM_REVISE_PATH = `${SERVICE_ITEM_PATH}/revise`;
 export const SERVICE_CONTENT_DRIFT_PATH = `${SERVICE_ID_PATH}/content-drift`;
+export const SERVICE_DEPENDENTS_PATH = `${SERVICE_ID_PATH}/dependents`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: SERVICES_MANAGE };
 
@@ -63,6 +64,7 @@ const ROUTES = [
   ['POST', SERVICE_ITEMS_REORDER_PATH],
   ['POST', SERVICE_ITEM_REVISE_PATH],
   ['GET', SERVICE_CONTENT_DRIFT_PATH],
+  ['GET', SERVICE_DEPENDENTS_PATH],
 ] as const;
 
 const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
@@ -276,5 +278,15 @@ export function serveServiceRoutes(app: FastifyInstance, { services }: ServiceRo
     if (!answer.ok) return refused(request, reply, answer);
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  // Nothing downstream references a Service by id — a template made `fromService` copies its entries and
+  // keeps no link back, and a run's history names its service only as a record of what was shown, which
+  // archiving cannot break — so zero is the exact answer, not a guess.
+  app.get(SERVICE_DEPENDENTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const answer = await settled(() => services.current(call(request), idIn(request)));
+    if (!answer.ok) return refused(request, reply, answer);
+    if (answer.value === undefined) return reply.code(404).send(notFound(request));
+    return reply.send(successEnvelope({ count: 0, approximate: false }, request.id, CLIENT_WINDOW.current));
   });
 }

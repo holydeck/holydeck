@@ -34,6 +34,7 @@ const SONG_BODY = {
 };
 
 let calls: string[];
+let bodies: Record<string, unknown>;
 let routes: Record<string, ReturnType<typeof reply> | ReturnType<typeof reply>[]>;
 
 beforeEach(() => {
@@ -43,6 +44,7 @@ beforeEach(() => {
     lastSeenAt: '2026-09-13T09:30:00.000Z', expiresAt: '2026-09-14T09:30:00.000Z', rotation: 'authentication', csrf: 'c'.repeat(43), slots: [],
   };
   calls = [];
+  bodies = {};
   routes = {
     [`GET ${API.library()}`]: ok([
       entry('a', 'song', 'Paadal', daysAgo(2)),
@@ -64,6 +66,7 @@ beforeEach(() => {
   const fetching: FetchLike = async (url, init) => {
     const key = `${init.method ?? 'GET'} ${url}`;
     calls.push(key);
+    if (typeof init.body === 'string') bodies[key] = JSON.parse(init.body);
     const found = routes[key];
     const route = Array.isArray(found) ? found.shift() : found;
     if (route === undefined) throw new Error(`No reply for ${key}`);
@@ -99,6 +102,92 @@ describe('ContentLibrary', () => {
     const old = await screen.findByRole('button', { name: /Old group.*Archived/u });
     fireEvent.click(old);
     expect(screen.getByRole('region', { name: 'Old group' }).textContent).toContain('Slide group · Archived');
+  });
+
+  it('archives the picked entry after a dialog naming what still uses it, then reloads the list', async () => {
+    routes[`GET ${API.libraryDependents('a')}`] = ok({ count: 3, approximate: false, services: 2, templates: 1 });
+    routes[`PATCH ${API.libraryStatus('a')}`] = ok(entry('a', 'song', 'Paadal', daysAgo(0), daysAgo(0)));
+    render(<ContentLibrary />);
+    fireEvent.click(await screen.findByRole('button', { name: /Paadal/u }));
+    const before = calls.filter((call) => call === `GET ${API.library()}`).length;
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Archive Paadal?' });
+    expect(await screen.findByText('Used by 2 services and 1 template.')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Confirm' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(dialog.isConnected).toBe(false);
+    expect(bodies[`PATCH ${API.libraryStatus('a')}`]).toEqual({ archived: true });
+    expect(screen.getByRole('region', { name: 'Paadal' }).textContent).toContain('Song · Archived');
+    expect(screen.getByRole('button', { name: 'Restore' })).toBeTruthy();
+    await waitFor(() => expect(calls.filter((call) => call === `GET ${API.library()}`).length).toBe(before + 1));
+  });
+
+  it('says plainly when nothing uses the entry, and when that could not be checked', async () => {
+    routes[`GET ${API.libraryDependents('a')}`] = [
+      ok({ count: 0, approximate: false, services: 0, templates: 0 }),
+      reply(500, errorEnvelope('internal', 'broken', 'r')),
+    ];
+    render(<ContentLibrary />);
+    fireEvent.click(await screen.findByRole('button', { name: /Paadal/u }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    expect(await screen.findByText('No service or template uses it.')).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    expect(await screen.findByText('What uses it could not be checked.')).toBeTruthy();
+  });
+
+  it('restores an archived entry without asking what uses it', async () => {
+    routes[`PATCH ${API.libraryStatus('z')}`] = ok(entry('z', 'slideGroup', 'Old group', daysAgo(0)));
+    render(<ContentLibrary />);
+    fireEvent.click(screen.getByLabelText('Show archived'));
+    fireEvent.click(await screen.findByRole('button', { name: /Old group/u }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    await screen.findByRole('alertdialog', { name: 'Restore Old group?' });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(bodies[`PATCH ${API.libraryStatus('z')}`]).toEqual({ archived: false });
+    expect(calls.some((call) => call.includes('/dependents'))).toBe(false);
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeTruthy();
+  });
+
+  it('keeps the dialog open with the refusal when the server refuses the change', async () => {
+    routes[`GET ${API.libraryDependents('a')}`] = ok({ count: 0, approximate: false, services: 0, templates: 0 });
+    routes[`PATCH ${API.libraryStatus('a')}`] = reply(409, errorEnvelope('entity.conflict', 'a is already archived', 'r'));
+    render(<ContentLibrary />);
+    fireEvent.click(await screen.findByRole('button', { name: /Paadal/u }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    await screen.findByRole('alertdialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    expect((await screen.findByRole('alert')).textContent).toBe('The change was refused: a is already archived');
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+  });
+
+  it('offers no archive action to a session that may not edit content', async () => {
+    session.value = { ...session.value!, permissions: ['services.manage'] };
+    render(<ContentLibrary />);
+    fireEvent.click(await screen.findByRole('button', { name: /Paadal/u }));
+    expect(screen.queryByRole('button', { name: 'Archive' })).toBeNull();
+  });
+
+  it('links a session that may manage history to the revision history, and no other', async () => {
+    session.value = { ...session.value!, permissions: ['content.edit', 'contentHistory.manage'] };
+    const { unmount } = render(<ContentLibrary />);
+    fireEvent.click(await screen.findByRole('button', { name: /Grace/u }));
+    await screen.findByText('Revision 3');
+    expect(screen.getByRole('link', { name: 'Revision history' }).getAttribute('href')).toBe('/content/c/history');
+    unmount();
+
+    session.value = { ...session.value!, permissions: ['content.edit'] };
+    render(<ContentLibrary />);
+    fireEvent.click(await screen.findByRole('button', { name: /Grace/u }));
+    await screen.findByText('Revision 3');
+    expect(screen.queryByRole('link', { name: 'Revision history' })).toBeNull();
   });
 
   it('refetches on focus', async () => {

@@ -13,7 +13,7 @@
 // it arrived, forever, and a resolution can be read as the event it was rather than as a flag somebody
 // flipped and nobody can date.
 
-import { FIELD_CODES, type ParseFn, isRecord, parseObject } from './problems.js';
+import { FIELD_CODES, type Parsed, type ParseFn, isRecord, parseObject } from './problems.js';
 import { REVISION_ORIGINS, type RevisionBody, type RevisionOrigin } from './revisions.js';
 
 /** What a row on the shelf is: the losing attempt, or the note that says it was settled. */
@@ -103,3 +103,36 @@ export const parseShelfEntry: ParseFn<ShelfEntry> = (value, path) =>
       body: isRecord(raw) ? raw : {},
     };
   });
+
+/** The ways an editor can settle a shelved body without making the losing revision disappear. */
+export const CONFLICT_RESOLUTION_STRATEGIES = ['keep-mine', 'keep-theirs', 'combine'] as const;
+
+/** One choice for a conflict, constrained so only a deliberate combination carries a replacement body. */
+export type ConflictResolutionStrategy = (typeof CONFLICT_RESOLUTION_STRATEGIES)[number];
+
+/** What a resolution request says: where its body comes from, or the body it made for the combined case. */
+export interface ConflictResolutionInput {
+  readonly strategy: ConflictResolutionStrategy;
+  readonly resolvedBody?: Record<string, unknown>;
+}
+
+/** Reads a resolution request so the body exists exactly where the chosen settlement needs one. */
+export function parseConflictResolution(value: unknown, path = 'body'): Parsed<ConflictResolutionInput> {
+  return parseObject(value, path, (reader) => {
+    const strategy = reader.choice('strategy', CONFLICT_RESOLUTION_STRATEGIES);
+    if (strategy === 'combine') {
+      const raw = reader.present('resolvedBody');
+      if (!isRecord(raw)) {
+        reader.reject('resolvedBody', FIELD_CODES.notAnObject, 'is required when strategy is combine');
+        return { strategy, resolvedBody: {} };
+      }
+      return { strategy, resolvedBody: raw };
+    }
+    reader.absent(
+      'resolvedBody',
+      FIELD_CODES.notAllowed,
+      `is not read for ${strategy}, which resolves from the shelf or the current revision instead`,
+    );
+    return { strategy };
+  });
+}

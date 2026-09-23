@@ -25,6 +25,13 @@ import type { JSX } from 'preact';
 const OutputPage = lazy(() => import('./pages/output.js').then((module) => module.OutputPage));
 const ServicePage = lazy(() => import('./pages/service.js').then((module) => module.ServicePage));
 const AdminUsersPage = lazy(() => import('./pages/admin-users.js').then((module) => module.AdminUsersPage));
+const AdminSettingsPage = lazy(() => import('./pages/admin-settings.js').then((module) => module.AdminSettingsPage));
+const AdminAuditPage = lazy(() => import('./pages/admin-audit.js').then((module) => module.AdminAuditPage));
+const AdminIntegrationsPage = lazy(() => import('./pages/admin-integrations.js').then((module) => module.AdminIntegrationsPage));
+const AdminLanguagesPage = lazy(() => import('./pages/admin-languages.js').then((module) => module.AdminLanguagesPage));
+const AdminSlideLabelsPage = lazy(() => import('./pages/admin-slide-labels.js').then((module) => module.AdminSlideLabelsPage));
+const HistoryPage = lazy(() => import('./pages/history.js').then((module) => module.HistoryPage));
+const SecurityPage = lazy(() => import('./pages/account-security.js').then((module) => module.SecurityPage));
 const WorkspacePage = lazy(() => import('./workspace/Workspace.js').then((module) => module.Workspace)) as
   (props: { readonly id: string }) => JSX.Element;
 const NewServicePage = lazy(() => import('./workspace/NewService.js').then((module) => module.NewService));
@@ -54,10 +61,24 @@ function Page(): JSX.Element {
       return <MediaLibraryPage />;
     case 'admin-users':
       return <AdminUsersPage />;
+    case 'admin-settings':
+      return <AdminSettingsPage />;
+    case 'admin-audit':
+      return <AdminAuditPage />;
+    case 'admin-integrations':
+      return <AdminIntegrationsPage />;
+    case 'admin-languages':
+      return <AdminLanguagesPage />;
+    case 'admin-slide-labels':
+      return <AdminSlideLabelsPage />;
+    case 'account-security':
+      return <SecurityPage />;
+    case 'content-history':
+      return <HistoryPage contentId={current.contentId} />;
     case 'welcome':
       return <WelcomePage />;
     case 'sign-in':
-      return <SignInPage next={current.next} notice={current.notice} />;
+      return <SignInPage next={current.next} notice={current.notice} add={current.add === true} />;
     // `boot()` moves `/` on to `/services`, `/welcome` or `/sign-in`; until it has, there is nothing to show.
     case 'root':
       return <p role="status">{t('app.loading')}</p>;

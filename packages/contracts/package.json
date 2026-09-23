@@ -13,6 +13,10 @@
       "types": "./dist/accounts.d.ts",
       "import": "./dist/accounts.js"
     },
+    "./audit": {
+      "types": "./dist/audit.d.ts",
+      "import": "./dist/audit.js"
+    },
     "./backups": {
       "types": "./dist/backups.d.ts",
       "import": "./dist/backups.js"
@@ -32,6 +36,10 @@
     "./http": {
       "types": "./dist/http.d.ts",
       "import": "./dist/http.js"
+    },
+    "./integrations": {
+      "types": "./dist/integrations.d.ts",
+      "import": "./dist/integrations.js"
     },
     "./clients": {
       "types": "./dist/clients.d.ts",

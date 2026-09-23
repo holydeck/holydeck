@@ -93,6 +93,8 @@ export interface SessionRecord {
 export interface SlotSummary {
   readonly slotId: string;
   readonly actor: string;
+  /** The display name of the account behind `actor`, when there is one: what an account switcher shows. */
+  readonly displayName?: string;
 }
 
 /** Who a signed-in slot is, as the client renders it: never a credential, a second factor, or a flag nobody shows. */
@@ -193,7 +195,11 @@ const readSessionRecord = (reader: FieldReader): SessionRecord => {
 };
 
 const parseSlotSummary = (value: unknown, path: string): Parsed<SlotSummary> =>
-  parseObject(value, path, (reader) => ({ slotId: reader.text('slotId'), actor: reader.text('actor') }));
+  parseObject(value, path, (reader) => ({
+    slotId: reader.text('slotId'),
+    actor: reader.text('actor'),
+    ...(reader.names.includes('displayName') ? { displayName: reader.text('displayName') } : {}),
+  }));
 
 const parseSessionAccount = (value: unknown, path: string): Parsed<SessionAccount> =>
   parseObject(value, path, (reader) => ({

@@ -3,6 +3,7 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: [
     'src/accounts.ts',
+    'src/audit.ts',
     'src/backups.ts',
     'src/canonical.ts',
     'src/collaboration.ts',
@@ -17,6 +18,7 @@ export default defineConfig({
     'src/live-theme.ts',
     'src/jobs.ts',
     'src/entities.ts',
+    'src/integrations.ts',
     'src/layouts.ts',
     'src/library.ts',
     'src/media.ts',

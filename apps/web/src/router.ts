@@ -8,7 +8,13 @@ import { computed, signal, type ReadonlySignal, type Signal } from '@preact/sign
 /** Every page the web application can render from a same-origin path. */
 export type Route =
   | { readonly name: 'root' }
-  | { readonly name: 'sign-in'; readonly next: string | undefined; readonly notice: 'claim-sign-in-refused' | undefined }
+  | {
+      readonly name: 'sign-in';
+      readonly next: string | undefined;
+      readonly notice: 'claim-sign-in-refused' | undefined;
+      /** Set when a signed-in tab opens sign-in to add another account to its container (COLAB-08). */
+      readonly add?: true;
+    }
   | { readonly name: 'welcome' }
   | { readonly name: 'services' }
   | { readonly name: 'service-new' }
@@ -18,6 +24,13 @@ export type Route =
   | { readonly name: 'library' }
   | { readonly name: 'media' }
   | { readonly name: 'admin-users' }
+  | { readonly name: 'admin-settings' }
+  | { readonly name: 'admin-audit' }
+  | { readonly name: 'admin-integrations' }
+  | { readonly name: 'admin-languages' }
+  | { readonly name: 'admin-slide-labels' }
+  | { readonly name: 'account-security' }
+  | { readonly name: 'content-history'; readonly contentId: string }
   | { readonly name: 'output'; readonly kind: string }
   | { readonly name: 'not-found' };
 
@@ -56,6 +69,7 @@ export function matchRoute(pathWithSearch: string): Route {
       name: 'sign-in',
       next: safeNext(parameters.get('next')),
       notice: parameters.get('notice') === 'claim-sign-in-refused' ? 'claim-sign-in-refused' : undefined,
+      ...(parameters.get('add') === '1' ? { add: true as const } : {}),
     };
   }
   if (pathname === '/welcome') return { name: 'welcome' };
@@ -64,6 +78,12 @@ export function matchRoute(pathWithSearch: string): Route {
   if (pathname === '/library') return { name: 'library' };
   if (pathname === '/media') return { name: 'media' };
   if (pathname === '/admin/users') return { name: 'admin-users' };
+  if (pathname === '/admin/settings') return { name: 'admin-settings' };
+  if (pathname === '/admin/audit') return { name: 'admin-audit' };
+  if (pathname === '/admin/integrations') return { name: 'admin-integrations' };
+  if (pathname === '/admin/languages') return { name: 'admin-languages' };
+  if (pathname === '/admin/slide-labels') return { name: 'admin-slide-labels' };
+  if (pathname === '/account/security') return { name: 'account-security' };
 
   const serviceLive = /^\/services\/([^/]+)\/live$/u.exec(pathname);
   if (serviceLive !== null) {
@@ -88,6 +108,15 @@ export function matchRoute(pathWithSearch: string): Route {
   if (service !== null) {
     try {
       return { name: 'service', id: decodeURIComponent(service[1] ?? '') };
+    } catch {
+      return notFound();
+    }
+  }
+
+  const contentHistory = /^\/content\/([^/]+)\/history$/u.exec(pathname);
+  if (contentHistory !== null) {
+    try {
+      return { name: 'content-history', contentId: decodeURIComponent(contentHistory[1] ?? '') };
     } catch {
       return notFound();
     }

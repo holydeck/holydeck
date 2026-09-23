@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn } from './audit.js';
+import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn, auditReadContext, integrationCallAudit } from './audit.js';
 import { ContextError, requestContext } from './context.js';
 import { RepositoryError } from './repositories.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -28,6 +28,7 @@ describe('what the trail records', () => {
         correlationId: CORRELATION,
         at: AT,
         action: 'instance.claim',
+        category: 'authentication',
         subject: 'account:7f3a',
         outcome: 'allowed',
       },
@@ -180,7 +181,11 @@ describe('the context the trail is written under', () => {
       'readiness.override',
       'backup.run',
       'restore.run',
+      'content.conflict.resolve',
+      'content.revision.restore',
       'integration.call',
+      'integration.enable',
+      'integration.disable',
     ]);
   });
 });
@@ -211,12 +216,36 @@ describe('the category taxonomy', () => {
   });
 });
 
+describe('history recorded before categories were stored', () => {
+  const legacy = (db: FakeDb, id: string, action: string, at = AT) =>
+    db.collection('audit_events').insertOne({
+      _id: `audit:${id}`, actor: 'account:1', correlationId: CORRELATION, at, action, subject: 's', outcome: 'allowed',
+    });
+  const reader = auditReadContext('account:1', CORRELATION);
+
+  it('reads a row with no stored category under the category its action belongs to', async () => {
+    const db = fakeDb();
+    await legacy(db, 'old', 'instance.claim');
+    const { entries: listed } = await trailOn(db).list(reader, { limit: 10 });
+    expect(listed).toEqual([expect.objectContaining({ id: 'old', category: 'authentication' })]);
+  });
+
+  it('finds that row under its category filter, and not under another', async () => {
+    const db = fakeDb();
+    await legacy(db, 'old', 'instance.claim');
+    await legacy(db, 'other', 'settings.update');
+    const trail = trailOn(db);
+    expect((await trail.list(reader, { category: 'authentication', limit: 10 })).entries.map((entry) => entry.id)).toEqual(['old']);
+    expect((await trail.list(reader, { category: 'backup', limit: 10 })).entries).toEqual([]);
+  });
+});
+
 describe('the actions reserved for a surface not yet built', () => {
   it('accepts each one, so the surface that calls it for the first time finds the trail already open', async () => {
     const db = fakeDb();
-    const trail = trailOn(db, ['r1', 'r2', 'r3', 'r4']);
+    const trail = trailOn(db, ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
     const context = auditContext('system', CORRELATION);
-    const reserved = ['content.change', 'backup.run', 'restore.run'] as const;
+    const reserved = ['content.change', 'backup.run', 'restore.run', 'content.conflict.resolve', 'integration.disable'] as const;
     for (const action of reserved) {
       await expect(trail.record(context, { action, subject: 'reserved', outcome: 'allowed' })).resolves.toBeTruthy();
     }
@@ -236,5 +265,50 @@ describe('what an entry could never be made to carry', () => {
     // @ts-expect-error -- body is not a field AuditEntry declares, and it never should be
     const withBody: AuditEntry = { action: 'settings.update', subject: 'x', outcome: 'allowed', body: 'raw' };
     expect([withPrompt, withHeaders, withBody]).toHaveLength(3);
+  });
+});
+
+describe('what the trail keeps of an address or a credential it is handed anyway', () => {
+  const LEAKY = 'from 203.0.113.57 and 2001:db8:85a3:8d3:1319:8a2e:370:7348 via mongodb://holydeck:hunter2@db:27017/holydeck at 09:30:00';
+  const KEPT = 'from 203.0.113.0/24 and 2001:db8:85a3::/48 via mongodb://holydeck:[redacted]@db:27017/holydeck at 09:30:00';
+
+  it('narrows an address to its /24 (or /48) and drops a URL password before anything is written', async () => {
+    const db = fakeDb();
+    await trailOn(db).record(auditContext('system', CORRELATION), {
+      action: 'session.signIn',
+      subject: 'client 198.51.100.23',
+      outcome: 'refused',
+      detail: LEAKY,
+    });
+    expect(entries(db)[0]).toMatchObject({ subject: 'client 198.51.100.0/24', detail: KEPT });
+    expect(JSON.stringify(entries(db))).not.toContain('hunter2');
+  });
+
+  it('narrows the same way when reading back a row written before the trail did', async () => {
+    const db = fakeDb();
+    await db.collection('audit_events').insertOne({
+      _id: 'audit:old', actor: 'system', correlationId: CORRELATION, at: AT, action: 'session.signIn',
+      subject: 'client 198.51.100.23', outcome: 'refused', detail: LEAKY,
+    });
+    const { entries: listed } = await trailOn(db).list(auditReadContext('account:1', CORRELATION), { limit: 10 });
+    expect(listed[0]).toMatchObject({ subject: 'client 198.51.100.0/24', detail: KEPT });
+  });
+});
+
+describe('integrationCallAudit', () => {
+  it('records an integration.call entry with token/duration fields from the call info', async () => {
+    const db = fakeDb();
+    const record = integrationCallAudit(trailOn(db), 'account:1', CORRELATION);
+    await record({
+      action: 'integration.call',
+      subject: 'sermon-ai',
+      outcome: 'allowed',
+      detail: 'generate-sermon',
+      requestTokens: 120,
+      responseTokens: 340,
+      durationMs: 890,
+    });
+    const [stored] = entries(db);
+    expect(stored).toMatchObject({ requestTokens: 120, responseTokens: 340, durationMs: 890 });
   });
 });

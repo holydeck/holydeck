@@ -8,6 +8,11 @@
 // `edit`, and `unarchive` alone among the mutations grade the claim against the live catalogue, so only
 // those three can answer 409 with the exact `CatalogueConflict[]` the store graded it against, carried
 // in the envelope's `fields`. `archive` claims nothing and can only ever answer 409 for double-archiving.
+//
+// The administered list carries each label's usage, and `/dependents` answers the same number exactly
+// (COLAB-13/14): how many current songs, slide groups and reusable slides carry a section or slide whose
+// label names it. Content stores a label by its name, not its id — the editors offer the catalogue as a
+// datalist — so the match is on the name, trimmed and case-folded by `labelKey`. See content-usage.ts.
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
@@ -20,6 +25,7 @@ import {
 } from '@holydeck/contracts/slide-labels';
 
 import { auditContext } from './audit.js';
+import { contentUsage, labelKey } from './content-usage.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
@@ -28,8 +34,12 @@ import { SlideLabelError, slideLabelContext, subjectFor } from './slide-labels.j
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
+import type { LibraryStore } from './library.js';
 import type { Identity } from './onboarding.js';
+import type { SermonStore } from './sermons.js';
+import type { SlideGroupStore } from './slide-groups.js';
 import type { SlideLabelStore } from './slide-labels.js';
+import type { SongStore } from './songs.js';
 import type { CatalogueConflict } from '@holydeck/contracts/slide-labels';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
@@ -38,6 +48,7 @@ const SLIDE_LABEL_PREFIX = 'slideLabel:';
 export const SLIDE_LABEL_ID_PATH = `${SLIDE_LABELS_PATH}/:id`;
 export const SLIDE_LABEL_STATUS_PATH = `${SLIDE_LABEL_ID_PATH}/status`;
 export const SLIDE_LABEL_CATALOGUE_PATH = `${SLIDE_LABELS_PATH}/catalogue`;
+export const SLIDE_LABEL_DEPENDENTS_PATH = `${SLIDE_LABEL_ID_PATH}/dependents`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: CATALOGUE_MANAGE };
 const CATALOGUE_PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
@@ -49,6 +60,7 @@ const ROUTES = [
   ['GET', SLIDE_LABEL_ID_PATH, PERMISSION],
   ['PUT', SLIDE_LABEL_ID_PATH, PERMISSION],
   ['PATCH', SLIDE_LABEL_STATUS_PATH, PERMISSION],
+  ['GET', SLIDE_LABEL_DEPENDENTS_PATH, PERMISSION],
 ] as const;
 
 const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
@@ -73,9 +85,18 @@ const refusalReply = (error: unknown, requestId: string) => {
 export interface SlideLabelRoutesOptions {
   readonly slideLabels: SlideLabelStore | undefined;
   readonly identity: Identity | undefined;
+  /** Absent whenever `identity` is, per `main.ts`'s wiring — used only for the usage counts below. */
+  readonly songs: SongStore | undefined;
+  readonly slideGroups: SlideGroupStore | undefined;
+  readonly library: LibraryStore | undefined;
+  /** Absent in a deployment without sermons; a sermon carries no labels, so nothing here reads it yet. */
+  readonly sermons?: SermonStore | undefined;
 }
 
-export function serveSlideLabelRoutes(app: FastifyInstance, { slideLabels, identity }: SlideLabelRoutesOptions): void {
+export function serveSlideLabelRoutes(
+  app: FastifyInstance,
+  { slideLabels, identity, songs, slideGroups, library, sermons }: SlideLabelRoutesOptions,
+): void {
   if (identity === undefined) {
     for (const [method, url, need] of ROUTES) {
       app.route({
@@ -88,6 +109,12 @@ export function serveSlideLabelRoutes(app: FastifyInstance, { slideLabels, ident
     return;
   }
   const labels = slideLabels as SlideLabelStore;
+  const usageFor = (request: FastifyRequest) =>
+    contentUsage(
+      { library: library as LibraryStore, songs: songs as SongStore, slideGroups: slideGroups as SlideGroupStore, sermons },
+      provenSession(request).record.actor,
+      correlationFor(SLIDE_LABEL_PREFIX, request.id),
+    );
   const call = (request: FastifyRequest) =>
     slideLabelContext(provenSession(request).record.actor, correlationFor(SLIDE_LABEL_PREFIX, request.id));
 
@@ -103,8 +130,9 @@ export function serveSlideLabelRoutes(app: FastifyInstance, { slideLabels, ident
   };
 
   app.get(SLIDE_LABELS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
-    const items = await labels.list(call(request));
-    return reply.send(successEnvelope(items, request.id, CLIENT_WINDOW.current));
+    const [items, usage] = await Promise.all([labels.list(call(request)), usageFor(request)]);
+    const counted = items.map((item) => ({ ...item, usage: usage.labels.get(labelKey(item.name)) ?? 0 }));
+    return reply.send(successEnvelope(counted, request.id, CLIENT_WINDOW.current));
   });
 
   app.post(SLIDE_LABELS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
@@ -157,5 +185,13 @@ export function serveSlideLabelRoutes(app: FastifyInstance, { slideLabels, ident
     } catch (error) {
       return reply.code(409).send(refusalReply(error, request.id));
     }
+  });
+
+  // Exact, not approximate: every current item is read (see the header), so the count is the true one.
+  app.get(SLIDE_LABEL_DEPENDENTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const item = await labels.get(call(request), idIn(request));
+    if (item === undefined) return reply.code(404).send(notFound(request));
+    const count = (await usageFor(request)).labels.get(labelKey(item.name)) ?? 0;
+    return reply.send(successEnvelope({ count, approximate: false }, request.id, CLIENT_WINDOW.current));
   });
 }

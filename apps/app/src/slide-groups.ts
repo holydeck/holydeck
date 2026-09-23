@@ -35,9 +35,11 @@ import { randomBytes } from 'node:crypto';
 
 import { parseSlideGroupBody } from '@holydeck/contracts/slide-groups';
 
+import { conflictShelfOn, SHELF_PERMISSIONS } from './conflicts.js';
 import { requestContext } from './context.js';
 import { LibraryError, LIBRARY_PERMISSIONS, libraryOn } from './library.js';
 import { RevisionError, REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
+import { saveContent } from './save-content.js';
 
 import type { EntityStamp } from '@holydeck/contracts/entities';
 import type { LibraryKind } from '@holydeck/contracts/library';
@@ -65,7 +67,7 @@ export class SlideGroupError extends Error {
 export function slideGroupContext(actor: string, correlationId: string): RequestContext {
   return requestContext({
     actor,
-    permissions: [...Object.values(LIBRARY_PERMISSIONS), ...Object.values(REVISION_PERMISSIONS)],
+    permissions: [...Object.values(LIBRARY_PERMISSIONS), ...Object.values(REVISION_PERMISSIONS), ...Object.values(SHELF_PERMISSIONS)],
     correlationId,
   });
 }
@@ -288,6 +290,7 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
   const newId = options.newId ?? ((): string => randomBytes(SLIDE_ID_BYTES).toString('base64url'));
   const library = libraryOn(db, { now: options.now, newId });
   const revisions = revisionsOn(db, { now: options.now });
+  const conflictShelf = conflictShelfOn(db, { now: options.now });
 
   /** The standing stamp and body of one item — a body-carrying `library.create`/`revisions.save` pair
    *  read back together. A stamp with no body is corrupt, never "not found": ruling 4's whole point. */
@@ -310,7 +313,7 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
     // SlideGroupBody is an interface, not a type alias (unlike `SlideLayoutBody`), so TypeScript does
     // not consider it structurally assignable to RevisionBody's index signature on its own; the value
     // itself is untouched by the cast.
-    await revisions.save(context, { contentId: id, body: body as unknown as RevisionBody, origin: 'manual-checkpoint' });
+    await saveContent(revisions, conflictShelf)(context, { contentId: id, body: body as unknown as RevisionBody, origin: 'manual-checkpoint' });
     return { stamp: row.stamp, title: row.title, body };
   };
 

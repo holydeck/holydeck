@@ -5,6 +5,7 @@ import {
   HASH_ALGORITHM,
   historyProblems,
   isRevisionAddress,
+  parseRevisionCompareQuery,
   parseRevisionRecord,
   REVISION_FIELDS,
   REVISION_KEY_SEPARATOR,
@@ -180,5 +181,27 @@ describe('history read as a whole', () => {
   it('refuses one history holding the revisions of two contents', () => {
     const mixed = run(2, (ordinal) => (ordinal === 2 ? { contentId: 'song-2' } : {}));
     expect(historyProblems(mixed)).toEqual(['revision 2: belongs to song-2, not to song-1']);
+  });
+});
+
+describe('parseRevisionCompareQuery', () => {
+  it('accepts two whole numbers', () => {
+    const result = parseRevisionCompareQuery({ from: '1', to: '3' });
+    expect(result).toEqual({ ok: true, value: { from: 1, to: 3 } });
+  });
+
+  it('rejects a missing from', () => {
+    const result = parseRevisionCompareQuery({ to: '3' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a non-numeric to', () => {
+    const result = parseRevisionCompareQuery({ from: '1', to: 'abc' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects zero', () => {
+    const result = parseRevisionCompareQuery({ from: '0', to: '1' });
+    expect(result.ok).toBe(false);
   });
 });

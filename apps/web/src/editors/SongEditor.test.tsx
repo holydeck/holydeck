@@ -39,6 +39,26 @@ type Reply = ReturnType<typeof reply> | { status: number; json: () => Promise<un
 let routes: Record<string, () => Reply>;
 let calls: { key: string; body: unknown }[];
 
+const coEditing = (contentId: string): Record<string, () => unknown> => ({
+  [`POST /api/v1/presence/${encodeURIComponent(contentId)}`]: () => reply(200, successEnvelope({}, 'r')),
+  [`GET /api/v1/presence/${encodeURIComponent(contentId)}`]: () =>
+    reply(200, successEnvelope([{
+      contentId, actor: 'account:other', displayName: 'Chioma Obi',
+      enteredAt: '2026-09-14T09:00:00.000Z', heartbeatAt: '2026-09-14T09:00:00.000Z', expiresAt: '2026-09-14T09:01:00.000Z',
+    }], 'r')),
+  [`DELETE /api/v1/presence/${encodeURIComponent(contentId)}`]: () => ({ status: 204, json: async (): Promise<unknown> => undefined }),
+  [`GET /api/v1/content/${encodeURIComponent(contentId)}/conflicts`]: () =>
+    reply(200, successEnvelope({
+      outstanding: [{
+        kind: 'shelved', contentId, sequence: 1, attempted: 3, origin: 'autosave', body: {},
+        at: '2026-09-14T09:00:00.000Z', actor: 'account:other', correlationId: 'req-1',
+      }],
+      entries: [],
+    }, 'r')),
+  [`POST /api/v1/content/${encodeURIComponent(contentId)}/conflicts/${encodeURIComponent(`${contentId}#1`)}/resolve`]: () =>
+    reply(200, successEnvelope({ appended: true, revision: 3 }, 'r')),
+});
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   calls = [];
@@ -137,6 +157,26 @@ describe('SongEditor', () => {
     expect(screen.queryByRole('button', { name: 'Reload Latest' })).toBeNull();
   });
 
+  it('reads the shelf again once a save is shelved, so the losing save is there to settle', async () => {
+    Object.assign(routes, coEditing('song1'));
+    const conflicts = `GET /api/v1/content/${encodeURIComponent('song1')}/conflicts`;
+    const shelved = routes[conflicts]!;
+    let reads = 0;
+    routes[conflicts] = () => (reads++ === 0 ? reply(200, successEnvelope({ outstanding: [], entries: [] }, 'r')) : shelved());
+    routes[`PUT ${API.song('song1')}`] = () => reply(409, errorEnvelope('entity.state_conflict', 'Stale.', 'r'));
+    render(<SongEditor songId="song1" />);
+    await settle();
+    expect(screen.queryByRole('button', { name: 'Keep mine' })).toBeNull();
+
+    fireEvent.input(screen.getByLabelText('Title (Tamil)'), { target: { value: 'மாற்றம்' } });
+    await settle(800);
+    await settle();
+    await settle();
+
+    expect(sent(conflicts)).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Keep mine' })).toBeTruthy();
+  });
+
   it('edits languages, sections and details in the form', async () => {
     render(<SongEditor songId="song1" />);
     await settle();
@@ -205,5 +245,19 @@ describe('SongEditor', () => {
     render(<SongEditor songId="song1" />);
     await settle();
     expect(screen.getByText('client.unreadable_response')).toBeTruthy();
+  });
+
+  it('shows who else is editing and the conflicts left to settle, and reloads after one is settled', async () => {
+    Object.assign(routes, coEditing('song1'));
+    render(<SongEditor songId="song1" />);
+    await settle();
+    await settle();
+    expect(screen.getByText('Also editing')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Chioma Obi is editing' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep theirs' }));
+    await settle();
+    await settle();
+    expect(sent(`GET ${API.song('song1')}`)).toHaveLength(2);
   });
 });

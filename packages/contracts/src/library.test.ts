@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ENTITY_KINDS, isEntityKind } from './entities.js';
-import { LIBRARY_KINDS, parseLibraryDraft, parseLibraryFilter } from './library.js';
+import { LIBRARY_KINDS, parseLibraryDependents, parseLibraryDraft, parseLibraryFilter, parseLibraryStatus } from './library.js';
 import { FIELD_CODES } from './problems.js';
 
 describe('what the content library holds', () => {
@@ -79,5 +79,18 @@ describe('reading a library draft', () => {
     expect(!parsed.ok && parsed.problems).toEqual([
       { path: 'library', code: FIELD_CODES.notAnObject, message: 'must be an object' },
     ]);
+  });
+});
+
+describe('archiving a library item and what still uses it', () => {
+  it('reads the archive flag and refuses anything else', () => {
+    expect(parseLibraryStatus({ archived: true })).toEqual({ ok: true, value: { archived: true } });
+    expect(parseLibraryStatus({ archived: 'yes' }).ok).toBe(false);
+  });
+
+  it('reads a dependents summary with its services and templates, and refuses a partial one', () => {
+    const summary = { count: 3, approximate: false, services: 2, templates: 1 };
+    expect(parseLibraryDependents(summary)).toEqual({ ok: true, value: summary });
+    expect(parseLibraryDependents({ count: 3, approximate: false }).ok).toBe(false);
   });
 });

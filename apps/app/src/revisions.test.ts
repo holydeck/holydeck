@@ -172,6 +172,33 @@ describe('appending a revision', () => {
   });
 });
 
+describe('appending against the revision an editor last read', () => {
+  it('appends when the revision the editor read is still the one standing', async () => {
+    const { revisions } = store();
+    await revisions.save(EDITOR, { contentId: 'song-1', body: FIRST, origin: 'autosave' });
+    const saved = await revisions.save(EDITOR, { contentId: 'song-1', body: SECOND, origin: 'autosave', expectedRevision: 1 });
+    expect(saved).toMatchObject({ appended: true, revision: { revision: 2 } });
+  });
+
+  it('refuses as a conflict when somebody else appended since, and writes nothing', async () => {
+    const { db, revisions } = store();
+    await revisions.save(EDITOR, { contentId: 'song-1', body: FIRST, origin: 'autosave' });
+    await revisions.save(EDITOR, { contentId: 'song-1', body: SECOND, origin: 'autosave' });
+    const error = await refused(
+      revisions.save(EDITOR, { contentId: 'song-1', body: { title: 'Other' }, origin: 'autosave', expectedRevision: 1 }),
+    );
+    expect(error.kind).toBe('conflict');
+    expect(error.message).toBe('song-1 is now at revision 2, not 1');
+    expect(rows(db)).toHaveLength(2);
+  });
+
+  it('expects revision 0 of content that has no history yet', async () => {
+    const { revisions } = store();
+    const first = await revisions.save(EDITOR, { contentId: 'song-1', body: FIRST, origin: 'autosave', expectedRevision: 0 });
+    expect(first.revision.revision).toBe(1);
+  });
+});
+
 describe('reading history back', () => {
   const written = async (): Promise<{ db: FakeDb; revisions: RevisionStore }> => {
     const made = store();

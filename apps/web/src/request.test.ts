@@ -97,6 +97,21 @@ describe('boot', () => {
     expect(currentPath.value).toBe('/admin/users');
   });
 
+  it('leaves a signed-in tab on sign-in when it came there to add another account', async () => {
+    resetRoute('/sign-in?add=1');
+    const fetching = vi.fn<FetchLike>(async (path) =>
+      path === SESSION_PATH
+        ? reply(200, successEnvelope(SESSION, 'request-add'))
+        : refused(404, 'resource.not_found'),
+    );
+    setFetching(fetching);
+
+    await boot();
+
+    expect(session.value).toEqual(SESSION);
+    expect(currentPath.value).toBe('/sign-in?add=1');
+  });
+
   it('returns an expired session to sign-in with the protected path encoded', async () => {
     resetRoute('/admin/users');
     const fetching = vi.fn<FetchLike>(async (path) =>

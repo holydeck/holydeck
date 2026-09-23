@@ -46,6 +46,21 @@ export interface Settings {
    * see `PROTECTED_SETTINGS` below for what that means and why this one is in it.
    */
   developmentDiagnostics: boolean;
+  /** How long an audit entry stands before `retention.ts` may consider it for removal (spec v1c-09,
+   *  COLAB-11). 30–3650 days, default 365. */
+  auditRetentionDays: number;
+  /** How long a superseded autosave revision stands before `retention.ts` may consider it for
+   *  removal (spec v1c-09, COLAB-04). Never applies to the current revision, the latest autosave, or
+   *  a manual checkpoint — those are permanently protected regardless of this value. 1–365 days,
+   *  default 30. */
+  autosaveRetentionDays: number;
+  /** Whether the sermon-AI integration (spec v1c-08) is turned on for this deployment. False by
+   *  default, and false is also what `integration-routes.ts` (task 09-7) forces it back to whenever
+   *  `anthropicApiKey` is empty — there is nothing to enable without a credential. */
+  sermonAiEnabled: boolean;
+  /** The credential the sermon-AI integration calls Anthropic with. Empty means this deployment has
+   *  not configured one, the same convention `corpusToken` and `resticPassword` use for "unset". */
+  anthropicApiKey: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -62,6 +77,10 @@ export const DEFAULT_SETTINGS: Settings = {
   mongoUrl: '',
   timezone: 'Europe/Zurich',
   developmentDiagnostics: false,
+  auditRetentionDays: 365,
+  autosaveRetentionDays: 30,
+  sermonAiEnabled: false,
+  anthropicApiKey: '',
 };
 
 /**
@@ -105,7 +124,7 @@ export class SettingsError extends Error {
   }
 }
 
-const ENV_KEYS: Record<keyof Settings, string> = {
+export const ENV_KEYS: Record<keyof Settings, string> = {
   port: 'HOLYDECK_PORT',
   dataDir: 'HOLYDECK_DATA_DIR',
   mediaRoot: 'HOLYDECK_MEDIA_ROOT',
@@ -119,6 +138,10 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   mongoUrl: 'HOLYDECK_MONGO_URL',
   timezone: 'HOLYDECK_TIMEZONE',
   developmentDiagnostics: 'HOLYDECK_DEVELOPMENT_DIAGNOSTICS',
+  auditRetentionDays: 'HOLYDECK_AUDIT_RETENTION_DAYS',
+  autosaveRetentionDays: 'HOLYDECK_AUTOSAVE_RETENTION_DAYS',
+  sermonAiEnabled: 'HOLYDECK_SERMON_AI_ENABLED',
+  anthropicApiKey: 'HOLYDECK_ANTHROPIC_API_KEY',
 };
 
 // Normalized so a relative or non-canonical override still matches, byte for byte, the mount table
@@ -150,6 +173,36 @@ const parseFlag = (raw: unknown): Parsed<boolean> => {
   if (raw === 'true') return { ok: true, value: true };
   if (raw === 'false') return { ok: true, value: false };
   return { ok: false, problem: `expected true or false, got ${JSON.stringify(raw)}` };
+};
+
+function parseRetentionDays(field: string, min: number, max: number) {
+  return (raw: unknown): Parsed<number> => {
+    const value = typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim()) : raw;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+      return {
+        ok: false,
+        problem: `expected a whole number between ${min} and ${max}, got ${JSON.stringify(raw)}`,
+      };
+    }
+    return { ok: true, value };
+  };
+}
+
+const parseAuditRetentionDays = parseRetentionDays('auditRetentionDays', 30, 3650);
+const parseAutosaveRetentionDays = parseRetentionDays('autosaveRetentionDays', 1, 365);
+
+// Unlike parseFlag, this setting is administrable through the file, not protected — and the file layer
+// hands YAML's own parsed boolean rather than text, so both a real boolean and the environment's string
+// are accepted here.
+const parseSermonAiEnabled = (raw: unknown): Parsed<boolean> => {
+  if (raw === true || raw === 'true') return { ok: true, value: true };
+  if (raw === false || raw === 'false') return { ok: true, value: false };
+  return { ok: false, problem: `expected true or false, got ${JSON.stringify(raw)}` };
+};
+
+const parseAnthropicApiKey = (raw: unknown): Parsed<string> => {
+  if (typeof raw !== 'string') return { ok: false, problem: `expected a string, got ${JSON.stringify(raw)}` };
+  return { ok: true, value: raw.trim() };
 };
 
 const parseAbsolutePath = (raw: unknown): Parsed<string> => {
@@ -364,6 +417,25 @@ export function loadSettings(input: {
     parseFlag,
     layers,
   );
+  const auditRetentionDays = resolve(
+    'auditRetentionDays',
+    DEFAULT_SETTINGS.auditRetentionDays,
+    parseAuditRetentionDays,
+    layers,
+  );
+  const autosaveRetentionDays = resolve(
+    'autosaveRetentionDays',
+    DEFAULT_SETTINGS.autosaveRetentionDays,
+    parseAutosaveRetentionDays,
+    layers,
+  );
+  const sermonAiEnabled = resolve('sermonAiEnabled', DEFAULT_SETTINGS.sermonAiEnabled, parseSermonAiEnabled, layers);
+  const anthropicApiKey = resolve(
+    'anthropicApiKey',
+    DEFAULT_SETTINGS.anthropicApiKey,
+    parseAnthropicApiKey,
+    layers,
+  );
 
   if (problems.length > 0) throw new SettingsError(problems);
 
@@ -382,6 +454,10 @@ export function loadSettings(input: {
       mongoUrl: mongoUrl.value,
       timezone: timezone.value,
       developmentDiagnostics: developmentDiagnostics.value,
+      auditRetentionDays: auditRetentionDays.value,
+      autosaveRetentionDays: autosaveRetentionDays.value,
+      sermonAiEnabled: sermonAiEnabled.value,
+      anthropicApiKey: anthropicApiKey.value,
     },
     sources: {
       port: port.source,
@@ -397,6 +473,10 @@ export function loadSettings(input: {
       mongoUrl: mongoUrl.source,
       timezone: timezone.source,
       developmentDiagnostics: developmentDiagnostics.source,
+      auditRetentionDays: auditRetentionDays.source,
+      autosaveRetentionDays: autosaveRetentionDays.source,
+      sermonAiEnabled: sermonAiEnabled.source,
+      anthropicApiKey: anthropicApiKey.source,
     },
     path,
   };
@@ -409,7 +489,7 @@ export function loadSettings(input: {
  * operator therefore has to hold a copy of it somewhere this deployment is not — MAINTENANCE.md says so
  * in the one place an operator is already reading about rotating secrets.
  */
-export const SETTINGS_SECRET_FIELDS: readonly (keyof Settings)[] = ['resticPassword', 'corpusToken', 'mongoUrl'];
+export const SETTINGS_SECRET_FIELDS: readonly (keyof Settings)[] = ['resticPassword', 'corpusToken', 'mongoUrl', 'anthropicApiKey'];
 
 const UNREADABLE_SETTINGS_PLACEHOLDER = '# settings file was not valid YAML; omitted from the backup\n';
 

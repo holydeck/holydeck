@@ -4,12 +4,16 @@ import multipart from '@fastify/multipart';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 
 import { serveAccountRoutes } from './accounts-routes.js';
+import { serveAuditRoutes } from './audit-routes.js';
 import { enforceAuthorization } from './authorization.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
+import { serveConflictRoutes } from './conflict-routes.js';
+import { contentKindResolver } from './content-kind.js';
 import { serveContentLanguageRoutes } from './content-language-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
 import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
+import { serveIntegrationRoutes, sermonAiSwitch } from './integration-routes.js';
 import { serveLibraryRoutes } from './library-routes.js';
 import { isUpgrade } from './live.js';
 import { serveMediaDeliveryRoutes } from './media-delivery-routes.js';
@@ -19,8 +23,10 @@ import { serveOrderRoutes } from './order-routes.js';
 import { serveOutputDefaultsRoutes } from './output-defaults-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { servePptxRoutes } from './pptx-routes.js';
+import { servePresenceRoutes } from './presence-routes.js';
 import { servePreparationRoutes } from './preparation-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
+import { serveRevisionRoutes } from './revision-routes.js';
 import { serveRunRoutes } from './run-routes.js';
 import { serveScriptureSearchRoutes } from './scripture-routes.js';
 import { serveSermonRoutes } from './sermon-routes.js';
@@ -39,6 +45,7 @@ import { serveWorkspacePositionRoutes } from './workspace-position-routes.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
+import type { ConflictShelf } from './conflicts.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { Fetching } from './corpus.js';
 import type { LibraryStore } from './library.js';
@@ -50,6 +57,8 @@ import type { PptxCommit } from './pptx-commit.js';
 import type { PptxImport } from './pptx-import.js';
 import type { PptxReview } from './pptx-review.js';
 import type { PptxSessionStore } from './pptx-sessions.js';
+import type { PresenceStore } from './presence.js';
+import type { RevisionStore } from './revisions.js';
 import type { RunDeck } from './run-deck.js';
 import type { RunEngine } from './run-engine.js';
 import type { RunReviewStore } from './run-review.js';
@@ -94,6 +103,10 @@ export interface AppOptions {
   settingsAdmin?: SettingsAdmin;
   /** Where Slide Layouts are kept. Without it, there is none to create, version or archive. */
   slideLayouts?: SlideLayoutStore;
+  /** Where an earlier revision of Slide Layouts and Service Templates is read, compared and restored. */
+  revisions?: RevisionStore;
+  /** Where a losing edit is kept rather than discarded (spec COLL-01). Without it, there is none to settle. */
+  conflictShelf?: ConflictShelf;
   /** Where an uploaded file becomes a media asset. Without it, there is nowhere for one to be uploaded to. */
   media?: MediaLibrary;
   /** Reads the retained bytes behind a media record without buffering the whole file. */
@@ -106,6 +119,8 @@ export interface AppOptions {
   contentExists?: (context: unknown, id: string) => Promise<boolean>;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
   shownReferences?: ShownReferenceStore;
+  /** Where who is editing what is kept. Without it, there is nobody here to observe. */
+  presence?: PresenceStore;
   services?: ServiceStore;
   serviceTemplates?: ServiceTemplateStore;
   preparation?: PreparationStore;
@@ -163,12 +178,15 @@ export function buildApp({
   capabilities,
   settingsAdmin,
   slideLayouts,
+  revisions,
+  conflictShelf,
   media,
   mediaBytes,
   translationOffsets,
   workspacePositions,
   contentExists,
   shownReferences,
+  presence,
   services,
   serviceTemplates,
   preparation,
@@ -312,6 +330,14 @@ export function buildApp({
   serveTotpRoutes(app, { identity });
   servePasskeyRoutes(app, { identity });
 
+  // Presence, history and the conflict shelf are all keyed by a content id alone; this says which surface
+  // an id belongs to, so each of them asks that surface's own permission before answering for it.
+  const kindOf = contentKindResolver({ slideLayouts, serviceTemplates });
+
+  // Presence is gated by a permission like everything below, but one every role is granted — Member
+  // included — so nothing here narrows who may say they are editing something.
+  servePresenceRoutes(app, { presence, identity, kindOf });
+
   // The first route this server asks a permission of, and not merely a proved session: administering
   // another account is Admin's alone, by the roles this server enforces.
   serveAccountRoutes(app, { identity, sessions });
@@ -324,13 +350,28 @@ export function buildApp({
   // alone, the same as administering an account is.
   serveSettingsRoutes(app, { settingsAdmin, identity });
 
+  // Its own permission, Admin's alone: viewing and toggling a third-party integration is administering
+  // this deployment, the same reach as the settings file above but not the same permission.
+  serveIntegrationRoutes(app, { settingsAdmin, identity, anthropicApiKey });
+
   // Behind the same permission again, by a vocabulary of its own: a Slide Layout is Admin's to create,
   // to save forward and to stop offering, and nobody else's to change.
-  serveSlideLayoutRoutes(app, { slideLayouts, identity });
+  serveSlideLayoutRoutes(app, { slideLayouts, identity, slideGroups, library });
+
+  // Behind a permission of its own, granted to Admin and Editor: reading, comparing and restoring an
+  // earlier revision of whatever content already versions itself through `revisions.ts`.
+  serveRevisionRoutes(app, { revisions, identity, kindOf });
+
+  // Behind the same permission the content stores it shelves for already grant: what is still waiting
+  // to be settled for one piece of content, and the one way an editor settles it (spec COLL-01).
+  serveConflictRoutes(app, { conflictShelf, revisions, identity, kindOf });
+
+  // Behind a permission of its own, Admin's alone: reading the administrative trail `audit.ts` writes.
+  serveAuditRoutes(app, { identity });
 
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
-  serveMediaRoutes(app, { media, identity });
+  serveMediaRoutes(app, { media, identity, slideGroups, library });
   serveMediaDeliveryRoutes(app, { media, bytes: mediaBytes });
 
   // Reading is public, the same as the corpus routes above: BIBL-02 calls an offset inspectable, and
@@ -359,16 +400,20 @@ export function buildApp({
   // what an Admin administers the catalogue with. Scripture search sits beside them but is reachable by
   // either `content.edit` or `presentation.control`, since Control presentation searches mid-service too.
   serveSongRoutes(app, { songs, chords, identity });
-  serveSermonRoutes(app, { sermons, corpus, identity, anthropicApiKey });
+  // The integrations page's switch, read per preview so a change there applies without a restart.
+  const sermonAi = settingsAdmin === undefined
+    ? undefined
+    : () => sermonAiSwitch(settingsAdmin.current().values, anthropicApiKey);
+  serveSermonRoutes(app, { sermons, corpus, identity, anthropicApiKey, sermonAi });
   serveSlideGroupRoutes(app, { slideGroups, identity });
-  serveLibraryRoutes(app, { library, identity });
+  serveLibraryRoutes(app, { library, identity, services, serviceTemplates });
   serveScriptureSearchRoutes(app, { corpus });
 
   // Their own permission again, the same Admin's tier as the Slide Layout and media surfaces above but not
   // the same permission: administering the content-language registry and the slide-label catalogue is
   // gated behind `catalogue.manage`, read there behind `content.edit` the same as an Editor's other surfaces.
-  serveContentLanguageRoutes(app, { contentLanguages, identity });
-  serveSlideLabelRoutes(app, { slideLabels, identity });
+  serveContentLanguageRoutes(app, { contentLanguages, identity, songs, slideGroups, library, sermons });
+  serveSlideLabelRoutes(app, { slideLabels, identity, songs, slideGroups, library, sermons });
 
   // Behind `services.manage`, the same as the sermon import preview: bringing a PowerPoint deck in is a
   // service integration rather than content editing, even though what it ends in is a Song.

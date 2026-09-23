@@ -22,9 +22,11 @@
 
 import { TITLE_LANGUAGE_KEYS, parseSongBody, exportSong, importSong } from '@holydeck/contracts/songs';
 
+import { conflictShelfOn, SHELF_PERMISSIONS } from './conflicts.js';
 import { requestContext } from './context.js';
 import { LibraryError, LIBRARY_PERMISSIONS, libraryOn } from './library.js';
 import { RevisionError, REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
+import { saveContent } from './save-content.js';
 import { SlideGroupError, slideGroupsOn } from './slide-groups.js';
 import { LAYOUT_PERMISSIONS, SlideLayoutError, slideLayoutsOn } from './slide-layouts.js';
 import { songFromYaml, songToYaml } from './song-yaml.js';
@@ -66,7 +68,10 @@ export class SongError extends Error {
 export function songContext(actor: string, correlationId: string): RequestContext {
   return requestContext({
     actor,
-    permissions: [...Object.values(LIBRARY_PERMISSIONS), ...Object.values(REVISION_PERMISSIONS), LAYOUT_PERMISSIONS.read],
+    permissions: [
+      ...Object.values(LIBRARY_PERMISSIONS), ...Object.values(REVISION_PERMISSIONS),
+      ...Object.values(SHELF_PERMISSIONS), LAYOUT_PERMISSIONS.read,
+    ],
     correlationId,
   });
 }
@@ -103,8 +108,11 @@ export interface SongStore {
   create(context: unknown, title: string, body: SongBody): Promise<SongRecord>;
   /** The standing configuration, or a named earlier version. Nothing is written either way. */
   current(context: unknown, id: string, revision?: number): Promise<SongRecord | undefined>;
-  /** Saves a configuration forward from the visual surface. */
-  edit(context: unknown, id: string, body: SongBody): Promise<SongRecord | undefined>;
+  /**
+   * Saves a configuration forward from the visual surface. Given the revision the editor read, a save over
+   * a newer one is shelved and refused as a conflict rather than written over what somebody else saved.
+   */
+  edit(context: unknown, id: string, body: SongBody, expectedRevision?: number): Promise<SongRecord | undefined>;
   /** The same configuration as the text the raw surface edits. */
   raw(context: unknown, id: string, revision?: number): Promise<string | undefined>;
   /** Saves what the raw surface typed. Refuses with located problems, having written nothing. */
@@ -215,6 +223,7 @@ export function songsOn(db: RepositoryDb, options: SongOptions): SongStore {
   // Passed through whole: a song needs no identifier of its own beyond the one the library mints for it.
   const library = libraryOn(db, options);
   const revisions = revisionsOn(db, { now: options.now });
+  const conflictShelf = conflictShelfOn(db, { now: options.now });
   const layouts = slideLayoutsOn(db, options);
   const groups = slideGroupsOn(db, options);
 
@@ -238,8 +247,14 @@ export function songsOn(db: RepositoryDb, options: SongOptions): SongStore {
     listed: Pick<SongRecord, 'stamp' | 'title'>,
     id: string,
     body: SongBody,
+    expectedRevision?: number,
   ): Promise<SongRecord> => {
-    const outcome = await revisions.save(context, { contentId: id, body, origin: 'manual-checkpoint' });
+    const outcome = await saveContent(revisions, conflictShelf)(context, {
+      contentId: id,
+      body,
+      origin: 'manual-checkpoint',
+      ...(expectedRevision === undefined ? {} : { expectedRevision }),
+    });
     return {
       stamp: listed.stamp,
       title: listed.title,
@@ -260,14 +275,14 @@ export function songsOn(db: RepositoryDb, options: SongOptions): SongStore {
 
     current: (context, id, revision) => own(() => standing(context, id, revision)),
 
-    edit: (context, id, body) =>
+    edit: (context, id, body, expectedRevision) =>
       own(async () => {
         // Graded before the song is even looked up, so a bad configuration is refused identically whether
         // or not the song it was meant for exists.
         const configuration = readBody(body);
         const row = await standing(context, id);
         if (row === undefined) return undefined;
-        return save(context, row, id, configuration);
+        return save(context, row, id, configuration, expectedRevision);
       }),
 
     raw: (context, id, revision) =>

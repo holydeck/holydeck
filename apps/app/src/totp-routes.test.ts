@@ -198,7 +198,7 @@ describe('proving an enrolment', () => {
 describe('replacing the recovery codes', () => {
   test('answers a fresh set, and every code in the old one stops working', async () => {
     const { codes } = await proved();
-    const response = await asking('POST', TOTP_RECOVERY_PATH);
+    const response = await asking('POST', TOTP_RECOVERY_PATH, { password: CLAIM.password });
     expect(response.statusCode).toBe(200);
     const replaced = response.json().data.recoveryCodes as string[];
     expect(replaced).toHaveLength(RECOVERY_CODE_COUNT);
@@ -207,9 +207,21 @@ describe('replacing the recovery codes', () => {
     expect(await totp.satisfied(totpContext(CORRELATION), ID, String(replaced[0]))).toBe('accepted');
   });
 
+  test('asks for the password again first, and keeps the old codes when it is wrong or missing', async () => {
+    const { codes } = await proved();
+    for (const body of [{ password: 'not-the-password' }, {}]) {
+      const response = await asking('POST', TOTP_RECOVERY_PATH, body);
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error.code).toBe('auth.sign_in_refused');
+    }
+    expect(await totp.satisfied(totpContext(CORRELATION), ID, String(codes[0]))).toBe('accepted');
+    expect(entries().filter((entry) => entry['action'] === 'totp.regenerate').map((entry) => entry['outcome']))
+      .toEqual(['refused', 'refused']);
+  });
+
   test('asking for codes to a factor nobody proved is the same disagreement about state', async () => {
     await secretOf();
-    const response = await asking('POST', TOTP_RECOVERY_PATH);
+    const response = await asking('POST', TOTP_RECOVERY_PATH, { password: CLAIM.password });
     expect(response.statusCode).toBe(409);
     expect(response.json().error.code).toBe(TOTP_MISSING);
   });
@@ -233,7 +245,7 @@ describe('giving up a second factor', () => {
 
   test('the trail records every turn a second factor took, under the account it belonged to', async () => {
     await proved();
-    await asking('POST', TOTP_RECOVERY_PATH);
+    await asking('POST', TOTP_RECOVERY_PATH, { password: CLAIM.password });
     await asking('DELETE', TOTP_PATH, { password: CLAIM.password });
     expect(actions()).toEqual(['totp.enroll', 'totp.verify', 'totp.regenerate', 'totp.revoke']);
     for (const entry of entries()) expect(entry['actor']).toBe(actorFor(ID));
@@ -318,7 +330,7 @@ describe('what this surface refuses to answer at all', () => {
         ['POST', TOTP_VERIFICATION_PATH],
         ['POST', TOTP_RECOVERY_PATH],
       ] as const) {
-        const response = await asking(method, url, { code: '000000' });
+        const response = await asking(method, url, { code: '000000', password: CLAIM.password });
         expect(response.statusCode).toBe(500);
       }
     }
@@ -328,7 +340,10 @@ describe('what this surface refuses to answer at all', () => {
     await app.close();
     app = await serving({
       ...identity,
-      audit: { record: () => Promise.reject(new Error('the trail is unavailable')) },
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
     });
     const response = await asking('POST', TOTP_PATH);
     expect(response.statusCode).toBe(201);

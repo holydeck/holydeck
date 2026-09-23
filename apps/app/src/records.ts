@@ -29,6 +29,7 @@ export const RECORDS = {
       ...HISTORY,
       at: 'required',
       action: 'required',
+      category: 'required',
       subject: 'required',
       outcome: 'required',
       detail: 'optional',

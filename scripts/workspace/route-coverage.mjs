@@ -45,13 +45,18 @@ export const KNOWN_INTEGRATION_GAPS = {
   'app.ts GET /api/v1/translations/:abbr/verses': 'no harness test reads verses over HTTP',
   'live.ts GET LIVE_CONNECTIONS_PATH': 'no harness test reads live connection counts over HTTP',
   'accounts-routes.ts': 'no harness test drives the admin account lifecycle over HTTP',
+  'audit-routes.ts': 'no harness test reads the audit trail over HTTP',
   'capability-routes.ts': 'no harness test issues or revokes a guest or output capability over HTTP',
+  'conflict-routes.ts': 'no harness test lists or settles a shelved conflict over HTTP',
+  'integration-routes.ts': 'no harness test reads or toggles a third-party integration over HTTP',
   'order-routes.ts': 'no harness test reads the running order over HTTP',
   'passkey-routes.ts':
     'registration and authentication need a WebAuthn authenticator, which the harness (raw fetch, no ' +
     'browser) cannot provide — likely belongs in tests/harness/e2e instead',
   'preparation-routes.ts': 'no harness test drives preparing a Service, its readiness checklist or an operator override over HTTP',
+  'presence-routes.ts': 'no harness test enters, lists or leaves presence over HTTP',
   'reference-routes.ts': 'no harness test looks a reference up or shows one over HTTP',
+  'revision-routes.ts': 'no harness test reads, compares or restores a revision over HTTP',
   'sermon-routes.ts': 'no harness test creates or edits a Sermon over HTTP',
   'run-routes.ts':
     'tests/harness/e2e/live-run.spec.ts starts a run over HTTP and drives it over the socket, but no ' +

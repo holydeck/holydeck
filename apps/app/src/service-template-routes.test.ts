@@ -253,7 +253,7 @@ describe('creating a Service Template', () => {
   test('a trail that refuses an entry does not cost the Template', async () => {
     await app.close();
     await serving(
-      { ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } },
+      { ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')), list: () => Promise.resolve({ entries: [] }) } },
       templates,
       services,
     );

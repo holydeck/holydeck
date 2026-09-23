@@ -4,6 +4,7 @@ import {
   PRESENCE_FIELDS,
   PRESENCE_KEY_SEPARATOR,
   isPresent,
+  parsePresenceEnter,
   parsePresenceEntry,
   presenceKey,
 } from './presence.js';
@@ -35,6 +36,11 @@ const codes = (value: unknown): string[] => {
 describe('what an entry says somebody is doing', () => {
   it('names every field an entry carries', () => {
     expect([...PRESENCE_FIELDS]).toEqual(['contentId', 'actor', 'enteredAt', 'heartbeatAt', 'expiresAt']);
+  });
+
+  it('reads back the name a listing gives the editor, and leaves it out when there is none', () => {
+    expect(read(stored({ displayName: 'Chioma Obi' })).displayName).toBe('Chioma Obi');
+    expect(read(stored())).not.toHaveProperty('displayName');
   });
 
   it('reads back the content, the editor and the three instants', () => {
@@ -83,5 +89,22 @@ describe('whether an entry still stands', () => {
     expect(isPresent(entry, '2026-09-17T09:30:49.999Z')).toBe(true);
     expect(isPresent(entry, '2026-09-17T09:30:50.000Z')).toBe(false);
     expect(isPresent(entry, '2026-09-17T09:31:00.000Z')).toBe(false);
+  });
+});
+
+describe('parsePresenceEnter', () => {
+  it('accepts a plain contentId', () => {
+    const result = parsePresenceEnter({ contentId: 'song:1' });
+    expect(result).toEqual({ ok: true, value: { contentId: 'song:1' } });
+  });
+
+  it('rejects a missing contentId', () => {
+    const result = parsePresenceEnter({});
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a contentId containing the reserved separator', () => {
+    const result = parsePresenceEnter({ contentId: 'song#1' });
+    expect(result.ok).toBe(false);
   });
 });

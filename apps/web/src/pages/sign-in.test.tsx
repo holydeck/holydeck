@@ -11,8 +11,10 @@ import { SESSION_PATH, SIGN_IN_REFUSED, type SessionView } from '@holydeck/contr
 
 import type { FetchLike } from '../api.js';
 
+import { pageReload } from '../account-switch.js';
 import { App } from '../app.js';
 import { resetAppState, session } from '../app-state.js';
+import { DRAFT_PREFIX } from '../drafts.js';
 import { SignInPage } from './sign-in.js';
 import { setFetching } from '../request.js';
 import { currentPath, matchRoute } from '../router.js';
@@ -64,6 +66,28 @@ describe('SignInPage', () => {
       'Signing in failed. Check the handle and the password, and try again in a few minutes.',
     );
     expect((screen.getByLabelText('Password') as HTMLInputElement).value).toBe('');
+  });
+
+  it('adds another account from a signed-in tab, then starts the tab over as that account', async () => {
+    resetRoute('/sign-in?add=1');
+    session.value = signedIn;
+    sessionStorage.setItem(`${DRAFT_PREFIX}users`, JSON.stringify({ name: 'Ruth' }));
+    const reload = vi.spyOn(pageReload, 'to').mockImplementation(() => undefined);
+    const fetching = vi.fn<FetchLike>(async (path, init) => {
+      if (path === SESSION_PATH && init.method === 'POST') return reply(201, successEnvelope({}, 'request-add'));
+      throw new Error(`unexpected request ${String(init.method)} ${path}`);
+    });
+    setFetching(fetching);
+    render(<App />);
+
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Add account');
+    expect(screen.queryByRole('status')).toBeNull();
+    fill();
+    submit();
+
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledWith('/services'));
+    expect(sessionStorage.getItem(`${DRAFT_PREFIX}users`)).toBeNull();
+    reload.mockRestore();
   });
 
   it('shows expiry context only when the router supplied a return path', () => {

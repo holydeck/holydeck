@@ -79,6 +79,15 @@ describe('the shipped migrations', () => {
     expect(new Set(MIGRATIONS.map((migration) => migration.name)).size).toBe(MIGRATIONS.length);
   });
 
+  // A database already standing at a version never runs that version again, so a step that moves to another
+  // number is a step some databases never get. The ones other branches shipped keep the number they shipped at.
+  test('keep every shipped step at the version it shipped with', () => {
+    const at = (version: number): string | undefined => MIGRATIONS.find((migration) => migration.version === version)?.name;
+    expect(at(21)).toBe('the index a song-singer chord standing stamp is found by');
+    expect(at(22)).toBe('the index a Service Template’s standing stamp is found by');
+    expect(at(23)).toBe('the index a category-narrowed audit listing is found by');
+  });
+
   test('decide the schema version this deployment requires', () => {
     expect(SCHEMA_VERSION).toBe(MIGRATIONS.length);
   });

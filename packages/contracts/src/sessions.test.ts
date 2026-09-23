@@ -205,6 +205,12 @@ describe('reading the session view', () => {
     expect(parsed.problems[0]?.path).toBe('session.account.role');
   });
 
+  it('reads the display name a slot carries when the server names the account behind it', () => {
+    const named = { ...VIEW, slots: [{ slotId: 'slot-1', actor: RECORD.actor, displayName: 'Ruth Example' }] };
+    const parsed = parseSessionView(named);
+    expect(parsed.ok && parsed.value.slots).toEqual(named.slots);
+  });
+
   it('refuses a view without its slots', () => {
     const withoutSlots = Object.fromEntries(Object.entries(VIEW).filter(([name]) => name !== 'slots'));
     const parsed = parseSessionView(withoutSlots);

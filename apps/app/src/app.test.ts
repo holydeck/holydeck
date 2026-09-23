@@ -27,8 +27,10 @@ import { attemptsOn } from './attempts.js';
 import { auditOn } from './audit.js';
 import { needsOf } from './authorization.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
+import { CONFLICT_RESOLVE_PATH } from './conflict-routes.js';
 import { CONTENT_LANGUAGE_KEY_PATH, CONTENT_LANGUAGE_STATUS_PATH } from './content-language-routes.js';
 import { contentLanguagesOn } from './content-languages.js';
+import { INTEGRATION_ID_PATH } from './integration-routes.js';
 import { libraryOn } from './library.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { passkeysOn } from './passkeys.js';
@@ -70,6 +72,8 @@ import { slideGroupsOn } from './slide-groups.js';
 import { SLIDE_LABEL_ID_PATH, SLIDE_LABEL_STATUS_PATH } from './slide-label-routes.js';
 import { slideLabelsOn } from './slide-labels.js';
 import { LAYOUT_BOXES_PATH, LAYOUT_REVISIONS_PATH } from './slide-layout-routes.js';
+import { PRESENCE_PATH } from './presence-routes.js';
+import { REVISION_RESTORE_PATH } from './revision-routes.js';
 import { SONG_ID_PATH } from './song-routes.js';
 import { songSingerChordsOn } from './song-singer-chords.js';
 import { songsOn } from './songs.js';
@@ -104,6 +108,10 @@ const sources: LoadedSettings['sources'] = {
   mongoUrl: 'default',
   timezone: 'default',
   developmentDiagnostics: 'default',
+  auditRetentionDays: 'default',
+  autosaveRetentionDays: 'default',
+  sermonAiEnabled: 'default',
+  anthropicApiKey: 'default',
 };
 
 const settings: LoadedSettings = {
@@ -155,6 +163,10 @@ describe('every route that changes something', () => {
       { method: 'POST', url: PASSKEY_PATH },
       { method: 'PATCH', url: `${PASSKEY_PATH}/:id` },
       { method: 'DELETE', url: `${PASSKEY_PATH}/:id` },
+      // Presence is gated by presence.use, but every role holds it, so nothing here narrows who may enter
+      // or leave — it is counted purely because entering and leaving are both changes.
+      { method: 'POST', url: PRESENCE_PATH },
+      { method: 'DELETE', url: PRESENCE_PATH },
       // The first route a permission gates, and not merely a proved session — still counted here, because
       // the guard it is behind is asked before the permission is.
       { method: 'PATCH', url: `${ACCOUNTS_PATH}/:id/control-presentation` },
@@ -170,12 +182,20 @@ describe('every route that changes something', () => {
       { method: 'DELETE', url: `${CAPABILITIES_PATH}/:capabilityId` },
       // Behind the same permission as the account surface: changing the settings file is Admin's alone.
       { method: 'PATCH', url: SETTINGS_PATH },
+      // Behind its own permission: toggling an integration on or off is the one change this surface makes.
+      { method: 'PATCH', url: INTEGRATION_ID_PATH },
       // And the Layouts a service is drawn from: creating one, saving its boxes forward, bringing an
       // earlier version back and taking one out of use are all Admin's, by a permission of their own.
       { method: 'POST', url: SLIDE_LAYOUTS_PATH },
       { method: 'PUT', url: LAYOUT_BOXES_PATH },
       { method: 'POST', url: `${LAYOUT_REVISIONS_PATH}/:revision` },
       { method: 'PATCH', url: `${SLIDE_LAYOUTS_PATH}/:id/status` },
+      // Restoring an earlier revision is the one change this surface makes; reading, listing and
+      // comparing are not.
+      { method: 'POST', url: REVISION_RESTORE_PATH },
+      // Settling a shelved conflict is the one change this surface makes; listing what is outstanding
+      // is not.
+      { method: 'POST', url: CONFLICT_RESOLVE_PATH },
       // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
       // Admin's, the same as a Slide Layout's own surface above is. Archiving, restoring and retrying a
       // failed item are the same permission's, the way a Slide Layout's own status route is.
@@ -262,6 +282,8 @@ describe('every route that changes something', () => {
       { method: 'DELETE', url: `${SLIDE_PATH}/background` },
       { method: 'POST', url: `${SLIDE_PATH}/language-blocks/:blockId/duplicate` },
       { method: 'PUT', url: `${SLIDE_PATH}/language-block-order` },
+      // Archiving or restoring any library item is an Editor's, the same as authoring one is.
+      { method: 'PATCH', url: `${LIBRARY_PATH}/:id/status` },
       // Behind the same permission as the Slide Layout and media surfaces above: administering the
       // content-language registry and the slide-label catalogue is Admin's, the same vocabulary again.
       { method: 'POST', url: CONTENT_LANGUAGES_PATH },
@@ -352,6 +374,8 @@ describe('the content surfaces this spec wires, with every store present', () =>
       [`PUT ${SLIDE_GROUP_ID_PATH}`]: contentEdit,
       [`PATCH ${SLIDE_PATH}`]: contentEdit,
       [`GET ${LIBRARY_PATH}`]: contentEdit,
+      [`PATCH ${LIBRARY_PATH}/:id/status`]: contentEdit,
+      [`GET ${LIBRARY_PATH}/:id/dependents`]: contentEdit,
       [`GET ${SCRIPTURE_SEARCH_PATH}`]: { kind: 'any-permission', needs: [CONTENT_EDIT, PRESENTATION_CONTROL] },
       [`POST ${CONTENT_LANGUAGES_PATH}`]: catalogueManage,
       [`PATCH ${CONTENT_LANGUAGE_STATUS_PATH}`]: catalogueManage,

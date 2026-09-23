@@ -436,7 +436,13 @@ describe('the surface itself', () => {
   });
 
   test('a trail that refuses an entry is logged, and does not take back a key that was registered', async () => {
-    identity = { ...identity, audit: { record: () => Promise.reject(new Error('the trail is full')) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: () => Promise.reject(new Error('the trail is full')),
+        list: () => Promise.reject(new Error('the trail is full')),
+      },
+    };
     await app.close();
     app = Fastify({ logger: false });
     withSafeErrors(app);

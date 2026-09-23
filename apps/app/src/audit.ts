@@ -6,8 +6,9 @@
 // nothing declares is refused, which is the same promise the record classes make about field names.
 //
 // Nothing here is ever handed a password or a token. `subject` names what was acted on and `detail` says
-// why in prose meant for a person, and both are written verbatim — so a caller passing a secret into
-// either has put it in the trail, which is the one thing the trail must never hold.
+// why in prose meant for a person, and both are written as given bar the narrowing `scrubAuditText` does
+// to addresses and URL passwords — so a caller passing any other secret into either has put it in the
+// trail, which is the one thing the trail must never hold.
 
 import { randomBytes } from 'node:crypto';
 
@@ -16,7 +17,9 @@ import { permissionsFor } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 
 import type { RequestContext } from './context.js';
-import type { RepositoryDb } from './repositories.js';
+import type { RecordName } from './records.js';
+import type { Document, Filter, RepositoryDb } from './repositories.js';
+import type { IntegrationCallInfo } from '@holydeck/core/sermon-ai';
 
 /** Every action this release records. One entry per thing an administrator can be answerable for. */
 export const AUDIT_ACTIONS = [
@@ -116,7 +119,14 @@ export const AUDIT_ACTIONS = [
   'backup.run',
   // Reserved for the restore surface T101+ builds. Exercised only by this task's own tests today.
   'restore.run',
+  // A losing edit's shelf row settled: `collaboration.ts`'s own caller, naming which revision won.
+  'content.conflict.resolve',
+  // An earlier revision brought back over what a piece of content held: `revision-routes.ts`'s restore.
+  'content.revision.restore',
+  // A third-party integration reached, and given up: the sermon-AI surface's own two entries, spec v1c-09.
   'integration.call',
+  'integration.enable',
+  'integration.disable',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -195,11 +205,30 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'readiness.override': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',
+  'content.conflict.resolve': 'content',
+  'content.revision.restore': 'content',
   'integration.call': 'integration',
+  'integration.enable': 'integration',
+  'integration.disable': 'integration',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */
 export type AuditOutcome = 'allowed' | 'refused';
+
+/** The record class this store owns. Named once, because the migration that indexes it reads off it. */
+export const AUDIT_RECORD: RecordName = 'auditEvents';
+
+export interface AuditIndex {
+  readonly name: string;
+  readonly keys: Readonly<Record<string, 1 | -1>>;
+  readonly options: Readonly<Record<string, unknown>>;
+}
+
+// `audit_time` already exists, from the trail's own first migration. This is the second: a listing
+// narrowed to one category still wants its newest-first order, and a collection scan cannot give it that.
+const DECLARED_INDEXES: readonly AuditIndex[] = [{ name: 'audit_category', keys: { category: 1, at: -1 }, options: {} }];
+
+export const AUDIT_INDEXES = Object.freeze(DECLARED_INDEXES);
 
 export interface AuditEntry {
   readonly action: AuditAction;
@@ -211,11 +240,40 @@ export interface AuditEntry {
   /** What an `integration.call` cost, in tokens. Never set by any other action. */
   readonly requestTokens?: number;
   readonly responseTokens?: number;
+  readonly durationMs?: number;
+}
+
+/** One written entry, read back: everything `AuditEntry` carries, plus what `record()` stamped on it. */
+export interface AuditRecordRead extends AuditEntry {
+  readonly id: string;
+  readonly at: string;
+  readonly category: AuditCategory;
+  readonly actor: string;
+  readonly correlationId: string;
+}
+
+export interface AuditListQuery {
+  readonly category?: AuditCategory;
+  readonly action?: AuditAction;
+  readonly actor?: string;
+  readonly outcome?: AuditOutcome;
+  /** An inclusive ISO instant bound: `from` and `to` narrow `at`, either or both. */
+  readonly from?: string;
+  readonly to?: string;
+  readonly cursor?: { readonly at: string; readonly id: string };
+  readonly limit: number;
+}
+
+export interface AuditPage {
+  readonly entries: readonly AuditRecordRead[];
+  readonly nextCursor?: { readonly at: string; readonly id: string };
 }
 
 export interface AuditTrail {
   /** Appends one entry and answers with its identifier. */
   record(context: unknown, entry: AuditEntry): Promise<string>;
+  /** Newest first, redacted the way `AUDIT_DETAIL_REDACTION` says its action is. */
+  list(context: unknown, query: AuditListQuery): Promise<AuditPage>;
 }
 
 export interface AuditOptions {
@@ -224,6 +282,128 @@ export interface AuditOptions {
 }
 
 const ID_BYTES = 12;
+
+/**
+ * Every current action defaults to `'verbatim'` — this file's own header already guarantees no `detail`
+ * string carries a secret, and `scrubAuditText` narrows whatever address or URL password one carries
+ * anyway. A `detail` is one prose string rather than a map of keys, so there is no per-key allow-list to
+ * keep: `'omit'` withholds an action's detail whole. An action added above without an entry here fails to compile, the map being
+ * `Record<AuditAction, ...>`, and the exhaustiveness test in `audit.test.ts` fails with it.
+ */
+export const AUDIT_DETAIL_REDACTION: Readonly<Record<AuditAction, 'verbatim' | 'omit'>> = {
+  'instance.claim': 'verbatim',
+  'session.signIn': 'verbatim',
+  'session.lock': 'verbatim',
+  'totp.enroll': 'verbatim',
+  'totp.verify': 'verbatim',
+  'totp.use': 'verbatim',
+  'totp.regenerate': 'verbatim',
+  'totp.revoke': 'verbatim',
+  'passkey.register': 'verbatim',
+  'passkey.name': 'verbatim',
+  'passkey.use': 'verbatim',
+  'passkey.revoke': 'verbatim',
+  'account.control': 'verbatim',
+  'account.create': 'verbatim',
+  'account.disable': 'verbatim',
+  'account.restore': 'verbatim',
+  'account.role': 'verbatim',
+  'authorization.refuse': 'verbatim',
+  'session.slot.add': 'verbatim',
+  'session.slot.switch': 'verbatim',
+  'capability.guest.issue': 'verbatim',
+  'capability.output.issue': 'verbatim',
+  'capability.revoke': 'verbatim',
+  'settings.update': 'verbatim',
+  'content.change': 'verbatim',
+  'pptx.import': 'verbatim',
+  'pptx.commit': 'verbatim',
+  'serviceTemplate.version': 'verbatim',
+  'serviceTemplate.archive': 'verbatim',
+  'serviceTemplate.unarchive': 'verbatim',
+  'serviceTemplate.fromService': 'verbatim',
+  'service.create': 'verbatim',
+  'service.duplicate': 'verbatim',
+  'service.schedule': 'verbatim',
+  'service.archive': 'verbatim',
+  'service.edit': 'verbatim',
+  'service.transition': 'verbatim',
+  'service.output': 'verbatim',
+  'service.item.add': 'verbatim',
+  'service.item.body': 'verbatim',
+  'service.item.remove': 'verbatim',
+  'service.item.enable': 'verbatim',
+  'service.item.disable': 'verbatim',
+  'service.item.duplicate': 'verbatim',
+  'service.item.reorder': 'verbatim',
+  'service.item.revise': 'verbatim',
+  'run.start': 'verbatim',
+  'run.end': 'verbatim',
+  'run.theme': 'verbatim',
+  'run.addition': 'verbatim',
+  'run.recap.export': 'verbatim',
+  'readiness.override': 'verbatim',
+  'backup.run': 'verbatim',
+  'restore.run': 'verbatim',
+  'content.conflict.resolve': 'verbatim',
+  'content.revision.restore': 'verbatim',
+  'integration.call': 'verbatim',
+  'integration.enable': 'verbatim',
+  'integration.disable': 'verbatim',
+};
+
+const IPV4 = /\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}\b/gu;
+const IPV6 = /\b(?:[0-9a-f]{1,4}:){2,7}(?::|[0-9a-f]{1,4})\b/giu;
+const URL_PASSWORD = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/giu;
+const IPV6_KEPT_GROUPS = 3;
+const IPV6_MIN_COLONS = 3;
+
+/**
+ * What the trail keeps of a subject or a detail: an IPv4 address narrowed to its /24 and an IPv6 one to
+ * its /48, and the password in any `scheme://user:password@` URL replaced. No caller passes either today,
+ * but `detail` is free prose — a corpus address, a restore's error message — and COLAB-10 asks that no
+ * address beyond /24 and no credential ever comes back out, so it is enforced here rather than promised.
+ * Run when an entry is written and again when one is read, so a row written before this existed is held
+ * to the same rule. An IPv6 match needs three colons, which keeps a clock time like `09:30:00` intact.
+ */
+export function scrubAuditText(text: string): string {
+  return text
+    .replace(URL_PASSWORD, '$1[redacted]@')
+    .replace(IPV4, '$1.$2.$3.0/24')
+    .replace(IPV6, (address) =>
+      address.split(':').length - 1 < IPV6_MIN_COLONS
+        ? address
+        : `${address.split(':').slice(0, IPV6_KEPT_GROUPS).join(':')}::/48`,
+    );
+}
+
+export function redactAuditDetail(action: AuditAction, detail: string | undefined): string | undefined {
+  if (detail === undefined) return undefined;
+  return AUDIT_DETAIL_REDACTION[action] === 'verbatim' ? scrubAuditText(detail) : undefined;
+}
+
+function auditIdIn(_id: unknown): string {
+  const id = String(_id);
+  return id.startsWith('audit:') ? id.slice('audit:'.length) : id;
+}
+
+function graded(document: Document): AuditRecordRead {
+  const action = document['action'] as AuditAction;
+  return {
+    action,
+    subject: scrubAuditText(document['subject'] as string),
+    outcome: document['outcome'] as AuditOutcome,
+    detail: redactAuditDetail(action, document['detail'] as string | undefined),
+    id: auditIdIn(document['_id']),
+    at: document['at'] as string,
+    // Read from the action rather than the row: rows written before the category was stored have none,
+    // and an action's category is a fact of this release, not of the moment the row was written. A row
+    // whose action this release no longer declares keeps whatever it stored.
+    category: CATEGORY_OF[action] ?? (document['category'] as AuditCategory),
+    actor: document['actor'] as string,
+    correlationId: document['correlationId'] as string,
+  };
+}
 
 export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
   const newId = options.newId ?? ((): string => randomBytes(ID_BYTES).toString('base64url'));
@@ -243,12 +423,43 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
         correlationId: checked.correlationId,
         at: options.now(),
         action: entry.action,
-        subject: entry.subject,
+        category: CATEGORY_OF[entry.action],
+        subject: scrubAuditText(entry.subject),
         outcome: entry.outcome,
-        ...(entry.detail === undefined ? {} : { detail: entry.detail }),
+        ...(entry.detail === undefined ? {} : { detail: scrubAuditText(entry.detail) }),
         ...(entry.requestTokens === undefined ? {} : { requestTokens: entry.requestTokens }),
         ...(entry.responseTokens === undefined ? {} : { responseTokens: entry.responseTokens }),
+        ...(entry.durationMs === undefined ? {} : { durationMs: entry.durationMs }),
       });
+    },
+    async list(context, query) {
+      const clauses: Filter[] = [];
+      if (query.category !== undefined) {
+        // By the category's member actions, so history from before the category was stored still answers
+        // to it; the stored field is kept as one more branch for a row whose action is no longer declared.
+        const members = AUDIT_ACTIONS.filter((action) => CATEGORY_OF[action] === query.category);
+        clauses.push({ $or: [{ category: query.category }, ...members.map((action) => ({ action }))] });
+      }
+      if (query.action !== undefined) clauses.push({ action: query.action });
+      if (query.actor !== undefined) clauses.push({ actor: query.actor });
+      if (query.outcome !== undefined) clauses.push({ outcome: query.outcome });
+      if (query.from !== undefined || query.to !== undefined) {
+        const at: Record<string, string> = {};
+        if (query.from !== undefined) at['$gte'] = query.from;
+        if (query.to !== undefined) at['$lte'] = query.to;
+        clauses.push({ at });
+      }
+      if (query.cursor !== undefined) {
+        const { at, id } = query.cursor;
+        clauses.push({ $or: [{ at: { $lt: at } }, { at, _id: { $lt: `audit:${id}` } }] });
+      }
+      const filter: Filter = clauses.length === 0 ? {} : clauses.length === 1 ? clauses[0]! : { $and: clauses };
+
+      const rows = await events.read(context, filter, { sort: { at: -1, _id: -1 }, limit: query.limit + 1 });
+      const page = rows.slice(0, query.limit).map(graded);
+      const last = page[page.length - 1];
+      const nextCursor = rows.length > query.limit && last !== undefined ? { at: last.at, id: last.id } : undefined;
+      return { entries: page, nextCursor };
     },
   };
   return Object.freeze(trail);
@@ -257,4 +468,32 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
 /** The context the server writes its own trail under: able to append an entry, and to do nothing else. */
 export function auditContext(actor: string, correlationId: string): RequestContext {
   return requestContext({ actor, permissions: [permissionsFor('auditEvents').append], correlationId });
+}
+
+/** The context an admin reads the trail under: able to list it, and to do nothing else. */
+export function auditReadContext(actor: string, correlationId: string): RequestContext {
+  return requestContext({ actor, permissions: [permissionsFor('auditEvents').read], correlationId });
+}
+
+/**
+ * Adapts sermon-ai.ts's (spec v1c-08, package @holydeck/core) onIntegrationCall callback shape onto this
+ * file's own AuditTrail.record(), so a call site only has to pass this closure through, not build an
+ * AuditEntry by hand. The sermon import preview in sermon-routes.ts is the one caller today.
+ */
+export function integrationCallAudit(
+  trail: AuditTrail,
+  actor: string,
+  correlationId: string,
+): (call: IntegrationCallInfo) => Promise<void> {
+  return async (call) => {
+    await trail.record(auditContext(actor, correlationId), {
+      action: call.action,
+      subject: call.subject,
+      outcome: call.outcome,
+      detail: call.detail,
+      requestTokens: call.requestTokens,
+      responseTokens: call.responseTokens,
+      durationMs: call.durationMs,
+    });
+  };
 }

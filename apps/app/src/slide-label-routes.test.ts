@@ -7,22 +7,31 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { accountsOn } from './accounts.js'; import { attemptsOn } from './attempts.js'; import { auditOn } from './audit.js'; import { enforceAuthorization } from './authorization.js';
 import { guardMutations } from './csrf.js'; import { withSafeErrors } from './failures.js'; import { passkeysOn } from './passkeys.js'; import { CATALOGUE_MANAGE, CONTENT_EDIT } from './roles.js';
-import { serveSlideLabelRoutes, SLIDE_LABEL_CATALOGUE_PATH, SLIDE_LABEL_ID_PATH, SLIDE_LABEL_STATUS_PATH } from './slide-label-routes.js';
+import { serveSlideLabelRoutes, SLIDE_LABEL_CATALOGUE_PATH, SLIDE_LABEL_DEPENDENTS_PATH, SLIDE_LABEL_ID_PATH, SLIDE_LABEL_STATUS_PATH } from './slide-label-routes.js';
 import { slideLabelsOn } from './slide-labels.js'; import { sessionContext, sessionsOn } from './sessions.js'; import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js'; import { memoryAttempts } from '../test/helpers/attempts.js'; import { fakeDb } from '../test/helpers/fake-db.js'; import { memoryPasskeys } from '../test/helpers/passkeys.js'; import { memorySessions } from '../test/helpers/sessions.js'; import { memoryTotp } from '../test/helpers/totp.js';
 
+import { libraryOn } from './library.js';
+import { slideGroupContext, slideGroupsOn } from './slide-groups.js';
+import { songContext, songsOn } from './songs.js';
+import type { LibraryStore } from './library.js';
+import type { SlideGroupStore } from './slide-groups.js';
+import type { SongStore } from './songs.js';
+import type { SongBody } from '@holydeck/contracts/songs';
 import type { Identity } from './onboarding.js'; import type { SlideLabelStore } from './slide-labels.js'; import type { SessionStore, StartedSession } from './sessions.js'; import type { FastifyInstance } from 'fastify';
 
 const START = Date.parse('2026-09-22T09:30:00.000Z'); const ORIGIN = 'https://holydeck.example.invalid'; const HOST = 'holydeck.example.invalid'; const ACTOR = `account:${'C'.repeat(22)}`;
 const DRAFT = { name: 'Praise', shortcut: '1' };
-const ROUTES = [['GET', SLIDE_LABELS_PATH], ['POST', SLIDE_LABELS_PATH], ['GET', SLIDE_LABEL_CATALOGUE_PATH], ['GET', SLIDE_LABEL_ID_PATH], ['PUT', SLIDE_LABEL_ID_PATH], ['PATCH', SLIDE_LABEL_STATUS_PATH]] as const;
+const SONG_BODY: SongBody = { titles: { tamil: 'பாடல்', romanized: 'Paadal' }, languages: ['ta'], sections: [], provenance: { source: 'manual' } };
+const ROUTES = [['GET', SLIDE_LABELS_PATH], ['POST', SLIDE_LABELS_PATH], ['GET', SLIDE_LABEL_CATALOGUE_PATH], ['GET', SLIDE_LABEL_ID_PATH], ['PUT', SLIDE_LABEL_ID_PATH], ['PATCH', SLIDE_LABEL_STATUS_PATH], ['GET', SLIDE_LABEL_DEPENDENTS_PATH]] as const;
+let songs: SongStore; let slideGroups: SlideGroupStore; let library: LibraryStore;
 let app: FastifyInstance; let sessions: SessionStore; let identity: Identity; let labels: SlideLabelStore; let admin: StartedSession; let tick: number;
 const now = (): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString(); const at = (path: string, id: string) => path.replace(':id', id);
 const headers = (held: StartedSession = admin) => ({ [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), host: HOST, 'x-forwarded-proto': 'https', origin: ORIGIN, cookie: sessionCookie(held.token, 60), [CSRF_HEADER]: held.record.csrf });
 const ask = (method: 'GET' | 'POST' | 'PUT' | 'PATCH', url: string, payload?: unknown, held: StartedSession = admin) => app.inject({ method, url, headers: headers(held), ...(payload === undefined ? {} : { payload: payload as never }) });
 const creating = (payload: unknown = DRAFT, held: StartedSession = admin) => ask('POST', SLIDE_LABELS_PATH, payload, held); const statusing = (id: string, archived: boolean) => ask('PATCH', at(SLIDE_LABEL_STATUS_PATH, id), { archived });
-const serving = async (held: Identity | undefined, store: SlideLabelStore | undefined = labels) => { app = Fastify({ logger: false }); withSafeErrors(app); guardMutations(app, { sessions }); enforceAuthorization(app, { sessions, identity: undefined }); serveSlideLabelRoutes(app, { slideLabels: store, identity: held }); await app.ready(); };
-beforeEach(async () => { tick = 0; const db = fakeDb(); sessions = sessionsOn(memorySessions().db, { now: () => new Date(START).toISOString() }); let serial = 0; identity = { accounts: accountsOn(memoryAccounts().db, { now, newId: () => 'A'.repeat(22), hash: async (value) => `hash:${value}`, verify: async (value, hash) => hash === `hash:${value}` }), audit: auditOn(db, { now, newId: () => 'audit' }), attempts: attemptsOn(memoryAttempts().db, { now }), totp: totpsOn(memoryTotp().db, { now }), passkeys: passkeysOn(memoryPasskeys().db, { now }) }; labels = slideLabelsOn(db, { now, newId: () => `label-${(serial += 1)}` }); await serving(identity); admin = await sessions.start(sessionContext('req-slide-label'), { actor: ACTOR, permissions: [CATALOGUE_MANAGE, CONTENT_EDIT] }); });
+const serving = async (held: Identity | undefined, store: SlideLabelStore | undefined = labels) => { app = Fastify({ logger: false }); withSafeErrors(app); guardMutations(app, { sessions }); enforceAuthorization(app, { sessions, identity: undefined }); serveSlideLabelRoutes(app, { slideLabels: store, identity: held, songs, slideGroups, library }); await app.ready(); };
+beforeEach(async () => { tick = 0; const db = fakeDb(); sessions = sessionsOn(memorySessions().db, { now: () => new Date(START).toISOString() }); let serial = 0; identity = { accounts: accountsOn(memoryAccounts().db, { now, newId: () => 'A'.repeat(22), hash: async (value) => `hash:${value}`, verify: async (value, hash) => hash === `hash:${value}` }), audit: auditOn(db, { now, newId: () => 'audit' }), attempts: attemptsOn(memoryAttempts().db, { now }), totp: totpsOn(memoryTotp().db, { now }), passkeys: passkeysOn(memoryPasskeys().db, { now }) }; labels = slideLabelsOn(db, { now, newId: () => `label-${(serial += 1)}` }); songs = songsOn(db, { now }); slideGroups = slideGroupsOn(db, { now }); library = libraryOn(db, { now }); await serving(identity); admin = await sessions.start(sessionContext('req-slide-label'), { actor: ACTOR, permissions: [CATALOGUE_MANAGE, CONTENT_EDIT] }); });
 afterEach(async () => { await app.close(); });
 
 describe('slide-label routes', () => {
@@ -33,5 +42,18 @@ describe('slide-label routes', () => {
   test('reports conflicts when restoring a name claimed while archived', async () => { await creating(); await statusing('label-1', true); await creating({ name: 'Praise' }); const response = await statusing('label-1', false); expect(response.statusCode).toBe(409); expect(response.json().error.fields).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'name', code: 'field.not_allowed' })])); });
   test('reports conflicts when editing a label onto a name another label already holds', async () => { await creating(); await creating({ name: 'Other', shortcut: '2' }); const response = await ask('PUT', at(SLIDE_LABEL_ID_PATH, 'label-2'), { name: 'Praise' }); expect(response.statusCode).toBe(409); expect(response.json().error.fields).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'name', code: 'field.not_allowed' })])); });
   test('enforces both permission surfaces and a session', async () => { const editor = await sessions.start(sessionContext('req-editor'), { actor: ACTOR, permissions: [CONTENT_EDIT] }); const manager = await sessions.start(sessionContext('req-manager'), { actor: ACTOR, permissions: [CATALOGUE_MANAGE] }); expect((await ask('GET', SLIDE_LABELS_PATH, undefined, editor)).statusCode).toBe(403); expect((await ask('GET', SLIDE_LABEL_CATALOGUE_PATH, undefined, manager)).statusCode).toBe(403); expect((await app.inject({ method: 'GET', url: SLIDE_LABELS_PATH, headers: { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current), host: HOST, origin: ORIGIN } })).statusCode).toBe(401); });
+  test('counts zero for an unused label and answers not-found for a missing one', async () => { await creating(); expect((await ask('GET', at(SLIDE_LABEL_DEPENDENTS_PATH, 'label-1'))).json().data).toEqual({ count: 0, approximate: false }); expect((await ask('GET', at(SLIDE_LABEL_DEPENDENTS_PATH, 'nope'))).statusCode).toBe(404); });
+  test('counts every current song section or slide carrying the label by name', async () => {
+    await creating();
+    await songs.create(songContext(ACTOR, 'song-corr'), 'Song', { ...SONG_BODY, sections: [{ id: 'v1', label: 'praise ', text: [] }] });
+    await slideGroups.create(slideGroupContext(ACTOR, 'group-corr'), 'slideGroup', 'Group', { mode: 'custom', enabled: true, slideLayoutId: 'layout-1', slides: [{ id: 's1', enabled: true, label: 'Praise', languageBlocks: [] }] });
+    expect((await ask('GET', at(SLIDE_LABEL_DEPENDENTS_PATH, 'label-1'))).json().data).toEqual({ count: 2, approximate: false });
+  });
+  test('lists each label with how many items use it', async () => {
+    await creating(); await creating({ name: 'Other', shortcut: '2' });
+    await songs.create(songContext(ACTOR, 'song-corr'), 'Song', { ...SONG_BODY, sections: [{ id: 'v1', label: 'Praise', text: [] }] });
+    const listed = (await ask('GET', SLIDE_LABELS_PATH)).json().data as { stamp: { id: string }; usage: number }[];
+    expect(Object.fromEntries(listed.map((row) => [row.stamp.id, row.usage]))).toEqual({ 'label-1': 1, 'label-2': 0 });
+  });
   test.each(ROUTES)('answers not-found without the store: %s %s', async (method, path) => { await app.close(); await serving(undefined, undefined); expect((await ask(method, at(path, 'label-1'), method === 'POST' ? DRAFT : method === 'PUT' ? { name: 'Praise' } : method === 'PATCH' ? { archived: true } : undefined)).statusCode).toBe(404); });
 });

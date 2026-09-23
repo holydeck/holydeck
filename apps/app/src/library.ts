@@ -7,13 +7,18 @@
 // `revisionsOn()` store — this file never calls it.
 //
 // No promotion step exists, and none is added later without changing this file: CONT-01 says library
-// views filter rather than promote, so `list`'s only per-kind behaviour is a filter, and this store's
-// exported verbs are `create`, `get`, `list` — nothing that moves an item from one visibility to
-// another.
+// views filter rather than promote, so `list`'s only per-kind behaviour is a filter — nothing here moves
+// an item from one visibility to another.
+//
+// Archiving (DELT-01) is not promotion: `archive` and `restore` append one more stamp row over the
+// standing one, exactly as `create` appends the first, so the item's whole history stays readable and
+// `list` already hides an archived item unless asked. The body and its revisions are never touched;
+// whether anything still uses the item is the `/dependents` route's question, answered before a person
+// confirms, not a refusal here.
 
 import { randomBytes } from 'node:crypto';
 
-import { createdStamp, parseEntityStamp } from '@holydeck/contracts/entities';
+import { EntityError, archivedStamp, createdStamp, parseEntityStamp, restoredStamp } from '@holydeck/contracts/entities';
 import { parseLibraryDraft } from '@holydeck/contracts/library';
 
 import { requestContext } from './context.js';
@@ -45,7 +50,7 @@ const DECLARED_INDEXES: readonly LibraryIndex[] = [
 
 export const LIBRARY_INDEXES = Object.freeze(DECLARED_INDEXES);
 
-export type LibraryRefusal = 'schema' | 'conflict' | 'corrupt';
+export type LibraryRefusal = 'schema' | 'conflict' | 'corrupt' | 'state';
 
 export class LibraryError extends Error {
   readonly kind: LibraryRefusal;
@@ -76,6 +81,10 @@ export interface LibraryStore {
   create(context: unknown, draft: LibraryDraft): Promise<LibraryRecord>;
   get(context: unknown, id: string): Promise<LibraryRecord | undefined>;
   list(context: unknown, filter?: LibraryFilter): Promise<readonly LibraryRecord[]>;
+  /** Nothing when no such item exists; a `state` refusal when it is already archived. */
+  archive(context: unknown, id: string): Promise<LibraryRecord | undefined>;
+  /** Nothing when no such item exists; a `state` refusal when it is not archived. */
+  restore(context: unknown, id: string): Promise<LibraryRecord | undefined>;
 }
 
 export interface LibraryOptions {
@@ -149,7 +158,29 @@ export function libraryOn(db: RepositoryDb, options: LibraryOptions): LibrarySto
     return { stamp, title };
   };
 
+  /** One more stamp over the standing one, or nothing when there is no standing one to change. */
+  const restamp = async (
+    context: unknown,
+    id: string,
+    change: typeof archivedStamp | typeof restoredStamp,
+  ): Promise<LibraryRecord | undefined> => {
+    const row = await standing(context, id);
+    if (row === undefined) return undefined;
+    let stamp: EntityStamp;
+    try {
+      stamp = change(row.stamp, { at: options.now(), by: author(context).actor });
+    } catch (error) {
+      if (error instanceof EntityError) throw new LibraryError('state', error.message);
+      throw error;
+    }
+    return stampOnto(context, stamp, row.title, row.sequence + 1);
+  };
+
   return {
+    archive: (context, id) => own(() => restamp(context, id, archivedStamp)),
+
+    restore: (context, id) => own(() => restamp(context, id, restoredStamp)),
+
     create: (context, draft) =>
       own(async () => {
         const parsed = parseLibraryDraft(draft, 'library');

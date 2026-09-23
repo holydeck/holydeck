@@ -35,10 +35,14 @@ import { codeAt, stepAt } from './otp.js';
 import { passkeyContext, passkeysOn } from './passkeys.js';
 import {
   ACCOUNTS_MANAGE,
+  AUDIT_READ,
   CATALOGUE_MANAGE,
   CONTENT_EDIT,
+  CONTENT_HISTORY_MANAGE,
+  INTEGRATIONS_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
+  PRESENCE_USE,
   PRESENTATION_CONTROL,
   SERVICES_MANAGE,
   SERVICE_TEMPLATES_MANAGE,
@@ -284,6 +288,14 @@ describe('what an operator can ask about their own session', () => {
     expect(response.body).not.toContain(session.token);
   });
 
+  test('names the account behind each slot, so a switcher shows who rather than an actor id', async () => {
+    const session = await store.start(sessionContext('req-0f9c2a42'), { actor: actorFor(ID), permissions: ['services.read'] });
+    const response = await asking('GET', SESSION_PATH, session);
+    expect(response.json().data.slots).toEqual([
+      { slotId: expect.any(String), actor: actorFor(ID), displayName: CLAIM.displayName },
+    ]);
+  });
+
   test('answers an account session with only the account summary a client renders', async () => {
     const session = await store.start(sessionContext('req-0f9c2a41'), { actor: actorFor(ID), permissions: ['services.read'] });
     const response = await asking('GET', SESSION_PATH, session);
@@ -363,6 +375,10 @@ describe('signing in', () => {
         SERVICES_MANAGE,
         CONTENT_EDIT,
         CATALOGUE_MANAGE,
+        PRESENCE_USE,
+        CONTENT_HISTORY_MANAGE,
+        AUDIT_READ,
+        INTEGRATIONS_MANAGE,
       ],
     });
     const cookie = String(response.headers['set-cookie']);
@@ -441,6 +457,10 @@ describe('signing in with a passkey', () => {
         SERVICES_MANAGE,
         CONTENT_EDIT,
         CATALOGUE_MANAGE,
+        PRESENCE_USE,
+        CONTENT_HISTORY_MANAGE,
+        AUDIT_READ,
+        INTEGRATIONS_MANAGE,
       ],
     });
     const cookie = String(response.headers['set-cookie']);
@@ -1146,13 +1166,27 @@ describe('what recording must never cost', () => {
   });
 
   test('a trail that refuses the entry does not undo the sign-in that happened', async () => {
-    app = await serving(deaf({ audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } }));
+    app = await serving(
+      deaf({
+        audit: {
+          record: () => Promise.reject(new Error('the trail is unavailable')),
+          list: () => Promise.reject(new Error('the trail is unavailable')),
+        },
+      }),
+    );
     expect((await signingIn()).statusCode).toBe(201);
     expect((await failing()).statusCode).toBe(401);
   });
 
   test('a trail that refuses the entry does not undo the slot switch that happened', async () => {
-    app = await serving(deaf({ audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } }));
+    app = await serving(
+      deaf({
+        audit: {
+          record: () => Promise.reject(new Error('the trail is unavailable')),
+          list: () => Promise.reject(new Error('the trail is unavailable')),
+        },
+      }),
+    );
     const { control, member } = await joined();
     const controlId = slotIdOf(control.token, control.record.actor);
     expect((await asking('PATCH', SESSION_PATH, member, { active: controlId })).statusCode).toBe(200);

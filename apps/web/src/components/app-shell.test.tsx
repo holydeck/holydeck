@@ -2,11 +2,19 @@
 import { act, fireEvent, render, screen } from '@testing-library/preact';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
+import { SESSION_PATH } from '@holydeck/contracts/sessions';
+
+import { pageReload } from '../account-switch.js';
 import { resetAppState, session } from '../app-state.js';
+import { setFetching } from '../request.js';
 import { currentPath } from '../router.js';
 import { AppShell } from './app-shell.js';
 
+import type { FetchLike } from '../api.js';
 import type { SessionView } from '@holydeck/contracts/sessions';
+
+const reply = (status: number, body: unknown) => ({ status, json: async (): Promise<unknown> => body });
 
 const signedIn = (permissions: readonly string[], role: 'admin' | 'editor' | 'member' = 'admin'): SessionView =>
   ({
@@ -52,7 +60,100 @@ describe('the navigation shell', () => {
 
     session.value = signedIn(['settings.manage']);
     render(<AppShell><p>page</p></AppShell>);
-    expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('href')).toBe('/admin/users');
+    expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('href')).toBe('/admin/settings');
+  });
+
+  it('opens Administration for every permission an admin page asks for, at the first page it may see', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['accounts.manage', '/admin/users'],
+      ['settings.manage', '/admin/settings'],
+      ['audit.read', '/admin/audit'],
+      ['integrations.manage', '/admin/integrations'],
+      ['catalogue.manage', '/admin/languages'],
+    ];
+    for (const [permission, href] of cases) {
+      session.value = signedIn([permission], 'editor');
+      const view = render(<AppShell><p>page</p></AppShell>);
+      expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('href')).toBe(href);
+      view.unmount();
+    }
+  });
+
+  it('lists each admin page the session may open while in Administration, marking the current one', () => {
+    session.value = signedIn(['accounts.manage', 'settings.manage', 'audit.read', 'integrations.manage', 'catalogue.manage']);
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.queryByRole('navigation', { name: 'Administration' })).toBeNull();
+
+    act(() => {
+      currentPath.value = '/admin/audit';
+    });
+    const admin = screen.getByRole('navigation', { name: 'Administration' });
+    const links = [...admin.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')]);
+    expect(links).toEqual([
+      ['Users', '/admin/users'],
+      ['Settings', '/admin/settings'],
+      ['Audit log', '/admin/audit'],
+      ['Integrations', '/admin/integrations'],
+      ['Content languages', '/admin/languages'],
+      ['Slide labels', '/admin/slide-labels'],
+    ]);
+    expect(admin.querySelector('a[href="/admin/audit"]')?.getAttribute('aria-current')).toBe('page');
+    expect(admin.querySelector('a[href="/admin/users"]')?.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('leaves out the admin pages a session may not open', () => {
+    session.value = signedIn(['catalogue.manage'], 'editor');
+    currentPath.value = '/admin/slide-labels';
+    render(<AppShell><p>page</p></AppShell>);
+    const admin = screen.getByRole('navigation', { name: 'Administration' });
+    expect([...admin.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual([
+      '/admin/languages',
+      '/admin/slide-labels',
+    ]);
+  });
+
+  it('lists the other signed-in accounts by name in the account menu, and offers to add one', () => {
+    session.value = {
+      ...signedIn([]),
+      actor: 'account:a1',
+      slots: [
+        { slotId: 's1', actor: 'account:a1', displayName: 'Ruth Example' },
+        { slotId: 's2', actor: 'account:a2', displayName: 'Naomi Example' },
+        { slotId: 's3', actor: 'operator:setup' },
+      ],
+    } as SessionView;
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByText('Accounts')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Switch to Naomi Example' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Switch to operator:setup' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Switch to Ruth Example' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Add account' }).getAttribute('href')).toBe('/sign-in?add=1');
+  });
+
+  it('switches from the account menu and starts the tab over, or says why it could not', async () => {
+    session.value = {
+      ...signedIn([]),
+      actor: 'account:a1',
+      slots: [
+        { slotId: 's1', actor: 'account:a1', displayName: 'Ruth Example' },
+        { slotId: 's2', actor: 'account:a2', displayName: 'Naomi Example' },
+      ],
+    } as SessionView;
+    const reload = vi.spyOn(pageReload, 'to').mockImplementation(() => undefined);
+    const fetching = vi.fn<FetchLike>(async () => reply(200, successEnvelope({}, 'r-switch')));
+    setFetching(fetching);
+    render(<AppShell><p>page</p></AppShell>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Naomi Example' }));
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledWith('/services'));
+    expect(fetching).toHaveBeenCalledWith(SESSION_PATH, expect.objectContaining({ method: 'PATCH' }));
+
+    reload.mockClear();
+    setFetching(async () => reply(403, errorEnvelope('auth.forbidden', 'No such slot', 'r-refused')));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Naomi Example' }));
+    await screen.findByRole('alert');
+    expect(reload).not.toHaveBeenCalled();
+    reload.mockRestore();
   });
 
   it('marks the current section and links to the library', () => {
@@ -68,6 +169,18 @@ describe('the navigation shell', () => {
       currentPath.value = '/admin/users';
     });
     expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('aria-current')).toBe('page');
+  });
+
+  it('offers Security to every signed-in session, and marks it current on its own route', () => {
+    session.value = signedIn([], 'editor');
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByRole('link', { name: 'Security' }).getAttribute('href')).toBe('/account/security');
+    expect(screen.getByRole('link', { name: 'Security' }).getAttribute('aria-current')).toBeNull();
+
+    act(() => {
+      currentPath.value = '/account/security';
+    });
+    expect(screen.getByRole('link', { name: 'Security' }).getAttribute('aria-current')).toBe('page');
   });
 
   it('marks the library current while on it', () => {

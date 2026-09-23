@@ -19,6 +19,7 @@ import {
   checkSchema,
   readSettingsText,
 } from './boot.js';
+import { conflictShelfOn } from './conflicts.js';
 import { contentLanguagesOn } from './content-languages.js';
 import { requestContext, systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
@@ -50,6 +51,7 @@ import { serviceTemplatesOn } from './service-templates.js';
 import { preparationOn } from './snapshots.js';
 import { sessionDb, sessionsOn } from './sessions.js';
 import { passkeyDb, passkeysOn } from './passkeys.js';
+import { presenceDb, presenceOn } from './presence.js';
 import { settingsAdminOn } from './settings-admin.js';
 import { slideGroupsOn } from './slide-groups.js';
 import { slideLayoutsOn } from './slide-layouts.js';
@@ -64,6 +66,7 @@ import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
+import type { ConflictShelf } from './conflicts.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { LibraryStore } from './library.js';
 import type { MediaByteSource } from './media-delivery-routes.js';
@@ -74,6 +77,8 @@ import type { PptxCommit } from './pptx-commit.js';
 import type { PptxImport } from './pptx-import.js';
 import type { PptxReview } from './pptx-review.js';
 import type { PptxSessionStore } from './pptx-sessions.js';
+import type { PresenceStore } from './presence.js';
+import type { RevisionStore } from './revisions.js';
 import type { RunEventStore } from './run-events.js';
 import type { RunReviewStore } from './run-review.js';
 import type { SermonStore } from './sermons.js';
@@ -171,6 +176,17 @@ let contentExists: ((context: unknown, id: string) => Promise<boolean>) | undefi
 // write it down may show nothing, because a passage displayed without its revision recorded is the one
 // thing BIBL-04 rules out, and its routes answer not-found the same way.
 let shownReferences: ShownReferenceStore | undefined;
+// Who is editing what is kept the same way and for the same reason: a deployment with nowhere to
+// keep an entry has nobody here to observe, and its routes answer not-found the same way.
+let presence: PresenceStore | undefined;
+// Content history is kept the same way and for the same reason: a deployment with nowhere to keep
+// one has no earlier revision to read, compare or bring back, and its routes answer not-found the
+// same way.
+let revisions: RevisionStore | undefined;
+// The conflict shelf keeps a losing edit rather than discarding it (spec COLL-01), kept and administered
+// the same way: a deployment with nowhere to keep one has nothing here to settle, and its routes answer
+// not-found the same way.
+let conflictShelf: ConflictShelf | undefined;
 // Songs, Sermons and Slide Groups are durable content records too, kept and administered the same way: a
 // deployment with nowhere to keep one has none to create, edit or generate slides from, and its routes
 // answer not-found the same way.
@@ -237,12 +253,15 @@ if (settings.values.mongoUrl !== '') {
   engine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
+  revisions = revisionsOn(repositoryDb(store.db()), { now });
+  conflictShelf = conflictShelfOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
   workspacePositions = workspacePositionsOn(workspacePositionDb(store.db()), { now });
   const libraryStore = libraryOn(repositoryDb(store.db()), { now });
   library = libraryStore;
   contentExists = async (context, id) => (await libraryStore.get(context, id)) !== undefined;
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
+  presence = presenceOn(presenceDb(store.db()), { now });
   songs = songsOn(repositoryDb(store.db()), { now });
   chords = songSingerChordsOn(repositoryDb(store.db()), { now });
   sermons = sermonsOn(repositoryDb(store.db()), { now });
@@ -317,12 +336,15 @@ const app = buildApp({
   capabilities,
   settingsAdmin,
   slideLayouts,
+  revisions,
+  conflictShelf,
   media,
   mediaBytes,
   translationOffsets,
   workspacePositions,
   contentExists,
   shownReferences,
+  presence,
   services,
   serviceTemplates,
   preparation,

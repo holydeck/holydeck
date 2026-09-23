@@ -433,7 +433,13 @@ describe('what this surface refuses to answer at all', () => {
 
   test('a trail that refuses an entry does not cost the account the grant', async () => {
     await app.close();
-    app = await serving({ ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } });
+    app = await serving({
+      ...identity,
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
+    });
     const response = await asking(controlPath(ID), { granted: true });
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toMatchObject({ controlPresentation: true });

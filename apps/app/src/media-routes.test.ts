@@ -11,11 +11,13 @@ import { auditOn } from './audit.js';
 import { enforceAuthorization } from './authorization.js';
 import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
+import { libraryOn } from './library.js';
 import { CONTENT_EDIT, MEDIA_MANAGE } from './roles.js';
 import { mediaContext, mediaLibraryOn } from './media.js';
 import { MEDIA_PATH, MEDIA_PIXEL_CEILING, serveMediaRoutes } from './media-routes.js';
 import { passkeysOn } from './passkeys.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { slideGroupContext, slideGroupsOn } from './slide-groups.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
@@ -26,10 +28,13 @@ import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
 import type { Identity } from './onboarding.js';
+import type { LibraryStore } from './library.js';
 import type { MediaLibrary } from './media.js';
 import type { Document } from './repositories.js';
 import type { SessionStore, StartedSession } from './sessions.js';
+import type { SlideGroupStore } from './slide-groups.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
+import type { SlideGroupBody } from '@holydeck/contracts/slide-groups';
 import type { FastifyInstance } from 'fastify';
 
 const NOW = '2026-09-13T09:30:00.000Z';
@@ -69,6 +74,8 @@ let sessions: SessionStore;
 let trail: FakeDb;
 let identity: Identity;
 let media: MediaLibrary;
+let slideGroups: SlideGroupStore;
+let library: LibraryStore;
 let upload: ReturnType<typeof vi.fn>;
 let admin: StartedSession;
 
@@ -107,7 +114,7 @@ const served = async (options: {
   built.register(multipart, { limits: { fileSize: options.ceiling ?? 10_000_000 } });
   guardMutations(built, { sessions });
   enforceAuthorization(built, { sessions, identity: undefined });
-  serveMediaRoutes(built, { media: options.media, identity: options.noIdentity === true ? undefined : identity });
+  serveMediaRoutes(built, { media: options.media, identity: options.noIdentity === true ? undefined : identity, slideGroups, library });
   await built.ready();
   return built;
 };
@@ -140,6 +147,9 @@ beforeEach(async () => {
   });
   upload = vi.fn((...args: Parameters<MediaLibrary['upload']>) => real.upload(...args));
   media = { ...real, upload: upload as unknown as MediaLibrary['upload'] };
+  let groupSerial = 0;
+  slideGroups = slideGroupsOn(trail, { now, newId: () => `group-${(groupSerial += 1)}` });
+  library = libraryOn(trail, { now });
   app = await served({ media });
   admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [MEDIA_MANAGE] });
 });
@@ -172,7 +182,13 @@ describe('uploading a file', () => {
   });
 
   test('a trail that refuses an entry does not cost the upload', async () => {
-    identity = { ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
+    };
     await app.close();
     app = await served({ media });
     const response = await uploading({ filename: 'a.png', contentType: 'image/png', bytes: png(4, 4) });
@@ -395,11 +411,28 @@ describe('a request malformed before a file is even read', () => {
   });
 });
 
+describe('counting what references a media item', () => {
+  test('counts a real referencing slide group, zero when nothing references it, and not-found for an unknown id', async () => {
+    const id = await uploaded();
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}/dependents`)).json().data).toEqual({ count: 0, approximate: true });
+    const body: SlideGroupBody = {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-1',
+      slides: [{ id: 'slide-1', enabled: true, label: 'Slide', background: id, languageBlocks: [] }],
+    };
+    await slideGroups.create(slideGroupContext(ADMINISTRATOR, 'group-corr'), 'slideGroup', 'Test group', body);
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}/dependents`)).json().data).toEqual({ count: 1, approximate: true });
+    expect((await requesting('GET', `${MEDIA_PATH}/media-99/dependents`)).statusCode).toBe(404);
+  });
+});
+
 describe('what this surface refuses to answer at all', () => {
   test('a deployment that keeps no identity serves the path and answers not-found', async () => {
     await app.close();
     app = await served({ media: undefined, noIdentity: true });
     const response = await uploading({ filename: 'a.png', contentType: 'image/png', bytes: png(4, 4) });
     expect(response.statusCode).toBe(404);
+    expect((await requesting('GET', `${MEDIA_PATH}/media-1/dependents`)).statusCode).toBe(404);
   });
 });

@@ -4,6 +4,10 @@
 // `/catalogue` is gated narrower than the rest — `content.edit`, not `catalogue.manage` — because it is
 // what a language picker reads from, not what the registry is administered through.
 //
+// The administered list carries each language's usage — how many current songs, sermons and slide
+// groups name it — read by `content-usage.ts` from the fields that hold a language key, never from a
+// body's text. The dependents route answers the same count for one key, exactly.
+//
 // Archiving a language in use is not refused here: the store itself has no such rule (see its own
 // header comment), by design — every language block already keyed to an archived language keeps
 // resolving, so there is nothing here for an in-use check to protect.
@@ -21,6 +25,7 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
+import { contentUsage } from './content-usage.js';
 import { settled } from './refusals.js';
 import { CATALOGUE_MANAGE, CONTENT_EDIT } from './roles.js';
 import { ContentLanguageError, contentLanguageContext, subjectFor } from './content-languages.js';
@@ -28,7 +33,11 @@ import { ContentLanguageError, contentLanguageContext, subjectFor } from './cont
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
 import type { ContentLanguageStore } from './content-languages.js';
+import type { LibraryStore } from './library.js';
 import type { Identity } from './onboarding.js';
+import type { SermonStore } from './sermons.js';
+import type { SlideGroupStore } from './slide-groups.js';
+import type { SongStore } from './songs.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 const CONTENT_LANGUAGE_PREFIX = 'contentLanguage:';
@@ -36,6 +45,7 @@ const CONTENT_LANGUAGE_PREFIX = 'contentLanguage:';
 export const CONTENT_LANGUAGE_KEY_PATH = `${CONTENT_LANGUAGES_PATH}/:key`;
 export const CONTENT_LANGUAGE_STATUS_PATH = `${CONTENT_LANGUAGE_KEY_PATH}/status`;
 export const CONTENT_LANGUAGE_CATALOGUE_PATH = `${CONTENT_LANGUAGES_PATH}/catalogue`;
+export const CONTENT_LANGUAGE_DEPENDENTS_PATH = `${CONTENT_LANGUAGE_KEY_PATH}/dependents`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: CATALOGUE_MANAGE };
 const CATALOGUE_PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
@@ -47,6 +57,7 @@ const ROUTES = [
   ['GET', CONTENT_LANGUAGE_KEY_PATH, PERMISSION],
   ['PUT', CONTENT_LANGUAGE_KEY_PATH, PERMISSION],
   ['PATCH', CONTENT_LANGUAGE_STATUS_PATH, PERMISSION],
+  ['GET', CONTENT_LANGUAGE_DEPENDENTS_PATH, PERMISSION],
 ] as const;
 
 const keyIn = (request: FastifyRequest): string => (request.params as { readonly key: string }).key;
@@ -57,11 +68,24 @@ const isRefusal = (error: unknown): error is ContentLanguageError & { kind: 'sta
 export interface ContentLanguageRoutesOptions {
   readonly contentLanguages: ContentLanguageStore | undefined;
   readonly identity: Identity | undefined;
+  /** Absent whenever `identity` is, per `main.ts`'s wiring — used only for the usage counts below. */
+  readonly songs: SongStore | undefined;
+  readonly slideGroups: SlideGroupStore | undefined;
+  readonly library: LibraryStore | undefined;
+  /** Absent in a deployment without sermons, whose usage then counts none. */
+  readonly sermons?: SermonStore | undefined;
 }
 
 export function serveContentLanguageRoutes(
   app: FastifyInstance,
-  { contentLanguages, identity }: ContentLanguageRoutesOptions,
+  {
+    contentLanguages,
+    identity,
+    songs: songsOption,
+    slideGroups: slideGroupsOption,
+    library: libraryOption,
+    sermons,
+  }: ContentLanguageRoutesOptions,
 ): void {
   if (identity === undefined) {
     for (const [method, url, need] of ROUTES) {
@@ -75,6 +99,15 @@ export function serveContentLanguageRoutes(
     return;
   }
   const languages = contentLanguages as ContentLanguageStore;
+  const songs = songsOption as SongStore;
+  const slideGroups = slideGroupsOption as SlideGroupStore;
+  const library = libraryOption as LibraryStore;
+  const usageFor = (request: FastifyRequest) =>
+    contentUsage(
+      { library, songs, slideGroups, sermons },
+      provenSession(request).record.actor,
+      correlationFor(CONTENT_LANGUAGE_PREFIX, request.id),
+    );
   const call = (request: FastifyRequest) =>
     contentLanguageContext(provenSession(request).record.actor, correlationFor(CONTENT_LANGUAGE_PREFIX, request.id));
 
@@ -90,8 +123,9 @@ export function serveContentLanguageRoutes(
   };
 
   app.get(CONTENT_LANGUAGES_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
-    const items = await languages.list(call(request));
-    return reply.send(successEnvelope(items, request.id, CLIENT_WINDOW.current));
+    const [items, usage] = await Promise.all([languages.list(call(request)), usageFor(request)]);
+    const counted = items.map((item) => ({ ...item, usage: usage.languages.get(item.stamp.id) ?? 0 }));
+    return reply.send(successEnvelope(counted, request.id, CLIENT_WINDOW.current));
   });
 
   app.post(CONTENT_LANGUAGES_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
@@ -139,5 +173,14 @@ export function serveContentLanguageRoutes(
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     await note(request, key, 'allowed', parsed.value.archived ? 'archived' : 'brought back');
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  // A count, not an audited action: how many current items name this key (see `content-usage.ts`).
+  app.get(CONTENT_LANGUAGE_DEPENDENTS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const key = keyIn(request);
+    const found = await languages.get(call(request), key);
+    if (found === undefined) return reply.code(404).send(notFound(request));
+    const count = (await usageFor(request)).languages.get(key) ?? 0;
+    return reply.send(successEnvelope({ count, approximate: false }, request.id, CLIENT_WINDOW.current));
   });
 }

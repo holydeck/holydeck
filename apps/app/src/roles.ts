@@ -66,6 +66,26 @@ export const MEDIA_MANAGE = 'media.manage';
  */
 export const SERVICES_MANAGE = 'services.manage';
 
+/**
+ * Enters, lists and leaves presence on a piece of content being edited (spec v1c-09, COLAB-01).
+ * Granted to every role, including Member — presence is informational, not a change of reach.
+ */
+export const PRESENCE_USE = 'presence.use';
+
+/**
+ * Reads and restores earlier revisions of any content this store already versions (spec v1c-09,
+ * COLAB-02) — today Slide Layouts and Service Templates, both Admin's own surfaces already. Spelled
+ * `contentHistory.` rather than folding into `layouts.`/`serviceTemplates.`, because history reaches
+ * across whichever content kind wrote it and is not either one's alone to administer.
+ */
+export const CONTENT_HISTORY_MANAGE = 'contentHistory.manage';
+
+/** Reads the audit trail (spec v1c-09, ADMN-03/ADMN-04). Admin's alone, by role — the same reach as accounts and settings. */
+export const AUDIT_READ = 'audit.read';
+
+/** Views status and toggles integrations on/off (spec v1c-09, ADMN-04). Admin's alone, by role. */
+export const INTEGRATIONS_MANAGE = 'integrations.manage';
+
 const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
   admin: [
     ACCOUNTS_MANAGE,
@@ -76,9 +96,13 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     SERVICES_MANAGE,
     CONTENT_EDIT,
     CATALOGUE_MANAGE,
+    PRESENCE_USE,
+    CONTENT_HISTORY_MANAGE,
+    AUDIT_READ,
+    INTEGRATIONS_MANAGE,
   ],
-  editor: [SERVICES_MANAGE, CONTENT_EDIT],
-  member: [],
+  editor: [SERVICES_MANAGE, CONTENT_EDIT, PRESENCE_USE, CONTENT_HISTORY_MANAGE],
+  member: [PRESENCE_USE],
 };
 
 /**

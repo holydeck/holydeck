@@ -147,7 +147,7 @@ describe('changing a setting', () => {
     const response = await patching({ locale: 'de', port: 0 });
     expect(response.statusCode).toBe(422);
     expect(response.json().error.code).toBe(VALIDATION_FAILED);
-    expect(response.json().error.fields[0]).toMatchObject({ path: 'settings', code: 'field.not_allowed' });
+    expect(response.json().error.fields[0]).toMatchObject({ path: 'settings.port', code: 'field.not_allowed' });
     expect((await reading()).json().data.values).toMatchObject({ locale: 'en', port: 3000 });
   });
 
@@ -159,7 +159,10 @@ describe('changing a setting', () => {
     const response = await patching({ developmentDiagnostics: true });
     expect(response.statusCode).toBe(422);
     expect(response.json().error.code).toBe(VALIDATION_FAILED);
-    expect(response.json().error.fields[0]).toMatchObject({ path: 'settings', code: 'field.not_allowed' });
+    expect(response.json().error.fields[0]).toMatchObject({
+      path: 'settings.developmentDiagnostics',
+      code: 'field.not_allowed',
+    });
     expect((await reading()).json().data.values).toMatchObject({ developmentDiagnostics: false });
   });
 
@@ -167,6 +170,13 @@ describe('changing a setting', () => {
     const response = await patching({ locale: 'de', developmentDiagnostics: true });
     expect(response.statusCode).toBe(422);
     expect((await reading()).json().data.values).toMatchObject({ locale: 'en', developmentDiagnostics: false });
+  });
+
+  // A refusal that names two settings at once belongs to neither input alone, so it stays on the form.
+  test('keeps a refusal that pairs two settings on the whole form rather than on either field', async () => {
+    const response = await patching({ tlsCertFile: '/data/holydeck/tls/cert.pem' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.fields[0].path).toBe('settings');
   });
 
   test('an unexpected failure while writing is not turned into a validation refusal', async () => {
@@ -226,7 +236,13 @@ describe('the trail this route writes', () => {
   });
 
   test('a trail that refuses an entry does not cost the change', async () => {
-    identity = { ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
+    };
     await app.close();
     app = Fastify({ logger: false });
     withSafeErrors(app);

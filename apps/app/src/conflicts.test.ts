@@ -259,6 +259,29 @@ describe('an edit that loses its race', () => {
   });
 });
 
+describe('an edit saved over a revision it never read', () => {
+  beforeEach(async () => {
+    await revisions.save(ADA, { contentId: SONG, body: HELD, origin: 'autosave' });
+    await revisions.save(GRACE, { contentId: SONG, body: GRACES, origin: 'manual-checkpoint' });
+  });
+
+  test('is refused as a conflict, one after the other, not only in a race', async () => {
+    const saving = shelf.saveWithConflictPreservation(ADA, revisions, {
+      contentId: SONG, body: ADAS, origin: 'manual-checkpoint', expectedRevision: 1,
+    });
+    await expect(saving).rejects.toMatchObject({ name: 'RevisionError', kind: 'conflict' });
+    expect((await revisions.history(ADA, SONG)).map((revision) => revision.body)).toEqual([HELD, GRACES]);
+  });
+
+  test('is shelved with the ordinal it was aiming at, so the later save does not silently win', async () => {
+    await shelf.saveWithConflictPreservation(ADA, revisions, {
+      contentId: SONG, body: ADAS, origin: 'manual-checkpoint', expectedRevision: 1,
+    }).catch(() => undefined);
+    const [entry] = await shelf.outstanding(ADA, SONG);
+    expect(entry).toMatchObject({ kind: 'shelved', attempted: 2, body: ADAS, actor: 'account:7f3a' });
+  });
+});
+
 describe('settling a shelved conflict', () => {
   beforeEach(async () => {
     await revisions.save(ADA, { contentId: SONG, body: HELD, origin: 'autosave' });

@@ -6,6 +6,7 @@ import { type SignIn } from '@holydeck/contracts/accounts';
 import { SESSION_PATH, SIGN_IN_REFUSED } from '@holydeck/contracts/sessions';
 import { useState } from 'preact/hooks';
 
+import { reloadAsAnotherAccount } from '../account-switch.js';
 import { session } from '../app-state.js';
 import { FormField } from '../components/form-field.js';
 import { fieldErrors } from '../form-errors.js';
@@ -14,8 +15,15 @@ import { boot, request } from '../request.js';
 
 import type { JSX } from 'preact';
 
+export interface SignInPageProps {
+  readonly next: string | undefined;
+  readonly notice?: 'claim-sign-in-refused';
+  /** Signing in from a tab that already holds a session adds the account as a new slot (COLAB-08). */
+  readonly add?: boolean;
+}
+
 /** The session-opening form, with an optional safe destination supplied by the router. */
-export function SignInPage({ next, notice }: { readonly next: string | undefined; readonly notice?: 'claim-sign-in-refused' }): JSX.Element {
+export function SignInPage({ next, notice, add = false }: SignInPageProps): JSX.Element {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -38,7 +46,10 @@ export function SignInPage({ next, notice }: { readonly next: string | undefined
         }
         return;
       }
-      await boot();
+      // The server made the added account the active slot, so this tab is now that account's and starts
+      // over as it; an ordinary sign-in returns through boot, as a restoring session does.
+      if (add) reloadAsAnotherAccount();
+      else await boot();
     } finally {
       setSubmitting(false);
     }
@@ -46,7 +57,7 @@ export function SignInPage({ next, notice }: { readonly next: string | undefined
 
   return (
     <form noValidate onSubmit={submit}>
-      <h1>{t('signIn.title')}</h1>
+      <h1>{t(add ? 'signIn.addTitle' : 'signIn.title')}</h1>
       {session.value === null && next !== undefined ? <p role="status">{t('signIn.expired')}</p> : null}
       {notice === 'claim-sign-in-refused' ? <p role="status">{t('signIn.refused')}</p> : null}
       {error === undefined ? null : <p role="alert">{error}</p>}

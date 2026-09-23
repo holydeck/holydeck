@@ -72,3 +72,31 @@ export function parseLibraryFilter(query: unknown, path = 'library'): Parsed<Lib
   if (problems.length > 0) return { ok: false, problems };
   return { ok: true, value: { ...(kind === undefined ? {} : { kind }), ...(q === undefined ? {} : { q }), archived } };
 }
+
+/** The body of `PATCH …/library/:id/status` (DELT-01): archive an item, or bring an archived one back. */
+export type LibraryStatus = { readonly archived: boolean };
+
+export function parseLibraryStatus(value: unknown): Parsed<LibraryStatus> {
+  return parseObject(value, 'library', (reader) => ({ archived: reader.flag('archived') }));
+}
+
+/**
+ * What `GET …/library/:id/dependents` answers (COLAB-14): how many Services and Service Templates hold an
+ * entry pointing at this item, and their sum as `count` — the same `{count, approximate}` pair every other
+ * dependents route answers, with the split the Archive dialog names ("Used by 3 services, 1 template").
+ */
+export type LibraryDependents = {
+  readonly count: number;
+  readonly approximate: boolean;
+  readonly services: number;
+  readonly templates: number;
+};
+
+export function parseLibraryDependents(value: unknown): Parsed<LibraryDependents> {
+  return parseObject(value, 'library', (reader) => ({
+    count: reader.wholeNumber('count'),
+    approximate: reader.flag('approximate'),
+    services: reader.wholeNumber('services'),
+    templates: reader.wholeNumber('templates'),
+  }));
+}

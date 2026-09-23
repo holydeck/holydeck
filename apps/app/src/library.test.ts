@@ -66,9 +66,9 @@ describe('discovering content the instant it is created', () => {
 });
 
 describe('the library store has no promotion verb', () => {
-  it('exposes exactly create, get, and list, nothing that moves an item from local to global', () => {
+  it('exposes create, get, list, archive and restore, nothing that moves an item from local to global', () => {
     const { library } = store();
-    expect(Object.keys(library).sort()).toEqual(['create', 'get', 'list']);
+    expect(Object.keys(library).sort()).toEqual(['archive', 'create', 'get', 'list', 'restore']);
   });
 
   it.each(LIBRARY_KINDS)('accepts %s as a kind create() can mint', async (kind) => {
@@ -219,5 +219,35 @@ describe('what the library store is reached through', () => {
   it('generates an unpredictable id when no id factory is supplied', async () => {
     const library = libraryOn(fakeDb(), { now: () => new Date(START).toISOString() });
     expect((await library.create(CTX, { kind: 'song', title: 'x' })).stamp.id).toMatch(/^[\w-]{22}$/u);
+  });
+});
+
+describe('archiving and restoring an item (DELT-01)', () => {
+  it('stamps an archive over the standing stamp, hides the item from the default list, and restores it', async () => {
+    const { db, library } = store();
+    const created = await library.create(CTX, { kind: 'song', title: 'Amazing Grace' });
+    const archived = await library.archive(CTX, created.stamp.id);
+    expect(archived?.stamp).toMatchObject({ archivedAt: '2026-09-13T09:30:01.000Z', archivedBy: LIBRARIAN, updatedAt: '2026-09-13T09:30:01.000Z' });
+    expect(archived?.title).toBe('Amazing Grace');
+    expect(await library.list(CTX)).toEqual([]);
+    expect(await library.list(CTX, { archived: true })).toEqual([archived]);
+    const restored = await library.restore(CTX, created.stamp.id);
+    expect(restored?.stamp.archivedAt).toBeUndefined();
+    expect(await library.list(CTX)).toEqual([restored]);
+    expect(rows(db, STAMPS).map((row) => row['sequence'])).toEqual([1, 2, 3]);
+  });
+
+  it('answers nothing for an item that was never created', async () => {
+    const { library } = store();
+    expect(await library.archive(CTX, 'missing')).toBeUndefined();
+    expect(await library.restore(CTX, 'missing')).toBeUndefined();
+  });
+
+  it('refuses to archive an archived item or restore a live one, as a state refusal', async () => {
+    const { library } = store();
+    const created = await library.create(CTX, { kind: 'song', title: 'Amazing Grace' });
+    expect((await refused(library.restore(CTX, created.stamp.id))).kind).toBe('state');
+    await library.archive(CTX, created.stamp.id);
+    expect((await refused(library.archive(CTX, created.stamp.id))).kind).toBe('state');
   });
 });

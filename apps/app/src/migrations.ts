@@ -8,6 +8,7 @@
 
 import { ACCOUNT_INDEXES, createAccountIndexOn, dropAccountIndexOn } from './accounts.js';
 import { ATTEMPT_INDEXES, createAttemptIndexOn, dropAttemptIndexOn } from './attempts.js';
+import { AUDIT_INDEXES, AUDIT_RECORD } from './audit.js';
 import { BACKUP_INDEXES, BACKUP_RECORD } from './backups.js';
 import { CAPABILITY_INDEXES, createCapabilityIndexOn, dropCapabilityIndexOn } from './capabilities.js';
 import { SHELF_INDEXES, SHELF_RECORD } from './conflicts.js';
@@ -392,6 +393,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...SERVICE_TEMPLATE_INDEXES].reverse()) await api.dropIndex(SERVICE_TEMPLATE_RECORD, index.name);
+    },
+  },
+  {
+    version: 23,
+    name: 'the index a category-narrowed audit listing is found by',
+    async up(api) {
+      for (const index of AUDIT_INDEXES) {
+        await api.createIndex(AUDIT_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...AUDIT_INDEXES].reverse()) await api.dropIndex(AUDIT_RECORD, index.name);
     },
   },
 ]);

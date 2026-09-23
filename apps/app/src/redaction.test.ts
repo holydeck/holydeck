@@ -104,6 +104,9 @@ describe('redacting a value', () => {
         mongoUrl: `mongodb://app:${MONGO_PASSWORD}@db.example.invalid/holydeck`,
       }),
     ).toEqual([CORPUS_TOKEN, MONGO_PASSWORD]);
+    expect(secretsIn({ ...DEFAULT_SETTINGS, anthropicApiKey: 'sk-ant-example-key' })).toEqual([
+      'sk-ant-example-key',
+    ]);
     // An address with no credential in it carries no secret to remove, and is not made into one.
     expect(secretsIn({ ...DEFAULT_SETTINGS, mongoUrl: 'mongodb://db.example.invalid/holydeck' })).toEqual([]);
     expect(secretsIn({ ...DEFAULT_SETTINGS, mongoUrl: 'not a URL at all' })).toEqual([]);

@@ -173,8 +173,9 @@ export function conflictShelfOn(db: RepositoryDb, options: ConflictShelfOptions)
       // at is gone: the winner is standing there. This is the same read `save` makes for itself, and
       // when a third writer lands between the two the ordinal recorded is still the one this writer was
       // aiming at, which is what the shelf row is there to say.
+      // A writer that named the revision it read was aiming one past that, whatever has landed since.
       const standing = await revisions.current(context, input.contentId);
-      const attempted = (standing?.revision ?? 0) + 1;
+      const attempted = (input.expectedRevision ?? standing?.revision ?? 0) + 1;
       try {
         return await revisions.save(context, input);
       } catch (error) {
