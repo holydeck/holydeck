@@ -100,4 +100,43 @@ describe('resuming a run after a real restart', () => {
       await restarted.close();
     }
   });
+
+  it('resumes with the same LiveState and a stateRevision that never goes backward after a restart', async () => {
+    const db = repositoryDb(mongo.db);
+    let tick = 0;
+    const now = (): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString();
+    const services = servicesOn(db, { now, newId: () => 'service-2' });
+    const service = await services.create(EDITOR, DRAFT);
+    await preparationOn(db, { now: () => new Date(START).toISOString() }).prepare(PREPARE_CONTEXT, service.stamp.id, INPUTS);
+
+    const runs = runsOn(db, { now, newId: () => 'run-2', observe: () => READY });
+    const started = await runs.start(OPERATOR_SESSION, { serviceId: service.stamp.id, mode: 'live' });
+
+    // Three real advances over a real MongoClient — the same CAS pipeline `run-engine.ts` drives a
+    // live run through, not a synthetic row written directly.
+    let revision = started.stateRevision;
+    let live = started.live;
+    for (let slideIndex = 1; slideIndex <= 3; slideIndex += 1) {
+      const next = { ...live, selected: { ...live.selected, slideIndex } };
+      const advanced = await runs.advance(READ_CONTEXT, started.runId, revision, next);
+      if (advanced === 'stale' || advanced === undefined) throw new Error(`advance ${slideIndex} was unexpectedly refused`);
+      revision = advanced.stateRevision;
+      live = advanced.live;
+    }
+    expect(revision).toBe(3);
+
+    // A brand new MongoClient again, exactly as above — resume() must report the last-written `live`
+    // and `stateRevision` from the repository, never a value held in the first store's own closure.
+    const restarted = new MongoClient(mongo.uri, { ignoreUndefined: true });
+    await restarted.connect();
+    try {
+      const restartedRuns = runsOn(repositoryDb(restarted.db(DATABASE)), { now });
+      const resumed = await restartedRuns.resume(READ_CONTEXT, started.runId);
+
+      expect(resumed?.stateRevision).toBe(3);
+      expect(resumed?.live).toEqual(live);
+    } finally {
+      await restarted.close();
+    }
+  });
 });
