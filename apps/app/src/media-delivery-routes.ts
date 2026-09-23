@@ -42,7 +42,14 @@ interface Delivery {
   readonly key: string;
   readonly hash: string;
   readonly type: string;
+  /** What to answer when the key has no file behind it; without one a missing file stays a failure. */
+  readonly missing?: () => FastifyReply;
 }
+
+const DELIVERY_HEADERS = ['Content-Type', 'ETag', 'Cache-Control', 'Accept-Ranges'] as const;
+
+const isMissingFile = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && (error as { readonly code?: unknown }).code === 'ENOENT';
 
 const deliver = async (
   request: FastifyRequest,
@@ -59,7 +66,15 @@ const deliver = async (
 
   if (request.headers['if-none-match'] === etag) return reply.code(304).send();
 
-  const size = await bytes.size(delivery.key);
+  let size: number;
+  try {
+    size = await bytes.size(delivery.key);
+  } catch (error) {
+    if (delivery.missing === undefined || !isMissingFile(error)) throw error;
+    // The headers above describe bytes that are not there; the refusal is a JSON envelope, not a JPEG.
+    for (const name of DELIVERY_HEADERS) reply.removeHeader(name);
+    return delivery.missing();
+  }
   const range = parseByteRange(request.headers.range, size);
   if (range.kind === 'unsatisfiable') {
     return reply.code(416).header('Content-Range', `bytes */${size}`).send();
@@ -107,16 +122,19 @@ export function serveMediaDeliveryRoutes(
     const actor = provenSession(request).record.actor;
     const record = await media.inspect(mediaContext(actor, correlationFor(MEDIA_PREFIX, request.id)), id);
     if (record === undefined) return reply.code(404).send(notFound(request));
-    const derivative = record.manifest.derivatives.find((candidate) => candidate.kind === name);
-    if (derivative === undefined) {
-      return reply
+    const missing = () =>
+      reply
         .code(404)
         .send(errorEnvelope('media.derivative_missing', `No ${name} derivative has been produced for this asset yet`, request.id));
-    }
+    const derivative = record.manifest.derivatives.find((candidate) => candidate.kind === name);
+    if (derivative === undefined) return missing();
+    // A manifest can list a derivative whose file was never written or has since gone; that is the same
+    // "not produced" a preview already knows how to explain, not a server failure.
     return deliver(request, reply, bytes, {
       key: `${record.storageKey}.${name}.jpg`,
       hash: derivative.hash,
       type: 'image/jpeg',
+      missing,
     });
   });
 }

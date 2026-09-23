@@ -164,6 +164,23 @@ describe('media derivative delivery', () => {
     expect(response.json().error.code).toBe('media.derivative_missing');
   });
 
+  test('answers the same specific error when a recorded derivative has no file behind it', async () => {
+    record = {
+      ...record,
+      manifest: {
+        ...record.manifest,
+        derivatives: [{ kind: 'poster', bytes: 3, hash: 'sha256:def', from: 'sha256:abc' }],
+      },
+    };
+    size.mockRejectedValueOnce(Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }));
+
+    const response = await asking(derivativePath());
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('media.derivative_missing');
+    expect(stream).not.toHaveBeenCalled();
+  });
+
   test('streams the produced JPEG under its real storage key and validator', async () => {
     record = {
       ...record,
