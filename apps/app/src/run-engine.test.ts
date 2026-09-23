@@ -56,6 +56,8 @@ const setup = () => {
     end: vi.fn<RunStore['end']>(async () => ({ ...held, phase: 'ended' })),
     resume: vi.fn<RunStore['resume']>(async () => held),
     active: vi.fn<RunStore['active']>(async () => [held]),
+    list: vi.fn<RunStore['list']>(async () => [held]),
+    history: vi.fn<RunStore['history']>(async () => [held]),
     advance: vi.fn<RunStore['advance']>(async (_context, _runId, expected, live) => {
       order.push('advance');
       if (held.stateRevision !== expected) return 'stale';

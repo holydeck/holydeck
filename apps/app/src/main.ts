@@ -126,6 +126,7 @@ let runReview: RunReviewStore | undefined;
 let midService: MidServiceStore | undefined;
 let slideGroups: SlideGroupStore | undefined;
 let engine: RunEngine | undefined;
+let deck: ((context: unknown, run: RunRecord) => Promise<RunDeck>) | undefined;
 let slideLabels: SlideLabelStore | undefined;
 // The settings admin is kept apart from the durable store, but wired up alongside it: a deployment with
 // nowhere to keep accounts has nobody who could administer settings either, and its route answers
@@ -186,6 +187,7 @@ if (settings.values.mongoUrl !== '') {
     if (snapshot === undefined) throw new Error(`${run.snapshotId} is not a manifest this server holds`);
     return deriveDeck(deckContext, { slideGroups: groups }, snapshot, await additions.additions(deckContext, run.runId));
   };
+  deck = deckFor;
   engine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
@@ -257,6 +259,8 @@ const app = buildApp({
   runs,
   themes,
   runReview,
+  runEngine: engine,
+  deck,
   midService,
   slideLabels,
 });

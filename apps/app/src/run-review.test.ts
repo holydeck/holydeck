@@ -98,7 +98,11 @@ const live = async (): Promise<Live> => {
       const outcome = await additions.add(SESSION, { runId: run.runId, kind: 'reading', title, body: { text: title } });
       return outcome.addition.contentId;
     },
-    startAnother: async () => (await runs.start(SESSION, { serviceId: service.stamp.id, mode: 'live' })).runId,
+    startAnother: async () => {
+      // A service is never run twice at once, so the prior run (e.g. last Sunday) ends before this one starts.
+      await runs.end(SESSION, run.runId);
+      return (await runs.start(SESSION, { serviceId: service.stamp.id, mode: 'live' })).runId;
+    },
     end: async () => (await runs.end(SESSION, run.runId))!.phase,
   };
 };

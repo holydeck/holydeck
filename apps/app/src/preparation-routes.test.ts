@@ -61,7 +61,7 @@ let routed: PreparationStore;
 let sessions: SessionStore;
 let operator: StartedSession;
 
-const building = async (store: PreparationStore | undefined, runStore?: Pick<RunStore, 'resume'>): Promise<void> => {
+const building = async (store: PreparationStore | undefined, runStore?: RunStore): Promise<void> => {
   app = buildApp({
     settings: loadSettings({ env: {} }),
     logger: false,

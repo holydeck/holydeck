@@ -127,7 +127,7 @@ describe('starting a run', () => {
 
     const error = await refused(runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' }));
 
-    expect(error.kind).toBe('state');
+    expect(error.kind).toBe('outdated');
     expect(error.message).toContain('outdated');
     expect(rows(db, RUNS)).toHaveLength(0);
   });
@@ -145,7 +145,8 @@ describe('starting a run', () => {
 
   it('refuses starting under an id another run already claimed, and writes nothing new', async () => {
     const db = fakeDb();
-    const services = servicesOn(db, { now: () => new Date(START).toISOString(), newId: () => 'service-1' });
+    let serviceSerial = 0;
+    const services = servicesOn(db, { now: () => new Date(START).toISOString(), newId: () => `service-${(serviceSerial += 1)}` });
     const service = await services.create(EDITOR, DRAFT);
     await preparationOn(db, { now: () => new Date(START).toISOString() }).prepare(CONTEXT, service.stamp.id, INPUTS);
     const runs = runsOn(db, {
@@ -155,7 +156,12 @@ describe('starting a run', () => {
     });
     await runs.start(OPERATOR_SESSION, { serviceId: service.stamp.id, mode: 'live' });
 
-    const error = await refused(runs.start(OPERATOR_SESSION, { serviceId: service.stamp.id, mode: 'live' }));
+    // A different service, still active, so the service-level "already active" refusal never intercepts
+    // this before the runId collision this test means to exercise gets a chance to fire — the fixed
+    // `newId` above claims the same runId regardless of which service asks for one.
+    const serviceB = await services.create(EDITOR, DRAFT);
+    await preparationOn(db, { now: () => new Date(START).toISOString() }).prepare(CONTEXT, serviceB.stamp.id, INPUTS);
+    const error = await refused(runs.start(OPERATOR_SESSION, { serviceId: serviceB.stamp.id, mode: 'live' }));
 
     expect(error.kind).toBe('conflict');
     expect(rows(db, RUNS)).toHaveLength(1);
@@ -239,7 +245,7 @@ describe('going live over an open blocker', () => {
 
     const error = await refused(runs.start(OPERATOR_SESSION, { serviceId, mode: 'live', override: { reason: 'x' } }));
 
-    expect(error.kind).toBe('state');
+    expect(error.kind).toBe('outdated');
   });
 
   it('refuses an override offered when nothing is blocked', async () => {
@@ -491,9 +497,14 @@ describe('a Mongo interruption mid-run', () => {
 
 describe('active runs', () => {
   it('keeps only the latest row per run before filtering active phases', async () => {
-    const { runs, serviceId } = await prepared();
+    const { db, services, runs, serviceId } = await prepared();
+    // A different service, so both runs are legitimately active at once: a service is never started
+    // twice, but two different services running concurrently is exactly what `active` must reduce over.
+    const serviceB = await services.create(EDITOR, DRAFT);
+    await preparationOn(db, { now: () => new Date(START).toISOString() }).prepare(CONTEXT, serviceB.stamp.id, INPUTS);
+
     const first = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
-    const second = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'rehearsal' });
+    const second = await runs.start(OPERATOR_SESSION, { serviceId: serviceB.stamp.id, mode: 'rehearsal' });
     await runs.advance(READ_CONTEXT, second.runId, 0, { ...second.live, mode: 'paused' });
     await runs.end(OPERATOR_SESSION, first.runId);
     const active = await runs.active(READ_CONTEXT);

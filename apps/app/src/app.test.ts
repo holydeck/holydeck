@@ -17,6 +17,7 @@ import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from
 import { MEDIA_PATH } from './media-routes.js';
 import { PREPARATION_OVERRIDE_PATH, PREPARATION_PREPARE_PATH } from './preparation-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
+import { RUN_ADDITIONS_PATH, RUN_END_PATH, RUN_PATH, RUN_THEME_PATH } from './run-routes.js';
 import {
   SERVICE_DUPLICATE_PATH,
   SERVICE_ID_PATH,
@@ -163,6 +164,12 @@ describe('every route that changes something', () => {
       // alone, the one route in this module gated by a different permission than the rest.
       { method: 'POST', url: PREPARATION_PREPARE_PATH },
       { method: 'POST', url: PREPARATION_OVERRIDE_PATH },
+      // A live run's own surface: starting one, ending it, retheming it mid-service and adding to it are
+      // all Control presentation's alone, the same permission that drives the room while a run is live.
+      { method: 'POST', url: RUN_PATH },
+      { method: 'POST', url: RUN_END_PATH },
+      { method: 'POST', url: RUN_THEME_PATH },
+      { method: 'POST', url: RUN_ADDITIONS_PATH },
     ]);
   });
 

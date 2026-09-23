@@ -62,7 +62,7 @@ const DECLARED_INDEXES: readonly RunIndex[] = [
 
 export const RUN_INDEXES = Object.freeze(DECLARED_INDEXES);
 
-export type RunRefusal = 'permission' | 'state' | 'conflict' | 'corrupt';
+export type RunRefusal = 'permission' | 'state' | 'conflict' | 'corrupt' | 'outdated' | 'active';
 
 export class RunError extends Error {
   readonly kind: RunRefusal;
@@ -114,8 +114,21 @@ export interface RunRecord {
  *  standalone override route (`preparation-routes.ts`) already takes. */
 export type StartRunRequest = RunStartBody;
 
+export interface RunListFilter {
+  readonly serviceId?: string;
+  readonly phase?: RunPhase;
+}
+
 export interface RunStore {
   active(context: unknown): Promise<readonly RunRecord[]>;
+  /** Every run's latest row, most recently started first, optionally narrowed by service or phase — the
+   *  same "reduce to latest row per runId" read `active` does, without `active`'s phase filter fixed to
+   *  `'active'`. Used to answer `GET /api/v1/runs`, never to derive a single run's own history. */
+  list(context: unknown, filter?: RunListFilter): Promise<readonly RunRecord[]>;
+  /** Every row a single run has ever written, oldest first — `start` through every `advance` to `end`,
+   *  unfiltered. Exists so a reader can derive facts no single row carries alone, such as when a run
+   *  started or ended, without this module inventing new stored fields for them (spec Design §4). */
+  history(context: unknown, runId: string): Promise<readonly RunRecord[]>;
   /** Starts a fresh run from a Ready prepared snapshot. Refuses with a named error from anything else,
    *  Outdated included (spec LIVE-01). Requires Control presentation, checked before anything is read. */
   start(session: OperatorSession, request: StartRunRequest): Promise<RunRecord>;
@@ -306,6 +319,20 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
     return found === undefined ? undefined : rowFrom(found);
   };
 
+  /** Every run's latest row, reduced from its full row history — the read `active`, `list` and `start`'s
+   *  own already-active check all share, so the three never disagree about what "latest" means. */
+  const latestPerRun = async (context: unknown): Promise<readonly StandingRow[]> => {
+    const found = await runs.read(context, {});
+    const latest = new Map<unknown, Record<string, unknown>>();
+    for (const row of found) {
+      const previous = latest.get(row['runId']);
+      if (previous === undefined || Number(row['sequence']) > Number(previous['sequence'])) {
+        latest.set(row['runId'], row);
+      }
+    }
+    return [...latest.values()].map(rowFrom);
+  };
+
   const append = async (
     context: unknown,
     fields: Omit<StandingRow, 'at' | 'position'>,
@@ -317,16 +344,19 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
   };
 
   const store: RunStore = {
-    active: async (context) => {
-      const found = await runs.read(context, {});
-      const latest = new Map<unknown, Record<string, unknown>>();
-      for (const row of found) {
-        const previous = latest.get(row['runId']);
-        if (previous === undefined || Number(row['sequence']) > Number(previous['sequence'])) {
-          latest.set(row['runId'], row);
-        }
-      }
-      return [...latest.values()].map(rowFrom).filter((run) => run.phase === 'active');
+    active: async (context) => (await latestPerRun(context)).filter((run) => run.phase === 'active'),
+
+    list: async (context, filter) => {
+      const latest = await latestPerRun(context);
+      return latest
+        .filter((run) => filter?.serviceId === undefined || run.serviceId === filter.serviceId)
+        .filter((run) => filter?.phase === undefined || run.phase === filter.phase)
+        .sort((a, b) => b.at.localeCompare(a.at));
+    },
+
+    history: async (context, runId) => {
+      const found = await runs.read(context, { runId }, { sort: { sequence: 1 } });
+      return found.map(rowFrom);
     },
 
     start: (session, request) =>
@@ -340,6 +370,12 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
         if (record === undefined) {
           throw new RunError('state', `${request.serviceId} has no prepared manifest to start a run from`);
         }
+        const activeForService = (await latestPerRun(context)).find(
+          (run) => run.phase === 'active' && run.serviceId === request.serviceId,
+        );
+        if (activeForService !== undefined) {
+          throw new RunError('active', `${request.serviceId} already has an active run (${activeForService.runId}), and a service run is never started twice`);
+        }
         const checklist = await preparation.readiness(context, request.serviceId, await observe(context, request.serviceId));
         const state = checklist?.state ?? 'not prepared';
         // D-8: going live over an open blocker is this one operation, not a separate call the client
@@ -348,6 +384,9 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
         // route (`snapshots.ts:508`), so the two paths never disagree about when an override belongs.
         if (state === 'ready' && request.override !== undefined) {
           throw new RunError('state', 'an override is accepted only when a blocker is open, and none is');
+        }
+        if (state === 'outdated') {
+          throw new RunError('outdated', `${request.serviceId}'s prepared snapshot is outdated, and a run starts only from a Ready one`);
         }
         const overriding = state === 'blocked' && request.mode === 'live' && request.override !== undefined;
         if (checklist === undefined || (state !== 'ready' && !overriding)) {

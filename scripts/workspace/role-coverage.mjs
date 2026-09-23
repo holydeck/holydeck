@@ -37,6 +37,17 @@ export const KNOWN_INTEGRATION_GAPS = {
   'reference-routes.ts GET LOOKUP_PATH PRESENTATION_CONTROL': 'no harness test refuses reference lookup without Control presentation',
   'reference-routes.ts POST SHOWN_REFERENCES_PATH PRESENTATION_CONTROL': 'no harness test refuses showing references without Control presentation',
   'reference-routes.ts GET SHOWN_REFERENCES_PATH PRESENTATION_CONTROL': 'no harness test refuses reference history without Control presentation',
+  'run-routes.ts POST RUN_PATH PRESENTATION_CONTROL': 'no harness test refuses starting a run without Control presentation',
+  'run-routes.ts GET RUN_PATH PRESENTATION_CONTROL': 'no harness test refuses the run list to a session with neither Control presentation nor Presentation view',
+  'run-routes.ts GET RUN_PATH PRESENTATION_VIEW': 'no harness test refuses the run list to a session with neither Control presentation nor Presentation view',
+  'run-routes.ts POST RUN_END_PATH PRESENTATION_CONTROL': 'no harness test refuses ending a run without Control presentation',
+  'run-routes.ts GET RUN_ID_PATH PRESENTATION_CONTROL': 'no harness test refuses reading a run to a session with neither Control presentation nor Presentation view',
+  'run-routes.ts GET RUN_ID_PATH PRESENTATION_VIEW': 'no harness test refuses reading a run to a session with neither Control presentation nor Presentation view',
+  'run-routes.ts POST RUN_THEME_PATH PRESENTATION_CONTROL': 'no harness test refuses retheming a run without Control presentation',
+  'run-routes.ts POST RUN_ADDITIONS_PATH PRESENTATION_CONTROL': 'no harness test refuses a mid-service addition without Control presentation',
+  'run-routes.ts GET RUN_REVIEW_PATH PRESENTATION_CONTROL': 'no harness test refuses the run review without Control presentation',
+  'run-routes.ts GET RUN_RECAP_PATH PRESENTATION_CONTROL': 'no harness test refuses the run recap to a session with neither Control presentation nor service.read',
+  'run-routes.ts GET RUN_RECAP_PATH SERVICE_READ': 'no harness test refuses the run recap to a session with neither Control presentation nor service.read',
   'service-routes.ts POST SERVICE_PATH SERVICES_MANAGE': 'no harness test refuses service creation without services.manage',
   'service-routes.ts GET SERVICE_PATH SERVICES_MANAGE': 'no harness test refuses the service list without services.manage',
   'service-routes.ts GET SERVICE_CURRENT_PATH SERVICES_MANAGE': 'no harness test refuses the current service without services.manage',
@@ -164,6 +175,7 @@ export function permissionRoutesIn(routeSources) {
       const guard = need !== undefined && ts.isIdentifier(need) ? constants.get(need.text) : need;
       const kind = property(guard, 'kind');
       const permission = property(guard, 'need');
+      const needs = property(guard, 'needs');
       let signature;
       if (kind !== undefined && ts.isStringLiteral(kind) && ['public', 'session'].includes(kind.text)) {
         signature = kind.text;
@@ -171,6 +183,13 @@ export function permissionRoutesIn(routeSources) {
                  permission !== undefined && (ts.isIdentifier(permission) || ts.isStringLiteral(permission))) {
         signature = permission.getText(tree);
         routes.push(`${route} ${signature}`);
+      } else if (kind !== undefined && ts.isStringLiteral(kind) && kind.text === 'any-permission' &&
+                 needs !== undefined && ts.isArrayLiteralExpression(needs) && needs.elements.length > 0 &&
+                 needs.elements.every((element) => ts.isIdentifier(element) || ts.isStringLiteral(element))) {
+        // Satisfied by any one of several permissions (e.g. Control presentation OR a read-only role) —
+        // recorded once per permission it accepts, so covering any one of them proves the route covered.
+        signature = needs.elements.map((element) => element.getText(tree)).join(' | ');
+        for (const element of needs.elements) routes.push(`${route} ${element.getText(tree)}`);
       } else {
         problems.push(`${route} has no recognizable authorization guard`);
         return;
