@@ -48,7 +48,6 @@ export const MONGO_CONTENTS: readonly MongoContent[] = Object.freeze([
   { record: 'contentRevisions', class: 'content-revisions' },
   { record: 'mediaAssets', class: 'media-assets' },
   { record: 'midServiceAdditions', class: 'mid-service-additions' },
-  { record: 'pptxImportSessions', class: 'pptx-import-sessions' },
   { record: 'preparedSnapshots', class: 'prepared-snapshots' },
   { record: 'presentationRuns', class: 'presentation-runs' },
   { record: 'restores', class: 'restores' },
@@ -68,14 +67,19 @@ export interface ExcludedRecord {
 }
 
 /**
- * Record classes a backup deliberately leaves out, each with the reason it is left out. Empty today, and
- * that is the answer the census wants by default: everything this deployment holds of its own accord is
- * something a restore has to be able to put back. A class belongs here only when carrying it would be
- * actively wrong — state that is meaningless in another deployment, or a secret nobody should archive —
- * and never because carrying it was inconvenient. Whatever lands here also has to be reasoned about on
- * the restore side, which puts back exactly `MONGO_CONTENTS` and nothing else.
+ * Record classes a backup deliberately leaves out, each with the reason it is left out. That is the
+ * census's default answer for everything this deployment holds of its own accord: a class belongs here
+ * only when carrying it would be actively wrong — state that is meaningless in another deployment, or a
+ * secret nobody should archive — and never because carrying it was inconvenient. Whatever lands here also
+ * has to be reasoned about on the restore side, which puts back exactly `MONGO_CONTENTS` and nothing else.
  */
-export const EXCLUDED_RECORDS: readonly ExcludedRecord[] = Object.freeze([]);
+export const EXCLUDED_RECORDS: readonly ExcludedRecord[] = Object.freeze([
+  {
+    record: 'pptxImportSessions',
+    because: 'a session is unreadable 24 hours after it is created (spec AUTH-04); carrying one forward '
+      + 'into a later restore would only reintroduce an import already meaningless by the time it lands',
+  },
+]);
 
 /** A census to grade: the classes this deployment ships, against what a backup says about each. */
 export interface BackupCensus {

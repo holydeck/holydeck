@@ -70,6 +70,16 @@ describe('a PPTX import session', () => {
     expect(db.rows.get('pptx_import_sessions')).toHaveLength(1);
   });
 
+  it('treats the exact expiry instant as already expired, not one tick short of it', async () => {
+    const db = fakeDb();
+    const first = pptxSessionsOn(db, { now: () => new Date(START).toISOString(), newId: () => 'session-1' });
+    const context = pptxSessionContext(ALICE, 'req-1');
+    const created = await first.create(context, { fileName: 'sermon.pptx', result: SAMPLE_RESULT });
+
+    const atExpiry = pptxSessionsOn(db, { now: () => new Date(START + DAY_MS).toISOString() });
+    await expect(atExpiry.get(context, created.id)).resolves.toBeUndefined();
+  });
+
   it('review() appends reviewed and reviewedAt without losing the original slides', async () => {
     const { sessions } = store(() => new Date(START).toISOString());
     const context = pptxSessionContext(ALICE, 'req-1');

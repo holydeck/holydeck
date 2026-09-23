@@ -151,7 +151,7 @@ export function pptxSessionsOn(db: RepositoryDb, options: PptxSessionOptions): P
     const row = await latestRow(context, id);
     if (row === undefined) return undefined;
     if (row.discardedAt !== undefined) return undefined;
-    if (Date.parse(row.expiresAt) < Date.parse(options.now())) return undefined;
+    if (Date.parse(row.expiresAt) <= Date.parse(options.now())) return undefined;
     if (row.actor !== (context as RequestContext).actor) return undefined;
     return row;
   };
