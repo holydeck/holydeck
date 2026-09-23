@@ -4,7 +4,7 @@
 // server's own last word, while the controls below it hold a local draft that autosaves once the operator
 // actually changes something.
 
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 
 import { ENTITY_CONFLICT } from '@holydeck/contracts/http';
 import { aspectRatioOf, MAX_SAFE_AREA_PERCENT, SAFE_AREA_EDGES, type SafeAreaEdge, type SafeAreaMargins } from '@holydeck/contracts/snapshots';
@@ -47,17 +47,21 @@ export function OutputProfile(): JSX.Element | null {
   const [dirty, setDirty] = useState(false);
   const [locked, setLocked] = useState(false);
   const seededRevision = useRef<string | undefined>(undefined);
+  const latest = useRef<Draft | undefined>(undefined);
+  latest.current = draft;
 
+  // The form follows the server's revision only while it holds nothing unsaved: any other write (an item
+  // edit, a move) bumps the revision too, and re-seeding then would throw away what is being typed.
   useEffect(() => {
-    if (view === undefined || defaults === undefined) return;
+    if (view === undefined || defaults === undefined || dirty) return;
     if (seededRevision.current === view.revision) return;
     seededRevision.current = view.revision;
     const resolved = resolvedOutput(view, defaults);
     setDraft(draftFrom(resolved.aspectRatio, resolved.safeAreaMargins));
-    setDirty(false);
-  }, [view?.revision, defaults]);
+  }, [view?.revision, defaults, dirty]);
 
-  const save = async (next: Draft): Promise<boolean> => {
+  // Stable, so a re-render (every save moves `service`) does not re-arm the autosave for the same draft.
+  const save = useCallback(async (next: Draft): Promise<boolean> => {
     const current = service.value;
     if (current === undefined) return false;
     const ratio = ratioOf(next);
@@ -68,11 +72,13 @@ export function OutputProfile(): JSX.Element | null {
     });
     if (result.ok) {
       setLocked(false);
+      // Typing that landed while this save was in flight is still unsaved and keeps the form dirty.
+      if (latest.current === next) setDirty(false);
       return true;
     }
     if (result.code === ENTITY_CONFLICT) setLocked(true);
     return false;
-  };
+  }, []);
 
   useAutosave(draft ?? draftFrom('16:9', { top: 0, right: 0, bottom: 0, left: 0, unit: 'percent' }), save, {
     enabled: dirty && draft !== undefined && !readOnly,

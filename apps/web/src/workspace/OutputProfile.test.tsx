@@ -88,6 +88,35 @@ describe('OutputProfile', () => {
     await vi.waitFor(() => expect(screen.getByText('Aspect ratio: 4:3 (this service)')).toBeTruthy());
   });
 
+  it('keeps a margin being typed when another write moves the revision, saves it, then follows the server again', async () => {
+    vi.useFakeTimers();
+    const bodies: unknown[] = [];
+    const saved = { top: 10, right: 5, bottom: 5, left: 5, unit: 'percent' } as const;
+    setFetching(async (url, init) => {
+      if (url === '/api/v1/output-defaults') return reply(200, successEnvelope(DEFAULTS_BODY, 'r-defaults'));
+      bodies.push(JSON.parse(String(init.body)));
+      return reply(200, successEnvelope(record('r2', { aspectRatio: '16:9', safeAreaMargins: saved }), 'r-save'));
+    });
+
+    render(<OutputProfile />);
+    await vi.waitFor(() => expect(screen.getByText('Aspect ratio: 16:9 (default)')).toBeTruthy());
+    const top = (): HTMLInputElement => screen.getByRole('spinbutton', { name: /^Top/u });
+
+    fireEvent.input(top(), { target: { value: '10' } });
+    service.value = { ...view, revision: 'r1' };
+    await vi.advanceTimersByTimeAsync(0);
+    expect(top().value).toBe('10');
+
+    await vi.advanceTimersByTimeAsync(800);
+    expect(bodies).toEqual([{ aspectRatio: '16:9', safeAreaMargins: saved }]);
+    await vi.waitFor(() => expect(screen.getByText('Aspect ratio: 16:9 (this service)')).toBeTruthy());
+
+    service.value = { ...view, revision: 'r3', output: { safeAreaMargins: { ...saved, top: 7 } } };
+    await vi.waitFor(() => expect(top().value).toBe('7'));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(bodies).toHaveLength(1);
+  });
+
   it('never sends a request for an invalid custom ratio, and shows the inline error instead', async () => {
     vi.useFakeTimers();
     const calls: string[] = [];
