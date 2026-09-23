@@ -1,5 +1,5 @@
 import { ACCOUNTS_PATH, ONBOARDING_PATH, actorFor } from '@holydeck/contracts/accounts';
-import { CLIENT_VERSION_HEADER } from '@holydeck/contracts/clients';
+import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { CSRF_HEADER, SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
 import { describe, expect, it } from 'vitest';
 
@@ -49,7 +49,7 @@ describe('the operator a harness run signs in as', () => {
     expect(session).toMatchObject({ cookie: COOKIE, csrf: 'csrf-token' });
     expect(asked.map((request) => request.url)).toEqual([`${BASE}${ONBOARDING_PATH}`, `${BASE}${SESSION_PATH}`]);
     // What a browser would send, sent because the application grades both: its own origin, and a version.
-    expect(asked[0]?.headers).toMatchObject({ origin: BASE, [CLIENT_VERSION_HEADER]: '1' });
+    expect(asked[0]?.headers).toMatchObject({ origin: BASE, [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) });
     expect(asked[0]?.body).toEqual({ ...OPERATOR });
     expect(asked[1]?.body).toEqual({ name: OPERATOR.name, password: OPERATOR.password });
   });
@@ -97,7 +97,7 @@ describe('the operator allowed to control presentation', () => {
       headers: {
         'content-type': 'application/json',
         origin: BASE,
-        [CLIENT_VERSION_HEADER]: '1',
+        [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
         cookie: COOKIE,
         [CSRF_HEADER]: 'csrf-token',
       },
