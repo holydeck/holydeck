@@ -52,7 +52,6 @@ export const KNOWN_INTEGRATION_GAPS = {
   'integration-routes.ts': 'no harness test reads or toggles a third-party integration over HTTP',
   'job-routes.ts': 'no harness test lists or requeues a job over HTTP',
   'media-migration-routes.ts': 'no harness test triggers or cleans up a media storage-root migration over HTTP',
-  'media-routes.ts': 'no harness test uploads a file over HTTP',
   'media-cleanup-routes.ts': 'no harness test reports on or purges media over HTTP',
   'notification-routes.ts': 'no harness test reads or manages a notification inbox over HTTP',
   'operations-routes.ts': 'no harness test reads operational health over HTTP',
