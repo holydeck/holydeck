@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { adjacentPosition, deriveDeck, projectDeck } from './run-deck.js';
+import { DECK_CACHE_LIMIT, adjacentPosition, deriveDeck, projectDeck } from './run-deck.js';
 
 import type { PreparedSnapshot, SnapshotPin } from '@holydeck/contracts/snapshots';
 
@@ -139,6 +139,17 @@ describe('deriveDeck', () => {
 
     expect(second).toBe(first);
   });
+
+  it('bounds the cache: the least recently used deck is the one evicted', async () => {
+    const stores = { slideGroups: slideGroups() };
+    const first = await deriveDeck({}, stores, snapshot('snapshot-lru-0'), []);
+    for (let index = 1; index <= DECK_CACHE_LIMIT; index += 1) {
+      await deriveDeck({}, stores, snapshot(`snapshot-lru-${index}`), []);
+    }
+    const kept = await deriveDeck({}, stores, snapshot(`snapshot-lru-${DECK_CACHE_LIMIT}`), []);
+    expect(await deriveDeck({}, stores, snapshot(`snapshot-lru-${DECK_CACHE_LIMIT}`), [])).toBe(kept);
+    expect(await deriveDeck({}, stores, snapshot('snapshot-lru-0'), [])).not.toBe(first);
+  });
 });
 
 describe('projectDeck', () => {
@@ -241,6 +252,10 @@ describe('adjacentPosition', () => {
     ['item-3', 0, 'next', 'item-3', 0],
   ] as const)('navigates %s:%s %s to %s:%s', (itemId, slideIndex, direction, target, index) => {
     expect(adjacentPosition(deck, { itemId, slideIndex }, direction)).toEqual({ itemId: target, slideIndex: index });
+  });
+
+  it.each(['next', 'previous'] as const)('steps %s from the empty screen onto the first slide', (direction) => {
+    expect(adjacentPosition(deck, { itemId: '', slideIndex: 0 }, direction)).toEqual({ itemId: 'item-1', slideIndex: 0 });
   });
 
   it.each([['missing', 0], ['item-2', 0], ['item-1', 2], ['item-1', -1]])('refuses absent position %s:%s', (itemId, slideIndex) => {

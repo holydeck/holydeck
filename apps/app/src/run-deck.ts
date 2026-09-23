@@ -54,7 +54,16 @@ export interface DeckStores {
   readonly revisions?: Pick<RevisionStore, 'read'>;
 }
 
+/** Derived decks are cached per snapshot and addition count; a long-lived server sees many runs, so
+ *  the cache keeps only the most recently used few (Map order is insertion order, refreshed on a hit). */
+export const DECK_CACHE_LIMIT = 32;
 const decks = new Map<string, RunDeck>();
+
+const remember = (cacheKey: string, deck: RunDeck): void => {
+  decks.delete(cacheKey);
+  decks.set(cacheKey, deck);
+  if (decks.size > DECK_CACHE_LIMIT) decks.delete(decks.keys().next().value as string);
+};
 
 const itemFrom = (record: SlideGroupRecord): DeckItem => {
   const slides = record.body.slides
@@ -97,7 +106,10 @@ export async function deriveDeck(
 ): Promise<RunDeck> {
   const cacheKey = `${snapshot.id}:${additions.length}`;
   const cached = decks.get(cacheKey);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    remember(cacheKey, cached);
+    return cached;
+  }
 
   const generated = await Promise.all(snapshot.generatedSlides.map(async (provenance) => {
     const history = await stores.slideGroups.history(context, provenance.slideGroupId);
@@ -118,7 +130,7 @@ export async function deriveDeck(
       ...await Promise.all(additions.map((addition) => additionItem(context, stores, addition))),
     ],
   };
-  decks.set(cacheKey, deck);
+  remember(cacheKey, deck);
   return deck;
 }
 
@@ -147,6 +159,7 @@ const withoutPrivateFields = (item: DeckItem): DeckItem => {
 const audienceWindow = (deck: RunDeck, live: Pick<LiveState, 'public'> | undefined): readonly DeckItem[] => {
   if (live === undefined || 'standby' in live.public) return [];
   const current = live.public;
+  if (current.itemId === '') return [];
   const upcoming = adjacentPosition(deck, current, 'next');
   if (upcoming === undefined) return [];
   const window: DeckItem[] = [];
@@ -176,6 +189,6 @@ export function adjacentPosition(
   const index = positions.findIndex((position) =>
     position.itemId === current.itemId && position.slideIndex === current.slideIndex,
   );
-  if (index === -1) return undefined;
+  if (index === -1) return current.itemId === '' ? positions[0] ?? current : undefined;
   return positions[index + (direction === 'next' ? 1 : -1)] ?? current;
 }

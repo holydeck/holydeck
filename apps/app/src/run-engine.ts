@@ -6,6 +6,8 @@
 // theme, plus control (RUN-05). One process runs one live run, matching the hub's
 // global channels and counters; a command has no run identifier of its own.
 
+import { isDeepStrictEqual } from 'node:util';
+
 import { LIVE_CHANNELS, LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
 import { enterStandby, pause, resume, returnToLivePosition, select, takeSelectedLive } from '@holydeck/contracts/live-mode';
 import { projectFor } from '@holydeck/contracts/live-state';
@@ -252,6 +254,9 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
     const nextMode = reduce(command, prior, deck);
     if (nextMode === undefined) return { outcome: 'invalid' };
     const next = fromModeState(run.live, prior, nextMode);
+    // A command that changes nothing (next on the last slide, pause while paused) already holds: it is
+    // acknowledged, but nothing happened in the room, so nothing is logged, persisted or broadcast.
+    if (isDeepStrictEqual(next, run.live)) return { outcome: 'applied' };
     const kind = kindFor(command.type, run.live, next);
     const shown = kind === LIVE_EVENT_TYPES.slide && !('standby' in next.public) ? next.public : undefined;
     await options.runEvents.record(session, {

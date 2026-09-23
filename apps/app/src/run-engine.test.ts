@@ -327,6 +327,25 @@ describe('run-engine command ordering', () => {
     expect(runs.advance).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['next at the last slide', { ...LIVE, public: SECOND, selected: SECOND }, 'next'],
+    ['pause while paused', { ...LIVE, mode: 'paused' as const }, 'pause'],
+  ])('treats %s as applied without logging, persisting or publishing', async (_label, live, command) => {
+    const { engine, runs, runEvents, hub } = await started();
+    runs.resume.mockResolvedValue({ ...RECORD, live });
+    expect(await engine.command(CONTROL_MEMBER, frame(command))).toEqual({ outcome: 'applied' });
+    expect(runEvents.record).not.toHaveBeenCalled();
+    expect(runs.advance).not.toHaveBeenCalled();
+    expect(hub.publishChange).not.toHaveBeenCalled();
+  });
+
+  it('steps next from the empty screen onto the first slide', async () => {
+    const { engine, runs } = await started();
+    runs.resume.mockResolvedValue({ ...RECORD, live: { ...LIVE, public: { itemId: '', slideIndex: 0 }, selected: { itemId: '', slideIndex: 0 } } });
+    expect(await engine.command(CONTROL_MEMBER, frame('next'))).toEqual({ outcome: 'applied' });
+    expect(runs.advance).toHaveBeenCalledWith(expect.anything(), 'run-1', 7, expect.objectContaining({ public: FIRST }), 9);
+  });
+
   it('refuses navigation from a position not found in the deck', async () => {
     const { engine, runs, runEvents } = await started();
     runs.resume.mockResolvedValue({ ...RECORD, live: { ...LIVE, selected: { itemId: 'absent', slideIndex: 0 } } });
