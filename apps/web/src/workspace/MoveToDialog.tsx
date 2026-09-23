@@ -15,9 +15,12 @@ import { service } from '../state/workspace-store.js';
 import { runOrderSteps } from './order-actions.js';
 import { neighbours, reorderPlan } from './order-ops.js';
 
-export function MoveToDialog({ itemId, onClose }: {
+export function MoveToDialog({ itemId, onClose, onPick }: {
   readonly itemId: string;
   readonly onClose: () => void;
+  /** When given, picking a target reports it here instead of moving `itemId` itself — a bulk run uses
+   *  this to collect one target and then move each selected item to it in turn. */
+  readonly onPick?: (target: { sectionId: string; index: number }) => void;
 }): JSX.Element | null {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const firstFieldRef = useRef<HTMLSelectElement>(null);
@@ -39,6 +42,11 @@ export function MoveToDialog({ itemId, onClose }: {
 
   const submit = async (event: JSX.TargetedEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
+    if (onPick !== undefined) {
+      onPick({ sectionId, index });
+      onClose();
+      return;
+    }
     setSubmitting(true);
     await runOrderSteps(view.id, itemId, reorderPlan(view, itemId, { sectionId, index }));
     setSubmitting(false);

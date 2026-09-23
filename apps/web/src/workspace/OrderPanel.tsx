@@ -11,10 +11,12 @@ import type { JSX } from 'preact';
 import { API } from '../api-routes.js';
 import { useAutosave } from '../editors/use-autosave.js';
 import { t } from '../i18n.js';
-import { isReadOnly, mutate, service } from '../state/workspace-store.js';
+import { bulkSelecting, isReadOnly, mutate, service } from '../state/workspace-store.js';
+import { BulkBar, leaveSelectionMode } from './BulkBar.js';
 import { OrderItem } from './OrderItem.js';
 import { addSection, removeSection, renameSection } from './order-ops.js';
 import { itemsOf, type ServiceView } from './service-data.js';
+import { WindowedList } from './windowed-list.js';
 
 /** PATCHes the sections `sectionsFor` computes from the current service, alongside its unchanged facts. */
 async function patchSections(sectionsFor: (current: ServiceView) => ServiceView['sections']): Promise<boolean> {
@@ -85,10 +87,21 @@ function Section({ section, readOnly }: { readonly section: ServiceSection; read
         <button type="button" disabled={readOnly} onClick={() => void removeThisSection()}>{t('order.section.remove')}</button>
       </div>
       {notice === undefined ? null : <p role="alert">{notice}</p>}
+      {/* Windowing trades one thing away deliberately: an item mid-way through a long section that a
+          caller expands but never focuses can still scroll out of the mounted window, because
+          `WindowedList` only guarantees the row currently holding DOM focus stays rendered. Expanding a
+          row happens by clicking its own expand button, which leaves that button focused, so in practice
+          the row that was just expanded is kept — but a row expanded once, then left unfocused after
+          scrolling elsewhere, is not specially pinned beyond that. */}
       <ol id={itemsId} hidden={!expanded}>
-        {section.items.map((item, index) => (
-          <OrderItem key={item.id} sectionId={section.id} item={item} index={index} total={section.items.length} />
-        ))}
+        <WindowedList
+          items={section.items}
+          rowHeightPx={48}
+          keyOf={(item) => item.id}
+          render={(item, index) => (
+            <OrderItem key={item.id} sectionId={section.id} item={item} index={index} total={section.items.length} />
+          )}
+        />
       </ol>
     </div>
   );
@@ -97,6 +110,7 @@ function Section({ section, readOnly }: { readonly section: ServiceSection; read
 /** The Order panel Task 9 left a placeholder for: the same empty state, or every section and its items. */
 export function OrderPanel({ view, onEmpty }: { readonly view: ServiceView; readonly onEmpty: () => void }): JSX.Element {
   const readOnly = isReadOnly.value;
+  const selecting = bulkSelecting.value;
 
   if (itemsOf(view).length === 0) {
     return (
@@ -109,6 +123,16 @@ export function OrderPanel({ view, onEmpty }: { readonly view: ServiceView; read
 
   return (
     <div class="order-panel">
+      <div class="order-panel-header">
+        <button
+          type="button"
+          aria-pressed={selecting}
+          disabled={readOnly}
+          onClick={() => { if (selecting) leaveSelectionMode(); else bulkSelecting.value = true; }}
+        >
+          {t('bulk.select')}
+        </button>
+      </div>
       {view.sections.map((section) => <Section key={section.id} section={section} readOnly={readOnly} />)}
       <button
         type="button"
@@ -117,6 +141,7 @@ export function OrderPanel({ view, onEmpty }: { readonly view: ServiceView; read
       >
         {t('order.section.add')}
       </button>
+      {selecting ? <BulkBar view={view} /> : null}
     </div>
   );
 }

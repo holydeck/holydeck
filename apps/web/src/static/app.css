@@ -112,6 +112,19 @@ body:has(#properties:target, #properties :target) .workspace-tabs a[href="#prope
 }
 
 .order-panel { display: grid; gap: var(--space-4); }
+.order-panel-header { display: flex; justify-content: flex-end; }
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  position: sticky;
+  bottom: 0;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+}
 .order-section { display: grid; gap: var(--space-2); }
 .order-section-header { display: flex; align-items: center; gap: var(--space-2); }
 .order-item { display: flex; align-items: center; gap: var(--space-2); position: relative; }

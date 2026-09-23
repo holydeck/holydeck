@@ -274,6 +274,15 @@ const en = {
   'order.kind.slideGroup': 'Slide Group',
   'order.kind.customSlide': 'Custom Slide',
   'order.section.new': 'New Section',
+  'bulk.select': 'Select',
+  'bulk.done': 'Done',
+  'bulk.region': 'Bulk actions',
+  'bulk.count': '{n} selected',
+  'bulk.progress': '{done} of {total} done',
+  'bulk.result.all': 'All {total} done.',
+  'bulk.result.partial': '{done} of {total} done. These were not changed:',
+  'bulk.leave.confirm': 'Stop selecting? The bulk action in progress will finish, but nothing else will be sent.',
+  'bulk.item': 'Select {title}',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -544,6 +553,15 @@ const de: Catalog = {
   'order.kind.slideGroup': 'Foliengruppe',
   'order.kind.customSlide': 'Eigene Folie',
   'order.section.new': 'Neuer Abschnitt',
+  'bulk.select': 'Auswählen',
+  'bulk.done': 'Fertig',
+  'bulk.region': 'Sammelaktionen',
+  'bulk.count': '{n} ausgewählt',
+  'bulk.progress': '{done} von {total} erledigt',
+  'bulk.result.all': 'Alle {total} erledigt.',
+  'bulk.result.partial': '{done} von {total} erledigt. Diese wurden nicht geändert:',
+  'bulk.leave.confirm': 'Auswahl beenden? Die laufende Sammelaktion wird abgeschlossen, aber nichts weiteres wird gesendet.',
+  'bulk.item': '{title} auswählen',
 };
 
 const ta: Catalog = {
@@ -808,6 +826,15 @@ const ta: Catalog = {
   'order.kind.slideGroup': 'ஸ்லைடு குழு',
   'order.kind.customSlide': 'தனிப்பயன் ஸ்லைடு',
   'order.section.new': 'புதிய பிரிவு',
+  'bulk.select': 'தேர்ந்தெடு',
+  'bulk.done': 'முடிந்தது',
+  'bulk.region': 'தொகுப்பு செயல்கள்',
+  'bulk.count': '{n} தேர்ந்தெடுக்கப்பட்டது',
+  'bulk.progress': '{total}-ல் {done} முடிந்தது',
+  'bulk.result.all': 'அனைத்து {total} முடிந்தது.',
+  'bulk.result.partial': '{total}-ல் {done} முடிந்தது. இவை மாற்றப்படவில்லை:',
+  'bulk.leave.confirm': 'தேர்வு செய்வதை நிறுத்தவா? நடந்துகொண்டிருக்கும் தொகுப்பு செயல் முடிக்கப்படும், ஆனால் வேறு எதுவும் அனுப்பப்படாது.',
+  'bulk.item': '{title} ஐத் தேர்ந்தெடு',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */

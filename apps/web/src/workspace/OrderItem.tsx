@@ -10,7 +10,7 @@ import type { JSX } from 'preact';
 
 import { showToast } from '../components/toast.js';
 import { t } from '../i18n.js';
-import { isReadOnly, mutate, pending, service } from '../state/workspace-store.js';
+import { bulkSelecting, bulkSelection, isReadOnly, mutate, pending, service } from '../state/workspace-store.js';
 import { API } from '../api-routes.js';
 import { MoveToDialog } from './MoveToDialog.js';
 import { runOrderSteps } from './order-actions.js';
@@ -69,6 +69,12 @@ export function OrderItem({ sectionId, item, index }: {
     void runOrderSteps(view.id, item.id, reorderPlan(view, item.id, target));
   };
 
+  const toggleSelected = (): void => {
+    const next = new Set(bulkSelection.value);
+    if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+    bulkSelection.value = next;
+  };
+
   const runAction = (action: 'enable' | 'disable' | 'duplicate'): void => {
     setMenuOpen(false);
     if (view === undefined) return;
@@ -95,6 +101,14 @@ export function OrderItem({ sectionId, item, index }: {
 
   return (
     <li id={`workspace-item-${item.id}`} class="order-item" aria-busy={busy ? 'true' : undefined} data-item-id={item.id}>
+      {bulkSelecting.value ? (
+        <input
+          type="checkbox"
+          aria-label={t('bulk.item', { title: item.title })}
+          checked={bulkSelection.value.has(item.id)}
+          onChange={toggleSelected}
+        />
+      ) : null}
       <button
         type="button"
         aria-label={t('order.drag', { title: item.title })}

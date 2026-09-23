@@ -20,6 +20,9 @@ export const saveState: Signal<SaveState> = signal('idle');
 export const drift: Signal<readonly { itemId: string; latestRevision: number }[]> = signal([]);
 export const rightTab: Signal<'properties' | 'library'> = signal(readRightTab());
 export const bulkSelection: Signal<ReadonlySet<string>> = signal(new Set());
+export const bulkSelecting: Signal<boolean> = signal(false);
+/** Whether leaving selection mode needs confirming: a bulk run is still going, or the Move dialog is open. */
+export const bulkBusy: Signal<boolean> = signal(false);
 export const pending: Signal<ReadonlySet<string>> = signal(new Set());
 
 /** Whether the workspace must refuse every edit: the service is closed, the client is offline, or the
@@ -133,5 +136,7 @@ export function resetWorkspace(): void {
   drift.value = [];
   rightTab.value = readRightTab();
   bulkSelection.value = new Set();
+  bulkSelecting.value = false;
+  bulkBusy.value = false;
   pending.value = new Set();
 }
