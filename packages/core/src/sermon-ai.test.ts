@@ -354,6 +354,17 @@ describe('generateSermonFromText', () => {
     expect(result.resolver).toBe('not-configured');
   });
 
+  it('does not report an Object.prototype member as a resolved book', async () => {
+    // Regression: an empty `codes` map is still a plain object, so a book token that happens to name an
+    // inherited property (`constructor`, `toString`, ...) must not read back as "resolved" through it.
+    const result = await generateSermonFromText('constructor 1:1\nHosea 4:6', {
+      translations: ['ta'],
+      now: new Date('2026-09-22T00:00:00Z'),
+    });
+    expect(result.resolver).toBe('not-configured');
+    expect(result.resolvedTokens).toEqual([]);
+  });
+
   it('reports resolver "used" with resolvedTokens when the resolver placed a book', async () => {
     const httpPost: HttpPost = async () => ({
       status: 200,

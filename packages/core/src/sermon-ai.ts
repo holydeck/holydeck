@@ -402,7 +402,7 @@ export async function generateSermonFromText(
   const notices = resolverOutcome.notice === undefined ? built.notices : [resolverOutcome.notice, ...built.notices];
   const filename = resolveSermonFilename(message.title, options.now);
   const resolvedTokens = unresolved
-    .filter((token) => resolverOutcome.codes[token] !== undefined)
+    .filter((token) => Object.hasOwn(resolverOutcome.codes, token))
     .map((token) => ({ token, book: resolverOutcome.codes[token]!, source: 'ai' as const }));
   return message.title === undefined
     ? { filename, yaml: built.yaml, notices, resolver: resolverOutcome.state, resolvedTokens }
