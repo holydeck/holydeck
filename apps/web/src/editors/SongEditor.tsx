@@ -5,6 +5,8 @@
 // server's own validation, and the form re-reads the song after it, because the server is the truth.
 // Once the song exists, the editor also says who else has it open and offers the conflict shelf for any
 // save that lost a race (COLAB-05); settling one re-reads the song, since the settlement is a new revision.
+// A refused save is shelved by the server, so the shelf is read again the moment a save comes back stale:
+// the losing save is then on screen to settle, not waiting for the next page load.
 
 import { ENTITY_CONFLICT } from '@holydeck/contracts/http';
 import { METADATA_KEYS, TITLE_LANGUAGE_KEYS } from '@holydeck/contracts/songs';
@@ -257,7 +259,7 @@ export function SongEditor({ songId, onChange }: SongEditorProps): JSX.Element {
         </button>
       </div>
       {id === undefined ? null : <PresenceIndicator contentId={id} />}
-      {id === undefined ? null : <ConflictShelf contentId={id} onResolved={() => setReads((count) => count + 1)} />}
+      {id === undefined ? null : <ConflictShelf key={String(stale)} contentId={id} onResolved={() => setReads((count) => count + 1)} />}
       {stale ? (
         <div role="alert" class="song-stale">
           <p>{t('song.stale')}</p>

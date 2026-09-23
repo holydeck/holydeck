@@ -157,6 +157,26 @@ describe('SongEditor', () => {
     expect(screen.queryByRole('button', { name: 'Reload Latest' })).toBeNull();
   });
 
+  it('reads the shelf again once a save is shelved, so the losing save is there to settle', async () => {
+    Object.assign(routes, coEditing('song1'));
+    const conflicts = `GET /api/v1/content/${encodeURIComponent('song1')}/conflicts`;
+    const shelved = routes[conflicts]!;
+    let reads = 0;
+    routes[conflicts] = () => (reads++ === 0 ? reply(200, successEnvelope({ outstanding: [], entries: [] }, 'r')) : shelved());
+    routes[`PUT ${API.song('song1')}`] = () => reply(409, errorEnvelope('entity.state_conflict', 'Stale.', 'r'));
+    render(<SongEditor songId="song1" />);
+    await settle();
+    expect(screen.queryByRole('button', { name: 'Keep mine' })).toBeNull();
+
+    fireEvent.input(screen.getByLabelText('Title (Tamil)'), { target: { value: 'மாற்றம்' } });
+    await settle(800);
+    await settle();
+    await settle();
+
+    expect(sent(conflicts)).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Keep mine' })).toBeTruthy();
+  });
+
   it('edits languages, sections and details in the form', async () => {
     render(<SongEditor songId="song1" />);
     await settle();
