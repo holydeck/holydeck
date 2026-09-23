@@ -68,19 +68,19 @@ test.describe('the service workspace', () => {
     const second = orderRows(page).nth(1);
     const secondId = await second.getAttribute('data-item-id');
     await second.getByRole('button', { name: en('order.actions', { title: en('blank.title') }) }).click();
-    await page.getByRole('menuitem', { name: en('order.moveUp') }).click();
+    await second.getByRole('button', { name: en('order.moveUp'), exact: true }).click();
     await expect(orderRows(page).first()).toHaveAttribute('data-item-id', secondId!);
 
     const first = orderRows(page).first();
     await first.getByRole('button', { name: en('order.actions', { title: en('blank.title') }) }).click();
-    await page.getByRole('menuitem', { name: en('order.disable') }).click();
+    await first.getByRole('button', { name: en('order.disable'), exact: true }).click();
     await expect(first.getByText(en('order.disabled'), { exact: true })).toBeVisible();
     await first.getByRole('button', { name: en('order.actions', { title: en('blank.title') }) }).click();
-    await page.getByRole('menuitem', { name: en('order.enable') }).click();
+    await first.getByRole('button', { name: en('order.enable'), exact: true }).click();
     await expect(first.getByText(en('order.disabled'), { exact: true })).toHaveCount(0);
 
     await first.getByRole('button', { name: en('order.actions', { title: en('blank.title') }) }).click();
-    await page.getByRole('menuitem', { name: en('order.remove') }).click();
+    await first.getByRole('button', { name: en('order.remove'), exact: true }).click();
     await expect(orderRows(page)).toHaveCount(1);
     await page.getByRole('button', { name: en('order.undo') }).click();
     await expect(orderRows(page)).toHaveCount(2);

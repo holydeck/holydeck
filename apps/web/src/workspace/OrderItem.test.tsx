@@ -93,7 +93,7 @@ describe('OrderItem', () => {
     render(<OrderItem sectionId="sec" item={itemB} index={1} total={2} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Song B' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Move Up' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move Up' }));
 
     await vi.waitFor(() => expect(calls).toEqual(['POST /api/v1/services/s1/sections/sec/items/reorder']));
     expect(screen.getByText('Song B').closest('li')?.getAttribute('aria-busy')).toBe('true');
@@ -117,7 +117,7 @@ describe('OrderItem', () => {
     render(<><OrderItem sectionId="sec" item={itemB} index={1} total={2} /><ToastRegion /></>);
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Song B' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     await screen.findByText('Item removed.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
@@ -167,6 +167,23 @@ describe('OrderItem', () => {
     expect(screen.getByRole('button', { name: 'Update to revision 4' })).toBeTruthy();
   });
 
+  it('shows actions as a plain disclosure that Escape closes, returning focus to Actions', () => {
+    setFetching(fakeFetch({}));
+    render(<OrderItem sectionId="sec" item={itemA} index={0} total={2} />);
+
+    const actions = screen.getByRole('button', { name: 'Actions for Song A' });
+    fireEvent.click(actions);
+    expect(actions.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.queryByRole('menu')).toBeNull();
+    const duplicate = screen.getByRole('button', { name: 'Duplicate' });
+    fireEvent.keyDown(duplicate, { key: 'Tab' });
+    expect(actions.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.keyDown(duplicate, { key: 'Escape' });
+
+    expect(screen.queryByRole('button', { name: 'Duplicate' })).toBeNull();
+    expect(document.activeElement).toBe(actions);
+  });
+
   it('selects an existing item from its title, remembering it in the address', () => {
     setFetching(fakeFetch({}));
     globalThis.history.replaceState(null, '', '/services/s1?tab=x');
@@ -213,7 +230,7 @@ describe('OrderItem', () => {
 
     const actions = screen.getByRole('button', { name: 'Actions for Song B' });
     fireEvent.click(actions);
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Move To…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move To…' }));
 
     const dialog = screen.getByRole('dialog', { name: 'Move To…' });
     fireEvent.keyDown(dialog, { key: 'Escape' });

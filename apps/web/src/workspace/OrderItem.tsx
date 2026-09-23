@@ -169,37 +169,47 @@ export function OrderItem({ sectionId, item, index }: {
           type="button"
           ref={actionsRef}
           id={`order-actions-${item.id}`}
-          aria-haspopup="menu"
           aria-expanded={menuOpen}
+          aria-controls={`order-actions-list-${item.id}`}
           disabled={readOnly}
           onClick={() => setMenuOpen(!menuOpen)}
         >
           {t('order.actions', { title: item.title })}
         </button>
         {menuOpen ? (
-          <div role="menu" aria-labelledby={`order-actions-${item.id}`}>
-            <button type="button" role="menuitem" disabled={readOnly} onClick={() => runAction(item.enabled ? 'disable' : 'enable')}>
+          // A disclosure, not an ARIA menu: plain buttons reached with Tab, so nothing promises the arrow-key
+          // roving focus a `role="menu"` would. Escape closes it and hands focus back to Actions.
+          <div
+            id={`order-actions-list-${item.id}`}
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              event.preventDefault();
+              setMenuOpen(false);
+              actionsRef.current?.focus();
+            }}
+          >
+            <button type="button" disabled={readOnly} onClick={() => runAction(item.enabled ? 'disable' : 'enable')}>
               {t(item.enabled ? 'order.disable' : 'order.enable')}
             </button>
-            <button type="button" role="menuitem" disabled={readOnly} onClick={() => runAction('duplicate')}>
+            <button type="button" disabled={readOnly} onClick={() => runAction('duplicate')}>
               {t('order.duplicate')}
             </button>
             <button
-              type="button" role="menuitem" disabled={readOnly || at.up === undefined}
+              type="button" disabled={readOnly || at.up === undefined}
               onClick={() => { setMenuOpen(false); if (at.up !== undefined) move({ sectionId, index: at.up }); }}
             >
               {t('order.moveUp')}
             </button>
             <button
-              type="button" role="menuitem" disabled={readOnly || at.down === undefined}
+              type="button" disabled={readOnly || at.down === undefined}
               onClick={() => { setMenuOpen(false); if (at.down !== undefined) move({ sectionId, index: at.down }); }}
             >
               {t('order.moveDown')}
             </button>
-            <button type="button" role="menuitem" disabled={readOnly} onClick={() => { setMenuOpen(false); setMoveToOpen(true); }}>
+            <button type="button" disabled={readOnly} onClick={() => { setMenuOpen(false); setMoveToOpen(true); }}>
               {t('order.moveTo')}
             </button>
-            <button type="button" role="menuitem" disabled={readOnly} onClick={() => void remove()}>
+            <button type="button" disabled={readOnly} onClick={() => void remove()}>
               {t('order.remove')}
             </button>
           </div>
