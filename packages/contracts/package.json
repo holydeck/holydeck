@@ -77,6 +77,10 @@
       "types": "./dist/media.d.ts",
       "import": "./dist/media.js"
     },
+    "./media-migration": {
+      "types": "./dist/media-migration.d.ts",
+      "import": "./dist/media-migration.js"
+    },
     "./order": {
       "types": "./dist/order.d.ts",
       "import": "./dist/order.js"

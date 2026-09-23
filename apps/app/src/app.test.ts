@@ -16,6 +16,7 @@ import { VERSIONED_PREFIX, buildApp } from './app.js';
 import { BACKUPS_PATH } from './backup-routes.js';
 import { CAPABILITIES_PATH, GUEST_INVITATION_PATH, OUTPUT_CAPABILITY_PATH } from './capability-routes.js';
 import { JOBS_PATH } from './job-routes.js';
+import { MEDIA_MIGRATION_CLEANUP_PATH, MEDIA_MIGRATION_PATH } from './media-migration-routes.js';
 import { NOTIFICATIONS_PATH, NOTIFICATIONS_READ_ALL_PATH, NOTIFICATIONS_PREFERENCES_PATH } from './notification-routes.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
@@ -152,6 +153,10 @@ describe('every route that changes something', () => {
       // The queue's own surface, gated by its own permission: trying a failed job again is Admin's.
       // Listing what the queue holds and summarizing it are not changes and are absent here.
       { method: 'POST', url: `${JOBS_PATH}/:id/requeue` },
+      // Behind its own Admin permission, by its own vocabulary: asking this deployment to migrate its
+      // media storage to a new root, and cleaning up the old one afterward (OPS-16).
+      { method: 'POST', url: MEDIA_MIGRATION_PATH },
+      { method: 'POST', url: MEDIA_MIGRATION_CLEANUP_PATH },
       { method: 'POST', url: `${NOTIFICATIONS_PATH}/:id/read` },
       { method: 'POST', url: NOTIFICATIONS_READ_ALL_PATH },
       { method: 'POST', url: `${NOTIFICATIONS_PATH}/:id/dismiss` },

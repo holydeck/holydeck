@@ -110,6 +110,14 @@ export const AUDIT_ACTIONS = [
   'notification.read',
   'notification.dismiss',
   'notification.preferences',
+  // A media storage-root migration (OPS-16): `media-migration-routes.ts` writes the first and last when
+  // an operator requests one and later cleans up the old root; `media-migration-handler.ts` writes the
+  // middle two around the copy-verify-switch itself. Category `integration`, the same as `job.requeue` —
+  // queued work crossing into the systems it does.
+  'media.storageMigration.request',
+  'media.storageMigration.complete',
+  'media.storageMigration.fail',
+  'media.storageMigration.cleanup',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -185,6 +193,10 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'notification.read': 'content',
   'notification.dismiss': 'content',
   'notification.preferences': 'content',
+  'media.storageMigration.request': 'integration',
+  'media.storageMigration.complete': 'integration',
+  'media.storageMigration.fail': 'integration',
+  'media.storageMigration.cleanup': 'integration',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */

@@ -167,6 +167,10 @@ describe('the context the trail is written under', () => {
       'notification.read',
       'notification.dismiss',
       'notification.preferences',
+      'media.storageMigration.request',
+      'media.storageMigration.complete',
+      'media.storageMigration.fail',
+      'media.storageMigration.cleanup',
     ]);
   });
 });

@@ -97,6 +97,48 @@ async function writeAtomically(io: SettingsWriteIO, path: string, text: string):
   await io.rename(tmp, path);
 }
 
+/**
+ * Rereads the raw file text fresh from disk, merges `partial` into it, validates the whole merged file
+ * through the loader, and — only then — writes it atomically. Shared by `ensureResticPassword` and
+ * `settingsAdminOn(...).update()`, and by the media storage-root migration handler across the
+ * `apps/worker` → `@holydeck/app` package boundary, so none of the three carries its own copy of what
+ * "write a setting" means.
+ *
+ * Writability is probed only for a `WRITABILITY_CHECKED` key `partial` actually touches, and only when
+ * `io` supplies a `writable` probe at all — `ensureResticPassword` and the migration handler's own
+ * caller-supplied `io` never do, because neither one changes a writability-checked key without already
+ * having proven the target writable some other way (the migration handler by having just copied every
+ * file into it). Probed before the write either way: a syntactically valid path is still worth nothing
+ * if this process cannot write into it, and that must be caught before the file is touched.
+ */
+export async function writeSettings(
+  loaded: LoadedSettings,
+  io: SettingsWriteIO & {
+    readonly env: Record<string, string | undefined>;
+    writable?(path: string): Promise<boolean>;
+  },
+  partial: Partial<Settings>,
+): Promise<LoadedSettings> {
+  const path = loaded.path;
+  const mapping = mappingIn(await readTextOrEmpty(io, path), path);
+  Object.assign(mapping, partial);
+  const merged = stringify(mapping);
+  const next = loadSettings({ fileText: merged, env: io.env, path });
+
+  const unwritable: string[] = [];
+  for (const key of Object.keys(partial) as Array<keyof Settings>) {
+    if (!WRITABILITY_CHECKED.has(key) || io.writable === undefined) continue;
+    const target = next.values[key] as string;
+    if (!(await io.writable(target))) {
+      unwritable.push(`${key}: expected a writable path, but this process cannot write to ${JSON.stringify(target)}`);
+    }
+  }
+  if (unwritable.length > 0) throw new SettingsError(unwritable, 'unwritable');
+
+  await writeAtomically(io, path, merged);
+  return next;
+}
+
 /** Bytes of randomness behind a generated repository password, written out as hex — so 64 characters. */
 const RESTIC_PASSWORD_BYTES = 32;
 
@@ -126,12 +168,7 @@ export async function ensureResticPassword(
   generate: () => string = newResticPassword,
 ): Promise<LoadedSettings> {
   if (loaded.values.resticPassword !== '') return loaded;
-  const mapping = mappingIn(await readTextOrEmpty(io, loaded.path), loaded.path);
-  mapping['resticPassword'] = generate();
-  const merged = stringify(mapping);
-  const next = loadSettings({ fileText: merged, env: io.env, path: loaded.path });
-  await writeAtomically(io, loaded.path, merged);
-  return next;
+  return writeSettings(loaded, io, { resticPassword: generate() });
 }
 
 export function settingsAdminOn(seed: LoadedSettings, io: SettingsAdminOptions): SettingsAdmin {
@@ -155,31 +192,9 @@ export function settingsAdminOn(seed: LoadedSettings, io: SettingsAdminOptions):
     lastReloadError: () => reloadError,
 
     async update(partial) {
-      const path = snapshot.path;
-      const mapping = mappingIn(await readTextOrEmpty(io, path), path);
-      Object.assign(mapping, partial);
-      const merged = stringify(mapping);
-      // Validated as a whole before anything is written: a partial change that fails alongside a valid one
-      // must leave both unwritten, and the loader is the one place that already knows what "valid" means.
-      const loaded = loadSettings({ fileText: merged, env: io.env, path });
-
-      // Probed only for the paths this change actually touches, and only after the schema itself
-      // accepts them: a syntactically valid path is still worth nothing if this process cannot write
-      // into it, and that must be caught before the file is touched, exactly like a schema rejection.
-      // Every unwritable path is collected rather than just the first, for the same reason the loader
-      // itself reports every problem at once: a deployment fixes them all in one pass.
-      const unwritable: string[] = [];
-      for (const key of Object.keys(partial) as Array<keyof Settings>) {
-        if (!WRITABILITY_CHECKED.has(key)) continue;
-        const target = loaded.values[key] as string;
-        if (!(await io.writable(target))) {
-          unwritable.push(`${key}: expected a writable path, but this process cannot write to ${JSON.stringify(target)}`);
-        }
-      }
-      if (unwritable.length > 0) throw new SettingsError(unwritable, 'unwritable');
-
-      await writeAtomically(io, path, merged);
-
+      // Validated, writability-probed, and written atomically by `writeSettings` — see its own comment
+      // for why the probe happens before the write, and why the same function is shared this widely.
+      const loaded = await writeSettings(snapshot, io, partial);
       snapshot = loaded;
       reloadError = undefined;
       return loaded;

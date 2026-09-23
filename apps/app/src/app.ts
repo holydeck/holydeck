@@ -13,6 +13,7 @@ import { notFound, withSafeErrors } from './failures.js';
 import { serveJobRoutes } from './job-routes.js';
 import { isUpgrade } from './live.js';
 import { guardMaintenance } from './maintenance.js';
+import { serveMediaMigrationRoutes } from './media-migration-routes.js';
 import { serveMediaRoutes } from './media-routes.js';
 import { serveNotificationRoutes } from './notification-routes.js';
 import { notificationStoreOn } from './notification-store.js';
@@ -36,6 +37,7 @@ import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { MaintenanceStore } from './maintenance.js';
+import type { MediaMigrationStateStore } from './media-migration-state.js';
 import type { MediaLibrary } from './media.js';
 import type { NotificationDb } from './notification-store.js';
 import type { Identity } from './onboarding.js';
@@ -81,6 +83,9 @@ export interface AppOptions {
   backups?: { readonly db: RepositoryDb; readonly queue: Queue };
   /** The restore-apply lease `guardMaintenance` reads. Without it, no request is ever refused for one. */
   readonly maintenance?: MaintenanceStore;
+  /** Where the last media storage-root migration is recorded (OPS-16). Without it, there is
+   * nothing here to trigger a migration against or clean up after one. */
+  readonly migrationState?: MediaMigrationStateStore;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
   translationOffsets?: TranslationOffsetStore;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
@@ -111,6 +116,7 @@ export function buildApp({
   media,
   backups,
   maintenance,
+  migrationState,
   translationOffsets,
   shownReferences,
   services,
@@ -278,6 +284,16 @@ export function buildApp({
   // job kind is recorded in.
   serveJobRoutes(app, {
     queue: backups?.queue,
+    identity,
+  });
+
+  // Behind its own Admin permission, by its own vocabulary: asking this deployment to migrate its media
+  // storage to a new root, and cleaning up the old one afterward (OPS-16). Reuses the backup surface's
+  // own `queue` for the same reason `serveJobRoutes` does above.
+  serveMediaMigrationRoutes(app, {
+    queue: backups?.queue,
+    migrationState,
+    now: () => new Date().toISOString(),
     identity,
   });
 

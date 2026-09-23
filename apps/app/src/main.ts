@@ -23,6 +23,7 @@ import { probeCorpusIsClosed } from './corpus.js';
 import { serveLive } from './live.js';
 import { maintenanceDb, maintenanceOn } from './maintenance.js';
 import { schemaStatus } from './migrations.js';
+import { mediaMigrationStateDb, mediaMigrationStateOn } from './media-migration-state.js';
 import { mediaLibraryOn } from './media.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
@@ -44,6 +45,7 @@ import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
 import type { MaintenanceStore } from './maintenance.js';
+import type { MediaMigrationStateStore } from './media-migration-state.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { Queue } from './queue.js';
@@ -106,6 +108,9 @@ let backups: { readonly db: RepositoryDb; readonly queue: Queue } | undefined;
 // The restore-apply lease is kept the same way: a deployment with nowhere to keep one has no worker
 // applying a restore to it either, so `guardMaintenance` has nothing it could ever find held.
 let maintenance: MaintenanceStore | undefined;
+// The last media storage-root migration is kept the same way: a deployment with nowhere to keep one has
+// no worker migrating its media to a new root either, and its routes answer not-found the same way.
+let migrationState: MediaMigrationStateStore | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
@@ -155,6 +160,7 @@ if (settings.values.mongoUrl !== '') {
   backups = { db: repositoryDb(store.db()), queue };
   notificationDatabase = notificationDb(store.db());
   maintenance = maintenanceOn(maintenanceDb(store.db()));
+  migrationState = mediaMigrationStateOn(mediaMigrationStateDb(store.db()));
   settingsAdmin = settingsAdminOn(settings, {
     readFile: (path) => readFile(path, 'utf8'),
     writeFile,
@@ -193,6 +199,7 @@ const app = buildApp({
   backups,
   notificationDb: notificationDatabase,
   maintenance,
+  migrationState,
   translationOffsets,
   shownReferences,
   services,

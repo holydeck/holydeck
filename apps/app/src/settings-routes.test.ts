@@ -169,6 +169,22 @@ describe('changing a setting', () => {
     expect((await reading()).json().data.values).toMatchObject({ locale: 'en', developmentDiagnostics: false });
   });
 
+  test('refuses to change mediaRoot through this route at all, leaving it untouched', async () => {
+    const response = await patching({ mediaRoot: '/data/holydeck/other-media' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+    expect(response.json().error.fields[0]).toMatchObject({ path: 'mediaRoot', code: 'field.not_allowed' });
+    expect((await reading()).json().data.values.mediaRoot).not.toBe('/data/holydeck/other-media');
+  });
+
+  test('refuses mediaRoot even alongside a change that would otherwise be applied, applying neither', async () => {
+    const response = await patching({ locale: 'de', mediaRoot: '/data/holydeck/other-media' });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.fields[0]).toMatchObject({ path: 'mediaRoot', code: 'field.not_allowed' });
+    expect((await reading()).json().data.values).toMatchObject({ locale: 'en' });
+    expect((await reading()).json().data.values.mediaRoot).not.toBe('/data/holydeck/other-media');
+  });
+
   test('an unexpected failure while writing is not turned into a validation refusal', async () => {
     const io = fakeSettingsIO({ [PATH]: `corpusUrl: http://corpus:8080\ncorpusToken: ${TOKEN}\n` });
     io.failNextRename('the disk is full');
@@ -212,12 +228,12 @@ describe('who may ask any of it', () => {
 
 describe('the trail this route writes', () => {
   test('records exactly one entry per change, naming the fields and never a value', async () => {
-    await patching({ locale: 'de', mediaRoot: '/data/holydeck/other-media' });
+    await patching({ locale: 'de', resticRepository: '/data/holydeck/backups-secondary' });
     expect(actions()).toEqual(['settings.update']);
     expect(entries()[0]).toMatchObject({ actor: ADMINISTRATOR, subject: 'settings' });
-    expect(JSON.stringify(entries()[0])).not.toContain('/data/holydeck/other-media');
+    expect(JSON.stringify(entries()[0])).not.toContain('/data/holydeck/backups-secondary');
     expect(JSON.stringify(entries()[0])).toContain('locale');
-    expect(JSON.stringify(entries()[0])).toContain('mediaRoot');
+    expect(JSON.stringify(entries()[0])).toContain('resticRepository');
   });
 
   test('writes nothing for a change the file refused', async () => {

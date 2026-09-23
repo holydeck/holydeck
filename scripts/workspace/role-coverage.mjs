@@ -32,6 +32,8 @@ export const KNOWN_INTEGRATION_GAPS = {
   'job-routes.ts GET JOBS_SUMMARY_PATH JOBS_MANAGE': 'no harness test refuses the job summary to a non-admin',
   'job-routes.ts POST JOB_REQUEUE_PATH JOBS_MANAGE': 'no harness test refuses requeuing a job to a non-admin',
   'live.ts GET LIVE_CONNECTIONS_PATH PRESENTATION_CONTROL': 'no harness test refuses live connection counts without Control presentation',
+  'media-migration-routes.ts POST MEDIA_MIGRATION_PATH MEDIA_MANAGE': 'no harness test refuses a media storage migration request to a non-admin',
+  'media-migration-routes.ts POST MEDIA_MIGRATION_CLEANUP_PATH MEDIA_MANAGE': 'no harness test refuses a media migration cleanup to a non-admin',
   'media-routes.ts POST MEDIA_PATH MEDIA_MANAGE': 'no harness test refuses media uploads to a non-admin',
   'notification-routes.ts GET NOTIFICATIONS_PATH NOTIFICATIONS_USE': 'no harness test refuses the notification inbox to a session without notifications.use',
   'notification-routes.ts POST `${NOTIFICATIONS_PATH}/:id/read` NOTIFICATIONS_USE': 'no harness test refuses marking a notification read to a session without notifications.use',

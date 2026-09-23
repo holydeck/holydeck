@@ -3,10 +3,11 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { checkOwnSettingsMount, readSettingsText } from '@holydeck/app/boot';
-import { AUDIT_CATEGORIES, CATEGORY_OF, auditReadContext, retentionSweepContext } from '@holydeck/app/audit';
+import { AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditReadContext, retentionSweepContext } from '@holydeck/app/audit';
 import { backupContext, backupDb } from '@holydeck/app/backups';
 import { capabilityDb, capabilitiesOn } from '@holydeck/app/capabilities';
 import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
+import { mediaMigrationStateDb, mediaMigrationStateOn } from '@holydeck/app/media-migration-state';
 import { notificationDb, notificationStoreOn } from '@holydeck/app/notification-store';
 import { SCHEMA_VERSION } from '@holydeck/app/migrations';
 import { queueDb, queueOn, schedulerContext, workerContext } from '@holydeck/app/queue';
@@ -128,12 +129,13 @@ if (work.runs === 'nothing') {
   // backup can run. A deployment that mounts no settings directory at all — the development stack, by
   // design — has nowhere to keep one: that is said out loud and then left, and every Restic command
   // refuses for want of a password rather than quietly writing a repository anyone could read.
-  const configured = await ensureResticPassword(settings, {
-    readFile: (file) => readFile(file, 'utf8'),
-    writeFile: (file, text) => writeFile(file, text),
+  const settingsIo = {
+    readFile: (file: string) => readFile(file, 'utf8'),
+    writeFile: (file: string, text: string) => writeFile(file, text),
     rename,
     env: process.env,
-  }).catch((error: unknown) => {
+  };
+  const configured = await ensureResticPassword(settings, settingsIo).catch((error: unknown) => {
     process.stdout.write(`worker could not settle a backup repository password: ${(error as Error).message}\n`);
     return settings;
   });
@@ -149,6 +151,7 @@ if (work.runs === 'nothing') {
   // The same lease `apps/app`'s `guardMaintenance` reads: both processes read and write the one
   // `maintenance` collection in the production database, so a job held here is a hold the app sees too.
   const maintenance = maintenanceOn(maintenanceDb(store.db()));
+  const mediaMigrationState = mediaMigrationStateOn(mediaMigrationStateDb(store.db()));
   const handlers = handlersOn({
     mediaIngest: {
       context: mediaContext('system', name),
@@ -203,6 +206,16 @@ if (work.runs === 'nothing') {
       now,
       report: (line) => void process.stdout.write(`${line}\n`),
       schedulerState,
+    },
+    mediaMigration: {
+      context: auditContext('system', name),
+      db: repositoryDb(store.db()),
+      maintenance,
+      migrationState: mediaMigrationState,
+      loaded: configured,
+      settingsIo,
+      now,
+      report: (line) => void process.stdout.write(`${line}\n`),
     },
   });
   const runner = runnerOn({

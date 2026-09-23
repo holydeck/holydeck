@@ -73,6 +73,10 @@
       "types": "./dist/maintenance.d.ts",
       "import": "./dist/maintenance.js"
     },
+    "./media-migration-state": {
+      "types": "./dist/media-migration-state.d.ts",
+      "import": "./dist/media-migration-state.js"
+    },
     "./retention": {
       "types": "./dist/retention.d.ts",
       "import": "./dist/retention.js"
