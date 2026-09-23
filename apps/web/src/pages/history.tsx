@@ -1,7 +1,12 @@
 // The history behind a piece of content (spec v1c-09, COLAB-02): the revisions the server kept, one
 // revision compared with another, and an earlier one brought back. The server is the only place that
 // judges whether a restore is safe (revision-routes.ts); this page reads its answers and shows them.
+//
+// After a restore the list is read again rather than patched locally: a restore of a revision identical
+// to the current one appends nothing and answers with the existing record, so prepending that answer
+// would show one revision twice. A list that cannot be read says so, and says which way it failed.
 
+import { NOT_FOUND } from '@holydeck/contracts/http';
 import { parseRevisionRecord, type RevisionRecord } from '@holydeck/contracts/revisions';
 import { useEffect, useState } from 'preact/hooks';
 
@@ -52,12 +57,6 @@ const parsedCompare = (value: unknown): CompareResult | undefined => {
   return { from: from.value, to: to.value, diff: parsedDiff(value['diff']) };
 };
 
-const parsedRestore = (value: unknown): RevisionRecord | undefined => {
-  if (!isRecord(value)) return undefined;
-  const parsed = parseRevisionRecord(value['revision']);
-  return parsed.ok ? parsed.value : undefined;
-};
-
 const revisionsPath = (contentId: string): string => `/api/v1/content/${encodeURIComponent(contentId)}/revisions`;
 
 /** The revisions kept for one piece of content, with a two-way compare and a confirmed restore. */
@@ -72,11 +71,14 @@ export function HistoryPage({ contentId }: { readonly contentId: string }): JSX.
   const [confirming, setConfirming] = useState<number>();
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState<string>();
+  const [loadError, setLoadError] = useState<string>();
 
   const load = async (): Promise<void> => {
     setLoading(true);
     const result = await request(revisionsPath(contentId));
-    setRevisions(result.ok && Array.isArray(result.data) ? parsedRevisions(result.data) : []);
+    const listed = result.ok && Array.isArray(result.data) ? parsedRevisions(result.data) : undefined;
+    setRevisions(listed ?? []);
+    setLoadError(listed !== undefined ? undefined : t(!result.ok && result.code === NOT_FOUND ? 'history.notFound' : 'history.loadFailed'));
     setLoading(false);
   };
 
@@ -125,11 +127,10 @@ export function HistoryPage({ contentId }: { readonly contentId: string }): JSX.
         setRestoreError(fieldErrors(result, []).other ?? result.message);
         return;
       }
-      const restored = parsedRestore(result.data);
-      if (restored !== undefined) setRevisions((current) => [restored, ...current]);
       setConfirming(undefined);
       setSelected([]);
       setCompareResult(undefined);
+      await load();
     } finally {
       setRestoring(false);
     }
@@ -140,6 +141,7 @@ export function HistoryPage({ contentId }: { readonly contentId: string }): JSX.
   return (
     <>
       <h1>{t('history.heading')}</h1>
+      {loadError === undefined ? null : <p role="alert">{loadError}</p>}
       {loading ? <p role="status">{t('app.loading')}</p> : (
         <ul>
           {revisions.map((revision) => (

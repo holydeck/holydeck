@@ -122,9 +122,10 @@ describe('HistoryPage', () => {
   it('restores a revision after an explicit confirm step', async () => {
     const one = record({ revision: 1 });
     const restored = record({ revision: 2, at: '2026-09-23T00:00:00.000Z' });
+    const lists = [[one], [restored, one]];
     const fetching = vi.fn<FetchLike>(async (_requestPath, init) => init.method === 'POST'
       ? reply(200, successEnvelope({ appended: true, revision: restored, from: 1 }, 'request-restore'))
-      : reply(200, successEnvelope([one], 'request-list')));
+      : reply(200, successEnvelope(lists.shift() ?? [], 'request-list')));
     setFetching(fetching);
 
     render(<HistoryPage contentId={contentId} />);
@@ -177,6 +178,36 @@ describe('HistoryPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
     expect((await screen.findByRole('alert')).textContent).toBeTruthy();
+  });
+
+  it('reads the list again after a restore that appended nothing, so no revision shows twice', async () => {
+    const one = record({ revision: 1 });
+    const fetching = vi.fn<FetchLike>(async (_requestPath, init) => init.method === 'POST'
+      ? reply(200, successEnvelope({ appended: false, revision: one, from: 1 }, 'request-restore'))
+      : reply(200, successEnvelope([one], 'request-list')));
+    setFetching(fetching);
+
+    render(<HistoryPage contentId={contentId} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(fetching.mock.calls).toHaveLength(3));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(screen.getAllByText(/^Revision 1 — /)).toHaveLength(1);
+  });
+
+  it('says so when the history cannot be loaded', async () => {
+    setFetching(async () => reply(500, errorEnvelope('server.failed', 'Failed', 'request-list')));
+    render(<HistoryPage contentId={contentId} />);
+
+    expect((await screen.findByRole('alert')).textContent).toBe('The revision history could not be loaded.');
+  });
+
+  it('says so when the content has no history to show', async () => {
+    setFetching(async () => reply(404, errorEnvelope('resource.not_found', 'Not found', 'request-list')));
+    render(<HistoryPage contentId={contentId} />);
+
+    expect((await screen.findByRole('alert')).textContent).toBe('No history was found for this content.');
   });
 
   it('renders not found and makes no request without content history permission', () => {
