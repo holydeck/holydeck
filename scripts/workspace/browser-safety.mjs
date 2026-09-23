@@ -21,8 +21,9 @@ export const BROWSER_SAFE_WORKSPACES = [
 
 // Third-party packages a browser-safe workspace may take at run time. Each is a browser library by
 // construction and ships no Node builtin; naming them one by one keeps adding another an argued change
-// rather than a wildcard. Preact and its signals are the web client's component runtime (roadmap D1).
-export const BROWSER_SAFE_PACKAGES = ['preact', '@preact/signals'];
+// rather than a wildcard. Preact and its signals are the web client's component runtime (roadmap D1);
+// uqr draws the authenticator-enrolment QR code as SVG, and imports nothing at all.
+export const BROWSER_SAFE_PACKAGES = ['preact', '@preact/signals', 'uqr'];
 
 // Node's own builtin list, in the bare spelling that predates the `node:` prefix. The prefixed form
 // needs no list at all, which is why it is handled separately.
