@@ -285,6 +285,27 @@ describe('POST /api/v1/sermons/import/preview', () => {
     expect(response.json().data['resolver']).toBe('not-needed');
   });
 
+  test('answers resolver "not-configured" and lists the unresolved book in notices when a name is left over', async () => {
+    const response = await preview({ text: 'Xyzzy 1:1\nHosea 4:6', translations: ['ta'] });
+    expect(response.statusCode).toBe(200);
+    const data = response.json().data;
+    expect(data['resolver']).toBe('not-configured');
+    expect(data['notices']).toEqual([
+      expect.stringContaining('ANTHROPIC_API_KEY'),
+      expect.stringContaining('Xyzzy'),
+    ]);
+  });
+
+  test('answers resolver "unavailable" when the resolver call fails', async () => {
+    await app.close();
+    await serving(identity, sermons, answeringCorpus(), 'test-key', async () => ({ status: 500, body: '{}' }));
+    const response = await preview({ text: 'Xyzzy 1:1\nHosea 4:6', translations: ['ta'] });
+    expect(response.statusCode).toBe(200);
+    const data = response.json().data;
+    expect(data['resolver']).toBe('unavailable');
+    expect(data['resolvedTokens']).toEqual([]);
+  });
+
   test('writes nothing — no sermon exists after a preview call', async () => {
     const before = rowCount();
     const response = await preview({ text: 'John 3:16', translations: ['ta'] });
