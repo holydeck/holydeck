@@ -11,7 +11,7 @@ import { auditOn } from './audit.js';
 import { enforceAuthorization } from './authorization.js';
 import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
-import { MEDIA_MANAGE } from './roles.js';
+import { CONTENT_EDIT, MEDIA_MANAGE } from './roles.js';
 import { mediaContext, mediaLibraryOn } from './media.js';
 import { MEDIA_PATH, MEDIA_PIXEL_CEILING, serveMediaRoutes } from './media-routes.js';
 import { passkeysOn } from './passkeys.js';
@@ -88,6 +88,14 @@ const uploading = (
   file: { readonly filename: string; readonly contentType: string; readonly bytes: Uint8Array },
   held: StartedSession = admin,
 ) => app.inject({ method: 'POST', url: MEDIA_PATH, headers: withHeaders(held), payload: multipartBody(file) });
+
+const requesting = (method: 'GET' | 'PATCH' | 'POST', url: string, held: StartedSession = admin, payload?: unknown) =>
+  app.inject({ method, url, headers: { ...withHeaders(held), 'content-type': 'application/json' }, payload: payload as never });
+
+const uploaded = async (width = 4): Promise<string> => {
+  const response = await uploading({ filename: `${width}.png`, contentType: 'image/png', bytes: png(width, 4) });
+  return response.json().data.stamp.id as string;
+};
 
 const served = async (options: {
   readonly media: MediaLibrary | undefined;
@@ -178,9 +186,124 @@ describe('uploading a file', () => {
   });
 });
 
+describe('listing media', () => {
+  test('shows an editor active media only, even when archived=true is asked for', async () => {
+    const id = await uploaded();
+    await requesting('PATCH', `${MEDIA_PATH}/${id}/status`, admin, { archived: true });
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    const response = await requesting('GET', `${MEDIA_PATH}?archived=true`, editor);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual([]);
+  });
+
+  test('shows archived media to an admin only when asked', async () => {
+    const active = await uploaded(4);
+    const archived = await uploaded(5);
+    await requesting('PATCH', `${MEDIA_PATH}/${archived}/status`, admin, { archived: true });
+    expect((await requesting('GET', MEDIA_PATH)).json().data.map((row: { stamp: { id: string } }) => row.stamp.id)).toEqual([active]);
+    expect((await requesting('GET', `${MEDIA_PATH}?archived=true`)).json().data.map((row: { stamp: { id: string } }) => row.stamp.id)).toEqual([
+      active,
+      archived,
+    ]);
+  });
+});
+
+describe('inspecting media', () => {
+  test('answers an existing item to a content editor and not-found for an unknown id', async () => {
+    const id = await uploaded();
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    const found = await requesting('GET', `${MEDIA_PATH}/${id}`, editor);
+    expect(found.statusCode).toBe(200);
+    expect(found.json().data.stamp.id).toBe(id);
+    expect((await requesting('GET', `${MEDIA_PATH}/media-99`, editor)).statusCode).toBe(404);
+  });
+
+  test('hides the storage path from a content editor but not from media managers', async () => {
+    const id = await uploaded();
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    const manager = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT, MEDIA_MANAGE] });
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}`, editor)).json().data.storageKey).toBeUndefined();
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}`, manager)).json().data.storageKey).toBeTypeOf('string');
+    expect((await requesting('GET', MEDIA_PATH, editor)).json().data[0].storageKey).toBeUndefined();
+    expect((await requesting('GET', MEDIA_PATH, manager)).json().data[0].storageKey).toBeTypeOf('string');
+  });
+
+  test('gates an archived item by id the same way the list does', async () => {
+    const id = await uploaded();
+    await requesting('PATCH', `${MEDIA_PATH}/${id}/status`, admin, { archived: true });
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    const manager = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT, MEDIA_MANAGE] });
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}`, editor)).statusCode).toBe(404);
+    expect((await requesting('GET', `${MEDIA_PATH}/${id}`, manager)).statusCode).toBe(200);
+  });
+});
+
+describe('changing media status', () => {
+  test('archives and restores media, recording both changes', async () => {
+    const id = await uploaded();
+    const archived = await requesting('PATCH', `${MEDIA_PATH}/${id}/status`, admin, { archived: true });
+    expect(archived.statusCode).toBe(200);
+    expect(archived.json().data.stamp.archivedAt).toBe(NOW);
+    const restored = await requesting('PATCH', `${MEDIA_PATH}/${id}/status`, admin, { archived: false });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().data.stamp.archivedAt).toBeUndefined();
+    expect(entries().slice(-2)).toMatchObject([
+      { action: 'content.change', detail: 'archived' },
+      { action: 'content.change', detail: 'restored' },
+    ]);
+  });
+
+  test('refuses a second archive as a conflict', async () => {
+    const id = await uploaded();
+    await requesting('PATCH', `${MEDIA_PATH}/${id}/status`, admin, { archived: true });
+    const response = await requesting('PATCH', `${MEDIA_PATH}/${id}/status`, admin, { archived: true });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe(ENTITY_CONFLICT);
+  });
+
+  test('refuses malformed status bodies and unknown ids', async () => {
+    expect((await requesting('PATCH', `${MEDIA_PATH}/media-1/status`, admin, {})).statusCode).toBe(422);
+    expect((await requesting('PATCH', `${MEDIA_PATH}/media-99/status`, admin, { archived: true })).statusCode).toBe(404);
+  });
+
+  test('requires media.manage', async () => {
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    expect((await requesting('PATCH', `${MEDIA_PATH}/media-1/status`, editor, { archived: true })).statusCode).toBe(403);
+  });
+});
+
+describe('retrying media processing', () => {
+  test('returns failed media to pending and records the retry', async () => {
+    const id = await uploaded();
+    await media.startProcessing(mediaContext(ADMINISTRATOR, 'req-start'), id);
+    await media.failProcessing(mediaContext(ADMINISTRATOR, 'req-fail'), id);
+    const response = await requesting('POST', `${MEDIA_PATH}/${id}/retry`, admin, {});
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.manifest.processingState).toBe('pending');
+    expect(entries().at(-1)).toMatchObject({ action: 'content.change', detail: 'retried' });
+  });
+
+  test('refuses retrying non-failed media and unknown ids', async () => {
+    const id = await uploaded();
+    const nonFailed = await requesting('POST', `${MEDIA_PATH}/${id}/retry`, admin, {});
+    expect(nonFailed.statusCode).toBe(409);
+    expect(nonFailed.json().error.code).toBe(ENTITY_CONFLICT);
+    expect((await requesting('POST', `${MEDIA_PATH}/media-99/retry`, admin, {})).statusCode).toBe(404);
+  });
+
+  test('requires media.manage', async () => {
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    expect((await requesting('POST', `${MEDIA_PATH}/media-1/retry`, editor, {})).statusCode).toBe(403);
+  });
+});
+
 describe('who may ask any of it', () => {
-  test('every route here changes something, and so it is behind the guard', () => {
-    expect(mutatingRoutesOf(app)).toEqual([{ method: 'POST', url: MEDIA_PATH }]);
+  test('every route here that changes something is behind the guard', () => {
+    expect(mutatingRoutesOf(app)).toEqual([
+      { method: 'POST', url: MEDIA_PATH },
+      { method: 'PATCH', url: `${MEDIA_PATH}/:id/status` },
+      { method: 'POST', url: `${MEDIA_PATH}/:id/retry` },
+    ]);
   });
 
   test('refuses a request that carries no session, before upload() is ever reached', async () => {

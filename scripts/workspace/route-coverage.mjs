@@ -23,6 +23,14 @@ export const ROUTE_INTEGRATION_TESTS = {
   'app.ts GET /health': 'tests/harness/integration/surfaces.test.ts',
   'app.ts GET /api/v1/translations': 'tests/harness/integration/surfaces.test.ts',
   'live.ts GET LIVE_PATH': 'tests/harness/integration/surfaces.test.ts',
+  'content-language-routes.ts': 'tests/harness/e2e/content.spec.ts',
+  'library-routes.ts': 'tests/harness/e2e/content.spec.ts',
+  'media-routes.ts': 'tests/harness/e2e/content.spec.ts',
+  'scripture-routes.ts': 'tests/harness/e2e/content.spec.ts',
+  'slide-group-routes.ts': 'tests/harness/e2e/content.spec.ts',
+  'slide-label-routes.ts': 'tests/harness/e2e/content.spec.ts',
+  'slide-layout-routes.ts': 'tests/harness/e2e/content.spec.ts',
+  'song-routes.ts': 'tests/harness/e2e/content.spec.ts',
 };
 
 // A route identity with no harness-level test yet. Closing a gap means deleting its line here and adding one
@@ -36,7 +44,6 @@ export const KNOWN_INTEGRATION_GAPS = {
   'accounts-routes.ts': 'no harness test drives the admin account lifecycle over HTTP',
   'audit-routes.ts': 'no harness test reads the audit trail over HTTP',
   'capability-routes.ts': 'no harness test issues or revokes a guest or output capability over HTTP',
-  'media-routes.ts': 'no harness test uploads a file over HTTP',
   'order-routes.ts': 'no harness test reads the running order over HTTP',
   'passkey-routes.ts':
     'registration and authentication need a WebAuthn authenticator, which the harness (raw fetch, no ' +
@@ -45,9 +52,9 @@ export const KNOWN_INTEGRATION_GAPS = {
   'presence-routes.ts': 'no harness test enters, lists or leaves presence over HTTP',
   'reference-routes.ts': 'no harness test looks a reference up or shows one over HTTP',
   'revision-routes.ts': 'no harness test reads, compares or restores a revision over HTTP',
+  'sermon-routes.ts': 'no harness test creates or edits a Sermon over HTTP',
   'service-routes.ts': 'no harness test drives the Service workspace lifecycle over HTTP',
   'settings-routes.ts': 'no harness test reads or changes settings over HTTP',
-  'slide-layout-routes.ts': 'no harness test creates, versions or archives a Slide Layout over HTTP',
   'service-template-routes.ts': 'no harness test creates or previews a Service Template over HTTP',
   'totp-routes.ts': 'no harness test drives TOTP setup or verification over HTTP',
   'translation-offset-routes.ts': 'no harness test reads or configures a translation offset over HTTP',

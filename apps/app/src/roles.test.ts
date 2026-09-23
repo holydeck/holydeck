@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ACCOUNTS_MANAGE,
   AUDIT_READ,
+  CATALOGUE_MANAGE,
+  CONTENT_EDIT,
   CONTENT_HISTORY_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
@@ -29,7 +31,7 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, presence, history and audit', () => {
+  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, content, catalogues, presence, history and audit', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
@@ -37,25 +39,30 @@ describe('what a role grants', () => {
       SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
+      CONTENT_EDIT,
+      CATALOGUE_MANAGE,
       PRESENCE_USE,
       CONTENT_HISTORY_MANAGE,
       AUDIT_READ,
     ]);
   });
 
-  it('grants an editor service management, presence and history, but not Service Template management', () => {
+  it('grants an editor service management, content editing, presence and history, but neither catalogue nor Service Template management', () => {
     expect(SERVICES_MANAGE).toBe('services.manage');
     expect(permissionsFor(accountOf('editor', false))).toEqual([
       SERVICES_MANAGE,
+      CONTENT_EDIT,
       PRESENCE_USE,
       CONTENT_HISTORY_MANAGE,
     ]);
     expect(permissionsFor(accountOf('editor', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
+    expect(permissionsFor(accountOf('editor', false))).not.toContain(CATALOGUE_MANAGE);
   });
 
   it('grants a member presence by role alone', () => {
     expect(permissionsFor(accountOf('member', false))).toEqual([PRESENCE_USE]);
     expect(permissionsFor(accountOf('member', false))).not.toContain(SERVICE_TEMPLATES_MANAGE);
+    expect(permissionsFor(accountOf('member', false))).not.toContain(CONTENT_EDIT);
   });
 });
 
@@ -65,6 +72,7 @@ describe('what Control presentation is', () => {
   it('is independent of role: granted to an editor or a member, it is theirs', () => {
     expect(permissionsFor(accountOf('editor', true))).toEqual([
       SERVICES_MANAGE,
+      CONTENT_EDIT,
       PRESENCE_USE,
       CONTENT_HISTORY_MANAGE,
       PRESENTATION_CONTROL,
@@ -84,6 +92,8 @@ describe('what Control presentation is', () => {
       SERVICE_TEMPLATES_MANAGE,
       MEDIA_MANAGE,
       SERVICES_MANAGE,
+      CONTENT_EDIT,
+      CATALOGUE_MANAGE,
       PRESENCE_USE,
       CONTENT_HISTORY_MANAGE,
       AUDIT_READ,

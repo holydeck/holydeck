@@ -9,12 +9,23 @@ import {
   conflictsIn,
   conflictsWith,
   parseSlideLabelDraft,
+  parseSlideLabelStatus,
   readAssignedLabel,
   readableConflict,
   shortcutsOf,
 } from './slide-labels.js';
 
 import type { ShortcutKey, SlideLabelEntry } from './slide-labels.js';
+
+describe('reading slide-label status', () => {
+  it('accepts archived', () => {
+    expect(parseSlideLabelStatus({ archived: true })).toEqual({ ok: true, value: { archived: true } });
+  });
+
+  it('refuses missing archived', () => {
+    expect(parseSlideLabelStatus({})).toEqual({ ok: false, problems: [{ path: 'slideLabel.archived', code: FIELD_CODES.required, message: 'is required' }] });
+  });
+});
 
 const label = (id: string, name: string, shortcut?: ShortcutKey): SlideLabelEntry => ({
   id,

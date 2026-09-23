@@ -5,7 +5,7 @@ import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { buildApp } from './app.js';
-import { SERVICE_TEMPLATES_MANAGE, SETTINGS_MANAGE } from './roles.js';
+import { SERVICES_MANAGE, SERVICE_TEMPLATES_MANAGE, SETTINGS_MANAGE } from './roles.js';
 import { SERVICE_TEMPLATE_ID_PATH, SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
 import { ServiceTemplateError, serviceTemplateContext, serviceTemplatesOn } from './service-templates.js';
 import { sessionContext, sessionsOn } from './sessions.js';
@@ -71,7 +71,7 @@ beforeEach(async () => {
   sessions = sessionsOn(memorySessions().db, { now: () => NOW });
   operator = await sessions.start(sessionContext(CORRELATION), {
     actor: OPERATOR,
-    permissions: [SERVICE_TEMPLATES_MANAGE],
+    permissions: [SERVICE_TEMPLATES_MANAGE, SERVICES_MANAGE],
   });
   await building(templates);
 });
@@ -96,14 +96,37 @@ describe('Service Template routes', () => {
     expect(previewed.json().data).toEqual(created.json().data);
   });
 
-  test('gates both routes from an editor session before calling the store', async () => {
-    const editor = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [SETTINGS_MANAGE] });
+  test('lists every Service Template on file', async () => {
+    await asking('POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT);
+    const listed = await asking('GET', SERVICE_TEMPLATE_PATH);
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().data).toMatchObject([{ id: 'template-1', name: DRAFT.name }]);
+  });
+
+  test('lets an Editor holding only services.manage list but not create or preview Templates', async () => {
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [SERVICES_MANAGE] });
+    await asking('POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT);
+    const listed = await asking('GET', SERVICE_TEMPLATE_PATH, undefined, editor);
+    expect(listed.statusCode).toBe(200);
     const create = vi.spyOn(templates, 'create');
     const preview = vi.spyOn(templates, 'preview');
     expect((await asking('POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT, editor)).statusCode).toBe(403);
     expect((await asking('GET', templatePath('template-1'), undefined, editor)).statusCode).toBe(403);
     expect(create).not.toHaveBeenCalled();
     expect(preview).not.toHaveBeenCalled();
+  });
+
+  test('gates every route from an editor session before calling the store', async () => {
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [SETTINGS_MANAGE] });
+    const create = vi.spyOn(templates, 'create');
+    const preview = vi.spyOn(templates, 'preview');
+    const list = vi.spyOn(templates, 'list');
+    expect((await asking('POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT, editor)).statusCode).toBe(403);
+    expect((await asking('GET', templatePath('template-1'), undefined, editor)).statusCode).toBe(403);
+    expect((await asking('GET', SERVICE_TEMPLATE_PATH, undefined, editor)).statusCode).toBe(403);
+    expect(create).not.toHaveBeenCalled();
+    expect(preview).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
   });
 
   test('returns 404 when a Service Template was never created', async () => {
@@ -128,6 +151,7 @@ describe('Service Template routes', () => {
   test.each([
     ['POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT],
     ['GET', templatePath('template-1'), undefined],
+    ['GET', SERVICE_TEMPLATE_PATH, undefined],
   ] as const)('serves a gated 404 fallback for %s %s without a store', async (method, url, payload) => {
     await app.close();
     await building(undefined);

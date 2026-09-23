@@ -32,6 +32,7 @@ describe('the durable record classes', () => {
       'services',
       'slideLabels',
       'slideLayouts',
+      'songSingerChords',
     ]);
     const collections = CLASSES.map(([, record]) => record.collection);
     expect(new Set(collections).size).toBe(collections.length);

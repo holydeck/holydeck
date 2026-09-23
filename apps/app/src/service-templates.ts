@@ -64,6 +64,8 @@ export interface ServiceTemplateStore {
   create(context: unknown, draft: ServiceTemplateDraft): Promise<ServiceTemplatePreview>;
   /** The entries a Service Template was created with, or nothing for one that was never created. */
   preview(context: unknown, id: string): Promise<ServiceTemplatePreview | undefined>;
+  /** Every Service Template on file, without its entries — the same shape `create` stamps down first. */
+  list(context: unknown): Promise<readonly ServiceTemplateRecord[]>;
 }
 
 export interface ServiceTemplateOptions {
@@ -181,6 +183,26 @@ export function serviceTemplatesOn(db: RepositoryDb, options: ServiceTemplateOpt
           throw new ServiceTemplateError('corrupt', `${id} is a Service Template and holds no entries at all`);
         }
         return { ...row, revision: record.revision, body: bodyOf(record) };
+      }),
+
+    list: (context) =>
+      own(async () => {
+        const rows = await records.read(context, {});
+        return rows.map((found) => {
+          const id = found['_id'];
+          const name = found['name'];
+          const createdAt = found['createdAt'];
+          const createdBy = found['createdBy'];
+          if (
+            typeof id !== 'string' ||
+            typeof name !== 'string' ||
+            typeof createdAt !== 'string' ||
+            typeof createdBy !== 'string'
+          ) {
+            throw new ServiceTemplateError('corrupt', 'a Service Template row is missing its identifier');
+          }
+          return { id, name, createdAt, createdBy };
+        });
       }),
   };
 }

@@ -22,6 +22,8 @@ import type { EntityKind } from './entities.js';
 /** The kind each catalogue entry is stamped as, named once so a store never types the word again. */
 export const SLIDE_LABEL_KIND = 'slideLabel' satisfies EntityKind;
 
+export const SLIDE_LABELS_PATH = '/api/v1/slide-labels';
+
 /**
  * Every key a live shortcut may be, and the whole space "conflict-free across the whole catalogue" is
  * asserted over. The number row, in the order it sits in under a hand, and nothing else:
@@ -70,6 +72,12 @@ export const parseSlideLabelDraft: ParseFn<SlideLabelDraft> = (value, path) =>
     const shortcut = readShortcut(reader);
     return { name, ...(shortcut === undefined ? {} : { shortcut }) };
   });
+
+export type SlideLabelStatus = { readonly archived: boolean };
+
+export function parseSlideLabelStatus(value: unknown): Parsed<SlideLabelStatus> {
+  return parseObject(value, 'slideLabel', (reader) => ({ archived: reader.flag('archived') }));
+}
 
 /** Which of the two catalogue-wide rules was broken. Both block saving; neither is a bad payload. */
 export const CONFLICT_FIELDS = ['name', 'shortcut'] as const;

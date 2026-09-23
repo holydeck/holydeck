@@ -25,6 +25,7 @@ import { SERVICE_INDEXES, SERVICE_RECORD } from './services.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
 import { SLIDE_LABEL_INDEXES, SLIDE_LABEL_RECORD } from './slide-labels.js';
 import { LAYOUT_INDEXES, LAYOUT_RECORD } from './slide-layouts.js';
+import { SONG_SINGER_CHORDS_INDEXES, SONG_SINGER_CHORDS_RECORD } from './song-singer-chords.js';
 import { TOTP_INDEXES, createTotpIndexOn, dropTotpIndexOn } from './totp.js';
 import { createIndexOn, dropIndexOn, repositoriesOn, RepositoryError } from './repositories.js';
 
@@ -379,6 +380,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...AUDIT_INDEXES].reverse()) await api.dropIndex(AUDIT_RECORD, index.name);
+    },
+  },
+  {
+    version: 22,
+    name: 'the index a song-singer chord standing stamp is found by',
+    async up(api) {
+      for (const index of SONG_SINGER_CHORDS_INDEXES) {
+        await api.createIndex(SONG_SINGER_CHORDS_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...SONG_SINGER_CHORDS_INDEXES].reverse()) await api.dropIndex(SONG_SINGER_CHORDS_RECORD, index.name);
     },
   },
 ]);

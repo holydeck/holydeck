@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ENTITY_KINDS, isEntityKind } from './entities.js';
-import { LIBRARY_KINDS, parseLibraryDraft } from './library.js';
+import { LIBRARY_KINDS, parseLibraryDraft, parseLibraryFilter } from './library.js';
 import { FIELD_CODES } from './problems.js';
 
 describe('what the content library holds', () => {
@@ -11,6 +11,33 @@ describe('what the content library holds', () => {
 
   it('names only real entity kinds', () => {
     for (const kind of LIBRARY_KINDS) expect(isEntityKind(kind)).toBe(true);
+  });
+});
+
+describe('reading library filters', () => {
+  it('accepts kind and passes q through', () => {
+    expect(parseLibraryFilter({ kind: 'song', q: 'grace' })).toEqual({ ok: true, value: { kind: 'song', q: 'grace', archived: false } });
+  });
+
+  it('refuses an invalid kind with the library vocabulary', () => {
+    expect(parseLibraryFilter({ kind: 'slideLayout' }, 'filter')).toEqual({ ok: false, problems: [{ path: 'filter.kind', code: FIELD_CODES.notAllowed, message: `must be one of ${LIBRARY_KINDS.join(', ')}` }] });
+  });
+
+  it('ignores an empty q', () => {
+    expect(parseLibraryFilter({ q: '' })).toEqual({ ok: true, value: { archived: false } });
+  });
+
+  it('reads archived from valid boolean query strings and defaults to false', () => {
+    expect(parseLibraryFilter({ archived: 'true' })).toEqual({ ok: true, value: { archived: true } });
+    expect(parseLibraryFilter({ archived: 'false' })).toEqual({ ok: true, value: { archived: false } });
+    expect(parseLibraryFilter({})).toEqual({ ok: true, value: { archived: false } });
+  });
+
+  it.each(['yes', '1', 'TRUE', ''])('refuses the malformed archived query value %j', (archived) => {
+    expect(parseLibraryFilter({ archived }, 'filter')).toEqual({
+      ok: false,
+      problems: [{ path: 'filter.archived', code: FIELD_CODES.notAllowed, message: 'must be one of true, false' }],
+    });
   });
 });
 

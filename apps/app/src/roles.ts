@@ -30,6 +30,19 @@ export const LAYOUTS_MANAGE = 'layouts.manage';
 export const SERVICE_TEMPLATES_MANAGE = 'serviceTemplates.manage';
 
 /**
+ * Writes songs, sermons, slide groups and their slides (spec v1c-02, CRT-02). Held by Admin and Editor
+ * alike — an Editor plans and runs Services, and preparing their content is part of the same work.
+ */
+export const CONTENT_EDIT = 'content.edit';
+
+/**
+ * Administers the shared catalogues content is written against — content languages and slide labels
+ * (spec v1c-02, CRT-02) — rather than a single piece of content itself. Admin's alone, by role: the same
+ * reach as accounts, settings, Layouts and media, because a catalogue entry outlives any one Service.
+ */
+export const CATALOGUE_MANAGE = 'catalogue.manage';
+
+/**
  * Uploads to and administers the media library MEDI-01 describes. Spelled `media.` rather than borrowing
  * `media.ts`'s own store-permission vocabulary, for the same reason `layouts.` was spelled apart from
  * `slideLayouts.`: an operator-facing permission and a repository's internal one are never the same word.
@@ -70,11 +83,13 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     SERVICE_TEMPLATES_MANAGE,
     MEDIA_MANAGE,
     SERVICES_MANAGE,
+    CONTENT_EDIT,
+    CATALOGUE_MANAGE,
     PRESENCE_USE,
     CONTENT_HISTORY_MANAGE,
     AUDIT_READ,
   ],
-  editor: [SERVICES_MANAGE, PRESENCE_USE, CONTENT_HISTORY_MANAGE],
+  editor: [SERVICES_MANAGE, CONTENT_EDIT, PRESENCE_USE, CONTENT_HISTORY_MANAGE],
   member: [PRESENCE_USE],
 };
 

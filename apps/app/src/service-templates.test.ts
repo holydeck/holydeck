@@ -100,3 +100,20 @@ describe('preview', () => {
     expect(previewed).toEqual(created);
   });
 });
+
+describe('list', () => {
+  it('is empty before any Service Template is defined', async () => {
+    const templates = store();
+    expect(await templates.list(ADMIN)).toEqual([]);
+  });
+
+  it('lists every defined Service Template without its entries', async () => {
+    const templates = store();
+    const first = await templates.create(ADMIN, DRAFT);
+    const second = await templates.create(ADMIN, { name: 'Evening Service', body: { sections: [] } });
+    const listed = await templates.list(ADMIN);
+    expect(listed).toHaveLength(2);
+    expect(listed).toContainEqual({ id: first.id, name: first.name, createdAt: first.createdAt, createdBy: first.createdBy });
+    expect(listed).toContainEqual({ id: second.id, name: second.name, createdAt: second.createdAt, createdBy: second.createdBy });
+  });
+});

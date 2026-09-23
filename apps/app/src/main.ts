@@ -18,8 +18,10 @@ import {
   checkSchema,
   readSettingsText,
 } from './boot.js';
+import { contentLanguagesOn } from './content-languages.js';
 import { systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
+import { libraryOn } from './library.js';
 import { serveLive } from './live.js';
 import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
@@ -28,6 +30,7 @@ import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
 import { revisionsOn } from './revisions.js';
 import { seedContext, seedOn } from './seed.js';
+import { sermonsOn } from './sermons.js';
 import { servicesOn } from './services.js';
 import { serviceTemplatesOn } from './service-templates.js';
 import { preparationOn } from './snapshots.js';
@@ -35,27 +38,36 @@ import { sessionDb, sessionsOn } from './sessions.js';
 import { passkeyDb, passkeysOn } from './passkeys.js';
 import { presenceDb, presenceOn } from './presence.js';
 import { settingsAdminOn } from './settings-admin.js';
+import { slideGroupsOn } from './slide-groups.js';
 import { slideLayoutsOn } from './slide-layouts.js';
 import { slideLabelsOn } from './slide-labels.js';
 import { shownReferenceDb, shownReferencesOn } from './shown-references.js';
+import { songsOn } from './songs.js';
+import { songSingerChordsOn } from './song-singer-chords.js';
 import { totpDb, totpsOn } from './totp.js';
 import { translationOffsetDb, translationOffsetsOn } from './translation-offsets.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
+import type { ContentLanguageStore } from './content-languages.js';
+import type { LibraryStore } from './library.js';
 import type { MediaLibrary } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { PresenceStore } from './presence.js';
 import type { RevisionStore } from './revisions.js';
+import type { SermonStore } from './sermons.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
 import type { PreparationStore } from './snapshots.js';
 import type { SettingsAdmin } from './settings-admin.js';
+import type { SlideGroupStore } from './slide-groups.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SlideLabelStore } from './slide-labels.js';
 import type { SessionStore } from './sessions.js';
 import type { ShownReferenceStore } from './shown-references.js';
+import type { SongStore } from './songs.js';
+import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 
 checkReleasedContracts();
@@ -116,6 +128,19 @@ let presence: PresenceStore | undefined;
 // one has no earlier revision to read, compare or bring back, and its routes answer not-found the
 // same way.
 let revisions: RevisionStore | undefined;
+// Songs, Sermons and Slide Groups are durable content records too, kept and administered the same way: a
+// deployment with nowhere to keep one has none to create, edit or generate slides from, and its routes
+// answer not-found the same way.
+let songs: SongStore | undefined;
+let chords: SongSingerChordsStore | undefined;
+let sermons: SermonStore | undefined;
+let slideGroups: SlideGroupStore | undefined;
+// Every Song and Sermon indexed together, read from the same store either was written to: a deployment
+// with nowhere to keep either has nothing here to list.
+let library: LibraryStore | undefined;
+// The content-language registry is kept the same way and for the same reason: a deployment with nowhere
+// to keep one has none to create, edit or archive, and its routes answer not-found the same way.
+let contentLanguages: ContentLanguageStore | undefined;
 let stopWatchingSettings: (() => void) | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
@@ -140,6 +165,12 @@ if (settings.values.mongoUrl !== '') {
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
   presence = presenceOn(presenceDb(store.db()), { now });
+  songs = songsOn(repositoryDb(store.db()), { now });
+  chords = songSingerChordsOn(repositoryDb(store.db()), { now });
+  sermons = sermonsOn(repositoryDb(store.db()), { now });
+  slideGroups = slideGroupsOn(repositoryDb(store.db()), { now });
+  library = libraryOn(repositoryDb(store.db()), { now });
+  contentLanguages = contentLanguagesOn(repositoryDb(store.db()), { now });
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
   // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
   await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
@@ -206,6 +237,12 @@ const app = buildApp({
   serviceTemplates,
   preparation,
   slideLabels,
+  songs,
+  chords,
+  sermons,
+  slideGroups,
+  library,
+  contentLanguages,
 });
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.

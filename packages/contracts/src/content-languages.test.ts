@@ -5,8 +5,12 @@ import {
   CONTENT_LANGUAGE_KIND,
   TAMIL_FALLBACK_FONT_STACK,
   isContentLanguageKey,
+  parseContentLanguageCreate,
   parseContentLanguageDraft,
+  parseContentLanguageStatus,
 } from './content-languages.js';
+
+import { FIELD_CODES } from './problems.js';
 
 describe('the content-language registry (LANG-01)', () => {
   it('carries Tamil and Romanized Tamil, the languages spec §11.5 names for a song', () => {
@@ -22,6 +26,27 @@ describe('the content-language registry (LANG-01)', () => {
     }
     expect(isContentLanguageKey('fr')).toBe(false);
     expect(isContentLanguageKey('')).toBe(false);
+  });
+});
+
+describe('reading content-language route payloads', () => {
+  const value = { key: 'ta', displayName: 'Tamil', script: 'Tamil', fallbackFont: 'sans-serif' };
+
+  it('accepts a ContentLanguageCreate', () => {
+    expect(parseContentLanguageCreate(value, 'contentLanguage')).toEqual({ ok: true, value });
+  });
+
+  it('refuses each required create field', () => {
+    for (const field of Object.keys(value)) {
+      const input = { ...value };
+      delete input[field as keyof typeof input];
+      expect(parseContentLanguageCreate(input, 'contentLanguage')).toEqual({ ok: false, problems: [{ path: `contentLanguage.${field}`, code: FIELD_CODES.required, message: 'is required' }] });
+    }
+  });
+
+  it('accepts and refuses ContentLanguageStatus', () => {
+    expect(parseContentLanguageStatus({ archived: true })).toEqual({ ok: true, value: { archived: true } });
+    expect(parseContentLanguageStatus({})).toEqual({ ok: false, problems: [{ path: 'contentLanguage.archived', code: FIELD_CODES.required, message: 'is required' }] });
   });
 });
 

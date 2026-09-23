@@ -14,7 +14,7 @@
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
-import { imageDimensionsOf } from '@holydeck/contracts/media';
+import { imageDimensionsOf, parseMediaStatus } from '@holydeck/contracts/media';
 import { FIELD_CODES } from '@holydeck/contracts/problems';
 
 import { auditContext } from './audit.js';
@@ -22,17 +22,22 @@ import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
 import { MediaError, mediaContext } from './media.js';
-import { MEDIA_MANAGE } from './roles.js';
+import { settled } from './refusals.js';
+import { CONTENT_EDIT, MEDIA_MANAGE } from './roles.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
-import type { MediaLibrary } from './media.js';
+import type { MediaLibrary, MediaRecord } from './media.js';
 import type { Identity } from './onboarding.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 const MEDIA_PREFIX = 'media:';
 
 export const MEDIA_PATH = '/api/v1/media';
+
+const MEDIA_ID_PATH = `${MEDIA_PATH}/:id`;
+const MEDIA_STATUS_PATH = `${MEDIA_ID_PATH}/status`;
+const MEDIA_RETRY_PATH = `${MEDIA_ID_PATH}/retry`;
 
 /**
  * MEDI-01's stated default for the per-file ceiling: 1 GB. The full configurable 1 GB/5 GB policy system
@@ -50,9 +55,26 @@ export const MEDIA_SIZE_CEILING_BYTES = 1_073_741_824;
 export const MEDIA_PIXEL_CEILING = 100_000_000;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: MEDIA_MANAGE };
+const LIST_PERMISSION: RouteNeed = { kind: 'any-permission', needs: [CONTENT_EDIT, MEDIA_MANAGE] };
+const READ_PERMISSION: RouteNeed = { kind: 'permission', need: CONTENT_EDIT };
 
 /** Every route this module serves, in the order it registers them. */
-const ROUTES = [['POST', MEDIA_PATH]] as const;
+const ROUTES = [
+  ['GET', MEDIA_PATH, LIST_PERMISSION],
+  ['POST', MEDIA_PATH, PERMISSION],
+  ['GET', MEDIA_ID_PATH, READ_PERMISSION],
+  ['PATCH', MEDIA_STATUS_PATH, PERMISSION],
+  ['POST', MEDIA_RETRY_PATH, PERMISSION],
+] as const;
+
+const idIn = (request: FastifyRequest): string => (request.params as { readonly id: string }).id;
+
+const isRefusal = (error: unknown): error is MediaError & { kind: 'state' } =>
+  error instanceof MediaError && error.kind === 'state';
+
+/** `storageKey` is this deployment's own filesystem layout — an Editor reads media, not the disk it sits on. */
+const visibleTo = (held: readonly string[], record: MediaRecord): Omit<MediaRecord, 'storageKey'> =>
+  held.includes(MEDIA_MANAGE) ? record : { stamp: record.stamp, manifest: record.manifest };
 
 export interface MediaRoutesOptions {
   /** Absent whenever `identity` is, per `main.ts`'s wiring — never independently, from this module's view. */
@@ -65,11 +87,11 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity }: Medi
   // A deployment with nowhere to keep an identity has nothing here to audit an upload against. Every path
   // is still served, so the guard's table remains the complete shape of the surface in every deployment.
   if (identity === undefined) {
-    for (const [method, url] of ROUTES) {
+    for (const [method, url, need] of ROUTES) {
       app.route({
         method,
         url,
-        config: { need: PERMISSION },
+        config: { need },
         handler: (request, reply) => reply.code(404).send(notFound(request)),
       });
     }
@@ -86,13 +108,19 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity }: Medi
    * `audit.ts`'s own declared action for every content surface, media included, rather than a media-only
    * action that would say the same sentence in a second vocabulary.
    */
-  const note = async (request: FastifyRequest, actor: string, subject: string, outcome: AuditOutcome): Promise<void> => {
+  const note = async (
+    request: FastifyRequest,
+    actor: string,
+    subject: string,
+    outcome: AuditOutcome,
+    detail: string,
+  ): Promise<void> => {
     try {
       await identity.audit.record(auditContext(actor, correlationFor(MEDIA_PREFIX, request.id)), {
         action: 'content.change',
         subject,
         outcome,
-        detail: 'uploaded',
+        detail,
       });
     } catch (error: unknown) {
       request.log.error({ err: error }, 'the media trail refused an entry');
@@ -148,7 +176,7 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity }: Medi
         name: file.filename,
         type: file.mimetype,
       });
-      await note(request, actor, `media:${record.stamp.id}`, 'allowed');
+      await note(request, actor, `media:${record.stamp.id}`, 'allowed', 'uploaded');
       return reply.code(201).send(successEnvelope(record, request.id, CLIENT_WINDOW.current));
     } catch (error) {
       // A type this server's own content-sniffing does not recognise is exactly the same category of
@@ -165,5 +193,51 @@ export function serveMediaRoutes(app: FastifyInstance, { media, identity }: Medi
       }
       throw error;
     }
+  });
+
+  app.get(MEDIA_PATH, { config: { need: LIST_PERMISSION } }, async (request, reply) => {
+    const context = mediaContext(provenSession(request).record.actor, correlationFor(MEDIA_PREFIX, request.id));
+    const all = await library.list(context);
+    const held = provenSession(request).record.permissions;
+    const asked = (request.query as { readonly archived?: string }).archived === 'true';
+    const showArchived = held.includes(MEDIA_MANAGE) && asked;
+    const items = showArchived ? all : all.filter((record) => record.stamp.archivedAt === undefined);
+    return reply.send(successEnvelope(items.map((record) => visibleTo(held, record)), request.id, CLIENT_WINDOW.current));
+  });
+
+  app.get(MEDIA_ID_PATH, { config: { need: READ_PERMISSION } }, async (request, reply) => {
+    const context = mediaContext(provenSession(request).record.actor, correlationFor(MEDIA_PREFIX, request.id));
+    const record = await library.inspect(context, idIn(request));
+    const held = provenSession(request).record.permissions;
+    if (record === undefined) return reply.code(404).send(notFound(request));
+    if (record.stamp.archivedAt !== undefined && !held.includes(MEDIA_MANAGE)) return reply.code(404).send(notFound(request));
+    return reply.send(successEnvelope(visibleTo(held, record), request.id, CLIENT_WINDOW.current));
+  });
+
+  app.patch(MEDIA_STATUS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const parsed = parseMediaStatus(request.body);
+    if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
+    const id = idIn(request);
+    const actor = provenSession(request).record.actor;
+    const context = mediaContext(actor, correlationFor(MEDIA_PREFIX, request.id));
+    const answer = await settled(
+      () => (parsed.value.archived ? library.archive(context, id) : library.restore(context, id)),
+      isRefusal,
+    );
+    if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
+    if (answer.value === undefined) return reply.code(404).send(notFound(request));
+    await note(request, actor, `media:${id}`, 'allowed', parsed.value.archived ? 'archived' : 'restored');
+    return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  app.post(MEDIA_RETRY_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const id = idIn(request);
+    const actor = provenSession(request).record.actor;
+    const context = mediaContext(actor, correlationFor(MEDIA_PREFIX, request.id));
+    const answer = await settled(() => library.retryProcessing(context, id), isRefusal);
+    if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
+    if (answer.value === undefined) return reply.code(404).send(notFound(request));
+    await note(request, actor, `media:${id}`, 'allowed', 'retried');
+    return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 }

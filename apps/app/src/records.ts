@@ -245,6 +245,11 @@ export const RECORDS = {
     kind: 'append-only',
     fields: { ...HISTORY, layoutId: 'required', sequence: 'required', at: 'required', name: 'required', stamp: 'required' },
   },
+  songSingerChords: {
+    collection: 'song_singer_chords',
+    kind: 'append-only',
+    fields: { ...HISTORY, songId: 'required', singerId: 'required', sequence: 'required', at: 'required', chords: 'required', stamp: 'required' },
+  },
 } as const satisfies Readonly<Record<string, RecordClass>>;
 
 export type RecordName = keyof typeof RECORDS;
