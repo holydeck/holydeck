@@ -351,7 +351,7 @@ const en = {
   'slideLabels.refused': 'The change was refused: {message}',
   'slideLabels.announce.archived': '{name} archived.',
   'slideLabels.announce.restored': '{name} restored.',
-  'slideLabels.noShortcut': '—',
+  'slideLabels.noShortcut': 'No shortcut',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -626,7 +626,7 @@ const de: Catalog = {
   'audit.category.presentation': 'Präsentation',
   'audit.category.backup': 'Sicherung',
   'audit.category.restore': 'Wiederherstellung',
-  'audit.category.integration': 'Integration',
+  'audit.category.integration': 'Anbindung',
   'audit.column.at': 'Zeitpunkt',
   'audit.column.action': 'Aktion',
   'audit.column.category': 'Kategorie',
@@ -638,9 +638,9 @@ const de: Catalog = {
   'integrations.heading': 'Integrationen',
   'integrations.caption': 'Integrationen von Drittanbietern',
   'integrations.loadFailed': 'Die Integrationsliste konnte nicht geladen werden.',
-  'integrations.column.name': 'Integration',
+  'integrations.column.name': 'Integrationsname',
   'integrations.column.configured': 'Konfiguration',
-  'integrations.column.status': 'Status',
+  'integrations.column.status': 'Zustand',
   'integrations.column.calls': 'Aufrufe (30 Tage)',
   'integrations.column.lastCall': 'Letzter Aufruf',
   'integrations.column.actions': 'Aktionen',
@@ -662,7 +662,7 @@ const de: Catalog = {
   'languages.column.name': 'Sprache',
   'languages.column.script': 'Schrift',
   'languages.column.fallbackFont': 'Ersatzschriftart',
-  'languages.column.status': 'Status',
+  'languages.column.status': 'Zustand',
   'languages.column.actions': 'Aktionen',
   'languages.status.active': 'Aktiv',
   'languages.status.archived': 'Archiviert',
@@ -683,7 +683,7 @@ const de: Catalog = {
   'slideLabels.loadFailed': 'Die Folienbeschriftungen konnten nicht geladen werden.',
   'slideLabels.column.name': 'Beschriftung',
   'slideLabels.column.shortcut': 'Tastenkürzel',
-  'slideLabels.column.status': 'Status',
+  'slideLabels.column.status': 'Zustand',
   'slideLabels.column.actions': 'Aktionen',
   'slideLabels.status.active': 'Aktiv',
   'slideLabels.status.archived': 'Archiviert',
@@ -699,7 +699,7 @@ const de: Catalog = {
   'slideLabels.refused': 'Die Änderung wurde abgelehnt: {message}',
   'slideLabels.announce.archived': '{name} archiviert.',
   'slideLabels.announce.restored': '{name} wiederhergestellt.',
-  'slideLabels.noShortcut': '—',
+  'slideLabels.noShortcut': 'Kein Tastenkürzel',
 };
 
 const ta: Catalog = {
@@ -1041,7 +1041,7 @@ const ta: Catalog = {
   'slideLabels.refused': 'மாற்றம் நிராகரிக்கப்பட்டது: {message}',
   'slideLabels.announce.archived': '{name} காப்பகப்படுத்தப்பட்டது.',
   'slideLabels.announce.restored': '{name} மீட்டமைக்கப்பட்டது.',
-  'slideLabels.noShortcut': '—',
+  'slideLabels.noShortcut': 'குறுக்குவழி இல்லை',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */

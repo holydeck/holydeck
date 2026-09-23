@@ -71,7 +71,7 @@ describe('AdminSlideLabelsPage', () => {
     setFetching(async () => listReply([label({ shortcut: undefined as unknown as string })]));
     await renderPage();
 
-    expect(await screen.findByText('—')).toBeTruthy();
+    expect(await screen.findByText('No shortcut')).toBeTruthy();
   });
 
   it('shows an archived label as archived, with a restore action', async () => {
