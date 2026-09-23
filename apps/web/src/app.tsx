@@ -25,6 +25,7 @@ import type { JSX } from 'preact';
 const OutputPage = lazy(() => import('./pages/output.js').then((module) => module.OutputPage));
 const ServicePage = lazy(() => import('./pages/service.js').then((module) => module.ServicePage));
 const AdminUsersPage = lazy(() => import('./pages/admin-users.js').then((module) => module.AdminUsersPage));
+const AdminSettingsPage = lazy(() => import('./pages/admin-settings.js').then((module) => module.AdminSettingsPage));
 const HistoryPage = lazy(() => import('./pages/history.js').then((module) => module.HistoryPage));
 const SecurityPage = lazy(() => import('./pages/account-security.js').then((module) => module.SecurityPage));
 
@@ -39,6 +40,8 @@ function Page(): JSX.Element {
       return <ServicePage id={current.id} />;
     case 'admin-users':
       return <AdminUsersPage />;
+    case 'admin-settings':
+      return <AdminSettingsPage />;
     case 'account-security':
       return <SecurityPage />;
     case 'content-history':

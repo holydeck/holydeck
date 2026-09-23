@@ -34,7 +34,7 @@ const roleLabel = (role: AccountRole): string => t(`app.role.${role}`);
 /** Which primary section a route belongs to, so its link can say `aria-current="page"`. */
 const sectionOf = (current: Route): 'services' | 'administration' | 'security' | undefined => {
   if (current.name === 'services' || current.name === 'service') return 'services';
-  if (current.name === 'admin-users') return 'administration';
+  if (current.name === 'admin-users' || current.name === 'admin-settings') return 'administration';
   if (current.name === 'account-security') return 'security';
   return undefined;
 };
