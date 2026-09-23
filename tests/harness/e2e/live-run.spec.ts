@@ -94,9 +94,10 @@ test.describe('the live run API journey', () => {
 
     // A Service with just enough shown content to leave `readiness()`'s `NOTHING_TO_SHOW` blocker
     // behind, without depending on the library/slide-group content stores this milestone has no HTTP
-    // route to seed: `run-deck.ts` derives the run's navigable deck from a prepared snapshot's
-    // `generatedSlides` alone, which a `custom-slide` item never populates, so the deck stays empty and
-    // the journey commands by explicit position (`go-to`) rather than by stepping through it.
+    // route to seed: `run-deck.ts` derives the run's prepared deck from a snapshot's `generatedSlides`
+    // alone, which a `custom-slide` item never populates. The one showable item is therefore added
+    // mid-service over HTTP once the run is live, and the journey goes to it by explicit position — the
+    // engine refuses a `go-to` outside the run's deck.
     const created = await fetch(`${base}${SERVICE_PATH}`, {
       method: 'POST',
       headers: jsonHeaders(base, session),
@@ -140,6 +141,15 @@ test.describe('the live run API journey', () => {
       body: JSON.stringify({ serviceId, mode: 'live' }),
     });
     expect(started.status).toBe(201);
+    const runId = ((await started.json()) as { data: { runId: string } }).data.runId;
+
+    const added = await fetch(`${base}${RUN_PATH}/${runId}/additions`, {
+      method: 'POST',
+      headers: jsonHeaders(base, session),
+      body: JSON.stringify({ kind: 'reading', title: 'Welcome', body: 'Welcome to the service' }),
+    });
+    expect(added.status).toBe(201);
+    const itemId = ((await added.json()) as { data: { addition: { contentId: string } } }).data.addition.contentId;
 
     const control = await openLiveSocket(base, session, LIVE_CONTROL_CHANNEL);
     const audience = await openLiveSocket(base, session, 'audience');
@@ -157,7 +167,7 @@ test.describe('the live run API journey', () => {
         idempotencyKey: commandId,
         type: 'go-to',
         clientStateRevision: snapshot.stateRevision,
-        args: { itemId: 'item-1', slideIndex: 0 },
+        args: { itemId, slideIndex: 0 },
       });
 
       const ack = (await control.waitFor(
@@ -167,7 +177,7 @@ test.describe('the live run API journey', () => {
 
       const audienceEvent = (await audience.waitFor((frame) => frame.kind === 'event')) as EventFrame;
       const audienceState = audienceEvent.state as Record<string, unknown>;
-      expect(audienceState['frame']).toEqual({ itemId: 'item-1', slideIndex: 0 });
+      expect(audienceState['frame']).toEqual({ itemId, slideIndex: 0 });
       // The privacy projection itself (`projectFor`, live-state.ts): the audience view carries only its
       // own five fields, never `selected`, `mode`, `next`, or the raw `state` a control view alone gets —
       // proved on the wire, not just in the pure reducer's own unit test.
@@ -177,7 +187,7 @@ test.describe('the live run API journey', () => {
 
       const stageEvent = (await stage.waitFor((frame) => frame.kind === 'event')) as EventFrame;
       const stageState = stageEvent.state as Record<string, unknown>;
-      expect(stageState['frame']).toEqual({ itemId: 'item-1', slideIndex: 0 });
+      expect(stageState['frame']).toEqual({ itemId, slideIndex: 0 });
       expect(stageState['mode']).toBe('live');
     } finally {
       control.close();
