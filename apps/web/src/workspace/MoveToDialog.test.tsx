@@ -99,20 +99,19 @@ describe('MoveToDialog', () => {
     expect(onClose2).toHaveBeenCalledOnce();
   });
 
-  it('moves the item into the chosen section and position, then closes', async () => {
+  it('moves the item into the chosen section and position with one PATCH, then closes', async () => {
     const calls: string[] = [];
-    setFetching(fakeFetch({
-      'POST /api/v1/services/s1/sections/resp/items': reply(200, successEnvelope(
-        record([{ id: 'sec', name: 'Welcome', itemIds: ['a', 'b'] }, { id: 'resp', name: 'Response', itemIds: ['x', 'y', 'b'] }]), 'r2',
-      )),
-      'POST /api/v1/services/s1/sections/resp/items/reorder': reply(200, successEnvelope(
-        record([{ id: 'sec', name: 'Welcome', itemIds: ['a', 'b'] }, { id: 'resp', name: 'Response', itemIds: ['x', 'b', 'y'] }]), 'r3',
-      )),
-      'DELETE /api/v1/services/s1/items/b': reply(200, successEnvelope(
-        record([{ id: 'sec', name: 'Welcome', itemIds: ['a'] }, { id: 'resp', name: 'Response', itemIds: ['x', 'b', 'y'] }]), 'r4',
+    const fetching = fakeFetch({
+      'PATCH /api/v1/services/s1': reply(200, successEnvelope(
+        record([{ id: 'sec', name: 'Welcome', itemIds: ['a'] }, { id: 'resp', name: 'Response', itemIds: ['x', 'b', 'y'] }]), 'r2',
       )),
       'GET /api/v1/services/s1/content-drift': noDrift,
-    }, calls));
+    }, calls);
+    const bodies: unknown[] = [];
+    setFetching(async (url, init) => {
+      if ((init.method ?? 'GET') === 'PATCH') bodies.push(JSON.parse((init.body as string | undefined) ?? '{}'));
+      return fetching(url, init);
+    });
     const onClose = vi.fn();
     render(<MoveToDialog itemId="b" onClose={onClose} />);
 
@@ -121,15 +120,19 @@ describe('MoveToDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Move' }));
 
     await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-    // The add and reorder steps' responses briefly name item 'b' in both sections at once — a real,
-    // valid mid-sequence server state (`withAddedItem` never dedupes), but not one `readServiceView` can
-    // parse (item ids are unique service-wide), so those two steps update neither `service` nor `drift`.
-    // Only the final remove response is schema-valid, so only one content-drift refresh follows it.
+    // A cross-section move is one PATCH carrying the whole post-move sections tree — never an
+    // intermediate state with the item named in two sections, so its response always parses and one
+    // content-drift refresh always follows it.
     expect(calls).toEqual([
-      'POST /api/v1/services/s1/sections/resp/items',
-      'POST /api/v1/services/s1/sections/resp/items/reorder',
-      'DELETE /api/v1/services/s1/items/b',
+      'PATCH /api/v1/services/s1',
       'GET /api/v1/services/s1/content-drift',
     ]);
+    expect(bodies).toEqual([{
+      title: 'Sunday', date: '2026-09-27', site: 'Main Hall',
+      sections: [
+        { id: 'sec', name: 'Welcome', items: [itemA] },
+        { id: 'resp', name: 'Response', items: [itemX, itemB, itemY] },
+      ],
+    }]);
   });
 });

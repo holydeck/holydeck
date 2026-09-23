@@ -1,10 +1,17 @@
 // Pure order planning: turns a drag, a Move Up/Down/To action, or a section edit into the exact
 // requests the server accepts. The reorder route is within one section only — `withReorderedItems`
 // (`apps/app/src/services.ts`) refuses unless `itemIds` names exactly that section's current items,
-// once each — so a cross-section move must add to the target, reorder it in, then remove from the
-// source, in that order, so a refusal part-way through never loses the item.
-
-import type { ServiceItem } from '@holydeck/contracts/services';
+// once each — so a move that stays in its own section is one `reorder` step.
+//
+// A move across sections cannot be a separate add-then-remove: the server's `addItem` never checks
+// whether the id already exists elsewhere (`withAddedItem`, `apps/app/src/services.ts`), so the
+// moment between those two requests would have the item named in two sections at once — a service
+// no client can even read back, since `readServiceView` enforces one id per service, the same
+// constraint `parseServiceDraft` enforces server-side. Instead a cross-section move is a single
+// `move` step: the whole `sections` tree, already showing the item gone from its old section and
+// present in its new one, sent to the server's `edit` operation (`PATCH /api/v1/services/:id`, the
+// same one `OrderPanel.tsx`'s `patchSections` uses for rename/add/remove-section) in one request. No
+// state in between is ever computed, sent or parsed, so no response is ever invalid.
 
 import { itemsOf, type ServiceView } from './service-data.js';
 
@@ -35,13 +42,13 @@ export function neighbours(view: ServiceView, itemId: string): Neighbours {
 
 export type OrderStep =
   | { readonly kind: 'reorder'; readonly sectionId: string; readonly itemIds: readonly string[] }
-  | { readonly kind: 'add'; readonly sectionId: string; readonly item: ServiceItem }
-  | { readonly kind: 'remove'; readonly itemId: string };
+  | { readonly kind: 'move'; readonly sections: ServiceView['sections'] };
 
 /**
- * The ordered steps that move `itemId` to `target`: one `reorder` when it stays in its own section,
- * or an add/reorder/remove sequence when it crosses into another. Returns `[]` for an unknown item
- * or target section rather than throwing — the caller decides whether that is reachable.
+ * The one step that moves `itemId` to `target`: a same-section `reorder`, or — when it crosses into
+ * another section — a `move` carrying the complete post-move `sections`, computed here so no
+ * intermediate, cross-section-duplicate state is ever sent or read back. Returns `[]` for an unknown
+ * item or target section rather than throwing — the caller decides whether that is reachable.
  */
 export function reorderPlan(view: ServiceView, itemId: string, target: { sectionId: string; index: number }): OrderStep[] {
   const located = itemsOf(view).find(({ item }) => item.id === itemId);
@@ -53,13 +60,16 @@ export function reorderPlan(view: ServiceView, itemId: string, target: { section
     return [{ kind: 'reorder', sectionId: target.sectionId, itemIds: ids }];
   }
 
-  const ids = targetSection.items.map((item) => item.id);
-  const at = Math.max(0, Math.min(target.index, ids.length));
-  return [
-    { kind: 'add', sectionId: target.sectionId, item: located.item },
-    { kind: 'reorder', sectionId: target.sectionId, itemIds: [...ids.slice(0, at), itemId, ...ids.slice(at)] },
-    { kind: 'remove', itemId },
-  ];
+  const withoutIt = view.sections.map((section) =>
+    section.id === located.sectionId ? { ...section, items: section.items.filter((item) => item.id !== itemId) } : section,
+  );
+  const at = Math.max(0, Math.min(target.index, targetSection.items.length));
+  const sections = withoutIt.map((section) =>
+    section.id === target.sectionId
+      ? { ...section, items: [...section.items.slice(0, at), located.item, ...section.items.slice(at)] }
+      : section,
+  );
+  return [{ kind: 'move', sections }];
 }
 
 /** A copy of the service's sections with one section's name changed. */

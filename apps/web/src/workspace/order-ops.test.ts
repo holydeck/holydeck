@@ -65,16 +65,20 @@ describe('reorderPlan', () => {
     ]);
   });
 
-  it('plans an add, reorder, then remove across sections, in that order', () => {
+  it('plans one move step, carrying the whole post-move sections tree, across sections', () => {
     const crossed = view([
       { id: 'sec-1', name: 'Welcome', items: ['a', 'b'] },
       { id: 'sec-2', name: 'Response', items: ['x', 'y'] },
     ]);
     const plan = reorderPlan(crossed, 'a', { sectionId: 'sec-2', index: 1 });
     expect(plan).toEqual([
-      { kind: 'add', sectionId: 'sec-2', item: item('a') },
-      { kind: 'reorder', sectionId: 'sec-2', itemIds: ['x', 'a', 'y'] },
-      { kind: 'remove', itemId: 'a' },
+      {
+        kind: 'move',
+        sections: [
+          { id: 'sec-1', name: 'Welcome', items: [item('b')] },
+          { id: 'sec-2', name: 'Response', items: [item('x'), item('a'), item('y')] },
+        ],
+      },
     ]);
   });
 
