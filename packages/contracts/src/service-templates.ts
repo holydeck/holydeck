@@ -17,7 +17,7 @@
 // it was instantiated from, wired in now because it costs nothing extra, without building the comparison.
 
 import { FIELD_CODES, type ParseFn, type Parsed, parseObject } from './problems.js';
-import { ITEM_KINDS, parseRevisionRef } from './services.js';
+import { ITEM_KINDS, isCalendarDay, parseRevisionRef } from './services.js';
 
 import type { ItemKind, RevisionRef, Service, ServiceItem } from './services.js';
 
@@ -107,11 +107,56 @@ export function parseServiceTemplateDraft(value: unknown): Parsed<ServiceTemplat
   });
 }
 
+export type ServiceTemplateStatus = {
+  readonly archived: boolean;
+};
+
+export function parseServiceTemplateStatus(value: unknown): Parsed<ServiceTemplateStatus> {
+  return parseObject(value, 'serviceTemplate', (reader) => ({ archived: reader.flag('archived') }));
+}
+
+export type ServiceTemplateName = {
+  readonly name: string;
+};
+
+/** Just the name: `fromService` mints its entries from an existing Service and asks a caller for this alone. */
+export function parseServiceTemplateName(value: unknown): Parsed<ServiceTemplateName> {
+  return parseObject(value, 'serviceTemplate', (reader) => ({ name: reader.text('name') }));
+}
+
 export type EntryFill = {
   readonly entryId: string;
   readonly title: string;
   readonly content: RevisionRef | undefined;
 };
+
+/** The event details and typed-entry fills supplied when a Service Template creates a service. */
+export type TemplateInstantiation = {
+  readonly title: string;
+  readonly date: string;
+  readonly site: string;
+  readonly fills: readonly EntryFill[];
+};
+
+/** Reads the event details and pinned content used to instantiate a Service Template. */
+export function parseTemplateInstantiation(value: unknown): Parsed<TemplateInstantiation> {
+  return parseObject(value, 'templateInstantiation', (reader) => {
+    const date = reader.text('date');
+    if (date !== '' && !isCalendarDay(date)) {
+      reader.reject('date', FIELD_CODES.notAllowed, 'must be a calendar day such as 2026-09-13');
+    }
+    return {
+      title: reader.text('title'),
+      date,
+      site: reader.text('site'),
+      fills: reader.parsedList('fills', (fill, path) => parseObject(fill, path, (entry) => ({
+        entryId: entry.text('entryId'),
+        title: entry.text('title'),
+        content: entry.optionalParsed('content', parseRevisionRef),
+      }))),
+    };
+  });
+}
 
 export type InstantiationError = {
   readonly entryId: string;
@@ -172,20 +217,21 @@ export function instantiate(body: ServiceTemplateBody, fills: readonly EntryFill
   return errors.length > 0 ? { ok: false, errors } : { ok: true, items };
 }
 
-/** Converts a service into a Service Template body, one fixed entry per item. The service is only read. */
+/**
+ * Converts a service into a Service Template body. The service is only read. A custom slide carries its
+ * own content and stays a fixed entry, exactly as it stood; any other item becomes a required typed slot,
+ * since its content is a reusable reference a future instantiation should fill again rather than pin here.
+ */
 export function templateFromService(service: Service): ServiceTemplateBody {
   return {
     sections: service.sections.map((section) => ({
       id: section.id,
       name: section.name,
       entries: section.items.map(
-        (item): FixedEntry => ({
-          id: item.id,
-          slot: 'fixed',
-          itemKind: item.kind,
-          title: item.title,
-          content: item.content,
-        }),
+        (item): ServiceTemplateEntry =>
+          item.kind === AUTHORED_IN_PLACE
+            ? { id: item.id, slot: 'fixed', itemKind: item.kind, title: item.title, content: item.content }
+            : { id: item.id, slot: 'typed', itemKind: item.kind, required: true },
       ),
     })),
   };

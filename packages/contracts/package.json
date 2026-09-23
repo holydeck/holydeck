@@ -53,6 +53,10 @@
       "types": "./dist/live.d.ts",
       "import": "./dist/live.js"
     },
+    "./live-state": {
+      "types": "./dist/live-state.d.ts",
+      "import": "./dist/live-state.js"
+    },
     "./live-media": {
       "types": "./dist/live-media.d.ts",
       "import": "./dist/live-media.js"
@@ -105,6 +109,10 @@
       "types": "./dist/revisions.d.ts",
       "import": "./dist/revisions.js"
     },
+    "./runs": {
+      "types": "./dist/runs.d.ts",
+      "import": "./dist/runs.js"
+    },
     "./service-templates": {
       "types": "./dist/service-templates.d.ts",
       "import": "./dist/service-templates.js"
@@ -116,6 +124,10 @@
     "./services": {
       "types": "./dist/services.d.ts",
       "import": "./dist/services.js"
+    },
+    "./workspace": {
+      "types": "./dist/workspace.d.ts",
+      "import": "./dist/workspace.js"
     },
     "./content-languages": {
       "types": "./dist/content-languages.d.ts",
@@ -136,6 +148,14 @@
     "./sermons": {
       "types": "./dist/sermons.d.ts",
       "import": "./dist/sermons.js"
+    },
+    "./sermon-import": {
+      "types": "./dist/sermon-import.d.ts",
+      "import": "./dist/sermon-import.js"
+    },
+    "./pptx": {
+      "types": "./dist/pptx.d.ts",
+      "import": "./dist/pptx.js"
     },
     "./scripture": {
       "types": "./dist/scripture.d.ts",

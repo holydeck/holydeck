@@ -77,6 +77,11 @@ export const MESSAGE_CODES: readonly MessageCode[] = [
   // it was still being read rather than after. 413 carries HTTP semantics 422 does not, so its own code.
   { code: 'media.too_large', status: 413, stable: true, since: 1 },
   { code: UNEXPECTED_ERROR, status: 500, stable: true, since: 1 },
+  { code: 'run.not_ready', status: 409, stable: true, since: 2 },
+  { code: 'run.snapshot_outdated', status: 409, stable: true, since: 2 },
+  { code: 'run.already_active', status: 409, stable: true, since: 2 },
+  { code: 'run.ended', status: 409, stable: true, since: 2 },
+  { code: 'theme.contrast', status: 422, stable: true, since: 2 },
 ];
 
 /** Codes withdrawn from the registry. A released code is deprecated in documentation, never removed. */
@@ -88,11 +93,23 @@ export const ENVELOPE_CODES = {
   noFields: 'envelope.no_fields',
 } as const;
 
-export type FieldProblem = { readonly path: string; readonly code: string; readonly message: string };
+/** One refused field. `line` and `column` are set only where the refused request was raw text with a place
+ *  to point at (a song's raw YAML); every other refusal leaves them out. */
+export type FieldProblem = {
+  readonly path: string;
+  readonly code: string;
+  readonly message: string;
+  readonly line?: number;
+  readonly column?: number;
+};
+
+/** A problem found in raw text, with the place in that text when there is one. */
+export type LocatedFieldProblem = Problem & { readonly at?: { readonly line: number; readonly column: number } };
 
 export type SuccessEnvelope<T> = {
   readonly data: T;
-  readonly meta: { readonly requestId: string; readonly version?: number };
+  /** `dropped` is only ever present on the one route that revalidates a stored position (SERV-01). */
+  readonly meta: { readonly requestId: string; readonly version?: number; readonly dropped?: readonly string[] };
 };
 
 /**
@@ -147,22 +164,42 @@ export function validationFailure(requestId: string, problems: readonly Problem[
   );
 }
 
+/** The validation failure for raw text: each field also says the line and column it was found at. */
+export function locatedValidationFailure(requestId: string, problems: readonly LocatedFieldProblem[]): ErrorEnvelope {
+  return errorEnvelope(
+    VALIDATION_FAILED,
+    VALIDATION_MESSAGE,
+    requestId,
+    problems.map((problem) => ({
+      path: problem.path, code: problem.code, message: problem.message,
+      ...(problem.at === undefined ? {} : { line: problem.at.line, column: problem.at.column }),
+    })),
+  );
+}
+
 const parseFieldProblem = (value: unknown, path: string): Parsed<FieldProblem> =>
-  parseObject(value, path, (reader) => ({
-    path: reader.text('path'),
-    code: reader.text('code'),
-    message: reader.text('message'),
-  }));
+  parseObject(value, path, (reader) => {
+    const line = reader.optionalWholeNumber('line', 1);
+    const column = reader.optionalWholeNumber('column', 1);
+    return {
+      path: reader.text('path'),
+      code: reader.text('code'),
+      message: reader.text('message'),
+      ...(line === undefined ? {} : { line }),
+      ...(column === undefined ? {} : { column }),
+    };
+  });
 
 const readMeta = (reader: FieldReader) => ({
   requestId: reader.text('requestId'),
   version: reader.optionalWholeNumber('version', 1),
+  dropped: reader.optionalTextList('dropped'),
 });
 
 export function parseSuccessEnvelope(value: unknown, path = 'success'): Parsed<SuccessEnvelope<unknown>> {
   return parseObject(value, path, (reader) => ({
     data: reader.present('data'),
-    meta: reader.parsed('meta', (raw, at) => parseObject(raw, at, readMeta), { requestId: '', version: undefined }),
+    meta: reader.parsed('meta', (raw, at) => parseObject(raw, at, readMeta), { requestId: '', version: undefined, dropped: undefined }),
   }));
 }
 

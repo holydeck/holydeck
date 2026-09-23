@@ -287,7 +287,14 @@ describe('generateSermonFromText', () => {
         translations: TRANSLATIONS,
         now: new Date('2026-09-18T10:00:00Z'),
       });
-      expect(Object.keys(result).sort()).toEqual(['filename', 'notices', 'title', 'yaml']);
+      expect(Object.keys(result).sort()).toEqual([
+        'filename',
+        'notices',
+        'resolvedTokens',
+        'resolver',
+        'title',
+        'yaml',
+      ]);
       expect(result.filename).toBe('2026-09-20-god-break-the-yoke.yml');
       expect(result.title).toBe('GOD BREAK THE YOKE');
       expect(result.notices).toEqual([]);
@@ -328,6 +335,65 @@ describe('generateSermonFromText', () => {
     expect(result.notices).toHaveLength(2);
     expect(result.notices[1]).toContain('Roman 7:15');
     expect(parseSermonFile(result.yaml).entries).toHaveLength(1);
+  });
+
+  it('reports resolver "not-needed" when every book name was already recognized', async () => {
+    const result = await generateSermonFromText('John 3:16', {
+      translations: ['ta'],
+      now: new Date('2026-09-22T00:00:00Z'),
+    });
+    expect(result.resolver).toBe('not-needed');
+    expect(result.resolvedTokens).toEqual([]);
+  });
+
+  it('reports resolver "not-configured" when a book name is unresolved and no key is set', async () => {
+    const result = await generateSermonFromText('Xyzzy 1:1\nHosea 4:6', {
+      translations: ['ta'],
+      now: new Date('2026-09-22T00:00:00Z'),
+    });
+    expect(result.resolver).toBe('not-configured');
+  });
+
+  it('does not report an Object.prototype member as a resolved book', async () => {
+    // Regression: an empty `codes` map is still a plain object, so a book token that happens to name an
+    // inherited property (`constructor`, `toString`, ...) must not read back as "resolved" through it.
+    const result = await generateSermonFromText('constructor 1:1\nHosea 4:6', {
+      translations: ['ta'],
+      now: new Date('2026-09-22T00:00:00Z'),
+    });
+    expect(result.resolver).toBe('not-configured');
+    expect(result.resolvedTokens).toEqual([]);
+  });
+
+  it('reports resolver "used" with resolvedTokens when the resolver placed a book', async () => {
+    const httpPost: HttpPost = async () => ({
+      status: 200,
+      body: JSON.stringify({
+        content: [
+          { type: 'tool_use', id: 'toolu_test', name: RESOLVE_TOOL_NAME, input: { resolutions: [{ token: 'Xyzzy', usfm: 'JHN' }] } },
+        ],
+      }),
+    });
+    const result = await generateSermonFromText('Xyzzy 1:1\nHosea 4:6', {
+      translations: ['ta'],
+      now: new Date('2026-09-22T00:00:00Z'),
+      apiKey: 'test-key',
+      httpPost,
+    });
+    expect(result.resolver).toBe('used');
+    expect(result.resolvedTokens).toEqual([{ token: 'Xyzzy', book: 'JHN', source: 'ai' }]);
+  });
+
+  it('reports resolver "unavailable" when the resolver call throws', async () => {
+    const httpPost: HttpPost = async () => ({ status: 500, body: '{}' });
+    const result = await generateSermonFromText('Xyzzy 1:1\nHosea 4:6', {
+      translations: ['ta'],
+      now: new Date('2026-09-22T00:00:00Z'),
+      apiKey: 'test-key',
+      httpPost,
+    });
+    expect(result.resolver).toBe('unavailable');
+    expect(result.resolvedTokens).toEqual([]);
   });
 });
 

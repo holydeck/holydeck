@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   instantiate,
+  parseTemplateInstantiation,
   parseServiceTemplateBody,
   parseServiceTemplateDraft,
+  parseServiceTemplateName,
+  parseServiceTemplateStatus,
   templateFromService,
 } from './service-templates.js';
 
@@ -23,6 +26,17 @@ const VALID_BODY = {
     },
   ],
 };
+
+describe('parseTemplateInstantiation', () => {
+  it('reads title, date, site and fills', () => {
+    const body = { title: 'Sunday', date: '2026-09-27', site: 'Main', fills: [{ entryId: 'e1', title: 'Song', content: { id: 'g', revision: 2, hash: 'fnv1a-6fe1d1e9' } }] };
+    expect(parseTemplateInstantiation(body)).toMatchObject({ ok: true, value: { title: 'Sunday', fills: [{ entryId: 'e1' }] } });
+  });
+
+  it('refuses a date that is not a calendar day', () => {
+    expect(parseTemplateInstantiation({ title: 'S', date: '27.09.2026', site: 'M', fills: [] }).ok).toBe(false);
+  });
+});
 
 describe('parseServiceTemplateBody', () => {
   it('reads fixed and typed-slot entries', () => {
@@ -134,6 +148,28 @@ describe('parseServiceTemplateDraft', () => {
     if (!parsed.ok) throw new Error('expected the draft to parse');
     expect(parsed.value.name).toBe('Sunday Service');
     expect(parsed.value.body.sections).toHaveLength(1);
+  });
+});
+
+describe('parseServiceTemplateStatus', () => {
+  it('reads whether a Service Template is being hidden or brought back, and refuses anything else', () => {
+    expect(parseServiceTemplateStatus({ archived: true })).toEqual({ ok: true, value: { archived: true } });
+    const parsed = parseServiceTemplateStatus({ archived: 'yes' });
+    expect(parsed.ok).toBe(false);
+    expect(!parsed.ok && parsed.problems.map((problem) => `${problem.path}: ${problem.code}`)).toEqual([
+      'serviceTemplate.archived: field.not_a_boolean',
+    ]);
+  });
+});
+
+describe('parseServiceTemplateName', () => {
+  it('reads just the name fromService asks a caller for', () => {
+    expect(parseServiceTemplateName({ name: 'Sunday Service' })).toEqual({ ok: true, value: { name: 'Sunday Service' } });
+    const parsed = parseServiceTemplateName({});
+    expect(parsed.ok).toBe(false);
+    expect(!parsed.ok && parsed.problems.map((problem) => `${problem.path}: ${problem.code}`)).toEqual([
+      'serviceTemplate.name: field.required',
+    ]);
   });
 });
 
@@ -283,7 +319,7 @@ const SERVICE: Service = {
 };
 
 describe('templateFromService', () => {
-  it('converts each item into a fixed entry with a matching id', () => {
+  it('keeps a custom slide fixed with its content, and turns any other item into a required typed slot', () => {
     const body = templateFromService(SERVICE);
     expect(body).toEqual({
       sections: [
@@ -292,13 +328,7 @@ describe('templateFromService', () => {
           name: 'Welcome',
           entries: [
             { id: 'opener', slot: 'fixed', itemKind: 'custom-slide', title: 'Welcome slide', content: undefined },
-            {
-              id: 'song-1',
-              slot: 'fixed',
-              itemKind: 'song',
-              title: 'Amazing Grace',
-              content: { id: 'song-amazing-grace', revision: 3, hash: undefined },
-            },
+            { id: 'song-1', slot: 'typed', itemKind: 'song', required: true },
           ],
         },
       ],

@@ -3,13 +3,14 @@
 // release has one version inside its window and no previous one, which is why `previous` is optional
 // rather than a sentinel number: a sentinel would have to be either inside the window or outside it,
 // and both readings are wrong for a version that was never released.
+// Version 2 is the first release to use the previous branch.
 
 import { UPDATE_REQUIRED } from './http.js';
 import { isRecord } from './problems.js';
 
 export type ClientWindow = { readonly current: number; readonly previous?: number };
 
-export const CLIENT_WINDOW: ClientWindow = { current: 1 };
+export const CLIENT_WINDOW: ClientWindow = { current: 2, previous: 1 };
 
 export const CLIENT_VERSION_HEADER = 'x-holydeck-client-version';
 

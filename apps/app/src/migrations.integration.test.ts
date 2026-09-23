@@ -146,11 +146,11 @@ describe('migrating a real database', () => {
   test('undoes the shipped migrations and leaves the collections it found', async () => {
     await migrate(db, CONTEXT, { now: clock });
     expect(await rollback(db, CONTEXT, { now: clock })).toMatchObject({ recorded: SCHEMA_VERSION - 1 });
-    expect(await indexNames('song_singer_chords')).toEqual(['_id_']);
-    expect(await indexNames('restores')).toEqual(['_id_', 'restore_time']);
+    expect(await indexNames('audit_events')).toEqual(['_id_', 'audit_time']);
 
     expect(await rollback(db, CONTEXT, { now: clock })).toMatchObject({ recorded: SCHEMA_VERSION - 2 });
-    expect(await indexNames('audit_events')).toEqual(['_id_', 'audit_time']);
+    expect(await indexNames('service_templates')).toEqual(['_id_']);
+    expect(await indexNames('restores')).toEqual(['_id_', 'restore_time']);
 
     for (let step = SCHEMA_VERSION - 2; step > 0; step -= 1) await rollback(db, CONTEXT, { now: clock });
 

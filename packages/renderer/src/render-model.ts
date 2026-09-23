@@ -20,9 +20,8 @@ import { recoveryFor } from '@holydeck/contracts/live-media';
 
 import { autoFitStyle, chooseFit, fitLadder, fitRequests } from './auto-fit.js';
 import { deepFreeze } from './internal/freeze.js';
-import { geometry, roundTo } from './internal/numbers.js';
+import { geometry, MEASUREMENT_PRECISION, roundTo } from './internal/numbers.js';
 import { isScalableSize, mediaRectFor } from './media-fit.js';
-import { MEASUREMENT_PRECISION } from './measure.js';
 import { canvasFor, resolveOutputProfile } from './output-profile.js';
 import { blocker, readinessOf, warning } from './readiness.js';
 

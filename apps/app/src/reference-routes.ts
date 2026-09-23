@@ -20,18 +20,23 @@
 // rather than the public one.
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
-import { VALIDATION_FAILED, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
+import { ENTITY_CONFLICT, VALIDATION_FAILED, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import { type Parsed, parseObject } from '@holydeck/contracts/problems';
 
 import { correlationFor } from './context.js';
 import { REFERENCE_MALFORMED, referenceFrom, selectReference, versesIn } from './corpus.js';
-import { provenSession } from './csrf.js';
+import { FORBIDDEN, provenSession } from './csrf.js';
 import { notFound } from './failures.js';
 import { PRESENTATION_CONTROL } from './roles.js';
+import { RunEventError } from './run-events.js';
+import { runContext } from './runs.js';
 import { shownReferenceContext } from './shown-references.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { CorpusRefusal, corpusClient } from './corpus.js';
+import type { RunDeck } from './run-deck.js';
+import type { RunReviewStore } from './run-review.js';
+import type { RunRecord, RunStore } from './runs.js';
 import type { ShownReferenceStore } from './shown-references.js';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
@@ -71,6 +76,9 @@ interface ShowBody {
   readonly chapter: number;
   readonly verses: string;
   readonly revision: number | undefined;
+  /** The run this reference was shown into, when one is on (RUN-07). Absent shows it exactly as before —
+   *  recorded in `shownReferences` alone, with nothing appended to a run's own log. */
+  readonly runId: string | undefined;
 }
 
 // The verse list is read as text here and expanded by the same grammar the query string uses, so that the
@@ -82,6 +90,7 @@ const parseShowBody = (value: unknown): Parsed<ShowBody> =>
     chapter: reader.wholeNumber('chapter', 1),
     verses: reader.text('verses'),
     revision: reader.optionalWholeNumber('revision', 1),
+    runId: reader.optionalText('runId'),
   }));
 
 export interface ReferenceRoutesOptions {
@@ -89,12 +98,20 @@ export interface ReferenceRoutesOptions {
   readonly corpus: ReturnType<typeof corpusClient>;
   /** Absent in a deployment that keeps no record of what was shown, which may therefore show nothing. */
   readonly shownReferences: ShownReferenceStore | undefined;
+  /** RUN-07: appended through when a show names a `runId`. Absent in a deployment with no run log, where
+   *  showing a reference behaves exactly as it always has — recorded here alone. */
+  readonly runReview: RunReviewStore | undefined;
+  readonly runs: Pick<RunStore, 'resume'> | undefined;
+  readonly deck: ((context: unknown, run: RunRecord) => Promise<RunDeck>) | undefined;
 }
 
 const refused = (reply: FastifyReply, requestId: string, refusal: CorpusRefusal): FastifyReply =>
   reply.code(refusal.status).send(errorEnvelope(refusal.code, refusal.message, requestId));
 
-export function serveReferenceRoutes(app: FastifyInstance, { corpus, shownReferences }: ReferenceRoutesOptions): void {
+export function serveReferenceRoutes(
+  app: FastifyInstance,
+  { corpus, shownReferences, runReview, runs, deck }: ReferenceRoutesOptions,
+): void {
   // A deployment with nowhere to record what was shown may not show anything, because a display whose
   // revision went unrecorded is the one thing BIBL-04 rules out. The lookup path goes with it rather than
   // standing alone: it is the operator half of a surface that cannot work here, and the public verses
@@ -137,15 +154,47 @@ export function serveReferenceRoutes(app: FastifyInstance, { corpus, shownRefere
         ]),
       );
     }
-    const { abbr, book, chapter, revision } = parsed.value;
+    const { abbr, book, chapter, revision, runId } = parsed.value;
     const answer = await selectReference(corpus, { abbr, book, chapter, verses, revision });
     // Nothing was shown, so nothing is recorded: the log holds what a room saw, not what was asked for.
     if (!answer.ok) return refused(reply, request.id, answer.refusal);
     const operator = provenSession(request).record.actor;
-    const shown = await shownReferences.record(
-      shownReferenceContext(operator, correlationFor(SHOWN_REFERENCE_PREFIX, request.id)),
-      { reference: { abbr, book, chapter, verses }, revision: answer.value.revision },
-    );
+    const correlationId = correlationFor(SHOWN_REFERENCE_PREFIX, request.id);
+    // RUN-07: a run in progress gets this reference appended to its own log too, so LIVE-13's review can
+    // answer what it showed without reading `shownReferences`, which has no run to key a row under. The
+    // run's log is written first: a run that is gone, ended, or refuses the entry refuses the whole show,
+    // so the two logs never disagree about whether the room saw it.
+    if (runId !== undefined && runReview !== undefined && runs !== undefined && deck !== undefined) {
+      const context = runContext(operator, correlationId);
+      const run = await runs.resume(context, runId);
+      if (run === undefined) return reply.code(404).send(notFound(request));
+      if (run.phase !== 'active') {
+        return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, `${runId} has ended and shows nothing more`, request.id));
+      }
+      const runDeck = await deck(context, run);
+      try {
+        await runReview.show(
+          { actor: operator, permissions: provenSession(request).record.permissions, correlationId },
+          {
+            runId,
+            itemId: `reference:${abbr}:${book}:${chapter}`,
+            reference: answer.value.citation,
+            pinnedRevisions: runDeck.pinnedRevisions,
+          },
+        );
+      } catch (error) {
+        if (!(error instanceof RunEventError) || error.kind === 'corrupt') throw error;
+        if (error.kind === 'permission') return reply.code(403).send(errorEnvelope(FORBIDDEN, error.message, request.id));
+        if (error.kind === 'schema') {
+          return reply.code(422).send(validationFailure(request.id, [{ path: 'shownReference.runId', code: VALIDATION_FAILED, message: error.message }]));
+        }
+        return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, error.message, request.id));
+      }
+    }
+    const shown = await shownReferences.record(shownReferenceContext(operator, correlationId), {
+      reference: { abbr, book, chapter, verses },
+      revision: answer.value.revision,
+    });
     return reply.code(201).send(successEnvelope({ verses: answer.value, shown }, request.id, CLIENT_WINDOW.current));
   });
 

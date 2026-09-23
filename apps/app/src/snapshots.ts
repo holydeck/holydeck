@@ -188,6 +188,7 @@ export class PreparationError extends Error {
 }
 
 export interface PreparationStore {
+  snapshot(context: unknown, snapshotId: string): Promise<PreparedSnapshot | undefined>;
   /** Writes the manifest, or nothing for an identifier no Service holds. Never rewrites one. */
   prepare(context: unknown, serviceId: string, inputs: PreparationInputs): Promise<PreparedRecord | undefined>;
   /** The standing manifest: the last one prepared for this Service, or nothing. */
@@ -421,6 +422,11 @@ export function preparationOn(db: RepositoryDb, options: PreparationOptions): Pr
         throw error;
       }
       return { serviceId, preparedAt, snapshot };
+    },
+
+    async snapshot(context, snapshotId) {
+      const [found] = await snapshots.read(context, { _id: snapshotId }, { limit: 1 });
+      return found === undefined ? undefined : snapshotFrom(found);
     },
 
     async prepared(context, serviceId) {

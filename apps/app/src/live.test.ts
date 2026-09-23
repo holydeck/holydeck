@@ -5,7 +5,9 @@ import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, supporte
 import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
 import { LIVE_CHANNELS, LIVE_CLOSE, OUTPUT_CHANNELS, parseSnapshotFrame } from '@holydeck/contracts/live';
 import { TICKET_QUERY, sessionCookie } from '@holydeck/contracts/sessions';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { SNAPSHOT_PINS } from '@holydeck/contracts/snapshots';
 
 import { buildApp } from './app.js';
 import { capabilityContext, capabilitiesOn } from './capabilities.js';
@@ -19,7 +21,9 @@ import {
   isUpgrade,
   serveLive,
 } from './live.js';
+import { liveHub } from './live-protocol.js';
 import { PRESENTATION_CONTROL } from './roles.js';
+import { runEngineOn } from './run-engine.js';
 import { serviceContext, servicesOn } from './services.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { DEFAULT_SETTINGS, type LoadedSettings } from './settings.js';
@@ -27,9 +31,19 @@ import { memoryCapabilities } from '../test/helpers/capabilities.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 
+import type { LiveState } from '@holydeck/contracts/live-state';
+import type { SnapshotPin } from '@holydeck/contracts/snapshots';
 import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
+import type { LiveHub } from './live-protocol.js';
+import type { ThemeStore } from './live-theme.js';
+import type { MidServiceStore } from './mid-service-additions.js';
+import type { RunEngine } from './run-engine.js';
+import type { RunEventStore } from './run-events.js';
+import type { RunDeck } from './run-deck.js';
+import type { RunRecord, RunStore } from './runs.js';
 import type { ServiceStore } from './services.js';
+import type { OperatorSession } from './snapshots.js';
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import type { SessionStore } from './sessions.js';
@@ -64,12 +78,17 @@ const AT = '2026-09-13T10:00:00.000Z';
 
 let running: FastifyInstance | undefined;
 
+/** The hub `serveLive` no longer builds for itself (Design §1) — a fixed clock, same as every other test
+ *  here, unless a test asks for the wall clock to prove that a live one works too. */
+const hubFor = (clock: () => string = () => AT): LiveHub => liveHub({ clock });
+
 const listening = async (
   sessions?: SessionStore,
   guests?: { readonly capabilities: CapabilityStore; readonly services: ServiceStore },
+  engineWiring?: { readonly hub?: LiveHub; readonly engine?: Pick<RunEngine, 'command'> },
 ): Promise<string> => {
   const app = buildApp({ settings, logger: false, fetching: refusing, sessions });
-  await serveLive(app, { clock: () => AT, sessions, ...guests });
+  await serveLive(app, { hub: engineWiring?.hub ?? hubFor(), sessions, engine: engineWiring?.engine, ...guests });
   await app.listen({ host: '127.0.0.1', port: 0 });
   running = app;
   const { port } = app.server.address() as AddressInfo;
@@ -167,11 +186,14 @@ const CURRENT = `${CLIENT_VERSION_QUERY}=${CLIENT_WINDOW.current}`;
  * test names. Every socket it opens spends a ticket of its own, because a ticket opens one socket — which
  * is what lets a test hold an operator and a surface open on the same run at the same time.
  */
-const deployment = async (permissions: readonly string[]) => {
+const deployment = async (
+  permissions: readonly string[],
+  engineWiring?: { readonly hub?: LiveHub; readonly engine?: Pick<RunEngine, 'command'> },
+) => {
   const real = sessionsOn(memorySessions().db, { now: () => new Date().toISOString() });
   const context = sessionContext('req-0f9c2a41');
   const signedIn = await real.start(context, { actor: 'account:7f3a', permissions });
-  const base = await listening(real);
+  const base = await listening(real, undefined, engineWiring);
   const cookie = sessionCookie(signedIn.token, 60);
   return {
     base,
@@ -394,9 +416,9 @@ describe('the live session', () => {
     expect(response?.statusCode).toBe(200);
   });
 
-  it('stamps frames with the wall clock when nothing hands it one', async () => {
+  it('stamps frames with whatever clock its hub was built with, the wall clock included', async () => {
     const app = buildApp({ settings, logger: false, fetching: refusing });
-    await serveLive(app);
+    await serveLive(app, { hub: hubFor(() => new Date().toISOString()) });
     await app.listen({ host: '127.0.0.1', port: 0 });
     running = app;
     const { port } = app.server.address() as AddressInfo;
@@ -788,7 +810,7 @@ describe('live socket security without a listening port', () => {
       if (reason === 'expired') clockAt += 60_000;
       const app = buildApp({ settings, logger: false, fetching: refusing });
       running = app;
-      await serveLive(app, { clock: () => AT, capabilities, services });
+      await serveLive(app, { hub: hubFor(), capabilities, services });
       const query = new URLSearchParams({
         channel: reason === 'view' ? 'stage' : 'audience',
         [CLIENT_VERSION_QUERY]: String(CLIENT_WINDOW.current),
@@ -825,7 +847,7 @@ describe('live socket security without a listening port', () => {
     const app = buildApp({ settings, logger: false, fetching: refusing });
     running = app;
     await serveLive(app, {
-      clock: () => AT, capabilities,
+      hub: hubFor(), capabilities,
       services: duringRead === undefined ? services : {
         ...services,
         current: async (...args) => {
@@ -890,5 +912,124 @@ describe('live socket security without a listening port', () => {
     const closed = once(socket, 'close');
     socket.send(' '.repeat(8 * 1024 + 1));
     expect((await closed)[0]).toBe(1009);
+  });
+});
+
+describe('run engine wiring', () => {
+  it('delegates through the supplied engine when the live endpoint is registered', async () => {
+    const app = buildApp({ settings, logger: false, fetching: refusing });
+    running = app;
+    const hub = hubFor();
+    const frames: Record<string, unknown>[] = [];
+    await serveLive(app, { hub, engine: { command: async () => ({ outcome: 'invalid' }) } });
+    const connection = hub.join({
+      send: (text) => { frames.push(JSON.parse(text) as Record<string, unknown>); },
+      close: () => {}, buffered: () => 0,
+    }, 'live-control', { watch: LIVE_CHANNELS, command: true });
+    connection?.receive(JSON.stringify({
+      kind: 'command', channel: 'live-control', id: 'engine-command', idempotencyKey: 'engine-key',
+      type: 'pause', clientStateRevision: 0,
+    }));
+    await vi.waitFor(() => expect(frames.at(-1)).toMatchObject({ kind: 'ack', outcome: 'invalid' }));
+  });
+
+  it('an operator go-to command reaches only the audience/stage channels of the same run, each with its own projected state', async () => {
+    const ENGINE_AT = '2026-09-13T10:05:00.000Z';
+    const RUN_ID = 'run-11';
+    const FIRST_POSITION = { itemId: 'item-1', slideIndex: 0 };
+    const SECOND_POSITION = { itemId: 'item-2', slideIndex: 0 };
+    const ENGINE_LIVE: LiveState = {
+      runId: RUN_ID, snapshotId: 'snapshot-11', mode: 'live', public: FIRST_POSITION, selected: FIRST_POSITION,
+      themes: { audience: 'audience-default', stage: 'stage-default', singer: 'singer-default', operator: 'operator-default' },
+      additionsRevision: 0,
+    };
+    let held: RunRecord = {
+      runId: RUN_ID, serviceId: 'service-11', snapshotId: 'snapshot-11', phase: 'active', mode: 'live',
+      position: 0, live: ENGINE_LIVE, stateRevision: 1, at: ENGINE_AT,
+    };
+    const runs: RunStore = {
+      active: async () => [held],
+      list: async () => [held],
+      history: async () => [held],
+      start: async () => held,
+      end: async () => ({ ...held, phase: 'ended' }),
+      resume: async () => held,
+      advance: async (_context, _runId, expected, live) => {
+        if (held.stateRevision !== expected) return 'stale';
+        held = { ...held, live, stateRevision: expected + 1 };
+        return held;
+      },
+    };
+    const runEvents: RunEventStore = {
+      record: async (recording, input) => ({ ...input, actor: recording.actor, at: ENGINE_AT, sequence: 1 }),
+      log: async () => [],
+    };
+    const themes: ThemeStore = {
+      changeTheme: async () => { throw new Error('not exercised by this test'); },
+      themesFor: () => undefined,
+    };
+    const midService: MidServiceStore = {
+      add: async () => { throw new Error('not exercised by this test'); },
+      additions: async () => [],
+    };
+    const deck = async (): Promise<RunDeck> => ({
+      snapshotId: 'snapshot-11',
+      pinnedRevisions: Object.fromEntries(SNAPSHOT_PINS.map((pin) => [pin, `${pin}@1`])) as Record<SnapshotPin, string>,
+      aspectRatio: '16:9',
+      safeAreaMargins: { top: 0, right: 0, bottom: 0, left: 0, unit: 'percent' },
+      standbyScreens: [],
+      items: [
+        { itemId: 'item-1', title: 'First song', kind: 'song', slides: [{ slideId: 'slide-1', boxes: [] }] },
+        { itemId: 'item-2', title: 'Second song', kind: 'song', slides: [{ slideId: 'slide-2', boxes: [] }] },
+      ],
+    });
+
+    const hub = hubFor(() => ENGINE_AT);
+    const engine = runEngineOn({ hub, runs, runEvents, themes, midService, deck, clock: () => ENGINE_AT });
+    const engineSession: OperatorSession = {
+      actor: 'account:engine-test', permissions: [PRESENTATION_CONTROL], correlationId: 'test:live-engine',
+    };
+    await engine.start(engineSession, { serviceId: 'service-11', mode: 'live' });
+
+    const run = await deployment([PRESENTATION_CONTROL], { hub, engine });
+    const control = await run.open('live-control');
+    const audience = await run.open('audience');
+    const stage = await run.open('stage');
+
+    // Every join lands its own initial snapshot frame first — drained before a command is sent.
+    await control.frame();
+    await audience.frame();
+    await stage.frame();
+
+    control.send({
+      kind: 'command', channel: 'live-control', id: 'go-to-1', idempotencyKey: 'go-to-key-1',
+      type: 'go-to', clientStateRevision: 1, args: SECOND_POSITION,
+    });
+
+    const [controlEvent, controlAck, audienceEvent, stageEvent] = await Promise.all([
+      control.frame(), control.frame(), audience.frame(), stage.frame(),
+    ]);
+
+    expect(controlEvent).toMatchObject({ kind: 'event', channel: 'live-control' });
+    expect(controlAck).toMatchObject({ kind: 'ack', channel: 'live-control', id: 'go-to-1', outcome: 'applied' });
+
+    expect(audienceEvent).toMatchObject({ kind: 'event', channel: 'audience' });
+    const audienceState = (audienceEvent as { state: Record<string, unknown> }).state;
+    expect(audienceState).toMatchObject({ view: 'audience', frame: SECOND_POSITION });
+    expect(audienceState).not.toHaveProperty('mode');
+    expect(audienceState).not.toHaveProperty('selected');
+    expect(audienceState).not.toHaveProperty('counts');
+
+    expect(stageEvent).toMatchObject({ kind: 'event', channel: 'stage' });
+    const stageState = (stageEvent as { state: Record<string, unknown> }).state;
+    expect(stageState).toMatchObject({ view: 'stage', frame: SECOND_POSITION, mode: 'live' });
+
+    // Neither surface connection receives a second frame for the one command.
+    const noSecondFrame = await Promise.race([
+      audience.frame().then(() => 'frame' as const),
+      stage.frame().then(() => 'frame' as const),
+      new Promise<'timeout'>((resolve) => { setTimeout(() => resolve('timeout'), 150); }),
+    ]);
+    expect(noSecondFrame).toBe('timeout');
   });
 });

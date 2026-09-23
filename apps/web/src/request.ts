@@ -7,7 +7,7 @@ import { ONBOARDING_PATH, parseOnboardingOffer } from '@holydeck/contracts/accou
 import { NOT_FOUND } from '@holydeck/contracts/http';
 import { SESSION_EXPIRED, SESSION_PATH, parseSessionView } from '@holydeck/contracts/sessions';
 
-import { ask, needsUpdate, type ApiResult, type Change, type FetchLike, type ResponseLike } from './api.js';
+import { ask, askText, needsUpdate, type ApiResult, type Change, type FetchLike, type ResponseLike } from './api.js';
 import { lastAnsweredAt, onboarding, session, updateRequired } from './app-state.js';
 import { currentPath, navigate, route, safeNext, signInPathFor } from './router.js';
 
@@ -21,12 +21,8 @@ export function setFetching(next: FetchLike): void {
   fetching = next;
 }
 
-/**
- * Makes one parsed API request and applies the refusal states whose consequences belong to the whole
- * application. The result itself is not rewritten: a screen still receives its precise success or refusal.
- */
-export async function request(path: string, change?: Change): Promise<ApiResult<unknown>> {
-  const result = await ask(path, fetching, change);
+/** The whole-application consequences of one answer, shared by every read and the upload. */
+export function applied<T>(result: ApiResult<T>): ApiResult<T> {
   if (result.ok) lastAnsweredAt.value = Date.now();
   if (!result.ok && result.code === SESSION_EXPIRED) {
     session.value = null;
@@ -36,6 +32,19 @@ export async function request(path: string, change?: Change): Promise<ApiResult<
   }
   if (needsUpdate(result)) updateRequired.value = true;
   return result;
+}
+
+/**
+ * Makes one parsed API request and applies the refusal states whose consequences belong to the whole
+ * application. The result itself is not rewritten: a screen still receives its precise success or refusal.
+ */
+export async function request(path: string, change?: Change): Promise<ApiResult<unknown>> {
+  return applied(await ask(path, fetching, change));
+}
+
+/** Reads raw text (a song's raw YAML) through the same transport, applying the same whole-app refusals. */
+export async function requestText(path: string): Promise<ApiResult<string>> {
+  return applied(await askText(path, fetching));
 }
 
 /**

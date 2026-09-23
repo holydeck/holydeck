@@ -34,14 +34,11 @@
 // sections are `custom-slide` entries with `content: undefined`, so instantiating it pins nothing.
 // The default Standby slide group is an empty screen on purpose: `slides: []`.
 //
-// Two seeded kinds fall short of "editable and archivable" in ways disclosed here rather than
-// papered over, because inventing either verb would be a guess at a shape no requirement has asked
-// for (see `service-templates.ts`'s and `slide-groups.ts`'s own headers for the same ruling made
-// there first). `ServiceTemplateStore` has no edit or archive verb at all: a Service Template is
-// created once and read back exactly as it was, so the seeded default is no less editable than any
-// other one — which is to say, not yet. `SlideGroupStore` has no `archive`/`unarchive`; a slide
-// group's offer/withdraw verb is `enable`/`disable`, and the seeded Standby group is exercised
-// through that instead.
+// One seeded kind falls short of "editable and archivable" in a way disclosed here rather than
+// papered over, because inventing an edit verb would be a guess at a shape no requirement has asked
+// for (see `slide-groups.ts`'s own header for the same ruling made there first). `SlideGroupStore`
+// has no `archive`/`unarchive`; a slide group's offer/withdraw verb is `enable`/`disable`, and the
+// seeded Standby group is exercised through that instead.
 
 import { CONTENT_LANGUAGES } from '@holydeck/contracts/content-languages';
 
@@ -50,6 +47,7 @@ import { requestContext } from './context.js';
 import { LIBRARY_PERMISSIONS } from './library.js';
 import { REVISION_PERMISSIONS } from './revisions.js';
 import { SERVICE_TEMPLATE_PERMISSIONS, ServiceTemplateError, serviceTemplatesOn } from './service-templates.js';
+import { servicesOn } from './services.js';
 import { SLIDE_LABEL_PERMISSIONS, SlideLabelError, slideLabelsOn } from './slide-labels.js';
 import { LAYOUT_PERMISSIONS, SlideLayoutError, slideLayoutsOn } from './slide-layouts.js';
 import { SlideGroupError, slideGroupsOn } from './slide-groups.js';
@@ -189,7 +187,8 @@ export function seedOn(db: RepositoryDb, options: SeedOptions): Seed {
   const languages = contentLanguagesOn(db, { now: options.now });
   const labels = slideLabelsOn(db, { now: options.now });
   const layouts = slideLayoutsOn(db, { now: options.now });
-  const templates = serviceTemplatesOn(db, { now: options.now });
+  const services = servicesOn(db, { now: options.now });
+  const templates = serviceTemplatesOn(db, { now: options.now, services });
   const groups = slideGroupsOn(db, { now: options.now });
 
   return {
@@ -242,7 +241,7 @@ export function seedOn(db: RepositoryDb, options: SeedOptions): Seed {
         await ensured(
           () => templates.preview(context, template.id),
           () =>
-            serviceTemplatesOn(db, { now: options.now, newId: () => template.id }).create(context, {
+            serviceTemplatesOn(db, { now: options.now, newId: () => template.id, services }).create(context, {
               name: template.name,
               body: template.body,
             }),

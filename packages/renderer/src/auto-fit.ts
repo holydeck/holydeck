@@ -10,8 +10,7 @@
 // The ladder is built before anything is measured, which is what lets one preparation ask the browser
 // once for every candidate of every box rather than walking a loop of round trips.
 
-import { FIT_TOLERANCE_PX, roundTo } from './internal/numbers.js';
-import { MEASUREMENT_PRECISION } from './measure.js';
+import { FIT_TOLERANCE_PX, MEASUREMENT_PRECISION, roundTo } from './internal/numbers.js';
 import { RenderConfigurationError } from './output-profile.js';
 
 import type { MeasureRequest, TextMeasurer, TextMetrics } from './measure.js';

@@ -64,8 +64,20 @@ export const AUDIT_ACTIONS = [
   'settings.update',
   // Every change to a piece of content, whatever the surface: `slide-layout-routes.ts` is its first
   // caller, and names the Layout in the subject and the direction in the detail rather than adding a
-  // verb per surface. The content surfaces after it join this action instead of inventing their own.
+  // verb per surface. Most content surfaces after it join this action; a surface the spec calls out for
+  // its own action, such as PPTX below (AUTH-04), is a documented exception rather than the norm.
   'content.change',
+  // PPTX import's own history, kept apart from `content.change` because AUTH-04 asks for it by name: the
+  // upload (including a refused one) and the commit that turns a reviewed import into a Song.
+  'pptx.import',
+  'pptx.commit',
+  // A Service Template's own history, apart from `content.change`: creating stays on the shared action
+  // (TMPL-04, AUTH-09), but saving forward, archiving, bringing back and converting from a Service each
+  // get their own, per the same spec.
+  'serviceTemplate.version',
+  'serviceTemplate.archive',
+  'serviceTemplate.unarchive',
+  'serviceTemplate.fromService',
   // A Service's own history: creating, duplicating, scheduling, archiving/unarchiving, transitioning
   // through its lifecycle, and editing its sections and items. `services.ts` is the only caller — no
   // routes task exists yet to carry this the way `accounts-routes.ts` carries `account.*`, so the
@@ -76,17 +88,29 @@ export const AUDIT_ACTIONS = [
   'service.archive',
   'service.edit',
   'service.transition',
+  'service.output',
   // A Service item's own history: adding, removing, enabling, disabling, duplicating, and reordering
   // items within a Service's sections. Same caller as the service-level actions above — `services.ts`.
   'service.item.add',
+  'service.item.body',
   'service.item.remove',
   'service.item.enable',
   'service.item.disable',
   'service.item.duplicate',
   'service.item.reorder',
   'service.item.revise',
-  // Reserved for the presentation-run surface T76+ builds. Exercised only by this task's own tests today.
-  'presentation.run',
+  // A presentation run's own lifecycle: starting one and ending one. `runs.ts` is the only caller —
+  // distinct actions rather than one shared name, so the trail can be filtered to just starts or just
+  // ends without parsing `detail`.
+  'run.start',
+  'run.end',
+  // The rest of a run's own history LIVE-01 asks the trail to answer for: its theme changed, content
+  // joined it mid-service, or its recap left the server as a download. `run-routes.ts` is the only
+  // caller — `run.start`/`run.end` above are `runs.ts`'s own, the same split this file already draws
+  // between a store's actions and a routes task's.
+  'run.theme',
+  'run.addition',
+  'run.recap.export',
   // An Operator taking a Service live over an open blocker. Written by `snapshots.ts` itself — no routes
   // task owns the readiness surface yet — and naming the Operator, the reason, and every check carried.
   'readiness.override',
@@ -150,20 +174,32 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'authorization.refuse': 'authorization',
   'settings.update': 'settings',
   'content.change': 'content',
+  'pptx.import': 'content',
+  'pptx.commit': 'content',
+  'serviceTemplate.version': 'content',
+  'serviceTemplate.archive': 'content',
+  'serviceTemplate.unarchive': 'content',
+  'serviceTemplate.fromService': 'content',
   'service.create': 'content',
   'service.duplicate': 'content',
   'service.schedule': 'content',
   'service.archive': 'content',
   'service.edit': 'content',
   'service.transition': 'content',
+  'service.output': 'content',
   'service.item.add': 'content',
+  'service.item.body': 'content',
   'service.item.remove': 'content',
   'service.item.enable': 'content',
   'service.item.disable': 'content',
   'service.item.duplicate': 'content',
   'service.item.reorder': 'content',
   'service.item.revise': 'content',
-  'presentation.run': 'presentation',
+  'run.start': 'presentation',
+  'run.end': 'presentation',
+  'run.theme': 'presentation',
+  'run.addition': 'presentation',
+  'run.recap.export': 'presentation',
   'readiness.override': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',
@@ -198,6 +234,7 @@ export interface AuditEntry {
   readonly outcome: AuditOutcome;
   /** Why, for a person reading the trail later. Never a secret. */
   readonly detail?: string;
+  /** What an `integration.call` cost, in tokens. Never set by any other action. */
   readonly requestTokens?: number;
   readonly responseTokens?: number;
   readonly durationMs?: number;
@@ -274,20 +311,32 @@ export const AUDIT_DETAIL_REDACTION: Readonly<Record<AuditAction, 'verbatim' | '
   'capability.revoke': 'verbatim',
   'settings.update': 'verbatim',
   'content.change': 'verbatim',
+  'pptx.import': 'verbatim',
+  'pptx.commit': 'verbatim',
+  'serviceTemplate.version': 'verbatim',
+  'serviceTemplate.archive': 'verbatim',
+  'serviceTemplate.unarchive': 'verbatim',
+  'serviceTemplate.fromService': 'verbatim',
   'service.create': 'verbatim',
   'service.duplicate': 'verbatim',
   'service.schedule': 'verbatim',
   'service.archive': 'verbatim',
   'service.edit': 'verbatim',
   'service.transition': 'verbatim',
+  'service.output': 'verbatim',
   'service.item.add': 'verbatim',
+  'service.item.body': 'verbatim',
   'service.item.remove': 'verbatim',
   'service.item.enable': 'verbatim',
   'service.item.disable': 'verbatim',
   'service.item.duplicate': 'verbatim',
   'service.item.reorder': 'verbatim',
   'service.item.revise': 'verbatim',
-  'presentation.run': 'verbatim',
+  'run.start': 'verbatim',
+  'run.end': 'verbatim',
+  'run.theme': 'verbatim',
+  'run.addition': 'verbatim',
+  'run.recap.export': 'verbatim',
   'readiness.override': 'verbatim',
   'backup.run': 'verbatim',
   'restore.run': 'verbatim',

@@ -1,5 +1,6 @@
-import { constants, readFileSync, watch } from 'node:fs';
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { constants, createReadStream, readFileSync, watch } from 'node:fs';
+import { access, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,16 +21,29 @@ import {
 } from './boot.js';
 import { conflictShelfOn } from './conflicts.js';
 import { contentLanguagesOn } from './content-languages.js';
-import { systemContext } from './context.js';
+import { requestContext, systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
-import { libraryOn } from './library.js';
+import { LIBRARY_PERMISSIONS, libraryOn } from './library.js';
 import { serveLive } from './live.js';
+import { liveHub } from './live-protocol.js';
+import { themesOn } from './live-theme.js';
 import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
+import { MID_SERVICE_PERMISSIONS, midServiceOn } from './mid-service-additions.js';
+import { pptxCommitOn } from './pptx-commit.js';
+import { pptxImportOn } from './pptx-import.js';
+import { workerPptxRunner } from './pptx-isolated.js';
+import { pptxReviewOn } from './pptx-review.js';
+import { pptxSessionsOn } from './pptx-sessions.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
-import { revisionsOn } from './revisions.js';
+import { REVISION_PERMISSIONS, revisionsOn } from './revisions.js';
+import { deriveDeck } from './run-deck.js';
+import { runEngineOn } from './run-engine.js';
+import { runEventsOn } from './run-events.js';
+import { runReviewOn } from './run-review.js';
+import { runsOn } from './runs.js';
 import { seedContext, seedOn } from './seed.js';
 import { sermonsOn } from './sermons.js';
 import { servicesOn } from './services.js';
@@ -47,6 +61,7 @@ import { songsOn } from './songs.js';
 import { songSingerChordsOn } from './song-singer-chords.js';
 import { totpDb, totpsOn } from './totp.js';
 import { translationOffsetDb, translationOffsetsOn } from './translation-offsets.js';
+import { workspacePositionDb, workspacePositionsOn } from './workspace-positions.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
@@ -54,16 +69,28 @@ import type { CapabilityStore } from './capabilities.js';
 import type { ConflictShelf } from './conflicts.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { LibraryStore } from './library.js';
-import type { MediaLibrary } from './media.js';
+import type { MediaByteSource } from './media-delivery-routes.js';
+import type { MediaLibrary, MediaLibraryOptions } from './media.js';
+import type { MidServiceStore } from './mid-service-additions.js';
 import type { Identity } from './onboarding.js';
+import type { PptxCommit } from './pptx-commit.js';
+import type { PptxImport } from './pptx-import.js';
+import type { PptxReview } from './pptx-review.js';
+import type { PptxSessionStore } from './pptx-sessions.js';
 import type { PresenceStore } from './presence.js';
 import type { RevisionStore } from './revisions.js';
+import type { RunEventStore } from './run-events.js';
+import type { RunReviewStore } from './run-review.js';
 import type { SermonStore } from './sermons.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
+import type { RequestContext } from './context.js';
+import type { RunDeck } from './run-deck.js';
+import type { RunEngine } from './run-engine.js';
+import type { SlideGroupStore } from './slide-groups.js';
+import type { RunRecord, RunStore } from './runs.js';
 import type { PreparationStore } from './snapshots.js';
 import type { SettingsAdmin } from './settings-admin.js';
-import type { SlideGroupStore } from './slide-groups.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
 import type { SlideLabelStore } from './slide-labels.js';
 import type { SessionStore } from './sessions.js';
@@ -71,8 +98,12 @@ import type { ShownReferenceStore } from './shown-references.js';
 import type { SongStore } from './songs.js';
 import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
+import type { ThemeStore } from './live-theme.js';
+import type { WorkspacePositionStore } from './workspace-positions.js';
 
 checkReleasedContracts();
+
+const newId = (): string => randomBytes(16).toString('base64url');
 
 const path = settingsPath(process.env);
 checkOwnSettingsMount(path);
@@ -87,6 +118,13 @@ checkCorpusBoundary(corpus);
 // Asked once, before serving: a corpus that answers an unauthenticated request is reachable by
 // anything else that can reach it too, and that is not a deployment to start serving through.
 checkCorpusIsClosed(await probeCorpusIsClosed(corpus, fetch));
+
+// Built here, not inside `serveLive`, because a later task's run engine publishes through the same hub
+// from outside the live socket entirely (Design §1) — the hub is a piece of this deployment's own state,
+// not a detail of how a connection to it is served. Kept unconditional, unlike the durable stores above:
+// a deployment with nowhere to keep a run still serves a live socket, watch-only, the same way it always
+// has (see the comment on `serveLive` below).
+const hub = liveHub({ clock: () => new Date().toISOString() });
 
 // Durable records are optional until a deployment keeps any, and the presentation milestone keeps none.
 // Where a store is configured, the schema it is at is graded before anything is served from it.
@@ -105,6 +143,18 @@ let capabilities: CapabilityStore | undefined;
 let services: ServiceStore | undefined;
 let serviceTemplates: ServiceTemplateStore | undefined;
 let preparation: PreparationStore | undefined;
+// A run's own row is kept the same way, for the same reason: a deployment with nowhere to keep one
+// cannot start, end or resume it, and its routes answer not-found the same way.
+let runs: RunStore | undefined;
+let runEvents: RunEventStore | undefined;
+// Constructed once here (RUN-08) rather than inside midServiceOn/live-theme.ts/run-review.ts
+// themselves, so every caller in this deployment shares one instance over the same database instead of
+// each building its own — the same reason every other durable store in this file is built once, here.
+let themes: ThemeStore | undefined;
+let runReview: RunReviewStore | undefined;
+let midService: MidServiceStore | undefined;
+let engine: RunEngine | undefined;
+let deck: ((context: unknown, run: RunRecord) => Promise<RunDeck>) | undefined;
 let slideLabels: SlideLabelStore | undefined;
 // The settings admin is kept apart from the durable store, but wired up alongside it: a deployment with
 // nowhere to keep accounts has nobody who could administer settings either, and its route answers
@@ -116,9 +166,12 @@ let slideLayouts: SlideLayoutStore | undefined;
 // The media library is kept the same way and administered by the same Admin: a deployment with nowhere to
 // keep one has nothing here to upload to, and its route answers not-found the same way.
 let media: MediaLibrary | undefined;
+let mediaBytes: MediaByteSource | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
+let workspacePositions: WorkspacePositionStore | undefined;
+let contentExists: ((context: unknown, id: string) => Promise<boolean>) | undefined;
 // What an operator showed is recorded the same way and for the same reason: a deployment with nowhere to
 // write it down may show nothing, because a passage displayed without its revision recorded is the one
 // thing BIBL-04 rules out, and its routes answer not-found the same way.
@@ -147,6 +200,12 @@ let library: LibraryStore | undefined;
 // The content-language registry is kept the same way and for the same reason: a deployment with nowhere
 // to keep one has none to create, edit or archive, and its routes answer not-found the same way.
 let contentLanguages: ContentLanguageStore | undefined;
+// A PowerPoint import's stores are kept the same way: a deployment with nowhere to keep an import
+// session has none to upload, review or commit, and its routes answer not-found the same way.
+let pptxImport: PptxImport | undefined;
+let pptxReview: PptxReview | undefined;
+let pptxCommit: PptxCommit | undefined;
+let pptxSessions: PptxSessionStore | undefined;
 let stopWatchingSettings: (() => void) | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
@@ -163,25 +222,54 @@ if (settings.values.mongoUrl !== '') {
   };
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
   services = servicesOn(repositoryDb(store.db()), { now });
-  serviceTemplates = serviceTemplatesOn(repositoryDb(store.db()), { now });
+  serviceTemplates = serviceTemplatesOn(repositoryDb(store.db()), { now, services });
   preparation = preparationOn(repositoryDb(store.db()), { now });
+  runs = runsOn(repositoryDb(store.db()), { now });
+  runEvents = runEventsOn(repositoryDb(store.db()), { now });
+  themes = themesOn(runEvents);
+  runReview = runReviewOn(runEvents);
+  midService = midServiceOn(repositoryDb(store.db()), { now, runs, runEvents });
+  slideGroups = slideGroupsOn(repositoryDb(store.db()), { now });
+  const manifests = preparation;
+  const additions = midService;
+  const groups = slideGroups;
+  const bodies = revisionsOn(repositoryDb(store.db()), { now });
+  const deckFor = async (context: unknown, run: RunRecord): Promise<RunDeck> => {
+    const held = context as RequestContext;
+    const deckContext = requestContext({
+      ...held,
+      permissions: [...new Set([
+        ...held.permissions,
+        LIBRARY_PERMISSIONS.read,
+        REVISION_PERMISSIONS.read,
+        MID_SERVICE_PERMISSIONS.read,
+      ])],
+    });
+    const snapshot = await manifests.snapshot(deckContext, run.snapshotId);
+    if (snapshot === undefined) throw new Error(`${run.snapshotId} is not a manifest this server holds`);
+    return deriveDeck(deckContext, { slideGroups: groups, revisions: bodies }, snapshot, await additions.additions(deckContext, run.runId));
+  };
+  deck = deckFor;
+  engine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   revisions = revisionsOn(repositoryDb(store.db()), { now });
   conflictShelf = conflictShelfOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
+  workspacePositions = workspacePositionsOn(workspacePositionDb(store.db()), { now });
+  const libraryStore = libraryOn(repositoryDb(store.db()), { now });
+  library = libraryStore;
+  contentExists = async (context, id) => (await libraryStore.get(context, id)) !== undefined;
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
   presence = presenceOn(presenceDb(store.db()), { now });
   songs = songsOn(repositoryDb(store.db()), { now });
   chords = songSingerChordsOn(repositoryDb(store.db()), { now });
   sermons = sermonsOn(repositoryDb(store.db()), { now });
-  slideGroups = slideGroupsOn(repositoryDb(store.db()), { now });
-  library = libraryOn(repositoryDb(store.db()), { now });
   contentLanguages = contentLanguagesOn(repositoryDb(store.db()), { now });
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
   // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
   await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
-  media = mediaLibraryOn(repositoryDb(store.db()), {
+  const mediaOptions: MediaLibraryOptions = {
     now,
     queue: queueOn(queueDb(store.db()), { now }),
     mediaRoot: settings.values.mediaRoot,
@@ -194,7 +282,16 @@ if (settings.values.mongoUrl !== '') {
     async read(_root, key) {
       return new Uint8Array(await readFile(key));
     },
-  });
+  };
+  media = mediaLibraryOn(repositoryDb(store.db()), mediaOptions);
+  mediaBytes = {
+    size: async (key) => (await stat(key)).size,
+    stream: (key, range) => createReadStream(key, range === undefined ? {} : { start: range.start, end: range.end }),
+  };
+  pptxImport = pptxImportOn(repositoryDb(store.db()), { ...mediaOptions, runner: workerPptxRunner() });
+  pptxReview = pptxReviewOn(repositoryDb(store.db()), { now });
+  pptxCommit = pptxCommitOn(repositoryDb(store.db()), { now, newId });
+  pptxSessions = pptxSessionsOn(repositoryDb(store.db()), { now, newId });
   settingsAdmin = settingsAdminOn(settings, {
     readFile: (path) => readFile(path, 'utf8'),
     writeFile,
@@ -222,6 +319,10 @@ const https = settings.values.tlsCertFile === ''
   ? undefined
   : { cert: readFileSync(settings.values.tlsCertFile), key: readFileSync(settings.values.tlsKeyFile) };
 
+// Read bare, never through settings.ts: a deployment without this key simply has no resolver, and the
+// key itself is never worth persisting to the settings file it would then have to be redacted out of.
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+
 const app = buildApp({
   settings,
   // Every secret this deployment was configured with is replaced wherever it appears in a log line: a
@@ -238,12 +339,21 @@ const app = buildApp({
   revisions,
   conflictShelf,
   media,
+  mediaBytes,
   translationOffsets,
+  workspacePositions,
+  contentExists,
   shownReferences,
   presence,
   services,
   serviceTemplates,
   preparation,
+  runs,
+  themes,
+  runReview,
+  runEngine: engine,
+  deck,
+  midService,
   slideLabels,
   songs,
   chords,
@@ -251,6 +361,11 @@ const app = buildApp({
   slideGroups,
   library,
   contentLanguages,
+  pptxImport,
+  pptxReview,
+  pptxCommit,
+  pptxSessions,
+  anthropicApiKey,
 });
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.
@@ -261,7 +376,8 @@ const app = buildApp({
 // deployment that keeps no durable records has neither to hand the guard, and its socket refuses every
 // client there is — which is the same answer as before, reached now because there is nothing to sign in
 // to or be invited into, rather than no way to sign in.
-await serveLive(app, { sessions, capabilities, services });
+if (engine !== undefined) await engine.restore();
+await serveLive(app, { hub, engine, sessions, capabilities, services });
 
 for (const [key, source] of Object.entries(settings.sources)) {
   app.log.info(`${key} came from the ${source}`);

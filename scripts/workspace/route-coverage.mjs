@@ -19,6 +19,7 @@ export const ROUTES_DIR = 'apps/app/src';
 // Every route identity with harness-level HTTP or WebSocket coverage, and its test file — checked to
 // exist, so a deleted or renamed test file is a census failure rather than a claim nobody rechecks.
 export const ROUTE_INTEGRATION_TESTS = {
+  'media-delivery-routes.ts': 'tests/harness/integration/media-delivery.test.ts',
   'session-routes.ts': 'tests/harness/integration/surfaces.test.ts',
   'app.ts GET /health': 'tests/harness/integration/surfaces.test.ts',
   'app.ts GET /api/v1/translations': 'tests/harness/integration/surfaces.test.ts',
@@ -26,6 +27,7 @@ export const ROUTE_INTEGRATION_TESTS = {
   'content-language-routes.ts': 'tests/harness/e2e/content.spec.ts',
   'library-routes.ts': 'tests/harness/e2e/content.spec.ts',
   'media-routes.ts': 'tests/harness/e2e/content.spec.ts',
+  'pptx-routes.ts': 'tests/harness/integration/pptx-import.test.ts',
   'scripture-routes.ts': 'tests/harness/e2e/content.spec.ts',
   'slide-group-routes.ts': 'tests/harness/e2e/content.spec.ts',
   'slide-label-routes.ts': 'tests/harness/e2e/content.spec.ts',
@@ -37,6 +39,7 @@ export const ROUTE_INTEGRATION_TESTS = {
 // to ROUTE_INTEGRATION_TESTS above, which is a diff a reviewer sees, not a rule someone quietly stopped
 // enforcing.
 export const KNOWN_INTEGRATION_GAPS = {
+  'output-defaults-routes.ts': 'no harness test reads the output defaults over HTTP',
   'app.ts GET /api/contracts': 'no harness test reads the released contract registry over HTTP',
   'app.ts GET /api/v1/translations/:abbr/canon': "no harness test reads a translation's canon over HTTP",
   'app.ts GET /api/v1/translations/:abbr/verses': 'no harness test reads verses over HTTP',
@@ -55,11 +58,17 @@ export const KNOWN_INTEGRATION_GAPS = {
   'reference-routes.ts': 'no harness test looks a reference up or shows one over HTTP',
   'revision-routes.ts': 'no harness test reads, compares or restores a revision over HTTP',
   'sermon-routes.ts': 'no harness test creates or edits a Sermon over HTTP',
+  'run-routes.ts':
+    'tests/harness/e2e/live-run.spec.ts starts a run over HTTP and drives it over the socket, but no ' +
+    'tests/harness/integration test ends one or reads its deck, theme, additions, review or recap',
   'service-routes.ts': 'no harness test drives the Service workspace lifecycle over HTTP',
   'settings-routes.ts': 'no harness test reads or changes settings over HTTP',
-  'service-template-routes.ts': 'no harness test creates or previews a Service Template over HTTP',
+  'service-template-routes.ts':
+    'no harness test creates, previews, saves forward, archives, restores or mints a Service Template from ' +
+    'a Service over HTTP',
   'totp-routes.ts': 'no harness test drives TOTP setup or verification over HTTP',
   'translation-offset-routes.ts': 'no harness test reads or configures a translation offset over HTTP',
+  'workspace-position-routes.ts': 'no harness test reads or writes a workspace position over HTTP',
 };
 
 /**

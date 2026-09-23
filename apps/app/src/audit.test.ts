@@ -51,6 +51,24 @@ describe('what the trail records', () => {
     expect(detailed).toMatchObject({ detail: 'the instance has a founder already' });
   });
 
+  it('carries what an integration call cost only when there is a figure, same as detail', async () => {
+    const db = fakeDb();
+    const trail = trailOn(db);
+    const context = auditContext('system', CORRELATION);
+    await trail.record(context, { action: 'integration.call', subject: 'resolver', outcome: 'allowed' });
+    await trail.record(context, {
+      action: 'integration.call',
+      subject: 'resolver',
+      outcome: 'allowed',
+      requestTokens: 512,
+      responseTokens: 64,
+    });
+    const [plain, costed] = entries(db);
+    expect(plain).not.toHaveProperty('requestTokens');
+    expect(plain).not.toHaveProperty('responseTokens');
+    expect(costed).toMatchObject({ requestTokens: 512, responseTokens: 64 });
+  });
+
   it('gives every entry an identifier of its own, so one never overwrites another', async () => {
     const db = fakeDb();
     const trail = auditOn(db, { now: () => AT });
@@ -134,20 +152,32 @@ describe('the context the trail is written under', () => {
       'capability.revoke',
       'settings.update',
       'content.change',
+      'pptx.import',
+      'pptx.commit',
+      'serviceTemplate.version',
+      'serviceTemplate.archive',
+      'serviceTemplate.unarchive',
+      'serviceTemplate.fromService',
       'service.create',
       'service.duplicate',
       'service.schedule',
       'service.archive',
       'service.edit',
       'service.transition',
+      'service.output',
       'service.item.add',
+      'service.item.body',
       'service.item.remove',
       'service.item.enable',
       'service.item.disable',
       'service.item.duplicate',
       'service.item.reorder',
       'service.item.revise',
-      'presentation.run',
+      'run.start',
+      'run.end',
+      'run.theme',
+      'run.addition',
+      'run.recap.export',
       'readiness.override',
       'backup.run',
       'restore.run',
@@ -190,15 +220,7 @@ describe('the actions reserved for a surface not yet built', () => {
     const db = fakeDb();
     const trail = trailOn(db, ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
     const context = auditContext('system', CORRELATION);
-    const reserved = [
-      'content.change',
-      'presentation.run',
-      'backup.run',
-      'restore.run',
-      'content.conflict.resolve',
-      'integration.call',
-      'integration.disable',
-    ] as const;
+    const reserved = ['content.change', 'backup.run', 'restore.run', 'content.conflict.resolve', 'integration.disable'] as const;
     for (const action of reserved) {
       await expect(trail.record(context, { action, subject: 'reserved', outcome: 'allowed' })).resolves.toBeTruthy();
     }
@@ -210,7 +232,7 @@ describe('what an entry could never be made to carry', () => {
   it('has no field sized or named to hold a prompt, a raw request/response body, or headers', () => {
     expect(Object.keys(CATEGORY_OF).length).toBeGreaterThan(0); // keeps this suite from being a no-op if the block below is ever removed
     // Excess-property checking on an object literal is TypeScript's own proof that AuditEntry's key set is
-    // closed to exactly action | subject | outcome | detail.
+    // closed to exactly action | subject | outcome | detail | requestTokens | responseTokens.
     // @ts-expect-error -- prompt is not a field AuditEntry declares, and it never should be
     const withPrompt: AuditEntry = { action: 'settings.update', subject: 'x', outcome: 'allowed', prompt: 'never' };
     // @ts-expect-error -- headers is not a field AuditEntry declares, and it never should be

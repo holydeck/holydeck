@@ -31,7 +31,7 @@ const stores = (db: FakeDb, now: () => string) => ({
   languages: contentLanguagesOn(db, { now }),
   labels: slideLabelsOn(db, { now }),
   layouts: slideLayoutsOn(db, { now }),
-  templates: serviceTemplatesOn(db, { now }),
+  templates: serviceTemplatesOn(db, { now, services: servicesOn(db, { now }) }),
   groups: slideGroupsOn(db, { now }),
 });
 
@@ -187,12 +187,16 @@ describe('first-run seed data (SEED-01)', () => {
     expect(versioned).toBeDefined();
     expect((await layouts.archive(adminContext('req-admin0000009f'), outcome.slideLayouts[0]!))?.stamp.archivedAt).toBeDefined();
 
-    // service template: seeded and versioned, but this store has no edit or archive verb at all —
-    // a Service Template is created once and read back exactly as it was (see service-templates.ts's
-    // own TODO on ServiceTemplateStore, and "Known limitations" in the T59 report).
+    // service template: seeded, versioned, editable and archivable, exactly like a Slide Layout.
     const template = await templates.preview(read, outcome.serviceTemplates[0]!);
-    expect(template?.createdBy).toBe(SEED_ACTOR);
+    expect(template?.stamp.createdBy).toBe(SEED_ACTOR);
     expect(template?.revision).toBe(1);
+    const templateVersioned = await templates.version(adminContext('req-admin0000009e2'), outcome.serviceTemplates[0]!, {
+      name: template!.name,
+      body: template!.body,
+    });
+    expect(templateVersioned).toBeDefined();
+    expect((await templates.archive(adminContext('req-admin0000009e3'), outcome.serviceTemplates[0]!))?.stamp.archivedAt).toBeDefined();
 
     // slide group: seeded and editable, but this store has no archive/unarchive — its offer/withdraw
     // verb is enable/disable (disclosed friction), exercised here instead.

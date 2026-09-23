@@ -15,14 +15,18 @@ import { notFound, withSafeErrors } from './failures.js';
 import { serveIntegrationRoutes } from './integration-routes.js';
 import { serveLibraryRoutes } from './library-routes.js';
 import { isUpgrade } from './live.js';
+import { serveMediaDeliveryRoutes } from './media-delivery-routes.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveOrderRoutes } from './order-routes.js';
+import { serveOutputDefaultsRoutes } from './output-defaults-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
+import { servePptxRoutes } from './pptx-routes.js';
 import { servePresenceRoutes } from './presence-routes.js';
 import { servePreparationRoutes } from './preparation-routes.js';
 import { serveReferenceRoutes } from './reference-routes.js';
 import { serveRevisionRoutes } from './revision-routes.js';
+import { serveRunRoutes } from './run-routes.js';
 import { serveScriptureSearchRoutes } from './scripture-routes.js';
 import { serveSermonRoutes } from './sermon-routes.js';
 import { serveServiceRoutes } from './service-routes.js';
@@ -36,6 +40,7 @@ import { serveSongRoutes } from './song-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
 import { serveTranslationOffsetRoutes } from './translation-offset-routes.js';
 import { serveWebClient, shellFallback, withSecurityHeaders } from './static.js';
+import { serveWorkspacePositionRoutes } from './workspace-position-routes.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
@@ -43,10 +48,20 @@ import type { ConflictShelf } from './conflicts.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { Fetching } from './corpus.js';
 import type { LibraryStore } from './library.js';
+import type { MediaByteSource } from './media-delivery-routes.js';
 import type { MediaLibrary } from './media.js';
+import type { MidServiceStore } from './mid-service-additions.js';
 import type { Identity } from './onboarding.js';
+import type { PptxCommit } from './pptx-commit.js';
+import type { PptxImport } from './pptx-import.js';
+import type { PptxReview } from './pptx-review.js';
+import type { PptxSessionStore } from './pptx-sessions.js';
 import type { PresenceStore } from './presence.js';
 import type { RevisionStore } from './revisions.js';
+import type { RunDeck } from './run-deck.js';
+import type { RunEngine } from './run-engine.js';
+import type { RunReviewStore } from './run-review.js';
+import type { RunRecord, RunStore } from './runs.js';
 import type { SermonStore } from './sermons.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
@@ -61,7 +76,9 @@ import type { ShownReferenceStore } from './shown-references.js';
 import type { SongStore } from './songs.js';
 import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
+import type { ThemeStore } from './live-theme.js';
 import type { WebAsset } from './static.js';
+import type { WorkspacePositionStore } from './workspace-positions.js';
 
 const PUBLIC: RouteNeed = { kind: 'public' };
 
@@ -91,8 +108,14 @@ export interface AppOptions {
   conflictShelf?: ConflictShelf;
   /** Where an uploaded file becomes a media asset. Without it, there is nowhere for one to be uploaded to. */
   media?: MediaLibrary;
+  /** Reads the retained bytes behind a media record without buffering the whole file. */
+  mediaBytes?: MediaByteSource;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
   translationOffsets?: TranslationOffsetStore;
+  /** Where an account's last workspace position is kept. Without it, there is none to read or save. */
+  workspacePositions?: WorkspacePositionStore;
+  /** Checks whether a library content record remains available to its owner. */
+  contentExists?: (context: unknown, id: string) => Promise<boolean>;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
   shownReferences?: ShownReferenceStore;
   /** Where who is editing what is kept. Without it, there is nobody here to observe. */
@@ -100,7 +123,19 @@ export interface AppOptions {
   services?: ServiceStore;
   serviceTemplates?: ServiceTemplateStore;
   preparation?: PreparationStore;
+  /** Where a run's own row is kept. Without it, `run-routes.ts` serves every path not-found, the same as
+   *  every other optional store here, and the override route's own D-8 ownership check is skipped. */
+  runs?: RunStore;
   slideLabels?: SlideLabelStore;
+  themes?: ThemeStore;
+  runReview?: RunReviewStore;
+  midService?: MidServiceStore;
+  /** The run engine `run-routes.ts` starts and ends runs through — Task 8's own store, wrapping `runs`
+   *  with the in-memory state a live command needs. Without it, the run surface serves not-found. */
+  runEngine?: RunEngine;
+  /** Derives a run's deck without exposing raw stores to `run-routes.ts`, the same seam the run engine
+   *  itself takes a `deck` function through. */
+  deck?: (context: unknown, run: RunRecord) => Promise<RunDeck>;
   /** Where a Song is kept. Without it, there is none to create, edit, export or generate slides from. */
   songs?: SongStore;
   chords?: SongSingerChordsStore;
@@ -112,6 +147,16 @@ export interface AppOptions {
   library?: LibraryStore;
   /** Where the content-language registry is kept. Without it, there is none to create, edit or archive. */
   contentLanguages?: ContentLanguageStore;
+  /** Where an uploaded `.pptx` is extracted. Without it, and the three below, there is no import to run. */
+  pptxImport?: PptxImport;
+  /** Where an import's blocks are graded against the slide-label catalogue. */
+  pptxReview?: PptxReview;
+  /** Where a reviewed import becomes a Song, or is appended to one. */
+  pptxCommit?: PptxCommit;
+  /** Where an import is held between upload, review and commit. */
+  pptxSessions?: PptxSessionStore;
+  /** Bare ANTHROPIC_API_KEY, optional, never logged — absent disables the sermon import resolver. */
+  anthropicApiKey?: string | undefined;
 }
 
 /**
@@ -135,19 +180,33 @@ export function buildApp({
   revisions,
   conflictShelf,
   media,
+  mediaBytes,
   translationOffsets,
+  workspacePositions,
+  contentExists,
   shownReferences,
   presence,
   services,
   serviceTemplates,
   preparation,
+  runs,
   slideLabels,
+  themes,
+  runReview,
+  midService,
+  runEngine,
+  deck,
   songs,
   chords,
   sermons,
   slideGroups,
   library,
   contentLanguages,
+  pptxImport,
+  pptxReview,
+  pptxCommit,
+  pptxSessions,
+  anthropicApiKey,
 }: AppOptions): FastifyInstance {
   // HTTPS makes Fastify infer a specialised server, while the routes below use its common interface.
   const app = Fastify({ logger, ...(https === undefined ? {} : { https }) }) as unknown as FastifyInstance;
@@ -158,6 +217,13 @@ export function buildApp({
   // its body is still streaming in, never buffered whole before `media-routes.ts` ever sees it. Fastify
   // defers every registration below to boot, so this needs no `await` to take effect before a route does.
   app.register(multipart, { limits: { fileSize: MEDIA_SIZE_CEILING_BYTES } });
+  // A `.pptx` upload arrives as its own raw bytes, not as a multipart form: this one content type only,
+  // so no other route's body is read any differently. Its size ceiling is the import route's own.
+  app.addContentTypeParser(
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    { parseAs: 'buffer' },
+    (_request, payload, done) => done(null, payload),
+  );
   // Before every route, so a fault in one of them answers with a code and not with what it threw. The
   // one exception is a deployment that set `developmentDiagnostics` in its own environment, which the
   // settings file cannot do and an administrator's request therefore cannot either.
@@ -301,6 +367,7 @@ export function buildApp({
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
   serveMediaRoutes(app, { media, identity, slideGroups, library });
+  serveMediaDeliveryRoutes(app, { media, bytes: mediaBytes });
 
   // Reading is public, the same as the corpus routes above: BIBL-02 calls an offset inspectable, and
   // there is nothing in one worth a session. Setting one is behind the same permission once again.
@@ -309,11 +376,18 @@ export function buildApp({
   // The operator's own half of the library: looking a reference up mid-service, and showing one, which is
   // the only read of a passage this server writes down. Behind Control presentation, the same permission
   // the capability surface above is behind, because running a presentation is what this surface is for.
-  serveReferenceRoutes(app, { corpus, shownReferences });
+  serveReferenceRoutes(app, { corpus, shownReferences, runReview, runs, deck });
   serveOrderRoutes(app, { services, slideLabels });
+  serveOutputDefaultsRoutes(app);
   serveServiceRoutes(app, { services });
-  serveServiceTemplateRoutes(app, { serviceTemplates });
-  servePreparationRoutes(app, { preparation });
+  serveWorkspacePositionRoutes(app, { workspacePositions, services, contentExists });
+  serveServiceTemplateRoutes(app, { serviceTemplates, identity, services });
+  servePreparationRoutes(app, { preparation, runs });
+
+  // The presentation run surface itself: starting and ending a run, its state and its deck, its theme,
+  // mid-service additions, and reviewing or exporting what it showed. Behind Control presentation, bar
+  // the deck route, which a capability ticket may read instead of a session (D-4).
+  serveRunRoutes(app, { runs, runEngine, runReview, themes, midService, capabilities, sessions, identity, deck });
 
   // The content surfaces content-routes spec adds: songs, sermons, slide groups and the library are each
   // behind `content.edit` alone, the one permission an Editor holds and an Admin's own catalogue
@@ -321,7 +395,7 @@ export function buildApp({
   // what an Admin administers the catalogue with. Scripture search sits beside them but is reachable by
   // either `content.edit` or `presentation.control`, since Control presentation searches mid-service too.
   serveSongRoutes(app, { songs, chords, identity });
-  serveSermonRoutes(app, { sermons, corpus, identity });
+  serveSermonRoutes(app, { sermons, corpus, identity, anthropicApiKey });
   serveSlideGroupRoutes(app, { slideGroups, identity });
   serveLibraryRoutes(app, { library, identity });
   serveScriptureSearchRoutes(app, { corpus });
@@ -331,6 +405,10 @@ export function buildApp({
   // gated behind `catalogue.manage`, read there behind `content.edit` the same as an Editor's other surfaces.
   serveContentLanguageRoutes(app, { contentLanguages, identity, songs, slideGroups, library });
   serveSlideLabelRoutes(app, { slideLabels, identity });
+
+  // Behind `services.manage`, the same as the sermon import preview: bringing a PowerPoint deck in is a
+  // service integration rather than content editing, even though what it ends in is a Song.
+  servePptxRoutes(app, { pptxImport, pptxReview, pptxCommit, pptxSessions, identity });
 
   if (web !== undefined) serveWebClient(app, web);
 

@@ -24,6 +24,8 @@ import type { SnapshotPin } from '@holydeck/contracts/snapshots';
 
 import type { MidServiceOutcome, MidServiceStore } from './mid-service-additions.js';
 import type { Document } from './repositories.js';
+import type { RunEventStore } from './run-events.js';
+import type { RunStore } from './runs.js';
 import type { OperatorSession, PreparationInputs } from './snapshots.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 
@@ -70,6 +72,8 @@ const SONG: RevisionBody = { lines: ['Amazing grace, how sweet the sound'] };
 interface Live {
   readonly db: FakeDb;
   readonly store: MidServiceStore;
+  readonly runs: RunStore;
+  readonly runEvents: RunEventStore;
   readonly runId: string;
   readonly serviceId: string;
   readonly pins: Readonly<Record<SnapshotPin, string>>;
@@ -87,10 +91,13 @@ const live = async (): Promise<Live> => {
   // One counter for the run and for every trail entry `runs.ts` files beside it, the way `runs.test.ts`
   // does: a run and an audit entry minted under one fixed identifier would collide on the second write.
   const runs = runsOn(db, { now, newId: () => `run-${(serial += 1)}`, observe: () => ({ slideLayoutRevision: 3, checks: [] }) });
+  const runEvents = runEventsOn(db, { now: () => ADDED_AT });
   const run = await runs.start(SESSION, { serviceId: service.stamp.id, mode: 'live' });
   return {
     db,
-    store: midServiceOn(db, { now: () => ADDED_AT, newId: () => CONTENT_ID }),
+    store: midServiceOn(db, { now: () => ADDED_AT, newId: () => CONTENT_ID, runs, runEvents }),
+    runs,
+    runEvents,
     runId: run.runId,
     serviceId: service.stamp.id,
     pins: record!.snapshot.pins,
@@ -113,7 +120,7 @@ const refused = async (call: Promise<unknown>): Promise<MidServiceError> => {
 };
 
 describe('content added while a run is on', () => {
-  it('joins the run and appends a run event the way any shown content does', async () => {
+  it('joins the run and appends an item-added run event', async () => {
     const { db, store, runId, pins } = await live();
 
     const outcome = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
@@ -121,7 +128,7 @@ describe('content added while a run is on', () => {
     expect(outcome.event).toMatchObject({
       runId,
       sequence: 1,
-      kind: LIVE_EVENT_TYPES.slide,
+      kind: LIVE_EVENT_TYPES.itemAdded,
       actor: OPERATOR,
       pinnedRevisions: pins,
     });
@@ -129,15 +136,15 @@ describe('content added while a run is on', () => {
     expect(log).toEqual([outcome.event]);
   });
 
-  it('names what it put in front of the room, so a run’s review reads it back (LIVE-13)', async () => {
+  it('claims nothing shown: adding is not showing, and LIVE-13 reviews only what reached the room', async () => {
     const { store, runId } = await live();
 
     const outcome = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
 
-    // The title a person gave it, under the identifier the body was saved as: the addition is a reference
-    // shown, and the log is where a review of one is read from — never the Service definition, which
-    // never held this content at all.
-    expect(outcome.event.shown).toEqual({ itemId: outcome.addition.contentId, reference: 'Psalm 23' });
+    // The row keeps the title a person gave it and the revision its body was saved as, so the run deck
+    // can name and build the item; the run log says it was shown only once the engine puts it up.
+    expect(outcome.event.shown).toBeUndefined();
+    expect(outcome.addition).toMatchObject({ title: 'Psalm 23', revision: outcome.revision.revision });
   });
 
   it('carries the run’s own standing pins through unchanged, content pin included', async () => {
@@ -185,6 +192,23 @@ describe('content added while a run is on', () => {
     expect(outcome.addition.contentId).toBe(CONTENT_ID);
     expect(revision).toMatchObject({ contentId: CONTENT_ID, revision: 1, origin: 'manual-checkpoint', body: READING });
   });
+
+  it('records the addition through the injected run-events store, not one it builds itself', async () => {
+    const { db, runId, runs } = await live();
+    const recorded: unknown[] = [];
+    const spyEvents: RunEventStore = {
+      record: async (session, input) => {
+        recorded.push({ session, input });
+        return runEventsOn(db, { now: () => ADDED_AT }).record(session, input);
+      },
+      log: async (context, id) => runEventsOn(db, { now: () => ADDED_AT }).log(context, id),
+    };
+    const store = midServiceOn(db, { now: () => ADDED_AT, newId: () => CONTENT_ID, runs, runEvents: spyEvents });
+
+    await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
+
+    expect(recorded).toHaveLength(1);
+  });
 });
 
 describe('the provenance a mid-service addition leaves', () => {
@@ -193,27 +217,32 @@ describe('the provenance a mid-service addition leaves', () => {
 
     const outcome = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
 
-    expect(outcome.addition).toEqual({ contentId: CONTENT_ID, runId, actor: OPERATOR, at: ADDED_AT });
+    expect(outcome.addition).toEqual({ contentId: CONTENT_ID, runId, title: 'Psalm 23', revision: 1, actor: OPERATOR, at: ADDED_AT });
     // A row of its own is the whole of what says "added mid-service": one per addition, and nothing on
     // the revision or the run is asked to carry the fact instead.
     expect(rows(db, ADDITIONS)).toEqual([
-      { _id: CONTENT_ID, contentId: CONTENT_ID, runId, actor: OPERATOR, at: ADDED_AT, correlationId: CORRELATION },
+      { _id: CONTENT_ID, contentId: CONTENT_ID, runId, title: 'Psalm 23', revision: 1, actor: OPERATOR, at: ADDED_AT, correlationId: CORRELATION },
     ]);
   });
 
   it('is durable: a fresh store over the same database answers exactly the same', async () => {
-    const { db, store, runId } = await live();
+    const { db, store, runId, runs, runEvents } = await live();
     const outcome = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
 
-    const restarted = midServiceOn(db, { now: () => ADDED_AT });
+    const restarted = midServiceOn(db, { now: () => ADDED_AT, runs, runEvents });
 
     expect(await restarted.additions(READER, runId)).toEqual([outcome.addition]);
   });
 
   it('reads a run’s additions oldest first, however the rows came back', async () => {
-    const { db, store, runId } = await live();
+    const { db, store, runId, runs, runEvents } = await live();
     const first = await store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING });
-    const second = await midServiceOn(db, { now: () => '2026-09-20T09:52:00.000Z', newId: () => 'mid-service-content-2' }).add(
+    const second = await midServiceOn(db, {
+      now: () => '2026-09-20T09:52:00.000Z',
+      newId: () => 'mid-service-content-2',
+      runs,
+      runEvents,
+    }).add(
       SESSION,
       { runId, kind: 'song', title: 'Amazing Grace', body: SONG },
     );
@@ -372,9 +401,9 @@ describe('what a mid-service addition is refused for', () => {
   });
 
   it('refuses one of two Operators adding to the same run at the same moment, under its own name', async () => {
-    const { db, runId } = await live();
+    const { db, runId, runs, runEvents } = await live();
     let minted = 0;
-    const store = midServiceOn(db, { now: () => ADDED_AT, newId: () => `${CONTENT_ID}-${(minted += 1)}` });
+    const store = midServiceOn(db, { now: () => ADDED_AT, newId: () => `${CONTENT_ID}-${(minted += 1)}`, runs, runEvents });
 
     const outcomes = await Promise.allSettled([
       store.add(SESSION, { runId, kind: 'reading', title: 'Psalm 23', body: READING }),

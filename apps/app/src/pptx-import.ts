@@ -21,18 +21,19 @@
 
 import { createHash } from 'node:crypto';
 
-import { extractPptx } from '@holydeck/core/pptx';
 import { normalizePptxTitle } from '@holydeck/core/pptx-content';
 
 import { requestContext } from './context.js';
 import { LIBRARY_PERMISSIONS, libraryOn } from './library.js';
 import { MEDIA_ASSET_PERMISSIONS, MediaError, mediaLibraryOn } from './media.js';
+import { inProcessPptxRunner } from './pptx-isolated.js';
 import { QUEUE_PERMISSIONS } from './queue.js';
 
 import type { ExtractedPptx, PptxProvenance, PptxSkippedMedia } from '@holydeck/core/pptx';
 import type { RequestContext } from './context.js';
 import type { LibraryStore } from './library.js';
 import type { MediaLibrary, MediaLibraryOptions, MediaRecord } from './media.js';
+import type { IsolatedPptxRunner } from './pptx-isolated.js';
 import type { RepositoryDb } from './repositories.js';
 
 export type { PptxProvenance, PptxSkippedMedia };
@@ -124,12 +125,21 @@ async function findDuplicate(
   return match === undefined ? undefined : { id: match.stamp.id, title: match.title };
 }
 
-export function pptxImportOn(db: RepositoryDb, options: MediaLibraryOptions): PptxImport {
+export interface PptxImportOptions extends MediaLibraryOptions {
+  /** AUTH-13: how the raw bytes are actually parsed. Defaults to the in-process, un-isolated runner —
+   *  the right choice for tests that already exercise `packages/core`'s extraction directly and don't
+   *  need a real OS thread to prove it works. Production wires `workerPptxRunner()` in (see main.ts),
+   *  isolating parsing in its own `node:worker_threads` Worker. */
+  readonly runner?: IsolatedPptxRunner;
+}
+
+export function pptxImportOn(db: RepositoryDb, options: PptxImportOptions): PptxImport {
   const library = mediaLibraryOn(db, options);
   const catalogue = libraryOn(db, options);
+  const runner = options.runner ?? inProcessPptxRunner();
   return {
     import: async (context, bytes) => {
-      const extracted: ExtractedPptx = extractPptx(bytes);
+      const extracted: ExtractedPptx = await runner.run(bytes);
       const slides: PptxImportSlide[] = [];
       for (const slide of extracted.slides) {
         const media: MediaRecord[] = [];

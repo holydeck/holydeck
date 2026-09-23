@@ -1,19 +1,14 @@
-import { LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
 import { DEFAULT_THEMES, THEME_SURFACES } from '@holydeck/contracts/live-theme';
 import { describe, expect, it } from 'vitest';
 
-import { grantFor, liveHub } from './live-protocol.js';
 import { themesOn } from './live-theme.js';
 import { RunEventError, runEventContext, runEventsOn } from './run-events.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
 
-import type { LiveChannel } from '@holydeck/contracts/live';
 import type { Theme, ThemeSurface } from '@holydeck/contracts/live-theme';
-import type { LiveHub, LiveTransport } from './live-protocol.js';
 import type { OperatorSession } from './snapshots.js';
 
 const START = Date.parse('2026-09-19T10:00:00.000Z');
-const AT = '2026-09-19T10:00:00.000Z';
 const OPERATOR = `account:${'D'.repeat(22)}`;
 const CORRELATION = 'req-live-theme-1';
 const RUN_ID = 'run-1';
@@ -31,26 +26,13 @@ const PINS_ONE = Object.freeze({
   corpus: 'corpus@1',
 });
 
-type Frame = Record<string, unknown>;
-
-/** A joined view, kept only for the frames it was actually written — nothing it had to ask for. Mirrors
- *  `live-events.test.ts`'s own `watching` helper, extended to the control channel so an Operator view is
- *  covered the same way an Audience/Stage/Singer one is. */
-const watching = (hub: LiveHub, channel: LiveChannel, permissions: readonly string[] = []): { frames(): readonly Frame[] } => {
-  const written: string[] = [];
-  const transport: LiveTransport = { send: (text) => written.push(text), close: () => {}, buffered: () => 0 };
-  hub.join(transport, channel, grantFor(permissions));
-  return { frames: (): readonly Frame[] => written.map((text) => JSON.parse(text) as Frame) };
-};
-
 const harness = () => {
   const db = fakeDb();
   let tick = 0;
   const now = (): string => new Date(START + (tick += 1) * 1000).toISOString();
   const runEvents = runEventsOn(db, { now });
-  const hub = liveHub({ clock: () => AT });
-  const store = themesOn(hub, runEvents);
-  return { db, runEvents, hub, store };
+  const store = themesOn(runEvents);
+  return { db, runEvents, store };
 };
 
 describe('per-surface themes differ independently over identical prepared content (LIVE-09)', () => {
@@ -97,38 +79,7 @@ describe('per-surface themes differ independently over identical prepared conten
   });
 });
 
-describe('a theme change during a run is delivered as a versioned event (LIVE-09/LIVE-04)', () => {
-  it('publishes theme-changed, with an advancing sequence and state revision, to every joined output and control view', async () => {
-    const { store, hub } = harness();
-    const audience = watching(hub, 'audience');
-    const stage = watching(hub, 'stage');
-    const singer = watching(hub, 'singer');
-    const control = watching(hub, LIVE_CONTROL_CHANNEL, ['presentation.control']);
-
-    const first = await store.changeTheme(SESSION, {
-      runId: RUN_ID,
-      surface: 'audience',
-      theme: DEFAULT_THEMES.audience,
-      pinnedRevisions: PINS_ONE,
-    });
-    const second = await store.changeTheme(SESSION, {
-      runId: RUN_ID,
-      surface: 'stage',
-      theme: DEFAULT_THEMES.stage,
-      pinnedRevisions: PINS_ONE,
-    });
-
-    expect(first.landed).toEqual({ stateRevision: 1, sequence: 1 });
-    expect(second.landed).toEqual({ stateRevision: 2, sequence: 2 });
-
-    for (const view of [audience, stage, singer, control]) {
-      const events = view.frames().filter((frame) => frame['kind'] === 'event');
-      expect(events.map((frame) => frame['type'])).toEqual(['theme-changed', 'theme-changed']);
-      expect(events.map((frame) => frame['sequence'])).toEqual([1, 2]);
-      expect(events.map((frame) => frame['stateRevision'])).toEqual([1, 2]);
-    }
-  });
-
+describe('a theme change during a run is logged (LIVE-12)', () => {
   it('appends one immutable run event per change, in order, each carrying the pinned revisions byte-unchanged', async () => {
     const { store, runEvents } = harness();
 
@@ -144,15 +95,12 @@ describe('a theme change during a run is delivered as a versioned event (LIVE-09
 
 describe('an unauthorized session', () => {
   it('is refused before the run event log or any watching view is touched — theming is never a partial act', async () => {
-    const { store, hub, runEvents } = harness();
-    const audience = watching(hub, 'audience');
+    const { store, runEvents } = harness();
 
     await expect(
       store.changeTheme(UNAUTHORIZED, { runId: RUN_ID, surface: 'audience', theme: DEFAULT_THEMES.audience, pinnedRevisions: PINS_ONE }),
     ).rejects.toBeInstanceOf(RunEventError);
 
-    expect(hub.stateRevision()).toBe(0);
-    expect(audience.frames().filter((frame) => frame['kind'] === 'event')).toHaveLength(0);
     expect(await runEvents.log(runEventContext(OPERATOR, CORRELATION), RUN_ID)).toHaveLength(0);
     expect(store.themesFor(RUN_ID)).toBeUndefined();
   });

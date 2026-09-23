@@ -11,7 +11,12 @@ export type Route =
   | { readonly name: 'sign-in'; readonly next: string | undefined; readonly notice: 'claim-sign-in-refused' | undefined }
   | { readonly name: 'welcome' }
   | { readonly name: 'services' }
+  | { readonly name: 'service-new' }
   | { readonly name: 'service'; readonly id: string }
+  | { readonly name: 'service-live'; readonly id: string }
+  | { readonly name: 'service-readiness'; readonly id: string; readonly intent: 'prepare' | 'present' }
+  | { readonly name: 'library' }
+  | { readonly name: 'media' }
   | { readonly name: 'admin-users' }
   | { readonly name: 'admin-settings' }
   | { readonly name: 'admin-audit' }
@@ -62,6 +67,9 @@ export function matchRoute(pathWithSearch: string): Route {
   }
   if (pathname === '/welcome') return { name: 'welcome' };
   if (pathname === '/services' || pathname === '/services/') return { name: 'services' };
+  if (pathname === '/services/new') return { name: 'service-new' };
+  if (pathname === '/library') return { name: 'library' };
+  if (pathname === '/media') return { name: 'media' };
   if (pathname === '/admin/users') return { name: 'admin-users' };
   if (pathname === '/admin/settings') return { name: 'admin-settings' };
   if (pathname === '/admin/audit') return { name: 'admin-audit' };
@@ -69,6 +77,25 @@ export function matchRoute(pathWithSearch: string): Route {
   if (pathname === '/admin/languages') return { name: 'admin-languages' };
   if (pathname === '/admin/slide-labels') return { name: 'admin-slide-labels' };
   if (pathname === '/account/security') return { name: 'account-security' };
+
+  const serviceLive = /^\/services\/([^/]+)\/live$/u.exec(pathname);
+  if (serviceLive !== null) {
+    try {
+      return { name: 'service-live', id: decodeURIComponent(serviceLive[1] ?? '') };
+    } catch {
+      return notFound();
+    }
+  }
+
+  const serviceReadiness = /^\/services\/([^/]+)\/readiness$/u.exec(pathname);
+  if (serviceReadiness !== null) {
+    try {
+      const intent = new URLSearchParams(search).get('intent') === 'present' ? 'present' : 'prepare';
+      return { name: 'service-readiness', id: decodeURIComponent(serviceReadiness[1] ?? ''), intent };
+    } catch {
+      return notFound();
+    }
+  }
 
   const service = /^\/services\/([^/]+)$/u.exec(pathname);
   if (service !== null) {

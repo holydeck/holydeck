@@ -36,6 +36,19 @@ describe('matchRoute', () => {
   ] as const)('reads %s', (path, expected) => {
     expect(matchRoute(path)).toEqual(expected);
   });
+
+  it.each([
+    ['/services/new', { name: 'service-new' }],
+    ['/services/abc', { name: 'service', id: 'abc' }],
+    ['/services/abc/live', { name: 'service-live', id: 'abc' }],
+    ['/services/abc/readiness', { name: 'service-readiness', id: 'abc', intent: 'prepare' }],
+    ['/services/abc/readiness?intent=present', { name: 'service-readiness', id: 'abc', intent: 'present' }],
+    ['/library', { name: 'library' }],
+    ['/media', { name: 'media' }],
+    ['/services/abc/unknown', { name: 'not-found' }],
+  ])('matches %s', (path, expected) => {
+    expect(matchRoute(path)).toEqual(expected);
+  });
 });
 
 describe('navigate', () => {

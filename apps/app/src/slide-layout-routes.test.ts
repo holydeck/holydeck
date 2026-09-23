@@ -278,6 +278,16 @@ describe('previewing a Slide Layout', () => {
     expect(response.json().error.fields[0].path).toBe('revision');
   });
 
+  test('lets an editor read one layout revision without managing layouts', async () => {
+    const id = await created();
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+    const response = await previewing(id, '?revision=1', editor);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ revision: 1 });
+    expect((await listing(id, editor)).statusCode).toBe(403);
+    expect((await versioning(id, { boxes: [text] }, editor)).statusCode).toBe(403);
+  });
+
   test('answers with this server’s own fault when the stamp it reads back is unreadable', async () => {
     const id = await created();
     const rows = db.rows.get('slide_layouts') ?? [];

@@ -17,6 +17,11 @@ export const LIVE_EVENT_TYPES = Object.freeze({
   standby: 'standby-changed',
   theme: 'theme-changed',
   runState: 'run-state-changed',
+  // Reserved for spec 07 and later tasks of this one (T84/T85 and the run engine); this task only adds
+  // the type name, none of what causes it.
+  mode: 'mode-changed',
+  itemAdded: 'item-added',
+  media: 'media-changed',
 } as const);
 
 export type LiveEventType = (typeof LIVE_EVENT_TYPES)[keyof typeof LIVE_EVENT_TYPES];

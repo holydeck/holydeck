@@ -210,9 +210,10 @@ describe('the census of what a backup carries', () => {
     expect(MONGO_CONTENTS.map((content) => content.record)).toContain('schemaMigrations');
   });
 
-  it('carries every class by default, which is why nothing is excluded today', () => {
-    expect(EXCLUDED_RECORDS).toEqual([]);
-    expect(MONGO_CONTENTS).toHaveLength(RECORD_NAMES.length);
+  it('accounts for every class as either carried or excused, and for no other reason than that', () => {
+    expect(EXCLUDED_RECORDS.map((entry) => entry.record)).toEqual(['pptxImportSessions']);
+    expect(EXCLUDED_RECORDS[0]?.because.trim()).not.toBe('');
+    expect(MONGO_CONTENTS).toHaveLength(RECORD_NAMES.length - EXCLUDED_RECORDS.length);
   });
 
   it('inventories each class under its own name, so a dump file can be matched back to a collection', () => {
@@ -224,27 +225,27 @@ describe('the census of what a backup carries', () => {
 
   it('reports a class that is carried by nothing and excused by nothing, which is how one stops being lost', () => {
     const forgotten = MONGO_CONTENTS.filter((content) => content.record !== 'slideLayouts');
-    expect(problemsAmong(RECORD_NAMES, forgotten, [])).toEqual([
+    expect(problemsAmong(RECORD_NAMES, forgotten, EXCLUDED_RECORDS)).toEqual([
       'slideLayouts: no backup carries it and nothing says why — inventory it or exclude it with a reason',
     ]);
   });
 
   it('reports a class that is carried and excused at once, because only one of the two can be acted on', () => {
     expect(
-      problemsAmong(RECORD_NAMES, MONGO_CONTENTS, [{ record: 'runEvents', because: 'they are noisy' }]),
+      problemsAmong(RECORD_NAMES, MONGO_CONTENTS, [...EXCLUDED_RECORDS, { record: 'runEvents', because: 'they are noisy' }]),
     ).toEqual(['runEvents: is inventoried and excluded at once, which cannot both be true']);
   });
 
   it('reports an exclusion that gives no reason, which is the whole of what an exclusion has to give', () => {
     const kept = MONGO_CONTENTS.filter((content) => content.record !== 'runEvents');
-    expect(problemsAmong(RECORD_NAMES, kept, [{ record: 'runEvents', because: '  ' }])).toEqual([
-      'runEvents: is excluded without saying why',
-    ]);
+    expect(
+      problemsAmong(RECORD_NAMES, kept, [...EXCLUDED_RECORDS, { record: 'runEvents', because: '  ' }]),
+    ).toEqual(['runEvents: is excluded without saying why']);
   });
 
   it('reports a class inventoried twice, and two classes sharing one manifest name', () => {
     const doubled = [...MONGO_CONTENTS, { record: 'services', class: 'services' } as const];
-    expect(problemsAmong(RECORD_NAMES, doubled, [])).toEqual([
+    expect(problemsAmong(RECORD_NAMES, doubled, EXCLUDED_RECORDS)).toEqual([
       'one record class is inventoried more than once',
       'two classes are inventoried under one manifest name',
     ]);
@@ -254,7 +255,7 @@ describe('the census of what a backup carries', () => {
     const renamed = MONGO_CONTENTS.map((content) =>
       content.record === 'runEvents' ? { record: content.record, class: 'events' } : content,
     );
-    expect(problemsAmong(RECORD_NAMES, renamed, [])).toEqual([
+    expect(problemsAmong(RECORD_NAMES, renamed, EXCLUDED_RECORDS)).toEqual([
       'runEvents: is inventoried as events rather than run-events, which a restore reads by',
     ]);
   });
@@ -263,7 +264,7 @@ describe('the census of what a backup carries', () => {
     const clashing = MONGO_CONTENTS.map((content) =>
       content.record === 'mediaAssets' ? { record: content.record, class: 'media' } : content,
     );
-    expect(problemsAmong(RECORD_NAMES, clashing, [])).toEqual([
+    expect(problemsAmong(RECORD_NAMES, clashing, EXCLUDED_RECORDS)).toEqual([
       'mediaAssets: is inventoried as media rather than media-assets, which a restore reads by',
       'media: is inventoried under a name the file half already uses',
     ]);
