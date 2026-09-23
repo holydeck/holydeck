@@ -1,13 +1,15 @@
 // The media library's way in (WS-12): a file picker and a drop zone that feed the same queue. Each file
 // is checked against the deployment's upload limit and the accepted types before anything is sent, then
 // uploaded one at a time with its progress shown. A size refusal from the server is explained as the
-// storage reserve it protects, with a way to review storage; any other refusal shows its code.
+// storage reserve it protects, with a way to review storage; any other refusal says what every workspace
+// refusal says for its code (refusal-text.ts), the code itself only where no sentence names it.
 
 import { VALIDATION_FAILED } from '@holydeck/contracts/http';
 import type { JSX } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 
 import { t } from '../i18n.js';
+import { refusalText } from '../refusal-text.js';
 import { loadOutputDefaults, outputDefaults } from '../workspace/output-defaults.js';
 import { ACCEPTED_TYPES, formatBytes, precheck, uploadMedia } from './upload.js';
 
@@ -95,7 +97,7 @@ export function MediaUpload({ onUploaded }: { readonly onUploaded: () => void })
               {outcome.kind === 'too-large' ? t('mediaLib.tooLarge', { limit: formatBytes(limit ?? 0) })
                 : outcome.kind === 'wrong-type' ? t('mediaLib.wrongType')
                 : outcome.kind === 'reserve' ? <>{t('mediaLib.reserve')} <a href="/admin/storage">{t('mediaLib.reviewStorage')}</a></>
-                : <>{t('add.error')} <code>{'code' in outcome ? outcome.code : ''}</code></>}
+                : refusalText({ code: 'code' in outcome ? outcome.code : '' })}
             </li>
           ))}
         </ul>

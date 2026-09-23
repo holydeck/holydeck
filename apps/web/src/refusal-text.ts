@@ -7,7 +7,7 @@ import type { MessageKey } from '@holydeck/localization/messages';
 import { NETWORK_UNREACHABLE, type Refused } from './api.js';
 import { t } from './i18n.js';
 
-export function refusalKey(refused: Refused): MessageKey {
+export function refusalKey(refused: Pick<Refused, 'code'>): MessageKey {
   if (refused.code === ENTITY_CONFLICT) return 'workspace.error.conflict';
   if (refused.code === NETWORK_UNREACHABLE) return 'form.error.network';
   if (refused.code === VALIDATION_FAILED) return 'form.error.summary';
@@ -15,7 +15,7 @@ export function refusalKey(refused: Refused): MessageKey {
   return 'form.error.unexpected';
 }
 
-export function refusalText(refused: Refused): string {
+export function refusalText(refused: Pick<Refused, 'code'>): string {
   const key = refusalKey(refused);
   return key === 'form.error.unexpected' ? t(key, { code: refused.code }) : t(key);
 }

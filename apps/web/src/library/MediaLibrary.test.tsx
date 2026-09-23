@@ -98,7 +98,7 @@ describe('MediaLibrary', () => {
   });
 
   it('checks size and type before sending, and explains other refusals', async () => {
-    uploads.answers = [refused(VALIDATION_FAILED), refused('entity.conflict')];
+    uploads.answers = [refused(VALIDATION_FAILED), refused('client.network_unreachable'), refused('media.odd')];
     render(<MediaLibrary />);
     await screen.findByRole('list', { name: 'Media' });
     choose([
@@ -106,11 +106,13 @@ describe('MediaLibrary', () => {
       new File(['x'], 'notes.txt', { type: 'text/plain' }),
       new File(['x'], 'odd.png', { type: 'image/png' }),
       new File(['x'], 'twice.png', { type: 'image/png' }),
+      new File(['x'], 'third.png', { type: 'image/png' }),
     ]);
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('larger than the 1.0 KB upload limit');
     expect(alert.textContent?.match(/can’t be used/gu)).toHaveLength(2);
-    expect(alert.textContent).toContain('entity.conflict');
+    expect(alert.textContent).toContain('twice.png: The server could not be reached.');
+    expect(alert.textContent).toContain('third.png: Something went wrong (media.odd). Try again.');
   });
 
   it('refreshes the list after an upload and follows a drop', async () => {
