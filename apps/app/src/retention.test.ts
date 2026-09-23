@@ -5,6 +5,7 @@ import {
   policyFor,
   RETENTION_POLICIES,
   RetentionError,
+  retentionOverridesOf,
   revisionRetentionClass,
   sweep,
 } from './retention.js';
@@ -76,6 +77,28 @@ describe('policyFor', () => {
 
   it('still throws no-policy for an unmapped class', () => {
     expect(() => policyFor('not-a-class', { auditRetentionDays: 90 })).toThrow();
+  });
+});
+
+describe('the retention windows an administrator sets', () => {
+  it('lets a shortened autosave window remove what the default would still keep', () => {
+    const young = candidate({ id: 'young', class: 'autosave-revision', ageDays: 10 });
+    expect(sweep([young]).removable).toEqual([]);
+    expect(sweep([young], { autosaveRetentionDays: 7 }).removable).toEqual(['young']);
+  });
+
+  it('lets a lengthened audit window keep what the default would remove', () => {
+    const entry = candidate({ id: 'entry', class: 'audit-entry', ageDays: 400 });
+    expect(sweep([entry]).removable).toEqual(['entry']);
+    expect(sweep([entry], { auditRetentionDays: 730 }).retained).toEqual([expect.objectContaining({ id: 'entry', reason: 'too-recent' })]);
+    expect(() => guardRemoval(entry, { auditRetentionDays: 730 })).toThrow(RetentionError);
+  });
+
+  it('reads both windows straight off the settings', () => {
+    expect(retentionOverridesOf({ auditRetentionDays: 90, autosaveRetentionDays: 14 })).toEqual({
+      auditRetentionDays: 90,
+      autosaveRetentionDays: 14,
+    });
   });
 });
 

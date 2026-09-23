@@ -14,6 +14,8 @@
 // "No policy without a window": every class this file names carries a `retentionDays`, protected or not,
 // so a class this table forgets is a defect `policyFor` raises rather than a sweep silently skipping.
 
+import type { Settings } from './settings.js';
+
 export type RetentionClass =
   | 'audit-entry'
   | 'autosave-revision'
@@ -90,6 +92,16 @@ export interface RetentionOverrides {
   readonly autosaveRetentionDays?: number;
 }
 
+/**
+ * The two windows as the settings hold them. A settings value is always a number, defaulted by the loader,
+ * so what a sweep passes on is exactly what the Settings page shows, never a window only this file knows.
+ */
+export function retentionOverridesOf(
+  settings: Pick<Settings, 'auditRetentionDays' | 'autosaveRetentionDays'>,
+): RetentionOverrides {
+  return { auditRetentionDays: settings.auditRetentionDays, autosaveRetentionDays: settings.autosaveRetentionDays };
+}
+
 /** The declared window for a class, or a named refusal — never a silent policy of "anything goes". */
 export function policyFor(retentionClass: string, overrides: RetentionOverrides = {}): RetentionPolicy {
   const policy = POLICY_BY_CLASS.get(retentionClass);
@@ -112,8 +124,8 @@ export interface RetentionCandidate {
  * class's own policy (a record something else still points at cannot go even from an unprotected class),
  * then the class's own protection, then its age against the declared window.
  */
-export function guardRemoval(candidate: RetentionCandidate): void {
-  const policy = policyFor(candidate.class);
+export function guardRemoval(candidate: RetentionCandidate, overrides: RetentionOverrides = {}): void {
+  const policy = policyFor(candidate.class, overrides);
   if (candidate.protectedBy.length > 0) {
     throw new RetentionError('referenced', `${candidate.id}: still referenced by ${candidate.protectedBy.join(', ')}`);
   }
@@ -144,12 +156,12 @@ export interface SweepOutcome {
  * is judged only against its own declared class and its own references, one at a time, so a protected or
  * referenced record is retained no matter what else — or how much of it — is being swept in the same pass.
  */
-export function sweep(candidates: readonly RetentionCandidate[]): SweepOutcome {
+export function sweep(candidates: readonly RetentionCandidate[], overrides: RetentionOverrides = {}): SweepOutcome {
   const removable: string[] = [];
   const retained: RetainedCandidate[] = [];
   for (const candidate of candidates) {
     try {
-      guardRemoval(candidate);
+      guardRemoval(candidate, overrides);
       removable.push(candidate.id);
     } catch (error) {
       if (!(error instanceof RetentionError)) throw error;
