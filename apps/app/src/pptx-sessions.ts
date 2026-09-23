@@ -19,7 +19,7 @@ import { randomBytes } from 'node:crypto';
 
 import { requestContext } from './context.js';
 import { permissionsFor } from './records.js';
-import { repositoriesOn } from './repositories.js';
+import { RepositoryError, repositoriesOn } from './repositories.js';
 
 import type { RequestContext } from './context.js';
 import type {
@@ -68,6 +68,11 @@ export interface PptxSessionStore {
    *  caller cannot tell "not yours" from "doesn't exist". */
   get(context: unknown, id: string): Promise<PptxSessionRecord | undefined>;
   review(context: unknown, id: string, reviewed: readonly PptxReviewedBlock[]): Promise<PptxSessionRecord | undefined>;
+  /** The atomic claim a commit takes before it writes a Song: a no-op re-append that exists only to
+   *  collide with a concurrent commit's own claim on the same next `sequence`, so only one of two callers
+   *  racing the same session ever reads back `true`. Unlike `discard`, a lost claim leaves the session
+   *  exactly as readable as it was — a claim is not itself a reason the session stops existing. */
+  claim(context: unknown, id: string): Promise<boolean>;
   discard(context: unknown, id: string): Promise<boolean>;
 }
 
@@ -207,11 +212,34 @@ export function pptxSessionsOn(db: RepositoryDb, options: PptxSessionOptions): P
       return toRecord(next);
     },
 
+    claim: async (context, id) => {
+      const row = await readable(context, id);
+      if (row === undefined) return false;
+      const next: Row = { ...row, sequence: row.sequence + 1 };
+      try {
+        await append(context, next);
+      } catch (error) {
+        // Another caller already appended this same next sequence first — a race lost fairly, not a
+        // reason to throw. Losing a claim says nothing about the session itself, which is why this does
+        // not touch `discardedAt`: the loser is told "not you", not "this session is gone".
+        if (error instanceof RepositoryError && error.kind === 'duplicate') return false;
+        throw error;
+      }
+      return true;
+    },
+
     discard: async (context, id) => {
       const row = await readable(context, id);
       if (row === undefined) return false;
       const next: Row = { ...row, sequence: row.sequence + 1, discardedAt: options.now() };
-      await append(context, next);
+      try {
+        await append(context, next);
+      } catch (error) {
+        // Same fairness as `claim` above, for the same reason: two callers ending one session at once
+        // is a race to lose, not an error.
+        if (error instanceof RepositoryError && error.kind === 'duplicate') return false;
+        throw error;
+      }
       return true;
     },
   };

@@ -381,6 +381,24 @@ describe('POST /api/v1/pptx-imports/:id/commit', () => {
     expect(trail).toMatchObject({ action: 'pptx.commit', subject: `pptxImport:${id}` });
   });
 
+  test('refuses a second commit racing the same session, and creates only one song', async () => {
+    const id = await reviewed();
+    const before = (db.rows.get('content_library') ?? []).length;
+
+    // What a real second commit racing this one's own claim would collide on — the same duplicate key
+    // `pptx-sessions.test.ts` forces directly, forced here instead at the seam the route calls through.
+    db.failOn = (collection) => (collection === 'pptx_import_sessions' ? Object.assign(new Error('E11000 duplicate key'), { code: 11_000 }) : undefined);
+    const loser = await ask('POST', at(PPTX_COMMIT_PATH, id), CREATE);
+    db.failOn = undefined;
+    expect(loser.statusCode).toBe(409);
+    expect(loser.json().error.code).toBe(ENTITY_CONFLICT);
+    expect((db.rows.get('content_library') ?? []).length).toBe(before);
+
+    const winner = await ask('POST', at(PPTX_COMMIT_PATH, id), CREATE);
+    expect(winner.statusCode).toBe(201);
+    expect((db.rows.get('content_library') ?? []).length).toBe(before + 1);
+  });
+
   test('appends onto an existing song', async () => {
     const existing = await songsOn(db, { now }).create(songContext(OPERATOR, CORRELATION), 'Arumai', {
       titles: { tamil: 'அருமை', romanized: 'Arumai' }, languages: ['ta-Latn'],

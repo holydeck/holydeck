@@ -264,6 +264,15 @@ export function servePptxRoutes(
     if (reviewed === undefined) {
       return reply.code(409).send(errorEnvelope('pptx.not_reviewed', 'review this import before committing it', request.id));
     }
+    // Claimed before a Song is ever written, the same way a Service Template's own stamp is claimed
+    // before its entries are: two commits racing the same session collide on this append, and only the
+    // winner goes on to create a Song. The loser learns it lost, rather than creating a second one. A
+    // claim is not a discard, so a legitimate commit failure (a bad append target, say) leaves the
+    // session itself intact for the caller to retry against a different target.
+    if (!(await sessions.claim(context, id))) {
+      await note(request, 'pptx.commit', importSubject(id), 'refused', 'already being committed');
+      return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, 'this import is already being committed', request.id));
+    }
     let song: SongRecord;
     try {
       song = await commitStore.commit(context, parsed.value, textBlocksOf(session), reviewed);
