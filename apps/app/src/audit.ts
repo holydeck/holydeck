@@ -368,7 +368,10 @@ function graded(document: Document): AuditRecordRead {
     detail: redactAuditDetail(action, document['detail'] as string | undefined),
     id: auditIdIn(document['_id']),
     at: document['at'] as string,
-    category: document['category'] as AuditCategory,
+    // Read from the action rather than the row: rows written before the category was stored have none,
+    // and an action's category is a fact of this release, not of the moment the row was written. A row
+    // whose action this release no longer declares keeps whatever it stored.
+    category: CATEGORY_OF[action] ?? (document['category'] as AuditCategory),
     actor: document['actor'] as string,
     correlationId: document['correlationId'] as string,
   };
@@ -403,7 +406,12 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
     },
     async list(context, query) {
       const clauses: Filter[] = [];
-      if (query.category !== undefined) clauses.push({ category: query.category });
+      if (query.category !== undefined) {
+        // By the category's member actions, so history from before the category was stored still answers
+        // to it; the stored field is kept as one more branch for a row whose action is no longer declared.
+        const members = AUDIT_ACTIONS.filter((action) => CATEGORY_OF[action] === query.category);
+        clauses.push({ $or: [{ category: query.category }, ...members.map((action) => ({ action }))] });
+      }
       if (query.action !== undefined) clauses.push({ action: query.action });
       if (query.actor !== undefined) clauses.push({ actor: query.actor });
       if (query.outcome !== undefined) clauses.push({ outcome: query.outcome });

@@ -21,6 +21,26 @@ function textField(query: Readonly<Record<string, string | undefined>>, name: st
   return value === undefined || value === '' ? undefined : value;
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/u;
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
+
+/**
+ * One bound as the store's own `at` is written: a UTC instant with milliseconds, because the store compares
+ * it as text and only like compares with like. A bare date is the whole of that day, so a `to` of the
+ * 22nd still includes the 22nd. Anything else ISO 8601 does not spell, Date.parse's guesses included, is
+ * refused rather than read as some instant nobody typed.
+ */
+function instantIn(text: string, endOfDay: boolean): string | undefined {
+  if (ISO_DATE.test(text)) {
+    const day = new Date(`${text}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
+    // A date that rolls over (the 31st of September) is a date nobody meant, not the 1st of October.
+    return !Number.isNaN(day.getTime()) && day.toISOString().startsWith(text) ? day.toISOString() : undefined;
+  }
+  if (!ISO_INSTANT.test(text)) return undefined;
+  const at = Date.parse(text);
+  return Number.isNaN(at) ? undefined : new Date(at).toISOString();
+}
+
 /** Reads audit filters as text at the boundary, preserving the instant and cursor values the store orders. */
 export function parseAuditQuery(
   query: Readonly<Record<string, string | undefined>>,
@@ -37,13 +57,15 @@ export function parseAuditQuery(
     problems.push({ path: `${path}.outcome`, code: FIELD_CODES.notAllowed, message: 'must be allowed or refused' });
   }
 
-  const from = textField(query, 'from');
-  if (from !== undefined && Number.isNaN(Date.parse(from))) {
-    problems.push({ path: `${path}.from`, code: FIELD_CODES.notATime, message: 'must be an ISO instant' });
+  const fromRaw = textField(query, 'from');
+  const from = fromRaw === undefined ? undefined : instantIn(fromRaw, false);
+  if (fromRaw !== undefined && from === undefined) {
+    problems.push({ path: `${path}.from`, code: FIELD_CODES.notATime, message: 'must be an ISO date or instant' });
   }
-  const to = textField(query, 'to');
-  if (to !== undefined && Number.isNaN(Date.parse(to))) {
-    problems.push({ path: `${path}.to`, code: FIELD_CODES.notATime, message: 'must be an ISO instant' });
+  const toRaw = textField(query, 'to');
+  const to = toRaw === undefined ? undefined : instantIn(toRaw, true);
+  if (toRaw !== undefined && to === undefined) {
+    problems.push({ path: `${path}.to`, code: FIELD_CODES.notATime, message: 'must be an ISO date or instant' });
   }
 
   const cursorAt = textField(query, 'cursorAt');

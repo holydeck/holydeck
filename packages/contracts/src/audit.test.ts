@@ -32,6 +32,21 @@ describe('parseAuditQuery', () => {
     });
   });
 
+  it('normalizes the instants it accepts, so the store compares like with like', () => {
+    const result = parseAuditQuery({ from: '2026-09-01T02:00:00+02:00', to: '2026-09-22T10:00:00Z' });
+    expect(result).toEqual({ ok: true, value: { from: '2026-09-01T00:00:00.000Z', to: '2026-09-22T10:00:00.000Z', limit: 50 } });
+  });
+
+  it('reads a bare date as the whole of that day', () => {
+    const result = parseAuditQuery({ from: '2026-09-01', to: '2026-09-22' });
+    expect(result).toEqual({ ok: true, value: { from: '2026-09-01T00:00:00.000Z', to: '2026-09-22T23:59:59.999Z', limit: 50 } });
+  });
+
+  it('rejects text that is not an ISO date or instant, even where Date.parse would guess', () => {
+    expect(parseAuditQuery({ from: 'September 1, 2026' }).ok).toBe(false);
+    expect(parseAuditQuery({ to: '2026-09-31' }).ok).toBe(false);
+  });
+
   it('rejects an invalid outcome', () => {
     expect(parseAuditQuery({ outcome: 'maybe' }).ok).toBe(false);
   });

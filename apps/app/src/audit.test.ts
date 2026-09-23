@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn, integrationCallAudit } from './audit.js';
+import { AUDIT_ACTIONS, AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditOn, auditReadContext, integrationCallAudit } from './audit.js';
 import { ContextError, requestContext } from './context.js';
 import { RepositoryError } from './repositories.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
@@ -213,6 +213,30 @@ describe('the category taxonomy', () => {
       const members = AUDIT_ACTIONS.filter((action) => CATEGORY_OF[action] === category);
       expect(members.length, `category ${category} has no member action`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('history recorded before categories were stored', () => {
+  const legacy = (db: FakeDb, id: string, action: string, at = AT) =>
+    db.collection('audit_events').insertOne({
+      _id: `audit:${id}`, actor: 'account:1', correlationId: CORRELATION, at, action, subject: 's', outcome: 'allowed',
+    });
+  const reader = auditReadContext('account:1', CORRELATION);
+
+  it('reads a row with no stored category under the category its action belongs to', async () => {
+    const db = fakeDb();
+    await legacy(db, 'old', 'instance.claim');
+    const { entries: listed } = await trailOn(db).list(reader, { limit: 10 });
+    expect(listed).toEqual([expect.objectContaining({ id: 'old', category: 'authentication' })]);
+  });
+
+  it('finds that row under its category filter, and not under another', async () => {
+    const db = fakeDb();
+    await legacy(db, 'old', 'instance.claim');
+    await legacy(db, 'other', 'settings.update');
+    const trail = trailOn(db);
+    expect((await trail.list(reader, { category: 'authentication', limit: 10 })).entries.map((entry) => entry.id)).toEqual(['old']);
+    expect((await trail.list(reader, { category: 'backup', limit: 10 })).entries).toEqual([]);
   });
 });
 
