@@ -22,6 +22,11 @@
 #   --server-url http://localhost:3000   and   HOLYDECK_SERVER_TOKEN=dev-corpus-token-not-a-secret
 # Set HOLYDECK_CORPUS_TOKEN in your shell to use a different one; both services read the same value.
 #
+# HOLYDECK_MONGO_PASSWORD and HOLYDECK_MONGO_ROOT_PASSWORD default to the same kind of not-a-secret
+# value below, rather than compose.yaml's required `${…:?}` (OPS-01): this stack is never a real
+# deployment, so a fixed default costs nothing a real one would, and `pnpm dev:server` stays a single
+# command with nothing to export first.
+#
 # Named explicitly so it never shares a default project name — and so the containers it starts — with
 # compose.yaml, the supported deployment stack this same directory also holds.
 name: holydeck-dev

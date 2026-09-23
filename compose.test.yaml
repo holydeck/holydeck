@@ -20,6 +20,11 @@
 # The one named volume is the built web client, which is output rather than record: keeping it across runs
 # is a build cache, and Compose scopes it to this project's name, so the development stack's client and
 # this one are two different volumes that happen to share a key.
+#
+# The Mongo passwords below are hardcoded literals rather than compose.yaml's required `${…:?}`
+# (OPS-01), for the same reason as compose.dev.yaml: nothing this file starts is a real deployment,
+# so a fixed value is enough, and scripts/stack/verify.mjs can bring the stack up without exporting
+# anything first.
 name: holydeck-test
 
 services:

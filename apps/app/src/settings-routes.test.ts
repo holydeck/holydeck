@@ -117,6 +117,26 @@ describe('reading the settings', () => {
     expect(response.body).not.toContain(TOKEN);
   });
 
+  // `redaction.ts`'s `secretsIn` reads the store address' own credential off `mongoUrl`, the same way it
+  // reads `corpusToken` above — proven directly here rather than left to that module's own tests, since
+  // this route is the one place either ever reaches a caller.
+  test('never sends the store address credential back verbatim either', async () => {
+    const withStore = `corpusUrl: http://corpus:8080\ncorpusToken: ${TOKEN}\nmongoUrl: mongodb://operator:hunter2@mongo:27017/holydeck\n`;
+    const io = fakeSettingsIO({ [PATH]: withStore });
+    settingsAdmin = settingsAdminOn(loadSettings({ fileText: withStore, env: {}, path: PATH }), { ...io, env: {} });
+    await app.close();
+    app = Fastify({ logger: false });
+    withSafeErrors(app);
+    guardMutations(app, { sessions });
+    enforceAuthorization(app, { sessions, identity: undefined });
+    serveSettingsRoutes(app, { settingsAdmin, identity });
+    await app.ready();
+
+    const response = await reading();
+    expect(response.body).not.toContain('hunter2');
+    expect(response.json().data.values.mongoUrl).not.toContain('hunter2');
+  });
+
   test('writes nothing to the trail, the same as any other read', async () => {
     await reading();
     expect(entries()).toEqual([]);
