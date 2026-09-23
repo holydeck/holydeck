@@ -165,6 +165,27 @@ export function restoreContext(actor: string, correlationId: string): RequestCon
   });
 }
 
+/** How long a rehearsal of a backup keeps it eligible to apply to production (OPS-06) — shared so the
+ *  route that queues a restore-apply job and `restore-apply.ts`'s own re-check, right before anything is
+ *  written, can never quietly drift apart into two different windows. */
+export const REHEARSAL_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether `backupId` has a passing rehearsal recorded within `REHEARSAL_WINDOW_MS` of `now`. Every row
+ * `RESTORE_RECORD` holds is already a passing one — `rehearseRestore` below throws rather than record a
+ * failed attempt — so existence within the window is enough; there is no separate outcome field to check.
+ */
+export async function hasPassingRehearsal(
+  db: RepositoryDb,
+  context: RequestContext,
+  backupId: string,
+  now: string,
+): Promise<boolean> {
+  const since = new Date(Date.parse(now) - REHEARSAL_WINDOW_MS).toISOString();
+  const rehearsals = await repositoriesOn(db)[RESTORE_RECORD].read(context, { backupId, at: { $gte: since } });
+  return rehearsals.length > 0;
+}
+
 function permit(context: unknown): RequestContext {
   const problems = contextProblems(context);
   if (problems.length > 0) throw new RestoreError('context', `restores: ${problems.join('; ')}`);

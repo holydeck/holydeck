@@ -18,6 +18,7 @@ import type { RestoreCapabilities, RestoreCollection, RestoreDb, RestoreSessions
 
 const NOW = '2026-09-21T03:00:00.000Z';
 const CONTEXT = restoreContext('operator', 'restore-apply-1');
+const BACKUP_ID = 'backup-2026-09-21T03-00-00Z';
 
 const RESTIC_MONGO: BackupContent = { class: 'mongo', count: 1, bytes: 4096, hash: 'restic:cc33dd' };
 const RESTIC_SETTINGS: BackupContent = { class: 'settings', count: 1, bytes: 512, hash: 'restic:9f2c1b' };
@@ -54,7 +55,7 @@ const productionOf = (
   inventoried: readonly RestoreClass[] = ['mongo', 'settings', 'media'],
 ): BackupProduction => ({
   manifest: {
-    id: 'backup-2026-09-21T03-00-00Z',
+    id: BACKUP_ID,
     createdAt: NOW,
     schemaVersion: 19,
     contents: [
@@ -123,6 +124,31 @@ const fakeCompatibility = (log: string[] = []): RestoreApplyOptions['compatibili
   },
 });
 
+/** A passing rehearsal row, shaped the way `rehearseRestore` itself writes one — see `restore-routes.test.ts`'s
+ *  own `rehearsal` helper, which this mirrors, since both exercise the same `hasPassingRehearsal` query. */
+const rehearsalOf = (backupId: string, at: string): Document => ({
+  _id: `restore:${backupId}:${at}`,
+  actor: 'system',
+  correlationId: 'restore-apply-1',
+  restoreId: `restore-${at}`,
+  backupId,
+  at,
+  manifest: {},
+  consistency: {},
+  integrity: {},
+  objectives: {},
+  restore: {},
+});
+
+/** A `fakeDb()` seeded with a rehearsal `applyRestore`'s own precondition check finds passing, by default for
+ *  the backup every test in this file restores. `at` lets a test move that rehearsal outside the 24 h window
+ *  it would otherwise satisfy. */
+const dbWithRehearsal = (backupId: string = BACKUP_ID, at: string = NOW): ReturnType<typeof fakeDb> => {
+  const db = fakeDb();
+  db.rows.set(RESTORE_RECORD, [rehearsalOf(backupId, at)]);
+  return db;
+};
+
 const refusal = async (run: () => Promise<unknown>): Promise<RestoreApplyError | RestoreError> => {
   try {
     await run();
@@ -186,7 +212,7 @@ describe('selecting which classes a restore replaces', () => {
   test.each(nonEmptySubsets(ALL_CLASSES))('replaces exactly %s, and touches nothing else', async (...classes) => {
     const production = productionOf(await archiveIn(root));
     const { log, mongoTarget, targets, settingsLivePath, mediaLivePath } = await rigFor(root);
-    const applied = await applyRestore(fakeDb(), CONTEXT, production, {
+    const applied = await applyRestore(dbWithRehearsal(), CONTEXT, production, {
       selection: selectionOf(classes),
       targets,
       sessions: fakeSessions(log),
@@ -224,7 +250,7 @@ describe('what a production restore refuses before writing anything', () => {
     const production = productionOf(await archiveIn(root), ['mongo', 'settings']);
     const { log, targets } = await rigFor(root);
     const error = await refusal(() =>
-      applyRestore(fakeDb(), CONTEXT, production, {
+      applyRestore(dbWithRehearsal(), CONTEXT, production, {
         selection: selectionOf(['settings', 'media']),
         targets,
         sessions: fakeSessions(log),
@@ -243,7 +269,7 @@ describe('what a production restore refuses before writing anything', () => {
     const { log, targets } = await rigFor(root);
     const withoutSettings: RestoreApplyTargets = { mongo: targets.mongo, media: targets.media };
     const error = await refusal(() =>
-      applyRestore(fakeDb(), CONTEXT, production, {
+      applyRestore(dbWithRehearsal(), CONTEXT, production, {
         selection: selectionOf(['mongo', 'settings']),
         targets: withoutSettings,
         sessions: fakeSessions(log),
@@ -269,12 +295,47 @@ describe('what a production restore refuses before writing anything', () => {
     expect(mongoTarget.rows.size).toBe(0);
   });
 
+  test('refuses a backup with no rehearsal on file at all', async () => {
+    const production = productionOf(await archiveIn(root));
+    const { log, targets } = await rigFor(root);
+    const error = await refusal(() =>
+      applyRestore(fakeDb(), CONTEXT, production, {
+        selection: selectionOf(['settings']),
+        targets,
+        sessions: fakeSessions(log),
+        capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
+        now: () => NOW,
+      }),
+    );
+    expect(error.kind).toBe('rehearsal');
+    expect(log).toEqual([]);
+  });
+
+  test('re-checks the rehearsal itself rather than trusting the route checked it: a rehearsal that has since aged out of the 24 h window is refused here too', async () => {
+    const production = productionOf(await archiveIn(root));
+    const { log, targets } = await rigFor(root);
+    const stale = dbWithRehearsal(BACKUP_ID, '2026-09-19T03:00:00.000Z');
+    const error = await refusal(() =>
+      applyRestore(stale, CONTEXT, production, {
+        selection: selectionOf(['settings']),
+        targets,
+        sessions: fakeSessions(log),
+        capabilities: fakeCapabilities(log),
+        compatibility: fakeCompatibility(log),
+        now: () => NOW,
+      }),
+    );
+    expect(error.kind).toBe('rehearsal');
+    expect(log).toEqual([]);
+  });
+
   test('refuses an archive whose restored Mongo bytes do not match the manifest, before any target is touched', async () => {
     const production = productionOf(await archiveIn(root));
     await writeFile(join(root, 'services.json'), '[]', 'utf8');
     const { log, targets } = await rigFor(root);
     const error = await refusal(() =>
-      applyRestore(fakeDb(), CONTEXT, production, {
+      applyRestore(dbWithRehearsal(), CONTEXT, production, {
         selection: selectionOf(['mongo']),
         targets,
         sessions: fakeSessions(log),
@@ -327,7 +388,7 @@ describe('what a production restore refuses before writing anything', () => {
 
 describe('what a production restore leaves behind', () => {
   test('audits a completed restore with the classes it replaced', async () => {
-    const db = fakeDb();
+    const db = dbWithRehearsal();
     const production = productionOf(await archiveIn(root));
     const { log, targets } = await rigFor(root);
     await applyRestore(db, CONTEXT, production, {
@@ -400,7 +461,7 @@ describe('what a production restore leaves behind', () => {
   });
 
   test('audits a restore that fails after mongo already replaced, naming what got through', async () => {
-    const db = fakeDb();
+    const db = dbWithRehearsal();
     const production = productionOf(await archiveIn(root));
     const { log, mongoTarget, targets } = await rigFor(root);
     const failingSettings: RestoreFileTarget = {

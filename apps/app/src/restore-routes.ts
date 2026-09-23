@@ -21,9 +21,8 @@ import { provenSession, refuseAsForbidden } from './csrf.js';
 import { notFound } from './failures.js';
 import { QUEUE_PERMISSIONS } from './queue.js';
 import { permissionsFor } from './records.js';
-import { repositoriesOn } from './repositories.js';
 import { RESTORE_MANAGE } from './roles.js';
-import { RESTORE_RECORD } from './restores.js';
+import { RESTORE_RECORD, hasPassingRehearsal } from './restores.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
@@ -42,9 +41,6 @@ const PERMISSION: RouteNeed = { kind: 'permission', need: RESTORE_MANAGE };
 const ROUTES = [['POST', RESTORES_PATH]] as const;
 
 const NOT_AN_ACCOUNT = 'applying a restore is asked by an account, and this session is not held by one';
-
-/** How long a rehearsal of the requested backup keeps it eligible to apply. See this module's header. */
-const REHEARSAL_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export interface RestoreRoutesOptions {
   /** Absent whenever `identity` is, per `main.ts`'s wiring — never independently, from this module's view. */
@@ -118,12 +114,7 @@ export function serveRestoreRoutes(app: FastifyInstance, { db, queue, now, ident
     }
 
     const context = routeContext(actor, correlationId);
-    const since = new Date(Date.parse(now()) - REHEARSAL_WINDOW_MS).toISOString();
-    const rehearsals = await repositoriesOn(db)[RESTORE_RECORD].read(context, {
-      backupId: parsed.value.backupId,
-      at: { $gte: since },
-    });
-    if (rehearsals.length === 0) {
+    if (!(await hasPassingRehearsal(db, context, parsed.value.backupId, now()))) {
       await note(request, actor, parsed.value.backupId, 'refused');
       return reply.code(409).send(errorEnvelope(
         ENTITY_CONFLICT,

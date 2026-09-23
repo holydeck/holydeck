@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { MONGO_CONTENTS, archiveEntryOf } from '@holydeck/app/backups';
-import { restoreContext } from '@holydeck/app/restores';
+import { RESTORE_RECORD, restoreContext } from '@holydeck/app/restores';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SETTINGS_STAGING_DIR } from './backup-producer.js';
@@ -81,6 +81,23 @@ const recordedBackup = (contents: readonly unknown[]): Document => ({
 });
 
 const FULL_CONTENTS = [...dumps.map((dump) => dump.content), ...RESTIC_CONTENTS];
+
+/** A passing rehearsal `applyRestore`'s own precondition check needs on file before it will touch
+ *  production — shaped the way `rehearseRestore` itself writes one; see `restore-apply.test.ts`'s
+ *  own `rehearsalOf`, which this mirrors. */
+const rehearsalRow = (): Document => ({
+  _id: `restore:${BACKUP_ID}:${NOW}`,
+  actor: 'system',
+  correlationId: 'req-restore-apply',
+  restoreId: `restore-${NOW}`,
+  backupId: BACKUP_ID,
+  at: NOW,
+  manifest: {},
+  consistency: {},
+  integrity: {},
+  objectives: {},
+  restore: {},
+});
 
 const fakeTarget = (): RestoreDb & { readonly rows: Map<string, Document[]> } => {
   const rows = new Map<string, Document[]>();
@@ -167,6 +184,7 @@ describe('applying a recorded backup to production', () => {
   it('restores mongo, settings and media behind the maintenance lease, and audits it', async () => {
     const db = fakeDb();
     db.rows.set('backups', [recordedBackup(FULL_CONTENTS)]);
+    db.rows.set(RESTORE_RECORD, [rehearsalRow()]);
     const target = fakeTarget();
     const revokeEvery = vi.fn(async () => 3);
     const revokeEveryCapability = vi.fn(async () => 6);
@@ -249,6 +267,7 @@ describe('applying a recorded backup to production', () => {
   it('narrows to the components the job asked for, leaving the rest untouched', async () => {
     const db = fakeDb();
     db.rows.set('backups', [recordedBackup(FULL_CONTENTS)]);
+    db.rows.set(RESTORE_RECORD, [rehearsalRow()]);
     const target = fakeTarget();
     const revokeEvery = vi.fn(async () => 3);
     const handler = restoreApplyOn(options({ db, target, sessions: { revokeEvery }, settingsPath, mediaRoot }));
