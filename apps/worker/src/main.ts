@@ -88,7 +88,19 @@ const beat = (): void => {
     return;
   }
   mkdirSync(dirname(beatFile), { recursive: true });
-  writeFileSync(beatFile, heartbeatText(new Date().toISOString(), process.pid, paths));
+  // OPS-09's worker-process scope: this process's own CPU time since it started and its own resident
+  // memory, never the host's. `operational-sources.ts` reads this back off the same file already read
+  // for liveness, rather than the worker needing anywhere else to publish it.
+  const usage = process.cpuUsage();
+  const memory = process.memoryUsage();
+  writeFileSync(
+    beatFile,
+    heartbeatText(new Date().toISOString(), process.pid, paths, {
+      cpuUserSeconds: usage.user / 1_000_000,
+      cpuSystemSeconds: usage.system / 1_000_000,
+      memoryRssMb: Math.round(memory.rss / 1_000_000),
+    }),
+  );
 };
 
 beat();
