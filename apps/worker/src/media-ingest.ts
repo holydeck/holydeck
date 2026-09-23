@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { sniffMediaType } from '@holydeck/contracts/media';
 
+import { posterStorageKey } from '@holydeck/app/media';
+
 import type { MediaDerivative } from '@holydeck/contracts/media';
 import type { MediaLibrary, MediaStorageIO } from '@holydeck/app/media';
 import type { Handler } from './runner.js';
@@ -70,7 +72,7 @@ export function mediaIngestOn(options: MediaIngestOptions): Handler {
         const poster = await options.poster.generate(source, signal);
         stopped(signal);
         if (poster === undefined) throw new Error(`media asset ${assetId} has no static poster frame`);
-        await options.storage.write(options.mediaRoot(), `${assetId}.poster.jpg`, poster);
+        await options.storage.write(options.mediaRoot(), posterStorageKey(assetId), poster);
         stopped(signal);
         derivatives.push({ kind: 'poster', bytes: poster.byteLength, hash: HASH(poster), from: assetId });
       }

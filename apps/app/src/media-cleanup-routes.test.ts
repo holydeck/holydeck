@@ -13,6 +13,7 @@ import { MEDIA_CLEANUP_PATH, serveMediaCleanupRoutes } from './media-cleanup-rou
 import { MEDIA_MANAGE } from './roles.js';
 import { passkeysOn } from './passkeys.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { slideGroupContext, slideGroupsOn } from './slide-groups.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
@@ -21,6 +22,7 @@ import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
+import type { SlideGroupBody } from '@holydeck/contracts/slide-groups';
 import type { Identity } from './onboarding.js';
 import type { MediaLibrary, MediaPurgeItem } from './media.js';
 import type { Document } from './repositories.js';
@@ -88,13 +90,17 @@ const fakeMedia = (): MediaLibrary => {
   };
 };
 
-const served = async (missing?: 'media' | 'identity' | 'all'): Promise<FastifyInstance> => {
+// `db: null` (as opposed to the default, unpassed `undefined`) is this helper's own way to say "no
+// content database" explicitly — a plain default parameter cannot tell "not passed" apart from
+// "passed as undefined", and the fallback-to-nothing-referenced test below needs exactly that.
+const served = async (missing?: 'media' | 'identity' | 'all', db: FakeDb | null = trail): Promise<FastifyInstance> => {
   const built = Fastify({ logger: false });
   withSafeErrors(built);
   guardMutations(built, { sessions });
   enforceAuthorization(built, { sessions, identity: undefined });
   serveMediaCleanupRoutes(built, {
     media: missing === 'media' || missing === 'all' ? undefined : media,
+    db: db ?? undefined,
     now,
     graceDays: GRACE_DAYS,
     identity: missing === 'identity' || missing === 'all' ? undefined : identity,
@@ -201,5 +207,43 @@ describe('who may see the report or ask for a purge', () => {
       const response = await app.inject({ method, url, headers: withHeaders(), payload: method === 'POST' ? '{}' : undefined });
       expect(response.statusCode).toBe(404);
     }
+  });
+});
+
+describe('what referencedBy actually resolves (OPS-14)', () => {
+  const SLIDE = { id: 'slide-1', enabled: true, label: 'Welcome', languageBlocks: [] };
+  const bodyWithBackground: SlideGroupBody = { mode: 'custom', enabled: true, slideLayoutId: 'layout-a', background: 'asset-1', slides: [SLIDE] };
+  const bodyWithAudio: SlideGroupBody = { mode: 'custom', enabled: true, slideLayoutId: 'layout-a', audioTrackId: 'asset-1', slides: [SLIDE] };
+  const bodyReusable: SlideGroupBody = {
+    mode: 'custom',
+    enabled: true,
+    slideLayoutId: 'layout-a',
+    slides: [{ ...SLIDE, background: 'asset-2' }],
+  };
+
+  test('resolves real slide group and reusable slide references, not an always-empty stub', async () => {
+    let nextId = 0;
+    const groups = slideGroupsOn(trail, { now, newId: () => `slide-group-${(nextId += 1)}` });
+    const context = slideGroupContext(ADMINISTRATOR, CORRELATION);
+    const withBackground = await groups.create(context, 'slideGroup', 'Background', bodyWithBackground);
+    const withAudio = await groups.create(context, 'slideGroup', 'Audio', bodyWithAudio);
+    const reusable = await groups.create(context, 'reusableSlide', 'Reusable', bodyReusable);
+
+    purgeReport.mockResolvedValue({ items: [] });
+    const response = await app.inject({ method: 'GET', url: MEDIA_CLEANUP_PATH, headers: withHeaders() });
+    expect(response.statusCode).toBe(200);
+    const referencedBy = purgeReport.mock.calls.at(-1)?.[1].referencedBy as (assetId: string) => readonly string[];
+    expect(referencedBy('asset-1')).toEqual([`slideGroup:${withBackground.stamp.id}`, `slideGroup:${withAudio.stamp.id}`]);
+    expect(referencedBy('asset-2')).toEqual([`reusableSlide:${reusable.stamp.id}`]);
+    expect(referencedBy('asset-3')).toEqual([]);
+  });
+
+  test('falls back to reporting nothing referenced when this deployment has no content database', async () => {
+    await app.close();
+    app = await served(undefined, null);
+    purgeReport.mockResolvedValue({ items: [] });
+    await app.inject({ method: 'GET', url: MEDIA_CLEANUP_PATH, headers: withHeaders() });
+    const referencedBy = purgeReport.mock.calls.at(-1)?.[1].referencedBy as (assetId: string) => readonly string[];
+    expect(referencedBy('asset-1')).toEqual([]);
   });
 });

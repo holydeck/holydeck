@@ -33,7 +33,7 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { parseSlideGroupBody } from '@holydeck/contracts/slide-groups';
+import { mediaReferencesIn, parseSlideGroupBody } from '@holydeck/contracts/slide-groups';
 
 import { requestContext } from './context.js';
 import { LibraryError, LIBRARY_PERMISSIONS, libraryOn } from './library.js';
@@ -478,4 +478,44 @@ export function slideGroupsOn(db: RepositoryDb, options: SlideGroupOptions): Sli
         return found.map((revision) => ({ stamp: libRecord.stamp, title: libRecord.title, body: bodyOf(revision) }));
       }),
   };
+}
+
+/** The two library kinds this file's body shape actually governs (see the file header) — the
+ *  only kinds `slideGroupMediaReferences` below scans. */
+const SLIDE_GROUP_LIBRARY_KINDS = ['slideGroup', 'reusableSlide'] as const;
+
+/**
+ * Every slide group or reusable slide currently referencing each media library id its body names
+ * (OPS-14): the group's own background, its audio track, and each slide's own background override
+ * — the same fields `mediaReferencesIn` collects. Built fresh from the library and revision stores
+ * directly, bypassing `SlideGroupStore` itself so this purge-time scan needs no bulk-list method
+ * added to that interface — and no matching change to every existing fake/mock of it — for what is
+ * otherwise this file's only caller wanting one. A stamped item with no current body is corrupt,
+ * the same invariant `standing()` above already enforces.
+ */
+export async function slideGroupMediaReferences(
+  db: RepositoryDb,
+  options: SlideGroupOptions,
+  context: unknown,
+): Promise<ReadonlyMap<string, readonly string[]>> {
+  return own(async () => {
+    const library = libraryOn(db, { now: options.now, newId: options.newId });
+    const revisions = revisionsOn(db, { now: options.now });
+    const references = new Map<string, string[]>();
+    for (const kind of SLIDE_GROUP_LIBRARY_KINDS) {
+      const items = await library.list(context, { kind });
+      for (const item of items) {
+        const revision = await revisions.current(context, item.stamp.id);
+        if (revision === undefined) {
+          throw new SlideGroupError('corrupt', `${item.stamp.id} is stamped as a slide group and holds no body at all`);
+        }
+        for (const assetId of mediaReferencesIn(bodyOf(revision))) {
+          const existing = references.get(assetId);
+          if (existing === undefined) references.set(assetId, [`${kind}:${item.stamp.id}`]);
+          else existing.push(`${kind}:${item.stamp.id}`);
+        }
+      }
+    }
+    return references;
+  });
 }

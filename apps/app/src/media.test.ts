@@ -227,6 +227,20 @@ describe('purging archived media past its grace period (OPS-14)', () => {
     expect(io.removed).toEqual([`/media/${uploaded.stamp.id}`]);
   });
 
+  it('purges a video asset’s poster derivative alongside its main bytes', async () => {
+    const { io, media } = store();
+    const uploaded = await media.upload(ADMIN, { bytes: png() });
+    const id = uploaded.stamp.id;
+    await media.startProcessing(ADMIN, id);
+    const source = { kind: 'source', bytes: uploaded.manifest.bytes, hash: uploaded.manifest.hash, from: id };
+    const poster = { kind: 'poster', bytes: 1, hash: 'sha256:poster', from: id };
+    await media.completeProcessing(ADMIN, id, [source, poster]);
+    await media.archive(ADMIN, id);
+    const outcome = await media.purgeArchived(ADMIN, { graceDays: 0, referencedBy: () => [] });
+    expect(outcome.purged).toEqual([id]);
+    expect(io.removed).toEqual([`/media/${id}`, `${id}.poster.jpg`]);
+  });
+
   it('never purges a referenced asset, however far past its grace period', async () => {
     const { media } = store();
     const uploaded = await media.upload(ADMIN, { bytes: png() });

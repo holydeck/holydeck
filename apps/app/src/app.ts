@@ -79,6 +79,12 @@ export interface AppOptions {
   slideLayouts?: SlideLayoutStore;
   /** Where an uploaded file becomes a media asset. Without it, there is nowhere for one to be uploaded to. */
   media?: MediaLibrary;
+  /** The same content database `backups.db` above also points at, handed separately here because a
+   * deployment could in principle have media to purge without also having backups configured. Lets
+   * the media cleanup routes scan slide groups and reusable slides for live references (OPS-14)
+   * instead of grading every asset unreferenced. Without it, that scan is skipped and everything
+   * grades unreferenced, same as before this scan existed. */
+  contentDb?: RepositoryDb;
   /** Where a backup is recorded and where an on-demand run is queued. Without both, there is
    * nothing here to trigger or list. */
   backups?: { readonly db: RepositoryDb; readonly queue: Queue };
@@ -115,6 +121,7 @@ export function buildApp({
   settingsAdmin,
   slideLayouts,
   media,
+  contentDb,
   backups,
   maintenance,
   migrationState,
@@ -266,6 +273,7 @@ export function buildApp({
   // `serveMediaRoutes` above already reads and writes.
   serveMediaCleanupRoutes(app, {
     media,
+    db: contentDb,
     now: () => new Date().toISOString(),
     graceDays: settings.values.mediaArchivedPurgeGraceDays,
     identity,

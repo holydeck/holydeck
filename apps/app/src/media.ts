@@ -41,6 +41,14 @@ const STAMP_SEPARATOR = '#';
 
 const MS_PER_DAY = 86_400_000;
 
+/** The storage key a video asset's static poster frame is written under (OPS-14): named here, once,
+ *  so `purgeArchived`'s cleanup below and `apps/worker/src/media-ingest.ts`'s write agree on the
+ *  same key without either duplicating the literal. Always root-relative, never a stored
+ *  `storageKey` of its own — a poster derivative carries no storage location on the manifest
+ *  (`MediaDerivative` has no path field), so this naming convention is its only record of where it
+ *  lives. */
+export const posterStorageKey = (assetId: string): string => `${assetId}.poster.jpg`;
+
 export interface MediaStorageIO {
   /** Stores bytes below this deployment's configured media root and returns their durable handle. */
   write(root: string, key: string, bytes: Uint8Array): Promise<string>;
@@ -395,6 +403,9 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
           if (row === undefined) continue;
           await options.purge.collection(RECORDS.mediaAssets.collection).deleteMany({ assetId: id });
           await options.remove(options.mediaRoot(), row.storageKey);
+          if (row.manifest.derivatives.some((derivative) => derivative.kind === 'poster')) {
+            await options.remove(options.mediaRoot(), posterStorageKey(id));
+          }
           purged.push(id);
         }
         return { purged, retained };

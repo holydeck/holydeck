@@ -165,10 +165,11 @@ if (settings.values.mongoUrl !== '') {
     async read(root, key) {
       return new Uint8Array(await readFile(isAbsolute(key) ? key : join(root, key)));
     },
-    // OPS-14: no content model in this deployment tracks media references yet — the same gap
-    // retention-sweep-handler.ts already documents and defers for autosave-revision. Every asset
-    // purges as unreferenced until that model exists; a maintainer building it wires this resolver
-    // for real.
+    // OPS-14: this asset's own bytes only. `serveMediaCleanupRoutes` below decides, from a live scan
+    // of slide groups and reusable slides (`contentDb`), whether an asset is still referenced before
+    // this ever runs — a song, reading, or sermon's own reference fields, once those schemas exist
+    // (SONG-01, the sermon pipeline), are that task's to add to that scan, the same gap
+    // retention-sweep-handler.ts already documents and defers for autosave-revision.
     async remove(root, key) {
       await rm(isAbsolute(key) ? key : join(root, key), { force: true });
     },
@@ -212,6 +213,7 @@ const app = buildApp({
   settingsAdmin,
   slideLayouts,
   media,
+  contentDb: backups?.db,
   backups,
   notificationDb: notificationDatabase,
   maintenance,
