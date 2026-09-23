@@ -134,9 +134,11 @@ const created = async (payload: unknown = WIRE_DRAFT): Promise<string> => {
   return response.json().data.stamp.id as string;
 };
 
+// `store` has no default: an explicit `undefined` argument would otherwise be indistinguishable from an
+// omitted one and silently fall back to `templates`, defeating the one test below that needs it absent.
 const serving = async (
   held: Identity | undefined,
-  store: ServiceTemplateStore | undefined = templates,
+  store: ServiceTemplateStore | undefined,
 ): Promise<void> => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
@@ -165,7 +167,7 @@ beforeEach(async () => {
   let serial = 0;
   services = servicesOn(db, { now, newId: () => `service-${(serial += 1)}` });
   templates = serviceTemplatesOn(db, { now, newId: () => `template-${(serial += 1)}`, services });
-  await serving(identity);
+  await serving(identity, templates);
   admin = await sessions.start(sessionContext(CORRELATION), {
     actor: ADMINISTRATOR,
     permissions: [SERVICE_TEMPLATES_MANAGE, SERVICES_MANAGE],
@@ -210,7 +212,7 @@ describe('creating a Service Template', () => {
   test('refuses a creation that lost the race for the identifier it was given', async () => {
     await app.close();
     templates = serviceTemplatesOn(db, { now, newId: () => 'template-twice', services });
-    await serving(identity);
+    await serving(identity, templates);
     expect((await creating(WIRE_DRAFT)).statusCode).toBe(201);
     const second = await creating({ name: 'Evening service', sections: [] });
     expect(second.statusCode).toBe(409);
@@ -222,7 +224,7 @@ describe('creating a Service Template', () => {
 
   test('a trail that refuses an entry does not cost the Template', async () => {
     await app.close();
-    await serving({ ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } });
+    await serving({ ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } }, templates);
     expect((await creating(WIRE_DRAFT)).statusCode).toBe(201);
   });
 });
@@ -472,7 +474,15 @@ describe('what this surface refuses to answer at all', () => {
 
   test('answers not-found from the identity gate alone, even with a store configured', async () => {
     await app.close();
-    await serving(undefined);
+    await serving(undefined, templates);
+    expect((await creating(WIRE_DRAFT)).statusCode).toBe(404);
+    expect((await listTemplates())).toHaveProperty('statusCode', 404);
+    expect((await previewing('template-1')).statusCode).toBe(404);
+  });
+
+  test('answers not-found from the store gate alone, even with an identity configured', async () => {
+    await app.close();
+    await serving(identity, undefined);
     expect((await creating(WIRE_DRAFT)).statusCode).toBe(404);
     expect((await listTemplates())).toHaveProperty('statusCode', 404);
     expect((await previewing('template-1')).statusCode).toBe(404);

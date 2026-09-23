@@ -104,9 +104,11 @@ export function serveServiceTemplateRoutes(
   app: FastifyInstance,
   { serviceTemplates, identity }: ServiceTemplateRoutesOptions,
 ): void {
-  // A deployment with nowhere to keep an identity has nothing here to audit a change against. Every path
-  // is still served, so the guard's table remains the complete shape of the surface in every deployment.
-  if (identity === undefined) {
+  // A deployment with nowhere to keep an identity, or no Service Template store, has nothing here to
+  // audit or serve. `main.ts` always wires the two together, but `buildApp` accepts them as independent
+  // options, so this module checks both itself rather than trusting that pairing. Every path is still
+  // served, so the guard's table remains the complete shape of the surface in every deployment.
+  if (identity === undefined || serviceTemplates === undefined) {
     for (const [method, url, need] of ROUTES) {
       app.route({
         method,
@@ -118,9 +120,7 @@ export function serveServiceTemplateRoutes(
     return;
   }
 
-  // Guaranteed by `main.ts`'s wiring, not by this module: an `identity` never exists without a Service
-  // Template store alongside it, so the gate above is this module's only check for either.
-  const templates = serviceTemplates as ServiceTemplateStore;
+  const templates = serviceTemplates;
 
   const call = (request: FastifyRequest) =>
     serviceTemplateContext(provenSession(request).record.actor, correlationFor(TEMPLATE_PREFIX, request.id));
