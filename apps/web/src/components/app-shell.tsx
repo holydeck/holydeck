@@ -38,7 +38,9 @@ const sectionOf = (current: Route): 'services' | 'administration' | 'security' |
     current.name === 'admin-users' ||
     current.name === 'admin-settings' ||
     current.name === 'admin-audit' ||
-    current.name === 'admin-integrations'
+    current.name === 'admin-integrations' ||
+    current.name === 'admin-languages' ||
+    current.name === 'admin-slide-labels'
   ) {
     return 'administration';
   }

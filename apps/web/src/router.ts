@@ -16,6 +16,8 @@ export type Route =
   | { readonly name: 'admin-settings' }
   | { readonly name: 'admin-audit' }
   | { readonly name: 'admin-integrations' }
+  | { readonly name: 'admin-languages' }
+  | { readonly name: 'admin-slide-labels' }
   | { readonly name: 'account-security' }
   | { readonly name: 'content-history'; readonly contentId: string }
   | { readonly name: 'output'; readonly kind: string }
@@ -64,6 +66,8 @@ export function matchRoute(pathWithSearch: string): Route {
   if (pathname === '/admin/settings') return { name: 'admin-settings' };
   if (pathname === '/admin/audit') return { name: 'admin-audit' };
   if (pathname === '/admin/integrations') return { name: 'admin-integrations' };
+  if (pathname === '/admin/languages') return { name: 'admin-languages' };
+  if (pathname === '/admin/slide-labels') return { name: 'admin-slide-labels' };
   if (pathname === '/account/security') return { name: 'account-security' };
 
   const service = /^\/services\/([^/]+)$/u.exec(pathname);

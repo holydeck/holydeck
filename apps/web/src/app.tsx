@@ -28,6 +28,8 @@ const AdminUsersPage = lazy(() => import('./pages/admin-users.js').then((module)
 const AdminSettingsPage = lazy(() => import('./pages/admin-settings.js').then((module) => module.AdminSettingsPage));
 const AdminAuditPage = lazy(() => import('./pages/admin-audit.js').then((module) => module.AdminAuditPage));
 const AdminIntegrationsPage = lazy(() => import('./pages/admin-integrations.js').then((module) => module.AdminIntegrationsPage));
+const AdminLanguagesPage = lazy(() => import('./pages/admin-languages.js').then((module) => module.AdminLanguagesPage));
+const AdminSlideLabelsPage = lazy(() => import('./pages/admin-slide-labels.js').then((module) => module.AdminSlideLabelsPage));
 const HistoryPage = lazy(() => import('./pages/history.js').then((module) => module.HistoryPage));
 const SecurityPage = lazy(() => import('./pages/account-security.js').then((module) => module.SecurityPage));
 
@@ -48,6 +50,10 @@ function Page(): JSX.Element {
       return <AdminAuditPage />;
     case 'admin-integrations':
       return <AdminIntegrationsPage />;
+    case 'admin-languages':
+      return <AdminLanguagesPage />;
+    case 'admin-slide-labels':
+      return <AdminSlideLabelsPage />;
     case 'account-security':
       return <SecurityPage />;
     case 'content-history':
