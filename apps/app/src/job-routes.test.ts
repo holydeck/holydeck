@@ -12,7 +12,7 @@ import { FORBIDDEN, guardMutations, mutatingRoutesOf } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { JOBS_PATH, serveJobRoutes } from './job-routes.js';
 import { QueueError, queueOn } from './queue.js';
-import { JOBS_MANAGE } from './roles.js';
+import { JOBS_MANAGE, JOBS_READ } from './roles.js';
 import { passkeysOn } from './passkeys.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { totpsOn } from './totp.js';
@@ -135,7 +135,10 @@ beforeEach(async () => {
   jobs = [];
   queue = queueOn(fakeQueueDb(), { now, newId: () => 'job-new' });
   app = await served();
-  admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [JOBS_MANAGE] });
+  admin = await sessions.start(sessionContext(CORRELATION), {
+    actor: ADMINISTRATOR,
+    permissions: [JOBS_READ, JOBS_MANAGE],
+  });
 });
 
 afterEach(async () => {
@@ -208,14 +211,31 @@ describe('trying a failed job again', () => {
     expect(entries()).toEqual([]);
   });
 
-  test('answers conflict and audits refusal when the job stopped being failed between list and requeue', async () => {
+  // `Queue.get` looks the job up by its own id rather than paging through `Queue.list` — so a failed job
+  // that would not appear on the first (or only) page a list call returns is still requeued here.
+  test('requeues a failed job even when it would not fall on the first page of a list', async () => {
+    jobs.push(stored({ _id: 'job-1', kind: 'backup-run', state: 'failed', idempotencyKey: 'backup-run:2026-09-21' }));
+    const pagedOut: Queue = { ...queue, list: async () => [] };
+    const pagedApp = Fastify({ logger: false });
+    withSafeErrors(pagedApp);
+    guardMutations(pagedApp, { sessions });
+    enforceAuthorization(pagedApp, { sessions, identity: undefined });
+    serveJobRoutes(pagedApp, { queue: pagedOut, identity });
+    await pagedApp.ready();
+    const response = await pagedApp.inject({ method: 'POST', url: `${JOBS_PATH}/job-1/requeue`, headers: withHeaders() });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ id: 'job-1', state: 'queued' });
+    await pagedApp.close();
+  });
+
+  test('answers conflict and audits refusal when the job stopped being failed between get and requeue', async () => {
     const flaky: Queue = {
       ...queue,
-      list: async () => [{
+      get: async () => ({
         id: 'job-9', kind: 'backup-run', idempotencyKey: 'backup-run:job-9', state: 'failed',
         attempt: 5, retryLimit: 5, queuedAt: NOW, workers: [], payload: {}, lastError: undefined,
         leaseExpiresAt: undefined, heartbeatAt: undefined,
-      }],
+      }),
       requeue: async () => {
         throw new QueueError('state', 'job job-9: only a job that failed is an administrator’s to requeue');
       },
@@ -266,9 +286,30 @@ describe('who may see or change the queue', () => {
     ['GET', JOBS_PATH],
     ['GET', `${JOBS_PATH}/summary`],
     ['POST', `${JOBS_PATH}/job-1/requeue`],
-  ] as const)('refuses %s %s without jobs.manage', async (method, url) => {
+  ] as const)('refuses %s %s with no permission at all', async (method, url) => {
     const guest = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [] });
     const response = await app.inject({ method, url, headers: withHeaders(guest) });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe(FORBIDDEN);
+  });
+
+  // `jobs.read` and `jobs.manage` are independent: holding one is not holding the other.
+  test.each([
+    ['GET', JOBS_PATH],
+    ['GET', `${JOBS_PATH}/summary`],
+  ] as const)('refuses %s %s to an actor who holds jobs.manage but not jobs.read', async (method, url) => {
+    const manager = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [JOBS_MANAGE] });
+    const response = await app.inject({ method, url, headers: withHeaders(manager) });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe(FORBIDDEN);
+  });
+
+  test('refuses requeue to an actor who holds jobs.read but not jobs.manage', async () => {
+    jobs.push(stored({ _id: 'job-1', kind: 'backup-run', state: 'failed', idempotencyKey: 'backup-run:2026-09-21' }));
+    const reader = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [JOBS_READ] });
+    const response = await app.inject({
+      method: 'POST', url: `${JOBS_PATH}/job-1/requeue`, headers: withHeaders(reader),
+    });
     expect(response.statusCode).toBe(403);
     expect(response.json().error.code).toBe(FORBIDDEN);
   });

@@ -58,11 +58,20 @@ export const BACKUP_MANAGE = 'backup.manage';
 export const RESTORE_MANAGE = 'restore.manage';
 
 /**
- * Sees what the queue holds and asks a failed job be tried again (OPS-08). Admin's alone, by role —
- * the same as every other administrative surface. Spelled `jobs.manage` deliberately apart from the
- * store-level `jobs.read`/`jobs.run`/`jobs.requeue` `queue.ts` already grants at the record layer:
- * an operator-facing permission and the internal vocabulary it is checked against are never the
- * same word.
+ * Sees what the queue holds — the Jobs page's own list, summary and per-job detail (OPS-08). Held apart
+ * from `JOBS_MANAGE` because seeing a job is not resetting one. Spelled `jobs.view` rather than `jobs.read`:
+ * `queue.ts` already grants `jobs.read` at the record layer, and an operator-facing permission and the
+ * internal vocabulary it is checked against are never the same word.
+ */
+export const JOBS_READ = 'jobs.view';
+
+/**
+ * Asks a failed job be tried again (OPS-08). Admin's alone, by role — the same as every other
+ * administrative surface. Spelled `jobs.manage` deliberately apart from the store-level
+ * `jobs.read`/`jobs.run`/`jobs.requeue` `queue.ts` already grants at the record layer: an operator-facing
+ * permission and the internal vocabulary it is checked against are never the same word. Held apart from
+ * `JOBS_READ` above because requeuing is not merely seeing: a role that reads the queue does not thereby
+ * act on it.
  */
 export const JOBS_MANAGE = 'jobs.manage';
 
@@ -86,6 +95,7 @@ const ROLE_PERMISSIONS: Readonly<Record<AccountRole, readonly string[]>> = {
     SERVICES_MANAGE,
     BACKUP_MANAGE,
     RESTORE_MANAGE,
+    JOBS_READ,
     JOBS_MANAGE,
     OPERATIONS_READ,
   ],

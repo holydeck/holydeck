@@ -317,6 +317,9 @@ export interface Queue {
     },
   ): Promise<readonly JobRecord[]>;
   summary(context: unknown): Promise<Readonly<Record<JobState, number>>>;
+  /** One job by its own id, undefined when there is none — the direct lookup `requeue` needs, rather than
+   *  a page of `list` a job can sit past. */
+  get(context: unknown, id: string): Promise<JobRecord | undefined>;
   requeue(
     context: unknown,
     input: { readonly id: string; readonly idempotencyKey: string },
@@ -481,6 +484,12 @@ export function queueOn(db: QueueDb, options: QueueOptions): Queue {
         JOB_STATES.map(async (state) => [state, await collection().countDocuments({ state })] as const),
       );
       return Object.freeze(Object.fromEntries(counts)) as Readonly<Record<JobState, number>>;
+    },
+
+    async get(context, id) {
+      permit(context, 'read');
+      const document = await collection().findOne({ _id: id });
+      return document === null ? undefined : jobFrom(document);
     },
 
     async requeue(context, { id, idempotencyKey }) {

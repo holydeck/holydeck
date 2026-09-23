@@ -1,13 +1,16 @@
 // Where an operator sees what the queue is doing and asks a failed job be tried again (OPS-08).
-// Shaped like `backup-routes.ts`: one permission, `JOBS_MANAGE`, gates every route, and a deployment
-// with nowhere to keep a queue serves the same paths answering not-found.
+// Shaped like `backup-routes.ts`: a permission gates every route, and a deployment with nowhere to
+// keep a queue serves the same paths answering not-found. Seeing and acting are gated apart here,
+// unlike `backup-routes.ts`'s single `BACKUP_MANAGE`: `JOBS_READ` gates the two GET routes, `JOBS_MANAGE`
+// gates requeuing, because `queue.ts` already grades `read` and `requeue` apart internally and OPS-08
+// asks the same split of the route that fronts it.
 //
-// Listing and summarizing pass `Queue.list`/`Queue.summary` straight through with no cursor of
-// their own — `Queue.list` keeps none, so this route keeps none either (a v1 follow-up, not this
-// task's). Requeuing a job is administration's alone, the same reach `restore-routes.ts` and
-// `backup-routes.ts` already ask of Admin for their own surfaces: `queue.ts` grades `read` and
-// `requeue` apart internally, per call, but never splits them at the route, so one operator-facing
-// permission covers every route this module serves.
+// Listing and summarizing pass `Queue.list`/`Queue.summary` straight through with no cursor of their
+// own — `Queue.list` keeps none, so this route keeps none either (a v1 follow-up, not this task's; no
+// consumer reads a cursor yet, since no Jobs page exists). Requeuing looks a job up by `Queue.get`
+// rather than paging through `Queue.list`, so a failed job outside the newest page is still found —
+// scheduled-next times from the scheduler state doc are an `apps/worker`-owned read this route does not
+// yet make (also a v1 follow-up, and again nothing here reads one back).
 
 import { JOB_STATES } from '@holydeck/contracts/jobs';
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
@@ -18,8 +21,8 @@ import { correlationFor, requestContext } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
 import { permissionsFor } from './records.js';
-import { MAX_PAGE, QUEUE_PERMISSIONS, QueueError } from './queue.js';
-import { JOBS_MANAGE } from './roles.js';
+import { QUEUE_PERMISSIONS, QueueError } from './queue.js';
+import { JOBS_MANAGE, JOBS_READ } from './roles.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
@@ -44,12 +47,13 @@ export const JOBS_PATH = '/api/v1/jobs';
 const JOBS_SUMMARY_PATH = `${JOBS_PATH}/summary`;
 const JOB_REQUEUE_PATH = `${JOBS_PATH}/:id/requeue`;
 
-const PERMISSION: RouteNeed = { kind: 'permission', need: JOBS_MANAGE };
+const READ_PERMISSION: RouteNeed = { kind: 'permission', need: JOBS_READ };
+const MANAGE_PERMISSION: RouteNeed = { kind: 'permission', need: JOBS_MANAGE };
 
 const ROUTES = [
-  ['GET', JOBS_PATH],
-  ['GET', JOBS_SUMMARY_PATH],
-  ['POST', JOB_REQUEUE_PATH],
+  ['GET', JOBS_PATH, READ_PERMISSION],
+  ['GET', JOBS_SUMMARY_PATH, READ_PERMISSION],
+  ['POST', JOB_REQUEUE_PATH, MANAGE_PERMISSION],
 ] as const;
 
 export interface JobRoutesOptions {
@@ -95,11 +99,11 @@ export function serveJobRoutes(app: FastifyInstance, { queue, identity }: JobRou
   // A deployment with nowhere to keep a queue has nothing here to show or to requeue. Every path is
   // still served, so the guard's table remains the complete shape of the surface in every deployment.
   if (identity === undefined || queue === undefined) {
-    for (const [method, url] of ROUTES) {
+    for (const [method, url, need] of ROUTES) {
       app.route({
         method,
         url,
-        config: { need: PERMISSION },
+        config: { need },
         handler: (request, reply) => reply.code(404).send(notFound(request)),
       });
     }
@@ -118,7 +122,7 @@ export function serveJobRoutes(app: FastifyInstance, { queue, identity }: JobRou
     }
   };
 
-  app.get(JOBS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.get(JOBS_PATH, { config: { need: READ_PERMISSION } }, async (request, reply) => {
     const actor = provenSession(request).record.actor;
     const context = routeContext(actor, correlationFor(JOB_PREFIX, request.id));
     const query = request.query as { readonly kind?: string; readonly state?: string };
@@ -126,21 +130,20 @@ export function serveJobRoutes(app: FastifyInstance, { queue, identity }: JobRou
     return reply.send(successEnvelope({ jobs }, request.id, CLIENT_WINDOW.current));
   });
 
-  app.get(JOBS_SUMMARY_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.get(JOBS_SUMMARY_PATH, { config: { need: READ_PERMISSION } }, async (request, reply) => {
     const actor = provenSession(request).record.actor;
     const context = routeContext(actor, correlationFor(JOB_PREFIX, request.id));
     const summary = await queue.summary(context);
     return reply.send(successEnvelope({ summary }, request.id, CLIENT_WINDOW.current));
   });
 
-  app.post(JOB_REQUEUE_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.post(JOB_REQUEUE_PATH, { config: { need: MANAGE_PERMISSION } }, async (request, reply) => {
     const { id } = request.params as { readonly id: string };
     const actor = provenSession(request).record.actor;
     const context = routeContext(actor, correlationFor(JOB_PREFIX, request.id));
 
-    const failed = await queue.list(context, { states: ['failed'], limit: MAX_PAGE });
-    const found = failed.find((job) => job.id === id);
-    if (found === undefined) return reply.code(404).send(notFound(request));
+    const found = await queue.get(context, id);
+    if (found === undefined || found.state !== 'failed') return reply.code(404).send(notFound(request));
 
     if (REQUEUE_REFUSED_KINDS.has(found.kind)) {
       await note(request, actor, id, 'refused');

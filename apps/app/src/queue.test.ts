@@ -555,6 +555,20 @@ describe('what an administrator can see and do', () => {
     ]);
   });
 
+  // `get` is the direct lookup `requeue` needs: a job outside `list`'s own page is still one `get` finds,
+  // because it asks the database for that one id rather than filtering a page of the newest jobs.
+  test('gets one job by id, whatever page it would fall on', async () => {
+    open({ findOne: [stored({ _id: 'job-500' })] });
+    const job = await queue.get(OPERATOR, 'job-500');
+    expect(job?.id).toBe('job-500');
+    expect(scripted.calls[0]?.args[0]).toEqual({ _id: 'job-500' });
+  });
+
+  test('answers undefined for an id no job carries', async () => {
+    open({ findOne: [null] });
+    await expect(queue.get(OPERATOR, 'job-missing')).resolves.toBeUndefined();
+  });
+
   // The requeue is the one thing an administrator does to a job. It resets the attempt and takes a new
   // key, so the work runs again even though the queue refuses to enqueue the key that failed a second time.
   test('requeues a failed job as a first attempt under the next key', async () => {

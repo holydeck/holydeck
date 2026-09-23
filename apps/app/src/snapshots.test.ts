@@ -625,6 +625,7 @@ describe('the Operator override', () => {
       'services.manage',
       'backup.manage',
       'restore.manage',
+      'jobs.view',
       'jobs.manage',
       'operations.read',
     ]);
