@@ -69,6 +69,31 @@ describe('the catalogs', () => {
   });
 });
 
+// The service workspace added several hundred keys at once; this names its surfaces so a missing or
+// copied string points at the screen it belongs to.
+const WORKSPACE_PREFIXES = ['dashboard.', 'serviceNew.', 'workspace.', 'order.', 'bulk.', 'lifecycle.', 'drift.', 'output.',
+  'preview.', 'add.', 'bible.', 'blank.', 'reading.', 'canvas.', 'song.', 'slides.', 'sermon.', 'media.', 'mediaLib.',
+  'library.', 'readiness.', 'editor.', 'service.state.'] as const;
+
+describe('the service workspace strings', () => {
+  it.each(['de', 'ta'] as const)('are all translated into %s, with the same placeholders', (locale) => {
+    for (const prefix of WORKSPACE_PREFIXES) {
+      const keys = MESSAGE_KEYS.filter((key) => key.startsWith(prefix));
+      expect(keys.length, prefix).toBeGreaterThan(0);
+      for (const key of keys) {
+        expect(MESSAGES[locale][key], key).not.toBe(MESSAGES.en[key]);
+        expect(placeholdersIn(MESSAGES[locale][key]), key).toEqual(placeholdersIn(MESSAGES.en[key]));
+      }
+    }
+  });
+
+  it('address the reader formally in German, as the rest of the catalog does', () => {
+    for (const key of MESSAGE_KEYS.filter((candidate) => WORKSPACE_PREFIXES.some((prefix) => candidate.startsWith(prefix)))) {
+      expect(MESSAGES.de[key], key).not.toMatch(/\b(du|dein|deine|dir|dich)\b/u);
+    }
+  });
+});
+
 describe('translating', () => {
   it('renders the copy of the locale it was asked for', () => {
     expect(translate('en', 'shell.preparing')).toBe('Preparing the service view.');
