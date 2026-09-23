@@ -31,6 +31,15 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 const JOB_PREFIX = 'job:';
 
+// `restore-routes.ts` and `media-migration-routes.ts` each gate their own kind behind a check this route
+// never re-runs: a fresh password step-up and a still-passing rehearsal for a restore, an unoverlapping
+// target path for a migration. Requeuing either kind here would re-run a destructive production write past
+// those checks on nothing but `JOBS_MANAGE`. Refused outright — the operator starts a fresh one through its
+// own route instead, which re-earns the checks rather than skipping them.
+const REQUEUE_REFUSED_KINDS = new Set(['restore-apply', 'media-root-migrate']);
+const REQUEUE_REFUSED_MESSAGE =
+  'This kind of job is not requeued here — start a new one through its own route so its checks run fresh.';
+
 export const JOBS_PATH = '/api/v1/jobs';
 const JOBS_SUMMARY_PATH = `${JOBS_PATH}/summary`;
 const JOB_REQUEUE_PATH = `${JOBS_PATH}/:id/requeue`;
@@ -132,6 +141,11 @@ export function serveJobRoutes(app: FastifyInstance, { queue, identity }: JobRou
     const failed = await queue.list(context, { states: ['failed'], limit: MAX_PAGE });
     const found = failed.find((job) => job.id === id);
     if (found === undefined) return reply.code(404).send(notFound(request));
+
+    if (REQUEUE_REFUSED_KINDS.has(found.kind)) {
+      await note(request, actor, id, 'refused');
+      return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, REQUEUE_REFUSED_MESSAGE, request.id));
+    }
 
     const answer = await settled(() => queue.requeue(context, { id, idempotencyKey: found.idempotencyKey }));
     if (!answer.ok) {

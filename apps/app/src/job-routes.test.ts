@@ -234,6 +234,19 @@ describe('trying a failed job again', () => {
     await flakyApp.close();
   });
 
+  test.each(['restore-apply', 'media-root-migrate'] as const)(
+    'refuses to requeue a failed %s job, which skips its own step-up and freshness checks',
+    async (kind) => {
+      jobs.push(stored({ _id: 'job-1', kind, state: 'failed' }));
+      const response = await app.inject({ method: 'POST', url: `${JOBS_PATH}/job-1/requeue`, headers: withHeaders() });
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.code).toBe(ENTITY_CONFLICT);
+      expect(entries()).toHaveLength(1);
+      expect(entries()[0]).toMatchObject({ actor: ADMINISTRATOR, action: 'job.requeue', subject: 'job-1', outcome: 'refused' });
+      expect(jobs.find((job) => job['_id'] === 'job-1')).toMatchObject({ state: 'failed' });
+    },
+  );
+
   test('a failed audit append does not lose an accepted requeue', async () => {
     jobs.push(stored({ _id: 'job-1', kind: 'backup-run', state: 'failed', idempotencyKey: 'backup-run:2026-09-21' }));
     identity = { ...identity, audit: { record: vi.fn(async () => { throw new Error('trail unavailable'); }) } };
