@@ -40,6 +40,8 @@ const record = (id: string, itemIds: string[]) => ({
   })) }],
 });
 
+const EMPTY_EDITOR = 'Choose an item in the order to edit it here.';
+
 const noDrift = reply(200, successEnvelope([], 'r-drift'));
 
 const fakeFetch = (map: Record<string, ReturnType<typeof reply> | (() => ReturnType<typeof reply>)>, calls: string[] = []): FetchLike =>
@@ -83,7 +85,7 @@ describe('the service workspace', () => {
     });
   });
 
-  it('keeps an editor mounted when a bottom tab hides it', async () => {
+  it('keeps the center mounted when a bottom tab hides it, with no field that drops typing', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({
       media: query, matches: false,
       addEventListener: () => undefined, removeEventListener: () => undefined,
@@ -95,15 +97,14 @@ describe('the service workspace', () => {
     await renderAt('/services/s1');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Editor' }));
-    const editor = await screen.findByRole('textbox', { name: 'Editor' }) as HTMLTextAreaElement;
-    fireEvent.input(editor, { target: { value: 'half-typed' } });
-    expect(editor.value).toBe('half-typed');
+    const editor = await screen.findByText(EMPTY_EDITOR);
+    expect(document.querySelector('textarea')).toBeNull();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Library' }));
-    expect(editor.value).toBe('half-typed');
+    expect(editor.isConnected).toBe(true);
 
     fireEvent.click(screen.getByRole('tab', { name: 'Order' }));
-    expect(editor.value).toBe('half-typed');
+    expect(screen.getByText(EMPTY_EDITOR)).toBe(editor);
 
     vi.unstubAllGlobals();
   });
@@ -127,7 +128,7 @@ describe('the service workspace', () => {
     await vi.waitFor(() => expect(loads).toBe(2));
   });
 
-  it('keeps a half-typed edit mounted across a reconnect, and ends up idle', async () => {
+  it('keeps the center mounted across a reconnect, and ends up idle', async () => {
     let loads = 0;
     setFetching(fakeFetch({
       'GET /api/v1/services/s1': () => { loads += 1; return reply(200, successEnvelope(record('s1', ['a']), `r${loads}`)); },
@@ -136,8 +137,7 @@ describe('the service workspace', () => {
     await renderAt('/services/s1');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Editor' }));
-    const editor = await screen.findByRole('textbox', { name: 'Editor' }) as HTMLTextAreaElement;
-    fireEvent.input(editor, { target: { value: 'half-typed' } });
+    const editor = await screen.findByText(EMPTY_EDITOR);
 
     globalThis.dispatchEvent(new Event('offline'));
     globalThis.dispatchEvent(new Event('online'));
@@ -146,7 +146,7 @@ describe('the service workspace', () => {
     await vi.waitFor(() => {
       expect(document.querySelector('[role="status"]')?.textContent).toBe('');
     });
-    expect(editor.value).toBe('half-typed');
+    expect(screen.getByText(EMPTY_EDITOR)).toBe(editor);
   });
 
   it('goes back offline, not idle, when the reconnect check fails', async () => {

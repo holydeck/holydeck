@@ -109,12 +109,13 @@ const BOTTOM_TABS: readonly { readonly id: string; readonly region: BottomRegion
 const BOTTOM_IDS = BOTTOM_TABS.map((tab) => tab.id);
 const ASIDE_IDS = ['workspace-tab-properties-aside', 'workspace-tab-library-aside'];
 
+/** Nothing is selected yet: say where editing starts, rather than offer a field whose text goes nowhere. */
 function EditorPlaceholder(): JSX.Element {
-  return <textarea aria-label={t('workspace.region.editor')} />;
+  return <p class="workspace-editor-empty">{t('workspace.editor.empty')}</p>;
 }
 
 /** The center region: the selected item's editor where it has one, above its exact preview; the bare
- *  editor until something is selected. Keyed by item, so switching items never carries an edit across. */
+ *  empty-state hint until something is selected. Keyed by item, so switching items never carries an edit across. */
 /** A song or slide group item: its song (for a song) or, behind `Edit Slides`, the slide group it pins. */
 function GroupItemEditor({ itemId }: { readonly itemId: string }): JSX.Element {
   const [slides, setSlides] = useState(false);
