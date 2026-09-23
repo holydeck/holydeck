@@ -87,7 +87,6 @@ const served = async (missing?: 'db' | 'queue' | 'identity' | 'all'): Promise<Fa
     queue: missing === 'queue' || missing === 'all' ? undefined : queue,
     identity: missing === 'identity' || missing === 'all' ? undefined : identity,
     now,
-    timezone: 'Europe/Zurich',
   });
   await built.ready();
   return built;
@@ -167,27 +166,30 @@ describe('recorded backups and on-demand requests', () => {
     }] });
   });
 
-  test.each([{}, { components: ['settings'] }])('queues a request with local-date identity and audits allowance: %j', async (payload) => {
-    const response = await requesting(payload);
-    expect(response.statusCode).toBe(202);
-    expect(response.json().data).toEqual({ id: 'job-1', created: true });
-    expect(await queue.list(queueContext)).toMatchObject([{
-      kind: 'backup-run',
-      idempotencyKey: 'backup-run:2026-09-22',
-      payload: {
-        components: 'components' in payload ? ['settings'] : ['mongo', 'settings', 'media'],
-        trigger: 'operator',
-      },
-    }]);
-    expect(entries()).toHaveLength(1);
-    expect(entries()[0]).toMatchObject({
-      actor: ADMINISTRATOR,
-      action: 'backup.request',
-      subject: 'backup-run',
-      outcome: 'allowed',
-      detail: 'requested on demand',
-    });
-  });
+  test.each([{}, { components: ['settings'] }])(
+    'queues a request under its own key, never the scheduler’s daily one, and audits allowance: %j',
+    async (payload) => {
+      const response = await requesting(payload);
+      expect(response.statusCode).toBe(202);
+      expect(response.json().data).toEqual({ id: 'job-1', created: true });
+      expect(await queue.list(queueContext)).toMatchObject([{
+        kind: 'backup-run',
+        idempotencyKey: `backup-run:operator:${NOW}`,
+        payload: {
+          components: 'components' in payload ? ['settings'] : ['mongo', 'settings', 'media'],
+          trigger: 'operator',
+        },
+      }]);
+      expect(entries()).toHaveLength(1);
+      expect(entries()[0]).toMatchObject({
+        actor: ADMINISTRATOR,
+        action: 'backup.request',
+        subject: 'backup-run',
+        outcome: 'allowed',
+        detail: 'requested on demand',
+      });
+    },
+  );
 
   test('defaults a request without a body to all components', async () => {
     const response = await app.inject({ method: 'POST', url: BACKUPS_PATH, headers: withHeaders() });

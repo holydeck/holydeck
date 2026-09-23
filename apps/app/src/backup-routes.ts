@@ -16,7 +16,6 @@ import { notFound } from './failures.js';
 import { QUEUE_PERMISSIONS } from './queue.js';
 import { permissionsFor } from './records.js';
 import { BACKUP_MANAGE } from './roles.js';
-import { localParts } from './schedule.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
@@ -41,9 +40,8 @@ export interface BackupRoutesOptions {
   /** Absent whenever `identity` is, per `main.ts`'s wiring — never independently, from this module's view. */
   readonly db: RepositoryDb | undefined;
   readonly queue: Queue | undefined;
-  /** Fixed clock: the same one `main.ts` wires the scheduler's own idempotency keys from. */
+  /** Fixed clock: also what this route's own idempotency key is built from. */
   readonly now: () => string;
-  readonly timezone: string;
   readonly identity: Identity | undefined;
 }
 
@@ -61,7 +59,7 @@ function routeContext(actor: string, correlationId: string): RequestContext {
   });
 }
 
-export function serveBackupRoutes(app: FastifyInstance, { db, queue, now, timezone, identity }: BackupRoutesOptions): void {
+export function serveBackupRoutes(app: FastifyInstance, { db, queue, now, identity }: BackupRoutesOptions): void {
   if (identity === undefined || db === undefined || queue === undefined) {
     for (const [method, url] of ROUTES) {
       app.route({
@@ -107,10 +105,14 @@ export function serveBackupRoutes(app: FastifyInstance, { db, queue, now, timezo
       return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, 'a backup is already running', request.id));
     }
 
-    const today = localParts(new Date(now()), timezone).date;
+    // Its own key per request, never the scheduler's `backup-run:<date>` family (`schedule.ts`): sharing
+    // that key meant this route silently did nothing once the day's scheduled backup already existed
+    // under it — `enqueue` treats any family member as "already exists" regardless of its state
+    // (`queue.ts`), success or failure alike. The "already running" check above is this route's own
+    // duplicate guard, so on-demand requests need no dedupe key of their own beyond being unique.
     const enqueued = await queue.enqueue(context, {
       kind: 'backup-run',
-      idempotencyKey: `backup-run:${today}`,
+      idempotencyKey: `backup-run:operator:${now()}`,
       payload: { components: parsed.value.components, trigger: 'operator' },
     });
     await note(request, actor, 'backup-run', 'allowed');

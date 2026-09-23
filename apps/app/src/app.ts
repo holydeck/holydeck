@@ -276,7 +276,6 @@ export function buildApp({
     db: backups?.db,
     queue: backups?.queue,
     now: () => new Date().toISOString(),
-    timezone: settings.values.timezone,
     identity,
   });
 
