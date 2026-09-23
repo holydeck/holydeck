@@ -23,6 +23,7 @@ describe('matchRoute', () => {
     ['/', { name: 'root' }],
     ['/sign-in?next=%2Fservices', { name: 'sign-in', next: '/services', notice: undefined }],
     ['/sign-in?notice=claim-sign-in-refused', { name: 'sign-in', next: undefined, notice: 'claim-sign-in-refused' }],
+    ['/sign-in?add=1', { name: 'sign-in', next: undefined, notice: undefined, add: true }],
     ['/welcome', { name: 'welcome' }],
     ['/services', { name: 'services' }],
     ['/services/', { name: 'services' }],

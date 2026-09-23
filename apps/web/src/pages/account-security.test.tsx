@@ -12,6 +12,7 @@ import { PASSKEY_OPTIONS_PATH, PASSKEY_PATH, passkeyPath, type PasskeySummary } 
 import type { FetchLike } from '../api.js';
 import type { AttestationCredentialLike, CredentialsContainerLike, WebAuthnLike } from '../passkey.js';
 
+import { pageReload } from '../account-switch.js';
 import { resetAppState, session } from '../app-state.js';
 import { setFetching } from '../request.js';
 import { SecurityPage } from './account-security.js';
@@ -319,40 +320,26 @@ describe('SecurityPage', () => {
     await screen.findByText('No other slots are signed in.');
   });
 
-  it('switches to another slot and refetches the session', async () => {
+  it('switches to another slot by its account name, then starts the tab over as it', async () => {
     session.value = signedIn([
       { slotId: 's1', actor: 'account:me' },
-      { slotId: 's2', actor: 'account:ruth' },
+      { slotId: 's2', actor: 'account:ruth', displayName: 'Ruth Example' },
     ]);
+    const reload = vi.spyOn(pageReload, 'to').mockImplementation(() => undefined);
     const fetching = vi.fn<FetchLike>(async (path, init) => {
       if (path === PASSKEY_PATH && init.method === undefined) return emptyPasskeys();
       if (path === SESSION_PATH && init.method === 'PATCH') return reply(200, successEnvelope({}, 'r-switch'));
-      if (path === SESSION_PATH && init.method === undefined) {
-        return reply(200, successEnvelope({
-          actor: 'account:ruth',
-          permissions: [],
-          startedAt: '2026-09-13T09:30:00.000Z',
-          lastSeenAt: '2026-09-13T09:35:00.000Z',
-          expiresAt: '2026-09-14T09:30:00.000Z',
-          rotation: 'authentication',
-          csrf,
-          slots: [
-            { slotId: 's1', actor: 'account:me' },
-            { slotId: 's2', actor: 'account:ruth' },
-          ],
-        }, 'r-get'));
-      }
       throw new Error(`unexpected request ${String(init.method)} ${path}`);
     });
     setFetching(fetching);
     withLiveRegions();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Switch to account:ruth' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Switch to Ruth Example' }));
 
-    await waitFor(() => expect(session.value?.actor).toBe('account:ruth'));
-    expect(document.getElementById('announce-polite')?.textContent).toBe('Switched slot.');
+    await waitFor(() => expect(reload).toHaveBeenCalledWith('/services'));
     const patchCall = fetching.mock.calls.find(([path, init]) => path === SESSION_PATH && init.method === 'PATCH');
     expect(JSON.parse(patchCall?.[1].body ?? '{}')).toEqual({ active: 's2' });
+    reload.mockRestore();
   });
 
   it('shows an alert when a slot switch is refused', async () => {

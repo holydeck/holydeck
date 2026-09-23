@@ -11,10 +11,12 @@
 // have nothing to navigate to yet, and a top bar naming nobody would only be noise to a screen reader.
 
 import { Component } from 'preact';
+import { useState } from 'preact/hooks';
 
 import { ACCOUNT_ROLES, type AccountRole } from '@holydeck/contracts/accounts';
 import type { MessageKey } from '@holydeck/localization/messages';
 
+import { switchAccount } from '../account-switch.js';
 import { can, session } from '../app-state.js';
 import { ExpiryBanner } from './expiry-banner.js';
 import { t } from '../i18n.js';
@@ -22,6 +24,7 @@ import { route, type Route } from '../router.js';
 import { ToastRegion } from './toast.js';
 import { UpdateDialog } from './update-dialog.js';
 
+import type { SessionView } from '@holydeck/contracts/sessions';
 import type { ComponentChildren, JSX } from 'preact';
 
 /**
@@ -79,6 +82,45 @@ const sectionOf = (current: Route): 'services' | 'library' | 'media' | 'administ
   return undefined;
 };
 
+/**
+ * The account menu (COLAB-08): every other account signed in to this browser container, by name, and the
+ * way to add one more. A switch reloads the whole tab, so nothing here outlives it; only a refusal stays.
+ */
+function AccountMenu({ current }: { readonly current: SessionView }): JSX.Element {
+  const [busy, setBusy] = useState<string>();
+  const [error, setError] = useState<string>();
+  const others = current.slots.filter((slot) => slot.actor !== current.actor);
+
+  const switchTo = async (slotId: string): Promise<void> => {
+    setBusy(slotId);
+    setError(undefined);
+    try {
+      setError(await switchAccount(slotId));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  return (
+    <details class="app-account-menu">
+      <summary>{t('app.account.menu')}</summary>
+      {error === undefined ? null : <p role="alert">{error}</p>}
+      <ul>
+        {others.map((slot) => (
+          <li key={slot.slotId}>
+            <button type="button" onClick={() => void switchTo(slot.slotId)} disabled={busy !== undefined}>
+              {t('app.account.switchTo', { name: slot.displayName ?? slot.actor })}
+            </button>
+          </li>
+        ))}
+        <li>
+          <a href="/sign-in?add=1">{t('app.account.add')}</a>
+        </li>
+      </ul>
+    </details>
+  );
+}
+
 /** The two regions, rendered once and never re-rendered: their text belongs to whoever last spoke. */
 class LiveRegions extends Component {
   override shouldComponentUpdate(): boolean {
@@ -121,6 +163,7 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
               <span class="app-role">{roleLabel(account.role)}</span>
             </p>
           )}
+          <AccountMenu current={current} />
           {onSignOut === undefined ? null : (
             <button type="button" class="app-sign-out" onClick={onSignOut}>{t('app.signOut')}</button>
           )}

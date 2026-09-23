@@ -78,7 +78,7 @@ function Page(): JSX.Element {
     case 'welcome':
       return <WelcomePage />;
     case 'sign-in':
-      return <SignInPage next={current.next} notice={current.notice} />;
+      return <SignInPage next={current.next} notice={current.notice} add={current.add === true} />;
     // `boot()` moves `/` on to `/services`, `/welcome` or `/sign-in`; until it has, there is nothing to show.
     case 'root':
       return <p role="status">{t('app.loading')}</p>;

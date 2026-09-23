@@ -77,6 +77,8 @@ export async function boot(): Promise<void> {
     }
     session.value = parsed.value;
     const matched = route.value;
+    // Adding an account is signing in while already signed in, so that one sign-in stays where it is.
+    if (matched.name === 'sign-in' && matched.add === true) return;
     if (matched.name === 'root' || matched.name === 'sign-in' || matched.name === 'welcome') {
       const destination = matched.name === 'sign-in' ? safeNext(matched.next) ?? '/services' : '/services';
       navigate(destination, { replace: true });

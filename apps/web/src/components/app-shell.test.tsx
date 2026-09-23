@@ -2,11 +2,19 @@
 import { act, fireEvent, render, screen } from '@testing-library/preact';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { errorEnvelope, successEnvelope } from '@holydeck/contracts/http';
+import { SESSION_PATH } from '@holydeck/contracts/sessions';
+
+import { pageReload } from '../account-switch.js';
 import { resetAppState, session } from '../app-state.js';
+import { setFetching } from '../request.js';
 import { currentPath } from '../router.js';
 import { AppShell } from './app-shell.js';
 
+import type { FetchLike } from '../api.js';
 import type { SessionView } from '@holydeck/contracts/sessions';
+
+const reply = (status: number, body: unknown) => ({ status, json: async (): Promise<unknown> => body });
 
 const signedIn = (permissions: readonly string[], role: 'admin' | 'editor' | 'member' = 'admin'): SessionView =>
   ({
@@ -102,6 +110,50 @@ describe('the navigation shell', () => {
       '/admin/languages',
       '/admin/slide-labels',
     ]);
+  });
+
+  it('lists the other signed-in accounts by name in the account menu, and offers to add one', () => {
+    session.value = {
+      ...signedIn([]),
+      actor: 'account:a1',
+      slots: [
+        { slotId: 's1', actor: 'account:a1', displayName: 'Ruth Example' },
+        { slotId: 's2', actor: 'account:a2', displayName: 'Naomi Example' },
+        { slotId: 's3', actor: 'operator:setup' },
+      ],
+    } as SessionView;
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByText('Accounts')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Switch to Naomi Example' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Switch to operator:setup' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Switch to Ruth Example' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Add account' }).getAttribute('href')).toBe('/sign-in?add=1');
+  });
+
+  it('switches from the account menu and starts the tab over, or says why it could not', async () => {
+    session.value = {
+      ...signedIn([]),
+      actor: 'account:a1',
+      slots: [
+        { slotId: 's1', actor: 'account:a1', displayName: 'Ruth Example' },
+        { slotId: 's2', actor: 'account:a2', displayName: 'Naomi Example' },
+      ],
+    } as SessionView;
+    const reload = vi.spyOn(pageReload, 'to').mockImplementation(() => undefined);
+    const fetching = vi.fn<FetchLike>(async () => reply(200, successEnvelope({}, 'r-switch')));
+    setFetching(fetching);
+    render(<AppShell><p>page</p></AppShell>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Naomi Example' }));
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledWith('/services'));
+    expect(fetching).toHaveBeenCalledWith(SESSION_PATH, expect.objectContaining({ method: 'PATCH' }));
+
+    reload.mockClear();
+    setFetching(async () => reply(403, errorEnvelope('auth.forbidden', 'No such slot', 'r-refused')));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to Naomi Example' }));
+    await screen.findByRole('alert');
+    expect(reload).not.toHaveBeenCalled();
+    reload.mockRestore();
   });
 
   it('marks the current section and links to the library', () => {

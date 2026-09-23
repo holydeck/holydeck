@@ -8,7 +8,13 @@ import { computed, signal, type ReadonlySignal, type Signal } from '@preact/sign
 /** Every page the web application can render from a same-origin path. */
 export type Route =
   | { readonly name: 'root' }
-  | { readonly name: 'sign-in'; readonly next: string | undefined; readonly notice: 'claim-sign-in-refused' | undefined }
+  | {
+      readonly name: 'sign-in';
+      readonly next: string | undefined;
+      readonly notice: 'claim-sign-in-refused' | undefined;
+      /** Set when a signed-in tab opens sign-in to add another account to its container (COLAB-08). */
+      readonly add?: true;
+    }
   | { readonly name: 'welcome' }
   | { readonly name: 'services' }
   | { readonly name: 'service-new' }
@@ -63,6 +69,7 @@ export function matchRoute(pathWithSearch: string): Route {
       name: 'sign-in',
       next: safeNext(parameters.get('next')),
       notice: parameters.get('notice') === 'claim-sign-in-refused' ? 'claim-sign-in-refused' : undefined,
+      ...(parameters.get('add') === '1' ? { add: true as const } : {}),
     };
   }
   if (pathname === '/welcome') return { name: 'welcome' };

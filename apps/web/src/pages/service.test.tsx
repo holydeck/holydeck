@@ -51,7 +51,7 @@ describe('ServicePage', () => {
   beforeEach(() => {
     resetAppState();
     sockets = [];
-    session.value = { csrf: 'c'.repeat(43), permissions: [] } as unknown as SessionView;
+    session.value = { csrf: 'c'.repeat(43), permissions: [], slots: [] } as unknown as SessionView;
     setFetching(vi.fn<FetchLike>(async (path) => {
       if (path === ORDER_PATH) return reply(order);
       if (path === TICKET_PATH) return reply({ ticket: 'ticket-one', expiresInSeconds: 30 });

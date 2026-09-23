@@ -2,7 +2,7 @@
 // account manages for itself. Every route here needs only a signed-in session — there is no permission
 // to gate on, because an account is always allowed to see and change how it signs itself in.
 
-import { SESSION_PATH, SIGN_IN_REFUSED, parseSessionView } from '@holydeck/contracts/sessions';
+import { SIGN_IN_REFUSED } from '@holydeck/contracts/sessions';
 import { TOTP_DIGITS, TOTP_PATH, TOTP_RECOVERY_PATH, TOTP_VERIFICATION_PATH } from '@holydeck/contracts/totp';
 import {
   PASSKEY_OPTIONS_PATH,
@@ -15,6 +15,7 @@ import {
 } from '@holydeck/contracts/webauthn';
 import { useEffect, useState } from 'preact/hooks';
 
+import { switchAccount } from '../account-switch.js';
 import { csrf, session } from '../app-state.js';
 import { FormField } from '../components/form-field.js';
 import { fieldErrors } from '../form-errors.js';
@@ -306,21 +307,12 @@ export function SecurityPage({ browser = defaultBrowser() }: SecurityPageProps):
     }
   };
 
+  // A switch ends in a full reload (see account-switch.ts), so only a refusal is ever shown here.
   const switchSlot = async (slotId: string): Promise<void> => {
     setSlotBusyId(slotId);
     setSlotError(undefined);
     try {
-      const result = await request(SESSION_PATH, { method: 'PATCH', csrf: csrf() ?? '', body: { active: slotId } });
-      if (!result.ok) {
-        setSlotError(fieldErrors(result, []).other);
-        return;
-      }
-      const read = await request(SESSION_PATH);
-      if (read.ok) {
-        const parsed = parseSessionView(read.data);
-        if (parsed.ok) session.value = parsed.value;
-      }
-      say('polite', t('security.slots.switched'));
+      setSlotError(await switchAccount(slotId));
     } finally {
       setSlotBusyId(undefined);
     }
@@ -495,7 +487,7 @@ export function SecurityPage({ browser = defaultBrowser() }: SecurityPageProps):
             {otherSlots.map((slot) => (
               <li key={slot.slotId}>
                 <button type="button" onClick={() => void switchSlot(slot.slotId)} disabled={slotBusyId === slot.slotId}>
-                  {t('security.slots.switch', { actor: slot.actor })}
+                  {t('security.slots.switch', { actor: slot.displayName ?? slot.actor })}
                 </button>
               </li>
             ))}
