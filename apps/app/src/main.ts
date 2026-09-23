@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { constants, readFileSync, watch } from 'node:fs';
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -25,6 +26,11 @@ import { libraryOn } from './library.js';
 import { serveLive } from './live.js';
 import { schemaStatus } from './migrations.js';
 import { mediaLibraryOn } from './media.js';
+import { pptxCommitOn } from './pptx-commit.js';
+import { pptxImportOn } from './pptx-import.js';
+import { workerPptxRunner } from './pptx-isolated.js';
+import { pptxReviewOn } from './pptx-review.js';
+import { pptxSessionsOn } from './pptx-sessions.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { repositoryDb } from './repositories.js';
@@ -50,8 +56,12 @@ import { readWebBuild } from './static.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { LibraryStore } from './library.js';
-import type { MediaLibrary } from './media.js';
+import type { MediaLibrary, MediaLibraryOptions } from './media.js';
 import type { Identity } from './onboarding.js';
+import type { PptxCommit } from './pptx-commit.js';
+import type { PptxImport } from './pptx-import.js';
+import type { PptxReview } from './pptx-review.js';
+import type { PptxSessionStore } from './pptx-sessions.js';
 import type { SermonStore } from './sermons.js';
 import type { ServiceStore } from './services.js';
 import type { ServiceTemplateStore } from './service-templates.js';
@@ -67,6 +77,8 @@ import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 
 checkReleasedContracts();
+
+const newId = (): string => randomBytes(16).toString('base64url');
 
 const path = settingsPath(process.env);
 checkOwnSettingsMount(path);
@@ -130,6 +142,12 @@ let library: LibraryStore | undefined;
 // The content-language registry is kept the same way and for the same reason: a deployment with nowhere
 // to keep one has none to create, edit or archive, and its routes answer not-found the same way.
 let contentLanguages: ContentLanguageStore | undefined;
+// A PowerPoint import's stores are kept the same way: a deployment with nowhere to keep an import
+// session has none to upload, review or commit, and its routes answer not-found the same way.
+let pptxImport: PptxImport | undefined;
+let pptxReview: PptxReview | undefined;
+let pptxCommit: PptxCommit | undefined;
+let pptxSessions: PptxSessionStore | undefined;
 let stopWatchingSettings: (() => void) | undefined;
 if (settings.values.mongoUrl !== '') {
   store = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
@@ -146,7 +164,7 @@ if (settings.values.mongoUrl !== '') {
   };
   capabilities = capabilitiesOn(capabilityDb(store.db()), { now });
   services = servicesOn(repositoryDb(store.db()), { now });
-  serviceTemplates = serviceTemplatesOn(repositoryDb(store.db()), { now });
+  serviceTemplates = serviceTemplatesOn(repositoryDb(store.db()), { now, services });
   preparation = preparationOn(repositoryDb(store.db()), { now });
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
@@ -161,7 +179,7 @@ if (settings.values.mongoUrl !== '') {
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
   // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
   await seedOn(repositoryDb(store.db()), { now }).run(seedContext(`boot:${process.pid}`));
-  media = mediaLibraryOn(repositoryDb(store.db()), {
+  const mediaOptions: MediaLibraryOptions = {
     now,
     queue: queueOn(queueDb(store.db()), { now }),
     mediaRoot: settings.values.mediaRoot,
@@ -174,7 +192,12 @@ if (settings.values.mongoUrl !== '') {
     async read(_root, key) {
       return new Uint8Array(await readFile(key));
     },
-  });
+  };
+  media = mediaLibraryOn(repositoryDb(store.db()), mediaOptions);
+  pptxImport = pptxImportOn(repositoryDb(store.db()), { ...mediaOptions, runner: workerPptxRunner() });
+  pptxReview = pptxReviewOn(repositoryDb(store.db()), { now });
+  pptxCommit = pptxCommitOn(repositoryDb(store.db()), { now, newId });
+  pptxSessions = pptxSessionsOn(repositoryDb(store.db()), { now, newId });
   settingsAdmin = settingsAdminOn(settings, {
     readFile: (path) => readFile(path, 'utf8'),
     writeFile,
@@ -202,6 +225,10 @@ const https = settings.values.tlsCertFile === ''
   ? undefined
   : { cert: readFileSync(settings.values.tlsCertFile), key: readFileSync(settings.values.tlsKeyFile) };
 
+// Read bare, never through settings.ts: a deployment without this key simply has no resolver, and the
+// key itself is never worth persisting to the settings file it would then have to be redacted out of.
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+
 const app = buildApp({
   settings,
   // Every secret this deployment was configured with is replaced wherever it appears in a log line: a
@@ -228,6 +255,11 @@ const app = buildApp({
   slideGroups,
   library,
   contentLanguages,
+  pptxImport,
+  pptxReview,
+  pptxCommit,
+  pptxSessions,
+  anthropicApiKey,
 });
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.

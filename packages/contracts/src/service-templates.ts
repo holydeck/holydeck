@@ -107,6 +107,23 @@ export function parseServiceTemplateDraft(value: unknown): Parsed<ServiceTemplat
   });
 }
 
+export type ServiceTemplateStatus = {
+  readonly archived: boolean;
+};
+
+export function parseServiceTemplateStatus(value: unknown): Parsed<ServiceTemplateStatus> {
+  return parseObject(value, 'serviceTemplate', (reader) => ({ archived: reader.flag('archived') }));
+}
+
+export type ServiceTemplateName = {
+  readonly name: string;
+};
+
+/** Just the name: `fromService` mints its entries from an existing Service and asks a caller for this alone. */
+export function parseServiceTemplateName(value: unknown): Parsed<ServiceTemplateName> {
+  return parseObject(value, 'serviceTemplate', (reader) => ({ name: reader.text('name') }));
+}
+
 export type EntryFill = {
   readonly entryId: string;
   readonly title: string;
@@ -172,20 +189,21 @@ export function instantiate(body: ServiceTemplateBody, fills: readonly EntryFill
   return errors.length > 0 ? { ok: false, errors } : { ok: true, items };
 }
 
-/** Converts a service into a Service Template body, one fixed entry per item. The service is only read. */
+/**
+ * Converts a service into a Service Template body. The service is only read. A custom slide carries its
+ * own content and stays a fixed entry, exactly as it stood; any other item becomes a required typed slot,
+ * since its content is a reusable reference a future instantiation should fill again rather than pin here.
+ */
 export function templateFromService(service: Service): ServiceTemplateBody {
   return {
     sections: service.sections.map((section) => ({
       id: section.id,
       name: section.name,
       entries: section.items.map(
-        (item): FixedEntry => ({
-          id: item.id,
-          slot: 'fixed',
-          itemKind: item.kind,
-          title: item.title,
-          content: item.content,
-        }),
+        (item): ServiceTemplateEntry =>
+          item.kind === AUTHORED_IN_PLACE
+            ? { id: item.id, slot: 'fixed', itemKind: item.kind, title: item.title, content: item.content }
+            : { id: item.id, slot: 'typed', itemKind: item.kind, required: true },
       ),
     })),
   };

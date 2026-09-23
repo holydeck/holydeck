@@ -20,6 +20,7 @@ import { PRESENCE_INDEXES, createPresenceIndexOn, dropPresenceIndexOn } from './
 import { QUEUE_INDEXES, createQueueIndexOn, dropQueueIndexOn } from './queue.js';
 import { RESTORE_INDEXES, RESTORE_RECORD } from './restores.js';
 import { RUN_INDEXES, RUN_RECORD } from './runs.js';
+import { SERVICE_TEMPLATE_INDEXES, SERVICE_TEMPLATE_RECORD } from './service-templates.js';
 import { SERVICE_INDEXES, SERVICE_RECORD } from './services.js';
 import { SESSION_INDEXES, createSessionIndexOn, dropSessionIndexOn } from './sessions.js';
 import { SLIDE_LABEL_INDEXES, SLIDE_LABEL_RECORD } from './slide-labels.js';
@@ -379,6 +380,18 @@ export const MIGRATIONS: readonly SchemaMigration[] = Object.freeze([
     },
     async down(api) {
       for (const index of [...SONG_SINGER_CHORDS_INDEXES].reverse()) await api.dropIndex(SONG_SINGER_CHORDS_RECORD, index.name);
+    },
+  },
+  {
+    version: 22,
+    name: 'the index a Service Template’s standing stamp is found by',
+    async up(api) {
+      for (const index of SERVICE_TEMPLATE_INDEXES) {
+        await api.createIndex(SERVICE_TEMPLATE_RECORD, index.keys, { name: index.name, ...index.options });
+      }
+    },
+    async down(api) {
+      for (const index of [...SERVICE_TEMPLATE_INDEXES].reverse()) await api.dropIndex(SERVICE_TEMPLATE_RECORD, index.name);
     },
   },
 ]);

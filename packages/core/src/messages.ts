@@ -14,6 +14,10 @@ export type MessageCode =
   | 'pptx_corrupt'
   | 'pptx_unsupported'
   | 'pptx_empty'
+  | 'pptx_too_many_entries'
+  | 'pptx_entry_too_large'
+  | 'pptx_archive_too_large'
+  | 'pptx_unsafe_entry_name'
   | 'config_invalid_value'
   | 'config_file_unreadable'
   | 'template_invalid'
@@ -98,6 +102,10 @@ export const messageCatalog: Record<MessageCode, string> = {
   pptx_corrupt: 'Could not read the PowerPoint file: {reason}.',
   pptx_unsupported: 'This file is not a supported PowerPoint presentation: {reason}.',
   pptx_empty: 'The PowerPoint file has no slides to extract.',
+  pptx_too_many_entries: 'The PowerPoint file has too many parts (max {max}).',
+  pptx_entry_too_large: 'A part of the PowerPoint file ("{name}") is too large once decompressed (max {max} bytes).',
+  pptx_archive_too_large: 'The PowerPoint file is too large once decompressed (max {max} bytes total).',
+  pptx_unsafe_entry_name: 'The PowerPoint file has a part with an unsafe name ("{name}").',
   config_invalid_value: 'Invalid value for {key}: "{value}" — {reason}.',
   config_file_unreadable: 'Cannot use config file {path}: {reason}.',
   template_invalid: 'Template error: {reason}.',

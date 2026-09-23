@@ -1,7 +1,7 @@
 import { strToU8, zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 import { HolyDeckError } from './messages.js';
-import { extractPptx } from './pptx.js';
+import { PPTX_MAX_ENTRIES, PPTX_MAX_ENTRY_BYTES, PPTX_MAX_TOTAL_BYTES, extractPptx } from './pptx.js';
 import type { ExtractedPptx } from './pptx.js';
 
 // `extractPptx` must never reach the filesystem, success or failure alike — the same boundary
@@ -162,6 +162,20 @@ function pngBytes(): Uint8Array {
  *  object `sniffMediaType` cannot type. */
 function unknownBytes(): Uint8Array {
   return new Uint8Array([0x01, 0x02, 0x03, 0x04]);
+}
+
+/** A zero-filled buffer of the given length: cheap to allocate, and still declares the real decompressed
+ *  size `openArchive`'s limits check against. Zipped with `{ level: 0 }` (store mode, see `storedFile`)
+ *  so `zipSync` copies it rather than running DEFLATE over tens of megabytes on every test run. */
+function bytesOfLength(length: number): Uint8Array {
+  return new Uint8Array(length);
+}
+
+/** Wraps a file for `zipSync` in store mode (compression method 0): a straight byte-copy, no DEFLATE.
+ *  `unzipSync` reads a stored entry by slicing, so the decompressed size/bytes it reports are unaffected —
+ *  only the time `zipSync` itself takes to build these large fixtures changes. */
+function storedFile(bytes: Uint8Array): [Uint8Array, { level: 0 }] {
+  return [bytes, { level: 0 }];
 }
 
 /** One minimal signature-only fixture per v1 media type `sniffPptxMediaType` recognizes, to exercise
@@ -334,6 +348,35 @@ describe('extractPptx rejections', () => {
     expect(result).toBeUndefined();
     expect(fsWrites).toEqual([]);
   });
+
+  it('rejects an archive whose entries declare more total decompressed bytes than PPTX_MAX_TOTAL_BYTES', () => {
+    // Entries just under the per-entry cap, added until their sum first crosses the total cap — proves the
+    // running total is tracked across entries rather than each one being checked only against the
+    // per-entry limit.
+    const perEntry = PPTX_MAX_ENTRY_BYTES - 1024;
+    const entryCount = Math.ceil(PPTX_MAX_TOTAL_BYTES / perEntry);
+    const files: Record<string, [Uint8Array, { level: 0 }]> = {};
+    for (let index = 0; index < entryCount; index += 1) files[`ppt/media/blob${index}.bin`] = storedFile(bytesOfLength(perEntry));
+    expect(codeOf(zipSync(files))).toBe('pptx_archive_too_large');
+  });
+
+  it('rejects a single entry whose decompressed size exceeds PPTX_MAX_ENTRY_BYTES', () => {
+    const bytes = zipSync({ 'ppt/media/big.bin': storedFile(bytesOfLength(PPTX_MAX_ENTRY_BYTES + 1)) });
+    expect(codeOf(bytes)).toBe('pptx_entry_too_large');
+  });
+
+  it('rejects an archive with more entries than PPTX_MAX_ENTRIES', () => {
+    const files: Record<string, Uint8Array> = {};
+    for (let index = 0; index <= PPTX_MAX_ENTRIES; index += 1) files[`f${index}.bin`] = strToU8('');
+    expect(codeOf(zipSync(files))).toBe('pptx_too_many_entries');
+  });
+
+  it.each(['../evil.xml', '/abs.xml', 'bad\0name.xml', 'bad\\name.xml'])(
+    'rejects an unsafe entry name %s',
+    (name) => {
+      expect(codeOf(zipSync({ [name]: strToU8('x') }))).toBe('pptx_unsafe_entry_name');
+    },
+  );
 });
 
 describe('extractPptx embedded media', () => {

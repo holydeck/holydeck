@@ -1,7 +1,9 @@
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT } from '@holydeck/contracts/http';
+import { SERMON_IMPORT_PREVIEW_PATH } from '@holydeck/contracts/sermon-import';
 import { SERMONS_PATH } from '@holydeck/contracts/sermons';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
+import { RESOLVE_TOOL_NAME } from '@holydeck/core/anthropic';
 import { parseSermonFile } from '@holydeck/core/sermon';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -14,7 +16,7 @@ import { corpusClient } from './corpus.js';
 import { FORBIDDEN, guardMutations } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { passkeysOn } from './passkeys.js';
-import { CONTENT_EDIT } from './roles.js';
+import { CONTENT_EDIT, SERVICES_MANAGE } from './roles.js';
 import { SERMON_ID_PATH, serveSermonRoutes } from './sermon-routes.js';
 import { sermonsOn } from './sermons.js';
 import { slideLayoutContext, slideLayoutsOn } from './slide-layouts.js';
@@ -27,11 +29,13 @@ import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
+import type { HttpPost } from '@holydeck/core/anthropic';
 import type { Fetching } from './corpus.js';
 import type { Identity } from './onboarding.js';
 import type { SermonBody, SermonStore } from './sermons.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { SlideLayoutStore } from './slide-layouts.js';
+import type { FakeDb } from '../test/helpers/fake-db.js';
 import type { FastifyInstance } from 'fastify';
 
 const START = Date.parse('2026-09-22T09:30:00.000Z');
@@ -94,6 +98,7 @@ let sermons: SermonStore;
 let layouts: SlideLayoutStore;
 let admin: StartedSession;
 let tick: number;
+let db: FakeDb;
 
 const now = (): string => new Date(START + (tick += 1) * 1000 - 1000).toISOString();
 const at = (path: string, id: string): string => path.replace(':id', id);
@@ -112,18 +117,26 @@ const serving = async (
   held: Identity | undefined,
   store: SermonStore | undefined = sermons,
   fetching: Fetching = answeringCorpus(),
+  anthropicApiKey?: string,
+  httpPost?: HttpPost,
 ): Promise<void> => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
   enforceAuthorization(app, { sessions, identity: undefined });
-  serveSermonRoutes(app, { sermons: store, corpus: corpusClient({ url: LIBRARY, token: CORPUS_TOKEN }, fetching), identity: held });
+  serveSermonRoutes(app, {
+    sermons: store,
+    corpus: corpusClient({ url: LIBRARY, token: CORPUS_TOKEN }, fetching),
+    identity: held,
+    anthropicApiKey,
+    httpPost,
+  });
   await app.ready();
 };
 
 beforeEach(async () => {
   tick = 0;
-  const db = fakeDb();
+  db = fakeDb();
   sessions = sessionsOn(memorySessions().db, { now: () => new Date(START).toISOString() });
   identity = {
     accounts: accountsOn(memoryAccounts().db, { now, newId: () => 'A'.repeat(22), hash: async (password) => `test-hash:${password}`, verify: async (password, stored) => stored === `test-hash:${password}` }),
@@ -134,7 +147,7 @@ beforeEach(async () => {
   sermons = sermonsOn(db, { now, newId: () => `sermon-${(serial += 1)}` });
   layouts = slideLayoutsOn(db, { now, newId: () => `layout-${(serial += 1)}` });
   await serving(identity);
-  admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT] });
+  admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [CONTENT_EDIT, SERVICES_MANAGE] });
 });
 
 afterEach(async () => app.close());
@@ -259,5 +272,82 @@ describe('sermon route guards', () => {
     await serving(undefined, undefined);
     const response = await ask(method as Method, at(path, 'sermon-1'), method === 'GET' ? undefined : {});
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe('POST /api/v1/sermons/import/preview', () => {
+  const preview = (payload: unknown) => ask('POST', SERMON_IMPORT_PREVIEW_PATH, payload);
+  const rowCount = () => [...db.rows.values()].reduce((total, rows) => total + rows.length, 0);
+
+  test('answers the deterministic yaml with resolver "not-needed" when no key is set', async () => {
+    const response = await preview({ text: 'John 3:16', translations: ['ta'] });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data['resolver']).toBe('not-needed');
+  });
+
+  test('answers resolver "not-configured" and lists the unresolved book in notices when a name is left over', async () => {
+    const response = await preview({ text: 'Xyzzy 1:1\nHosea 4:6', translations: ['ta'] });
+    expect(response.statusCode).toBe(200);
+    const data = response.json().data;
+    expect(data['resolver']).toBe('not-configured');
+    expect(data['notices']).toEqual([
+      expect.stringContaining('ANTHROPIC_API_KEY'),
+      expect.stringContaining('Xyzzy'),
+    ]);
+  });
+
+  test('answers resolver "unavailable" when the resolver call fails', async () => {
+    await app.close();
+    await serving(identity, sermons, answeringCorpus(), 'test-key', async () => ({ status: 500, body: '{}' }));
+    const response = await preview({ text: 'Xyzzy 1:1\nHosea 4:6', translations: ['ta'] });
+    expect(response.statusCode).toBe(200);
+    const data = response.json().data;
+    expect(data['resolver']).toBe('unavailable');
+    expect(data['resolvedTokens']).toEqual([]);
+  });
+
+  test('writes nothing — no sermon exists after a preview call', async () => {
+    const before = rowCount();
+    const response = await preview({ text: 'John 3:16', translations: ['ta'] });
+    expect(response.statusCode).toBe(200);
+    expect(rowCount()).toBe(before);
+  });
+
+  test('records an integration.call audit entry when the resolver runs, carrying its token cost', async () => {
+    await app.close();
+    await serving(identity, sermons, answeringCorpus(), 'test-key', async () => ({
+      status: 200,
+      body: JSON.stringify({
+        content: [
+          { type: 'tool_use', id: 'toolu_test', name: RESOLVE_TOOL_NAME, input: { resolutions: [{ token: 'Xyzzy', usfm: 'JHN' }] } },
+        ],
+        usage: { input_tokens: 512, output_tokens: 64 },
+      }),
+    }));
+    const response = await preview({ text: 'Xyzzy 1:1\nHosea 4:6', translations: ['ta'] });
+    expect(response.statusCode).toBe(200);
+    const events = db.rows.get('audit_events') ?? [];
+    const entry = events.find((row) => row['action'] === 'integration.call');
+    expect(entry).toBeDefined();
+    expect(typeof entry?.['subject']).toBe('string');
+    expect(entry?.['subject']).not.toBe('');
+    expect(entry?.['requestTokens']).toBe(512);
+    expect(entry?.['responseTokens']).toBe(64);
+    for (const row of events) expect(String(row['detail'] ?? '')).not.toContain('Xyzzy 1:1');
+  });
+
+  test('refuses the 11th preview in a minute for the same account with 429 sermon.import_rate_limited', async () => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const response = await preview({ text: 'John 3:16', translations: ['ta'] });
+      expect(response.statusCode).toBe(200);
+    }
+    const eleventh = await preview({ text: 'John 3:16', translations: ['ta'] });
+    expect(eleventh.statusCode).toBe(429);
+    expect(eleventh.json().error.code).toBe('sermon.import_rate_limited');
+  });
+
+  test('answers 422 for text over 20000 characters', async () => {
+    const response = await preview({ text: 'x'.repeat(20_001), translations: ['ta'] });
+    expect(response.statusCode).toBe(422);
   });
 });

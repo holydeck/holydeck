@@ -23,6 +23,7 @@ describe('the durable record classes', () => {
       'contentRevisions',
       'mediaAssets',
       'midServiceAdditions',
+      'pptxImportSessions',
       'preparedSnapshots',
       'presentationRuns',
       'restores',

@@ -8,7 +8,9 @@ import { CONTENT_LANGUAGES_PATH } from '@holydeck/contracts/content-languages';
 import { MESSAGE_CODES, UPDATE_REQUIRED } from '@holydeck/contracts/http';
 import { SLIDE_LAYOUTS_PATH } from '@holydeck/contracts/layouts';
 import { LIBRARY_PATH } from '@holydeck/contracts/library';
+import { PPTX_IMPORTS_PATH } from '@holydeck/contracts/pptx';
 import { SCRIPTURE_SEARCH_PATH } from '@holydeck/contracts/scripture';
+import { SERMON_IMPORT_PREVIEW_PATH } from '@holydeck/contracts/sermon-import';
 import { SERMONS_PATH } from '@holydeck/contracts/sermons';
 import { SESSION_PATH, TICKET_PATH } from '@holydeck/contracts/sessions';
 import { SLIDE_GROUPS_PATH } from '@holydeck/contracts/slide-groups';
@@ -30,6 +32,7 @@ import { contentLanguagesOn } from './content-languages.js';
 import { libraryOn } from './library.js';
 import { MEDIA_PATH } from './media-routes.js';
 import { passkeysOn } from './passkeys.js';
+import { PPTX_COMMIT_PATH, PPTX_ID_PATH, PPTX_REVIEW_PATH } from './pptx-routes.js';
 import { PREPARATION_OVERRIDE_PATH, PREPARATION_PREPARE_PATH } from './preparation-routes.js';
 import { SHOWN_REFERENCES_PATH } from './reference-routes.js';
 import { CATALOGUE_MANAGE, CONTENT_EDIT, PRESENTATION_CONTROL } from './roles.js';
@@ -50,7 +53,12 @@ import {
   SERVICE_STATUS_PATH,
   SERVICE_TRANSITION_PATH,
 } from './service-routes.js';
-import { SERVICE_TEMPLATE_PATH } from './service-template-routes.js';
+import {
+  SERVICE_TEMPLATE_FROM_SERVICE_PATH,
+  SERVICE_TEMPLATE_ID_PATH,
+  SERVICE_TEMPLATE_PATH,
+  SERVICE_TEMPLATE_STATUS_PATH,
+} from './service-template-routes.js';
 import { SIGN_IN_REFUSED } from './session-routes.js';
 import { SETTINGS_PATH } from './settings-routes.js';
 import { SLIDE_GROUP_ID_PATH, SLIDE_PATH } from './slide-group-routes.js';
@@ -192,8 +200,13 @@ describe('every route that changes something', () => {
       { method: 'POST', url: SERVICE_ITEM_DUPLICATE_PATH },
       { method: 'POST', url: SERVICE_ITEMS_REORDER_PATH },
       { method: 'POST', url: SERVICE_ITEM_REVISE_PATH },
-      // A Service Template is Admin's by a permission of its own: creating one changes what New Service offers.
+      // A Service Template is Admin's by a permission of its own: creating one changes what New Service
+      // offers, and saving it forward, archiving it, bringing it back or minting one from a Service already
+      // run are the same permission's again.
       { method: 'POST', url: SERVICE_TEMPLATE_PATH },
+      { method: 'PUT', url: SERVICE_TEMPLATE_ID_PATH },
+      { method: 'PATCH', url: SERVICE_TEMPLATE_STATUS_PATH },
+      { method: 'POST', url: SERVICE_TEMPLATE_FROM_SERVICE_PATH },
       // Preparation's own surface: preparing a Service into a manifest is Admin's or an Editor's, the
       // same permission Editing one already takes; overriding a readiness blocker is Control presentation's
       // alone, the one route in this module gated by a different permission than the rest.
@@ -213,6 +226,9 @@ describe('every route that changes something', () => {
       { method: 'PUT', url: SERMON_ID_PATH },
       { method: 'PUT', url: `${SERMON_ID_PATH}/raw` },
       { method: 'POST', url: `${SERMON_ID_PATH}/slides` },
+      // Previewing a sermon import calls out to the Anthropic resolver, which is a service integration
+      // rather than content editing, so it is gated behind its own permission.
+      { method: 'POST', url: SERMON_IMPORT_PREVIEW_PATH },
       // A Slide Group and the slides within it change behind the same permission again: creating one,
       // editing it, duplicating it, enabling or disabling it, regenerating it, reordering its slides, and
       // every per-slide change — enable, duplicate, a layout or background override, and a language
@@ -239,6 +255,10 @@ describe('every route that changes something', () => {
       { method: 'POST', url: SLIDE_LABELS_PATH },
       { method: 'PUT', url: SLIDE_LABEL_ID_PATH },
       { method: 'PATCH', url: SLIDE_LABEL_STATUS_PATH },
+      { method: 'POST', url: PPTX_IMPORTS_PATH },
+      { method: 'POST', url: PPTX_REVIEW_PATH },
+      { method: 'POST', url: PPTX_COMMIT_PATH },
+      { method: 'DELETE', url: PPTX_ID_PATH },
     ]);
   });
 
