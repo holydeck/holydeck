@@ -187,6 +187,15 @@ const en = {
   'conflicts.shelfHeading': 'Someone else changed this while you were editing. Choose which version to keep.',
   'conflicts.keepMine': 'Keep mine',
   'conflicts.keepTheirs': 'Keep theirs',
+  'history.heading': 'Revision history',
+  'history.revisionLabel': 'Revision {revision} — {at}',
+  'history.restore': 'Restore',
+  'history.compare': 'Compare selected',
+  'history.diffLabel': 'Differences',
+  'history.restoreConfirmLabel': 'Confirm restore',
+  'history.restoreConfirmBody': 'Restore revision {revision}? This creates a new revision with its content.',
+  'history.confirm': 'Confirm',
+  'history.cancel': 'Cancel',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -370,6 +379,15 @@ const de: Catalog = {
   'conflicts.shelfHeading': 'Jemand anderes hat dies geändert, während Sie bearbeitet haben. Wählen Sie, welche Version erhalten bleiben soll.',
   'conflicts.keepMine': 'Meine Version behalten',
   'conflicts.keepTheirs': 'Andere Version behalten',
+  'history.heading': 'Versionsverlauf',
+  'history.revisionLabel': 'Version {revision} — {at}',
+  'history.restore': 'Wiederherstellen',
+  'history.compare': 'Ausgewählte vergleichen',
+  'history.diffLabel': 'Unterschiede',
+  'history.restoreConfirmLabel': 'Wiederherstellung bestätigen',
+  'history.restoreConfirmBody': 'Version {revision} wiederherstellen? Dadurch wird eine neue Version mit diesem Inhalt erstellt.',
+  'history.confirm': 'Bestätigen',
+  'history.cancel': 'Abbrechen',
 };
 
 const ta: Catalog = {
@@ -547,6 +565,15 @@ const ta: Catalog = {
   'conflicts.shelfHeading': 'நீங்கள் திருத்திக் கொண்டிருந்தபோது வேறு ஒருவர் இதை மாற்றியுள்ளார். எந்தப் பதிப்பை வைத்திருக்க வேண்டும் எனத் தேர்ந்தெடுக்கவும்.',
   'conflicts.keepMine': 'எனது பதிப்பை வைத்திருக்கவும்',
   'conflicts.keepTheirs': 'அவரது பதிப்பை வைத்திருக்கவும்',
+  'history.heading': 'பதிப்பு வரலாறு',
+  'history.revisionLabel': 'பதிப்பு {revision} — {at}',
+  'history.restore': 'மீட்டமை',
+  'history.compare': 'தேர்ந்தெடுத்தவற்றை ஒப்பிடு',
+  'history.diffLabel': 'வேறுபாடுகள்',
+  'history.restoreConfirmLabel': 'மீட்டமைப்பை உறுதிப்படுத்து',
+  'history.restoreConfirmBody': 'பதிப்பு {revision} ஐ மீட்டமைக்கவா? இது அதன் உள்ளடக்கத்துடன் புதிய பதிப்பை உருவாக்கும்.',
+  'history.confirm': 'உறுதிப்படுத்து',
+  'history.cancel': 'ரத்துசெய்',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */

@@ -25,6 +25,7 @@ import type { JSX } from 'preact';
 const OutputPage = lazy(() => import('./pages/output.js').then((module) => module.OutputPage));
 const ServicePage = lazy(() => import('./pages/service.js').then((module) => module.ServicePage));
 const AdminUsersPage = lazy(() => import('./pages/admin-users.js').then((module) => module.AdminUsersPage));
+const HistoryPage = lazy(() => import('./pages/history.js').then((module) => module.HistoryPage));
 
 /** What the current route renders inside the shell. */
 function Page(): JSX.Element {
@@ -37,6 +38,8 @@ function Page(): JSX.Element {
       return <ServicePage id={current.id} />;
     case 'admin-users':
       return <AdminUsersPage />;
+    case 'content-history':
+      return <HistoryPage contentId={current.contentId} />;
     case 'welcome':
       return <WelcomePage />;
     case 'sign-in':
