@@ -12,6 +12,7 @@ import { showToast } from '../components/toast.js';
 import { t } from '../i18n.js';
 import { bulkSelecting, bulkSelection, isReadOnly, mutate, pending, service } from '../state/workspace-store.js';
 import { API } from '../api-routes.js';
+import { DriftNotice } from './DriftNotice.js';
 import { MoveToDialog } from './MoveToDialog.js';
 import { runOrderSteps } from './order-actions.js';
 import { moveWithin, neighbours, reorderPlan, type Neighbours } from './order-ops.js';
@@ -133,6 +134,7 @@ export function OrderItem({ sectionId, item, index }: {
       <span title={item.title}>{item.title}</span>
       <span>{t(KIND_KEY[item.kind])}</span>
       {item.content === undefined ? null : <span>{t('order.revision', { n: item.content.revision })}</span>}
+      <DriftNotice itemId={item.id} />
       {item.enabled ? null : <span class="is-disabled">{t('order.disabled')}</span>}
       {busy ? <span class="order-item-pending" aria-hidden="true" /> : null}
       <div class="order-item-actions">

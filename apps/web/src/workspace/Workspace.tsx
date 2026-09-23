@@ -9,6 +9,7 @@
 import { signal } from '@preact/signals';
 import { useEffect, useState } from 'preact/hooks';
 
+import { joinAllowedFor } from '@holydeck/contracts/services';
 import type { MessageKey } from '@holydeck/localization/messages';
 import type { ComponentChildren, JSX } from 'preact';
 
@@ -16,6 +17,7 @@ import { t } from '../i18n.js';
 import {
   loadService, loadState, resetWorkspace, rightTab, selection, service,
 } from '../state/workspace-store.js';
+import { LifecycleMenu } from './LifecycleMenu.js';
 import { OrderPanel } from './OrderPanel.js';
 import { PropertiesPanel } from './PropertiesPanel.js';
 import { startPositionWriter } from './position-writer.js';
@@ -277,6 +279,11 @@ export function Workspace({ id }: { readonly id: string }): JSX.Element {
   return (
     <div class="workspace-main">
       <h1 class="visually-hidden">{view.title}</h1>
+      <div class="workspace-header">
+        <LifecycleMenu view={view} />
+        {view.state === 'completed' || view.state === 'archived' ? <p role="note">{t('lifecycle.readOnly')}</p> : null}
+        {joinAllowedFor(view.state) ? <p>{t('lifecycle.join')}</p> : null}
+      </div>
       <WorkspaceFrame
         order={<OrderPanel view={view} onEmpty={() => { rightTab.value = 'library'; mobileRegion.value = 'details'; }} />}
         center={<EditorPlaceholder />}

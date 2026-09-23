@@ -6,7 +6,9 @@ import type { ComponentChildren, JSX } from 'preact';
 
 import { locale } from '../app-state.js';
 import { t } from '../i18n.js';
-import { service } from '../state/workspace-store.js';
+import { drift, selection, service } from '../state/workspace-store.js';
+import { DriftNotice } from './DriftNotice.js';
+import { findItem } from './service-data.js';
 
 const dateOf = (date: string): string =>
   new Intl.DateTimeFormat(locale.value, { dateStyle: 'full', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`));
@@ -15,12 +17,35 @@ const dateOf = (date: string): string =>
 export function PropertiesPanel({ children }: { readonly children?: ComponentChildren }): JSX.Element | null {
   const view = service.value;
   if (view === undefined) return null;
+  const itemId = selection.value.itemId;
+  const item = itemId === undefined ? undefined : findItem(view, itemId);
+  const entry = itemId === undefined ? undefined : drift.value.find((candidate) => candidate.itemId === itemId);
   return (
     <div>
       <h2>{view.title}</h2>
       <p>{dateOf(view.date)}</p>
       <p>{view.site}</p>
       <p>{t(`service.state.${view.state}`)}</p>
+      {item === undefined || entry === undefined ? null : (
+        <div>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">{t('drift.compare.pinned', { n: item.content?.revision ?? 0 })}</th>
+                <th scope="col">{t('drift.compare.latest', { n: entry.latestRevision })}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{item.title}</td>
+                <td>{item.title}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>{t('drift.compare.later')}</p>
+          <DriftNotice itemId={item.id} />
+        </div>
+      )}
       {children}
     </div>
   );

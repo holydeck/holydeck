@@ -12,7 +12,7 @@ import type { FetchLike } from '../api.js';
 import { session } from '../app-state.js';
 import { ToastRegion, toasts } from '../components/toast.js';
 import { setFetching } from '../request.js';
-import { resetWorkspace, service } from '../state/workspace-store.js';
+import { drift, resetWorkspace, service } from '../state/workspace-store.js';
 import { OrderItem } from './OrderItem.js';
 import type { ServiceView } from './service-data.js';
 
@@ -146,6 +146,15 @@ describe('OrderItem', () => {
 
     expect(screen.getByText('Song')).toBeTruthy();
     expect(screen.getByText('Revision 3')).toBeTruthy();
+  });
+
+  it('shows the drift notice for a drifted item, never firing on its own', () => {
+    drift.value = [{ itemId: 'b', latestRevision: 4 }];
+    setFetching(fakeFetch({}));
+    render(<OrderItem sectionId="sec" item={itemB} index={1} total={2} />);
+
+    expect(screen.getByText('A newer revision is available')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Update to revision 4' })).toBeTruthy();
   });
 
   it('opens Move To… from the keyboard and returns focus to Actions on Escape', () => {

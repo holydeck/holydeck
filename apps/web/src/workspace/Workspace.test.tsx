@@ -73,6 +73,7 @@ describe('the service workspace', () => {
     await renderAt('/services/s1');
 
     expect(await screen.findByRole('navigation', { name: 'Order' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Service' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Library' }));
     await vi.waitFor(() => {
@@ -198,6 +199,28 @@ describe('the service workspace', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe("We couldn't load this workspace. Check your connection and try again.");
     expect(screen.getByRole('button', { name: 'Try Again' })).toBeTruthy();
+  });
+
+  it('shows the read-only banner once completed, and no join note', async () => {
+    setFetching(fakeFetch({
+      'GET /api/v1/services/s1': reply(200, successEnvelope({ ...record('s1', ['a']), state: 'completed' }, 'r1')),
+      'GET /api/v1/services/s1/content-drift': noDrift,
+    }));
+    await renderAt('/services/s1');
+
+    expect(screen.getByRole('note').textContent).toBe('This service has been presented. Its delivered order is kept as it was.');
+    expect(screen.queryByText('Guests can join while this service is Presenting.')).toBeNull();
+  });
+
+  it('shows the join note while presenting, and no read-only banner', async () => {
+    setFetching(fakeFetch({
+      'GET /api/v1/services/s1': reply(200, successEnvelope({ ...record('s1', ['a']), state: 'presenting' }, 'r1')),
+      'GET /api/v1/services/s1/content-drift': noDrift,
+    }));
+    await renderAt('/services/s1');
+
+    expect(screen.getByText('Guests can join while this service is Presenting.')).toBeTruthy();
+    expect(screen.queryByRole('note')).toBeNull();
   });
 
   it('shows the empty state with Add Content, which switches to the Library tab', async () => {
