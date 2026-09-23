@@ -82,6 +82,10 @@ describe('translating', () => {
       'live.mode.paused',
       'live.mode.standby',
       'live.mode.live',
+      'live.error.stale',
+      'live.error.unauthorized',
+      'live.error.invalid',
+      'live.error.failed',
     ] as const;
     for (const locale of LOCALES) {
       for (const key of keys) expect(translate(locale, key)).not.toBe('');

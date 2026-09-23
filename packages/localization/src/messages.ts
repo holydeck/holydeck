@@ -189,6 +189,10 @@ const en = {
   'live.mode.paused': 'Live mode paused.',
   'live.mode.standby': 'Standing by.',
   'live.mode.live': 'Live mode is on.',
+  'live.error.stale': 'The live screen changed first. Check it and try again.',
+  'live.error.unauthorized': 'This screen may not control the live run.',
+  'live.error.invalid': 'That live command could not be carried out.',
+  'live.error.failed': 'The live command did not go through. Try again.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -374,6 +378,10 @@ const de: Catalog = {
   'live.mode.paused': 'Live-Modus pausiert.',
   'live.mode.standby': 'Bereit.',
   'live.mode.live': 'Live-Modus ist aktiv.',
+  'live.error.stale': 'Die Live-Anzeige hat sich zuerst geändert. Prüfen Sie sie und versuchen Sie es erneut.',
+  'live.error.unauthorized': 'Dieser Bildschirm darf den Live-Durchlauf nicht steuern.',
+  'live.error.invalid': 'Dieser Live-Befehl konnte nicht ausgeführt werden.',
+  'live.error.failed': 'Der Live-Befehl ist nicht angekommen. Versuchen Sie es erneut.',
 };
 
 const ta: Catalog = {
@@ -553,6 +561,10 @@ const ta: Catalog = {
   'live.mode.paused': 'நேரலை பயன்முறை இடைநிறுத்தப்பட்டது.',
   'live.mode.standby': 'காத்திருக்கிறது.',
   'live.mode.live': 'நேரலை பயன்முறை செயலில் உள்ளது.',
+  'live.error.stale': 'நேரலைத் திரை முதலில் மாறிவிட்டது. சரிபார்த்து மீண்டும் முயலவும்.',
+  'live.error.unauthorized': 'இந்தத் திரை நேரலை ஓட்டத்தைக் கட்டுப்படுத்த முடியாது.',
+  'live.error.invalid': 'அந்த நேரலைக் கட்டளையைச் செயல்படுத்த முடியவில்லை.',
+  'live.error.failed': 'நேரலைக் கட்டளை சென்றடையவில்லை. மீண்டும் முயலவும்.',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */

@@ -430,6 +430,30 @@ describe('run-engine lifecycle', () => {
     expect(deck).toHaveBeenCalledWith(expect.objectContaining({ actor: SESSION.actor, correlationId: SESSION.correlationId }), RECORD);
   });
 
+  // The key each view's aria-live region reads (spec §A11y); Control has its own full state instead.
+  it('announces a start to every output view, but not to control', async () => {
+    const { engine, hub } = setup();
+    await engine.start(SESSION, { serviceId: 'service-1', mode: 'live' });
+    const states = hub.changes[0]?.states ?? {};
+    for (const channel of ['audience', 'stage', 'singer'] as const) expect(states[channel]).toMatchObject({ announcement: 'live.run.started' });
+    expect(states['live-control']).not.toHaveProperty('announcement');
+  });
+
+  it.each([
+    ['pause', 'live.mode.paused'],
+    ['standby', 'live.mode.standby'],
+  ] as const)('announces the mode a %s command moves into', async (command, key) => {
+    const { engine, hub } = await started();
+    await engine.command(CONTROL_MEMBER, frame(command, command === 'standby' ? { screenId: 'welcome' } : undefined));
+    expect(hub.changes.at(-1)?.states.stage).toMatchObject({ announcement: key });
+  });
+
+  it('announces nothing for a slide change that leaves the mode alone', async () => {
+    const { engine, hub } = await started();
+    await engine.command(CONTROL_MEMBER, frame('next'));
+    expect(hub.changes.at(-1)?.states.audience).not.toHaveProperty('announcement');
+  });
+
   it('propagates start and deck failures', async () => {
     const { engine, runs } = setup();
     runs.start.mockRejectedValueOnce(new RunError('state', 'not ready'));

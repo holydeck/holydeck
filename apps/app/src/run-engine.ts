@@ -21,10 +21,11 @@ import { RunEventError } from './run-events.js';
 import { RUN_PERMISSIONS, RunError, runContext } from './runs.js';
 
 import type { AckOutcome, CommandFrame, LiveChannel } from '@holydeck/contracts/live';
-import type { LiveModeState } from '@holydeck/contracts/live-mode';
+import type { LiveMode, LiveModeState } from '@holydeck/contracts/live-mode';
 import type { ChannelState, LivePosition, LiveState } from '@holydeck/contracts/live-state';
 import type { Theme, ThemeSurface } from '@holydeck/contracts/live-theme';
 import type { RunStartBody } from '@holydeck/contracts/runs';
+import type { MessageKey } from '@holydeck/localization/messages';
 import type { LiveEventType } from './live-events.js';
 import type { LiveHub, LiveMember } from './live-protocol.js';
 import type { ThemeChangeResult, ThemeStore } from './live-theme.js';
@@ -129,6 +130,13 @@ const commandFrom = (frame: CommandFrame): Command | undefined => {
   }
 };
 
+/** The catalog key each view reads out when the run moves into a mode (spec §Localization). */
+const MODE_ANNOUNCEMENTS: Readonly<Record<LiveMode, MessageKey>> = {
+  live: 'live.mode.live',
+  paused: 'live.mode.paused',
+  standby: 'live.mode.standby',
+};
+
 const reduce = (command: Exclude<Command, { type: 'theme' }>, mode: LiveModeState<LivePosition>, deck: RunDeck): LiveModeState<LivePosition> | undefined => {
   switch (command.type) {
     case 'go-to':
@@ -174,14 +182,18 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
 
   /** Each channel's privacy projection of `live` (Design §2), computed here so no view is ever sent a
    *  wider view's state to project for itself. */
-  const statesFor = (live: LiveState, deck: RunDeck | undefined, channels: readonly LiveChannel[]): Partial<Record<LiveChannel, ChannelState>> => {
+  const statesFor = (
+    live: LiveState, deck: RunDeck | undefined, channels: readonly LiveChannel[], announcement?: MessageKey,
+  ): Partial<Record<LiveChannel, ChannelState>> => {
     const upcoming = deck === undefined || 'standby' in live.public ? undefined : adjacentPosition(deck, live.public, 'next');
     const states: Partial<Record<LiveChannel, ChannelState>> = {};
     for (const channel of channels) {
       const state = projectFor(
         channel === LIVE_CONTROL_CHANNEL ? 'control' : channel,
         live,
-        channel === LIVE_CONTROL_CHANNEL ? { counts: options.hub.connectionCounts() } : { next: upcoming },
+        channel === LIVE_CONTROL_CHANNEL
+          ? { counts: options.hub.connectionCounts() }
+          : { next: upcoming, ...(announcement === undefined ? {} : { announcement }) },
       );
       if (state !== undefined) states[channel] = state;
     }
@@ -199,7 +211,10 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
     const privateChanged = before.mode !== next.mode || !samePosition(before.selected, next.selected);
     const channels: readonly LiveChannel[] = publicChanged ? LIVE_CHANNELS
       : privateChanged ? ['stage', LIVE_CONTROL_CHANNEL] : [];
-    options.hub.publishChange({ type: kind, states: statesFor(next, deck, channels), stateRevision });
+    // A mode change is the one a room cannot see for itself, so each view's aria-live region is handed
+    // the catalog key to read out (spec §A11y); a slide change speaks for itself and carries none.
+    const announcement = before.mode === next.mode ? undefined : MODE_ANNOUNCEMENTS[next.mode];
+    options.hub.publishChange({ type: kind, states: statesFor(next, deck, channels, announcement), stateRevision });
   };
 
   const channelOf = (surface: ThemeSurface): LiveChannel => surface === 'operator' ? LIVE_CONTROL_CHANNEL : surface;
@@ -288,7 +303,7 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
       currentRunId = record.runId;
       states.set(record.runId, record.live);
       options.hub.publishChange({
-        type: LIVE_EVENT_TYPES.runState, states: statesFor(record.live, deck, LIVE_CHANNELS), everyone: true, stateRevision: record.stateRevision,
+        type: LIVE_EVENT_TYPES.runState, states: statesFor(record.live, deck, LIVE_CHANNELS, 'live.run.started'), everyone: true, stateRevision: record.stateRevision,
       });
       return record;
     },
