@@ -318,6 +318,15 @@ describe('run-engine command ordering', () => {
     expect(runs.advance).toHaveBeenCalledWith(expect.anything(), 'run-1', 12, expect.objectContaining({ selected: { ...FIRST, slideIndex: 1 } }), 9);
   });
 
+  it.each([
+    ['go-to', { itemId: 'absent', slideIndex: 0 }], ['select', { itemId: 'item-2', slideIndex: 1 }], ['go-to', { itemId: 'empty', slideIndex: 0 }],
+  ])('acks invalid for %s to %j, a position the deck does not hold', async (type, position) => {
+    const { engine, runs, runEvents } = await started();
+    expect(await engine.command(CONTROL_MEMBER, frame(type, position))).toEqual({ outcome: 'invalid' });
+    expect(runEvents.record).not.toHaveBeenCalled();
+    expect(runs.advance).not.toHaveBeenCalled();
+  });
+
   it('refuses navigation from a position not found in the deck', async () => {
     const { engine, runs, runEvents } = await started();
     runs.resume.mockResolvedValue({ ...RECORD, live: { ...LIVE, selected: { itemId: 'absent', slideIndex: 0 } } });

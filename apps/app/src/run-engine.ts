@@ -130,7 +130,13 @@ const commandFrom = (frame: CommandFrame): Command | undefined => {
 const reduce = (command: Exclude<Command, { type: 'theme' }>, mode: LiveModeState<LivePosition>, deck: RunDeck): LiveModeState<LivePosition> | undefined => {
   switch (command.type) {
     case 'go-to':
-    case 'select': return select(mode, command.position);
+    case 'select': {
+      // Only a slide the deck holds: anything else would be logged as shown, pushed to the room, and
+      // leave next/previous with nowhere to step from.
+      const { itemId, slideIndex } = command.position;
+      const item = deck.items.find((candidate) => candidate.itemId === itemId);
+      return item !== undefined && slideIndex < item.slides.length ? select(mode, command.position) : undefined;
+    }
     case 'next':
     case 'previous': {
       const position = adjacentPosition(deck, mode.selectedPosition, command.type);
