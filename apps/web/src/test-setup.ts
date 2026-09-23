@@ -11,3 +11,10 @@ afterEach(async () => {
   const { cleanup } = await import('@testing-library/preact');
   cleanup();
 });
+
+// Routed pages are lazy chunks. Under a parallel full-repo run a cold transform of a large chunk can outlast
+// Testing Library's default 1 s `findBy` wait, so page-level waits get more room; a passing wait is unchanged.
+if (typeof document !== 'undefined') {
+  const { configure } = await import('@testing-library/preact');
+  configure({ asyncUtilTimeout: 5_000 });
+}
