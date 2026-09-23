@@ -82,8 +82,8 @@ async function auditEntryCandidates(
 export function retentionSweepOn(options: RetentionSweepOptions): Handler {
   return async (_job, signal) => {
     const overrides = {
-      'autosave-revision': options.autosaveRetentionDays,
-      'audit-entry': options.auditRetentionDays,
+      autosaveRetentionDays: options.autosaveRetentionDays,
+      auditRetentionDays: options.auditRetentionDays,
     };
     const nowIso = options.now();
     const nowMs = Date.parse(nowIso);
