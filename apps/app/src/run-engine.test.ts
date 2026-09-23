@@ -328,6 +328,22 @@ describe('run-engine command ordering', () => {
     expect(engine.state('run-1')).toMatchObject({ mode: 'live', public: SECOND });
   });
 
+  // LIVE-13's review lists what the room saw: a paused or standby selection is private, and the act that
+  // actually puts it on screen is the one the log must carry `shown` on.
+  it.each([
+    ['pause', 'take-selected'], ['standby', 'resume-live'],
+  ] as const)('logs shown only when %s selection goes public via %s', async (hold, reveal) => {
+    const { engine, runEvents } = await started();
+    await engine.command(CONTROL_MEMBER, frame(hold, hold === 'standby' ? { screenId: 'welcome' } : undefined));
+    await engine.command(CONTROL_MEMBER, frame('select', SECOND));
+    expect(runEvents.record.mock.calls.at(-1)?.[1]).toEqual({ runId: 'run-1', kind: LIVE_EVENT_TYPES.runState, pinnedRevisions: PINS });
+    await engine.command(CONTROL_MEMBER, frame(reveal));
+    expect(runEvents.record.mock.calls.at(-1)?.[1]).toEqual({
+      runId: 'run-1', kind: LIVE_EVENT_TYPES.slide, pinnedRevisions: PINS, shown: { itemId: 'item-2', reference: 'Second song' },
+    });
+    expect(runEvents.record.mock.calls.filter(([, input]) => input.shown !== undefined)).toHaveLength(1);
+  });
+
   it.each(['pause', 'return-to-live'] as const)('%s from standby keeps the standby screen public, never a fake slide', async (command) => {
     const { engine, hub } = await started();
     await engine.command(CONTROL_MEMBER, frame('standby', { screenId: 'welcome' }));

@@ -141,14 +141,18 @@ const reduce = (command: Exclude<Command, { type: 'theme' }>, mode: LiveModeStat
   }
 };
 
-const kindFor = (type: Command['type']): LiveEventType => {
-  if (type === 'go-to' || type === 'select' || type === 'next' || type === 'previous') return LIVE_EVENT_TYPES.slide;
-  return type === 'standby' ? LIVE_EVENT_TYPES.standby : LIVE_EVENT_TYPES.runState;
-};
-
 const samePosition = (a: LiveState['public'], b: LiveState['public']): boolean =>
   'standby' in a ? 'standby' in b && a.standby === b.standby
     : !('standby' in b) && a.itemId === b.itemId && a.slideIndex === b.slideIndex;
+
+/** What a command did, read from the state diff rather than its name: a select while paused or in
+ *  standby moves nothing the room sees, and take-selected/resume-live are what really put a slide up.
+ *  Only a slide reaching the public output is `slide`, so LIVE-13's review lists exactly what was shown. */
+const kindFor = (type: Command['type'], before: LiveState, next: LiveState): LiveEventType => {
+  if (type === 'standby') return LIVE_EVENT_TYPES.standby;
+  const shown = !samePosition(before.public, next.public) && !('standby' in next.public) && next.public.itemId !== '';
+  return shown ? LIVE_EVENT_TYPES.slide : LIVE_EVENT_TYPES.runState;
+};
 
 export function runEngineOn(options: RunEngineOptions): RunEngine {
   const states = new Map<string, LiveState>();
@@ -236,15 +240,13 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
     const nextMode = reduce(command, prior, deck);
     if (nextMode === undefined) return { outcome: 'invalid' };
     const next = fromModeState(run.live, prior, nextMode);
-    const kind = kindFor(command.type);
+    const kind = kindFor(command.type, run.live, next);
+    const shown = kind === LIVE_EVENT_TYPES.slide && !('standby' in next.public) ? next.public : undefined;
     await options.runEvents.record(session, {
       runId, kind, pinnedRevisions: deck.pinnedRevisions,
-      ...(kind === LIVE_EVENT_TYPES.slide ? {
-        shown: {
-          itemId: next.selected.itemId,
-          reference: deck.items.find((item) => item.itemId === next.selected.itemId)?.title ?? next.selected.itemId,
-        },
-      } : {}),
+      ...(shown === undefined ? {} : {
+        shown: { itemId: shown.itemId, reference: deck.items.find((item) => item.itemId === shown.itemId)?.title ?? shown.itemId },
+      }),
     });
     const advanced = await options.runs.advance(context, runId, run.stateRevision, next, nextRevision());
     if (advanced === 'stale') return { outcome: 'stale' };
