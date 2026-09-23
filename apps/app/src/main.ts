@@ -325,8 +325,13 @@ if (settings.values.mongoUrl !== '') {
   };
   media = mediaLibraryOn(repositoryDb(store.db()), mediaOptions);
   mediaBytes = {
-    size: async (key) => (await stat(key)).size,
-    stream: (key, range) => createReadStream(key, range === undefined ? {} : { start: range.start, end: range.end }),
+    // A storageKey is bare unless it predates the OPS-16 migration (see mediaOptions.write above), so
+    // delivery resolves it against the live root exactly the way read()/remove() do.
+    size: async (key) => (await stat(isAbsolute(key) ? key : join(mediaOptions.mediaRoot(), key))).size,
+    stream: (key, range) => createReadStream(
+      isAbsolute(key) ? key : join(mediaOptions.mediaRoot(), key),
+      range === undefined ? {} : { start: range.start, end: range.end },
+    ),
   };
   backups = { db: repositoryDb(store.db()), queue };
   notificationDatabase = notificationDb(store.db());
