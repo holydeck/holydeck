@@ -173,6 +173,18 @@ export interface LiveHub {
    * `sequence` count only what was actually landed.
    */
   publishTo(channel: LiveChannel, type: string, stateFor: (channel: LiveChannel) => ChannelState | undefined): Landed;
+  /**
+   * One change the run engine made, landed once however many channels it reaches (RUN-01/RUN-03): the
+   * revision moves by one per command, not once per channel told about it, which is what keeps this hub's
+   * revision the run's persisted one (Design §4). Each channel named in `states` is sent that state; the
+   * hub remembers it as what the channel now shows, so a snapshot on join, resume or a gap carries it.
+   * `everyone` also reaches the channels left out of `states` — and clears what they show, which is what
+   * a run starting or ending means for a view. `stateRevision`, when given, is the revision the caller
+   * just persisted; the hub never moves backward to it.
+   */
+  publishChange(change: LiveChange): Landed;
+  /** Seeds what each channel shows, before any change has landed — a restarted process's first snapshot. */
+  seedStates(states: Partial<Record<LiveChannel, ChannelState>>): void;
   revokeCapability(capabilityId: string | undefined): void;
   /** One beat: drains whatever a transport had room for, then asks every session whether it is still there. */
   tick(): void;
@@ -190,12 +202,32 @@ const DEFAULTS = {
   rememberedCommands: 256,
 } as const;
 
+/** What `LiveHub.publishChange` lands. */
+export interface LiveChange {
+  readonly type: string;
+  readonly states: Partial<Record<LiveChannel, ChannelState>>;
+  readonly everyone?: boolean;
+  readonly stateRevision?: number;
+}
+
 /** One published change, held for as long as the backlog window reaches, so it can be replayed. */
 interface Change {
   readonly sequence: number;
   readonly stateRevision: number;
+  /** The revision standing just before this change — what a snapshot at the sequence before it reports. */
+  readonly previousRevision: number;
   readonly type: string;
   readonly at: string;
+  /** The channels this change was addressed to. A resume replays a change only to those (RUN-03/RUN-04):
+   *  an audience member must never be replayed what was only ever sent to stage and control. */
+  readonly channels: ReadonlySet<LiveChannel>;
+  /** The state each addressed channel was sent, replayed with the change exactly as it went out live. */
+  readonly states: Partial<Record<LiveChannel, ChannelState>>;
+  /** Whether this change set what its channels show (every `publishChange`), or only announced a type. */
+  readonly stateful: boolean;
+  /** What each addressed channel showed just before this change, so a snapshot at an earlier sequence
+   *  carries what was true at that sequence rather than what is true now. */
+  readonly before: Partial<Record<LiveChannel, ChannelState>>;
 }
 
 /** Where a command left the state, which is the whole of what a replay of it has to be answered with. */
@@ -235,6 +267,9 @@ export function liveHub(options: LiveHubOptions): LiveHub {
   // `__proto__` as its idempotency key has to find nothing rather than find an inherited member.
   // Insertion order is also the eviction order, which is what keeps the oldest key the first forgotten.
   const landed = new Map<string, Landed>();
+
+  /** What each channel shows right now — the state a snapshot at the present sequence carries. */
+  const current = new Map<LiveChannel, ChannelState>();
 
   let commandHandler: Parameters<LiveHub['useCommands']>[0] | undefined;
   let stateRevision = 0;
@@ -286,17 +321,26 @@ export function liveHub(options: LiveHubOptions): LiveHub {
   };
 
   /**
-   * The revision that was actually current at a given sequence, recovered from the backlog Change that
-   * carries it rather than read off the hub's own present standing — which is a different number as soon
-   * as anything has published since, and would hand a resumed client a wire that jumps the revision
-   * forward at the snapshot and then backward through the events replayed after it.
-   *
-   * A sequence that never reached the backlog — nothing published yet, or the one entry that named it has
-   * since fallen off the window — is answered with the sequence number itself: revision and sequence move
-   * together, one for one, on every publish this milestone knows of, so a sequence not yet reached is a
-   * revision not yet reached either.
+   * The revision that was actually current at a given sequence, recovered from the backlog rather than
+   * read off the hub's own present standing — which is a different number as soon as anything has
+   * published since, and would hand a resumed client a wire that jumps the revision forward at the
+   * snapshot and then backward through the events replayed after it. Revision and sequence do not move
+   * one for one (a restarted process seeds the persisted revision; a sequence restarts at zero), so the
+   * revision at a sequence is the one the next change after it started from.
    */
-  const revisionAt = (at: number): number => backlog.find((change) => change.sequence === at)?.stateRevision ?? at;
+  const revisionAt = (at: number): number =>
+    at >= sequence ? stateRevision : backlog.find((change) => change.sequence > at)?.previousRevision ?? stateRevision;
+
+  /** What `channel` showed at sequence `at`: the state the first later change replaced, or today's. */
+  const stateAt = (channel: LiveChannel, at: number): ChannelState | undefined => {
+    const later = backlog.find((change) => change.sequence > at && change.stateful && change.channels.has(channel));
+    return later === undefined ? current.get(channel) : later.before[channel];
+  };
+
+  const stateFor = (channel: LiveChannel, at: number): { readonly state?: ChannelState } => {
+    const state = stateAt(channel, at);
+    return state === undefined ? {} : { state };
+  };
 
   const snapshotAt = (channel: LiveChannel, at: number): SnapshotFrame => ({
     kind: 'snapshot',
@@ -304,9 +348,10 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     stateRevision: revisionAt(at),
     sequence: at,
     at: clock(),
+    ...stateFor(channel, at),
   });
 
-  const eventOf = (channel: LiveChannel, change: Change, state?: ChannelState): EventFrame => ({
+  const eventOf = (channel: LiveChannel, change: Change, state = change.states[channel]): EventFrame => ({
     kind: 'event',
     channel,
     sequence: change.sequence,
@@ -336,23 +381,43 @@ export function liveHub(options: LiveHubOptions): LiveHub {
   const standing = (): Landed => ({ stateRevision, sequence });
 
   /** Lands one change — the counters and the backlog entry every published frame is built from — shared
-   *  by `publish` and `publishTo` so the two ways a change reaches a member never drift apart on it. */
-  const land = (type: string): Change => {
-    stateRevision += 1;
+   *  by every way a change reaches a member, so none of them drift apart on it. */
+  const land = (
+    type: string,
+    channels: ReadonlySet<LiveChannel>,
+    states: Partial<Record<LiveChannel, ChannelState>> = {},
+    stateful = false,
+    revision?: number,
+  ): Change => {
+    const previousRevision = stateRevision;
+    stateRevision = Math.max(stateRevision + 1, revision ?? 0);
     sequence += 1;
-    const change: Change = { sequence, stateRevision, type, at: clock() };
+    const before: Partial<Record<LiveChannel, ChannelState>> = {};
+    if (stateful) {
+      for (const channel of channels) {
+        const was = current.get(channel);
+        if (was !== undefined) before[channel] = was;
+        const now = states[channel];
+        if (now === undefined) current.delete(channel);
+        else current.set(channel, now);
+      }
+    }
+    const change: Change = { sequence, stateRevision, previousRevision, type, at: clock(), channels, states, stateful, before };
     backlog.push(change);
     while (backlog.length > backlogFrames) backlog.shift();
     return change;
   };
 
-  const publish = (type: string): Landed => {
-    const change = land(type);
+  const deliver = (change: Change): Landed => {
     // Copied before it is walked, because serving one member can end another's session, and a set
     // being written to while it is read is how a live run starts losing frames nobody asked it to lose.
-    for (const member of [...members]) write(member, eventOf(member.channel, change));
+    for (const member of [...members]) {
+      if (change.channels.has(member.channel)) write(member, eventOf(member.channel, change));
+    }
     return { stateRevision, sequence };
   };
+
+  const publish = (type: string): Landed => deliver(land(type, new Set(LIVE_CHANNELS)));
 
   const publishTo = (
     channel: LiveChannel,
@@ -361,11 +426,12 @@ export function liveHub(options: LiveHubOptions): LiveHub {
   ): Landed => {
     const state = stateFor(channel);
     if (state === undefined) return standing();
-    const change = land(type);
-    for (const member of [...members]) {
-      if (member.channel === channel) write(member, eventOf(member.channel, change, state));
-    }
-    return { stateRevision, sequence };
+    return deliver(land(type, new Set([channel]), { [channel]: state }, true));
+  };
+
+  const publishChange = ({ type, states, everyone = false, stateRevision: revision }: LiveChange): Landed => {
+    const channels = new Set<LiveChannel>(everyone ? LIVE_CHANNELS : LIVE_CHANNELS.filter((channel) => states[channel] !== undefined));
+    return deliver(land(type, channels, states, true, revision));
   };
 
   const remember = (key: string, at: Landed): void => {
@@ -398,6 +464,14 @@ export function liveHub(options: LiveHubOptions): LiveHub {
       write(member, ackOf(member, frame.id, 'duplicate', already));
       return;
     }
+    // LIVE-05: a command issued against a revision that has since moved is refused, and the client is
+    // handed where things stand so it can decide again. Asked after the duplicate check for the reason
+    // the legacy path below gives, and inside the queue so the revision compared is the settled one.
+    if (frame.clientStateRevision !== stateRevision) {
+      write(member, ackOf(member, frame.id, 'stale', standing()));
+      write(member, snapshotAt(member.channel, sequence));
+      return;
+    }
     const liveMember: LiveMember = { channel: member.channel, grant: member.grant, identity: member.identity };
     let outcome: AckOutcome;
     try {
@@ -412,6 +486,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     const at = standing();
     if (outcome === 'applied') remember(landedKey(member, frame.idempotencyKey), at);
     write(member, ackOf(member, frame.id, outcome, at));
+    if (outcome === 'stale') write(member, snapshotAt(member.channel, sequence));
   };
 
   const command = (member: Member, frame: CommandFrame): void => {
@@ -462,7 +537,7 @@ export function liveHub(options: LiveHubOptions): LiveHub {
     }
     write(member, snapshotAt(member.channel, fromSequence));
     for (const change of backlog) {
-      if (change.sequence > fromSequence) write(member, eventOf(member.channel, change));
+      if (change.sequence > fromSequence && change.channels.has(member.channel)) write(member, eventOf(member.channel, change));
     }
   };
 
@@ -549,6 +624,13 @@ export function liveHub(options: LiveHubOptions): LiveHub {
 
     publish,
     publishTo,
+    publishChange,
+    seedStates: (states: Partial<Record<LiveChannel, ChannelState>>): void => {
+      for (const channel of LIVE_CHANNELS) {
+        const state = states[channel];
+        if (state !== undefined) current.set(channel, state);
+      }
+    },
 
     revokeCapability: (capabilityId: string | undefined): void => {
       for (const member of [...members]) {

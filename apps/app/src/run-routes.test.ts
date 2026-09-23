@@ -93,6 +93,9 @@ const building = async (): Promise<void> => {
     publish: (): { sequence: number; stateRevision: number } => ({ sequence: 1, stateRevision: 1 }),
     seedStateRevision: (): void => {},
     publishTo: (): { sequence: number; stateRevision: number } => ({ sequence: 1, stateRevision: 1 }),
+    publishChange: (): { sequence: number; stateRevision: number } => ({ sequence: 1, stateRevision: 1 }),
+    seedStates: (): void => {},
+    stateRevision: (): number => 0,
   };
   const themes = themesOn(hub, runEvents);
   const runReview = runReviewOn(runEvents);

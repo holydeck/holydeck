@@ -102,8 +102,10 @@ export interface RunRecord {
   /** The authoritative live state — LIVE-01's `select`/pause/standby model over this run's own
    *  positions, exactly what `live-state.ts`'s `projectFor` privacy-projects for every viewer. */
   readonly live: LiveState;
-  /** Moves by exactly one on every accepted `advance`, and never any other way — the compare-and-set
-   *  token a caller's own `advance` races on (see `RunStore.advance`). */
+  /** Moves forward on every start, end and accepted `advance`, never backward — the compare-and-set token
+   *  a caller's own `advance` races on (see `RunStore.advance`). The run engine names the value each write
+   *  lands at (the live hub's next revision), so a new run continues the numbering the wire already used
+   *  rather than restarting it at zero; left unnamed, a start begins at 0 and every later write adds one. */
   readonly stateRevision: number;
   /** When this row — the latest lifecycle change, start, end, or state advance — was written. */
   readonly at: string;
@@ -131,10 +133,10 @@ export interface RunStore {
   history(context: unknown, runId: string): Promise<readonly RunRecord[]>;
   /** Starts a fresh run from a Ready prepared snapshot. Refuses with a named error from anything else,
    *  Outdated included (spec LIVE-01). Requires Control presentation, checked before anything is read. */
-  start(session: OperatorSession, request: StartRunRequest): Promise<RunRecord>;
+  start(session: OperatorSession, request: StartRunRequest, stateRevision?: number): Promise<RunRecord>;
   /** Ends a run explicitly. Nothing written before this row is rewritten — the run's history is exactly
    *  as it was, with one more row appended. Nothing for a run this code has never heard of. */
-  end(session: OperatorSession, runId: string): Promise<RunRecord | undefined>;
+  end(session: OperatorSession, runId: string, stateRevision?: number): Promise<RunRecord | undefined>;
   /** A run's persisted state: the same answer whether this is the first read right after `start` or the
    *  first read after this process restarted, since nothing here is held between calls. */
   resume(context: unknown, runId: string): Promise<RunRecord | undefined>;
@@ -142,7 +144,7 @@ export interface RunStore {
    *  matches this run's current `stateRevision`, the same way `start` races `standing` to claim a fresh
    *  `runId`. Answers `'stale'` — never a thrown error — when another writer moved first, so a caller
    *  racing normal contention (the run engine, Task 8) can branch on the answer instead of a catch. */
-  advance(context: unknown, runId: string, expectedRevision: number, next: LiveState): Promise<RunRecord | 'stale' | undefined>;
+  advance(context: unknown, runId: string, expectedRevision: number, next: LiveState, nextRevision?: number): Promise<RunRecord | 'stale' | undefined>;
 }
 
 export interface RunOptions {
@@ -359,7 +361,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
       return found.map(rowFrom);
     },
 
-    start: (session, request) =>
+    start: (session, request, stateRevision = 0) =>
       own(async () => {
         // THR-11: checked first, before a single read, so the refusal is this server's and not a client's.
         if (!session.permissions.includes(PRESENTATION_CONTROL)) {
@@ -415,7 +417,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
           phase: 'active',
           mode: request.mode,
           live: initialLiveState(runId, record.snapshot.id),
-          stateRevision: 0,
+          stateRevision,
         });
         await trail.record(context, {
           action: 'run.start',
@@ -427,7 +429,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
         return started;
       }),
 
-    end: (session, runId) =>
+    end: (session, runId, stateRevision) =>
       own(async () => {
         if (!session.permissions.includes(PRESENTATION_CONTROL)) {
           throw new RunError('permission', `ending a run is the Operator's alone, which needs ${PRESENTATION_CONTROL}`);
@@ -446,7 +448,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
           phase: 'ended',
           mode: row.mode,
           live: row.live,
-          stateRevision: row.stateRevision,
+          stateRevision: Math.max(stateRevision ?? 0, row.stateRevision + 1),
         });
         await trail.record(context, {
           action: 'run.end',
@@ -466,7 +468,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
         return { runId: id, serviceId, snapshotId, phase, mode, position, live, stateRevision, at };
       }),
 
-    advance: (context, runId, expectedRevision, next) =>
+    advance: (context, runId, expectedRevision, next, nextRevision) =>
       own(async () => {
         const row = await standing(context, runId);
         if (row === undefined) return undefined;
@@ -480,7 +482,7 @@ export function runsOn(db: RepositoryDb, options: RunOptions): RunStore {
             phase: row.phase,
             mode: row.mode,
             live: next,
-            stateRevision: expectedRevision + 1,
+            stateRevision: Math.max(nextRevision ?? 0, expectedRevision + 1),
           });
         } catch (error) {
           // Lost a race to another writer's own `advance` landing the same next sequence first — the

@@ -6,13 +6,13 @@
 // position pipeline or publish a second event here. One process runs one live run, matching the hub's
 // global channels and counters; a command has no run identifier of its own.
 
-import { LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
+import { LIVE_CHANNELS, LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
 import { enterStandby, pause, resume, returnToLivePosition, select, takeSelectedLive } from '@holydeck/contracts/live-mode';
 import { projectFor } from '@holydeck/contracts/live-state';
 import { DEFAULT_THEMES, THEME_SURFACES } from '@holydeck/contracts/live-theme';
 
 import { correlationFor, requestContext, systemContext } from './context.js';
-import { LIVE_EVENT_TYPES, publishRunStateChanged } from './live-events.js';
+import { LIVE_EVENT_TYPES } from './live-events.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { adjacentPosition } from './run-deck.js';
 import { RunEventError } from './run-events.js';
@@ -20,7 +20,7 @@ import { RUN_PERMISSIONS, runContext } from './runs.js';
 
 import type { AckOutcome, CommandFrame, LiveChannel } from '@holydeck/contracts/live';
 import type { LiveModeState } from '@holydeck/contracts/live-mode';
-import type { LivePosition, LiveState } from '@holydeck/contracts/live-state';
+import type { ChannelState, LivePosition, LiveState } from '@holydeck/contracts/live-state';
 import type { Theme, ThemeSurface } from '@holydeck/contracts/live-theme';
 import type { RunStartBody } from '@holydeck/contracts/runs';
 import type { LiveEventType } from './live-events.js';
@@ -33,7 +33,7 @@ import type { RunRecord, RunStore } from './runs.js';
 import type { OperatorSession } from './snapshots.js';
 
 export interface RunEngineOptions {
-  readonly hub: Pick<LiveHub, 'publishTo' | 'publish' | 'seedStateRevision'>;
+  readonly hub: Pick<LiveHub, 'publishChange' | 'seedStateRevision' | 'seedStates' | 'stateRevision'>;
   readonly runs: RunStore;
   readonly runEvents: RunEventStore;
   readonly themes: ThemeStore;
@@ -142,19 +142,34 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
   const states = new Map<string, LiveState>();
   let currentRunId: string | undefined;
 
-  const publish = (before: LiveState, next: LiveState, deck: RunDeck, kind: LiveEventType): void => {
+  /** Each channel's privacy projection of `live` (Design §2), computed here so no view is ever sent a
+   *  wider view's state to project for itself. */
+  const statesFor = (live: LiveState, deck: RunDeck | undefined, channels: readonly LiveChannel[]): Partial<Record<LiveChannel, ChannelState>> => {
+    const upcoming = deck === undefined || 'standby' in live.public ? undefined : adjacentPosition(deck, live.public, 'next');
+    const states: Partial<Record<LiveChannel, ChannelState>> = {};
+    for (const channel of channels) {
+      const state = projectFor(
+        channel === LIVE_CONTROL_CHANNEL ? 'control' : channel,
+        live,
+        channel === LIVE_CONTROL_CHANNEL ? { counts: {} } : { next: upcoming },
+      );
+      if (state !== undefined) states[channel] = state;
+    }
+    return states;
+  };
+
+  /** The revision the next persisted write lands at: always the hub's next one, so the revision a client
+   *  sees and the one the run row holds are one number, before and after a restart (RUN-01, Design §4). */
+  const nextRevision = (): number => options.hub.stateRevision() + 1;
+
+  /** One landed change per command, however many channels it reaches. A change with nothing public or
+   *  private to say still lands, because the persisted revision it matches has moved. */
+  const publish = (before: LiveState, next: LiveState, deck: RunDeck, kind: LiveEventType, stateRevision: number): void => {
     const publicChanged = !samePosition(before.public, next.public);
     const privateChanged = before.mode !== next.mode || !samePosition(before.selected, next.selected);
-    const channels: readonly LiveChannel[] = publicChanged ? ['audience', 'singer', 'stage', LIVE_CONTROL_CHANNEL]
+    const channels: readonly LiveChannel[] = publicChanged ? LIVE_CHANNELS
       : privateChanged ? ['stage', LIVE_CONTROL_CHANNEL] : [];
-    const upcoming = 'standby' in next.public ? undefined : adjacentPosition(deck, next.public, 'next');
-    for (const channel of channels) {
-      options.hub.publishTo(channel, kind, (view) => projectFor(
-        view === LIVE_CONTROL_CHANNEL ? 'control' : view,
-        next,
-        view === LIVE_CONTROL_CHANNEL ? { counts: {} } : { next: upcoming },
-      ));
-    }
+    options.hub.publishChange({ type: kind, states: statesFor(next, deck, channels), stateRevision });
   };
 
   const apply: RunEngine['command'] = async (member, frame) => {
@@ -200,28 +215,31 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
         },
       } : {}),
     });
-    const advanced = await options.runs.advance(context, runId, run.stateRevision, next);
+    const advanced = await options.runs.advance(context, runId, run.stateRevision, next, nextRevision());
     if (advanced === 'stale') return { outcome: 'stale' };
     if (advanced === undefined) return { outcome: 'failed' };
     states.set(runId, next);
-    publish(run.live, next, deck, kind);
+    publish(run.live, next, deck, kind, advanced.stateRevision);
     return { outcome: 'applied' };
   };
 
   const engine: RunEngine = {
     start: async (session, request) => {
-      const record = await options.runs.start(session, request);
+      const record = await options.runs.start(session, request, nextRevision());
+      const deck = await options.deck(runContext(session.actor, session.correlationId), record);
       currentRunId = record.runId;
       states.set(record.runId, record.live);
-      publishRunStateChanged(options.hub);
-      await options.deck(runContext(session.actor, session.correlationId), record);
+      options.hub.publishChange({
+        type: LIVE_EVENT_TYPES.runState, states: statesFor(record.live, deck, LIVE_CHANNELS), everyone: true, stateRevision: record.stateRevision,
+      });
       return record;
     },
     end: async (session, runId) => {
-      const record = await options.runs.end(session, runId);
+      const record = await options.runs.end(session, runId, nextRevision());
       if (record !== undefined) {
         states.set(runId, record.live);
-        publishRunStateChanged(options.hub);
+        // Every view is told, and none keeps showing the run that ended.
+        options.hub.publishChange({ type: LIVE_EVENT_TYPES.runState, states: {}, everyone: true, stateRevision: record.stateRevision });
       }
       return record;
     },
@@ -239,13 +257,25 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
     restore: async () => {
       const system = systemContext('boot:run-engine');
       const context = requestContext({ ...system, permissions: [...system.permissions, RUN_PERMISSIONS.read] });
-      const active = await options.runs.active(context);
+      // Every run, ended ones included: the revision a restarted hub starts from is the highest ever
+      // persisted, so it never falls below one a client was already sent (RUN-01).
+      const all = await options.runs.list(context);
+      if (all.length === 0) return;
+      options.hub.seedStateRevision(Math.max(...all.map((run) => run.stateRevision)));
+      const active = all.filter((run) => run.phase === 'active');
       for (const run of active) states.set(run.runId, run.live);
-      if (active.length > 0) {
-        const highest = active.reduce((a, b) => a.stateRevision >= b.stateRevision ? a : b);
-        currentRunId = highest.runId;
-        options.hub.seedStateRevision(highest.stateRevision);
+      // `list` answers most recently started first; that is the run this process was presenting.
+      const [current] = active;
+      if (current === undefined) return;
+      currentRunId = current.runId;
+      let deck: RunDeck | undefined;
+      try {
+        deck = await options.deck(context, current);
+      } catch {
+        // Without a deck the first snapshot still carries position, mode and theme; only `next` is missing.
+        deck = undefined;
       }
+      options.hub.seedStates(statesFor(current.live, deck, LIVE_CHANNELS));
     },
   };
   return Object.freeze(engine);

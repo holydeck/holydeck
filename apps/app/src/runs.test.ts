@@ -287,6 +287,23 @@ describe('authoritative live state', () => {
     expect(started.live.mode).toBe('live');
   });
 
+  it('lands start, advance and end at the revision the caller names, and never behind the row', async () => {
+    const { runs, serviceId } = await prepared();
+    const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' }, 41);
+    expect(started.stateRevision).toBe(41);
+    const advanced = await runs.advance(READ_CONTEXT, started.runId, 41, started.live, 44);
+    expect(advanced).toMatchObject({ stateRevision: 44 });
+    const behind = await runs.advance(READ_CONTEXT, started.runId, 44, started.live, 3);
+    expect(behind).toMatchObject({ stateRevision: 45 });
+    expect(await runs.end(OPERATOR_SESSION, started.runId, 50)).toMatchObject({ phase: 'ended', stateRevision: 50 });
+  });
+
+  it('moves the revision by one when a run ends without a named revision', async () => {
+    const { runs, serviceId } = await prepared();
+    const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });
+    expect(await runs.end(OPERATOR_SESSION, started.runId)).toMatchObject({ stateRevision: 1 });
+  });
+
   it('advances the state and increments the revision on a matching expected revision', async () => {
     const { runs, serviceId } = await prepared();
     const started = await runs.start(OPERATOR_SESSION, { serviceId, mode: 'live' });

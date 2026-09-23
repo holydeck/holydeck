@@ -41,14 +41,23 @@ const setup = () => {
   let held: RunRecord = RECORD;
   const order: string[] = [];
   const publishToCalls: { channel: LiveChannel; type: string; state: ChannelState | undefined }[] = [];
+  const changes: Parameters<RunEngineOptions['hub']['publishChange']>[0][] = [];
+  let revision = 7;
   const hub = {
     publishToCalls,
-    publish: vi.fn(() => ({ sequence: 1, stateRevision: 1 })),
+    changes,
     seedStateRevision: vi.fn(),
-    publishTo: vi.fn<RunEngineOptions['hub']['publishTo']>((channel, type, stateFor) => {
+    seedStates: vi.fn(),
+    stateRevision: vi.fn(() => revision),
+    // Flattened per channel, so an assertion reads which view was told what.
+    publishChange: vi.fn<RunEngineOptions['hub']['publishChange']>((change) => {
       order.push('publish');
-      publishToCalls.push({ channel, type, state: stateFor(channel) });
-      return { sequence: 1, stateRevision: 1 };
+      changes.push(change);
+      revision = Math.max(revision + 1, change.stateRevision ?? 0);
+      for (const [channel, state] of Object.entries(change.states)) {
+        publishToCalls.push({ channel: channel as LiveChannel, type: change.type, state });
+      }
+      return { sequence: 1, stateRevision: revision };
     }),
   };
   const runs = {
@@ -96,7 +105,10 @@ const setup = () => {
 const started = async () => {
   const built = setup();
   await built.engine.start(SESSION, { serviceId: 'service-1', mode: 'live' });
-  built.hub.publish.mockClear();
+  built.hub.publishChange.mockClear();
+  built.hub.changes.length = 0;
+  built.hub.publishToCalls.length = 0;
+  built.order.length = 0;
   return built;
 };
 
@@ -145,7 +157,7 @@ describe('run-engine command ordering', () => {
       runId: 'run-1', surface: 'operator', theme: DEFAULT_THEMES.stage, pinnedRevisions: PINS,
     });
     expect(hub.publishToCalls).toEqual([]);
-    expect(hub.publish).not.toHaveBeenCalled();
+    expect(hub.publishChange).not.toHaveBeenCalled();
     expect(runEvents.record).not.toHaveBeenCalled();
     expect(runs.advance).not.toHaveBeenCalled();
   });
@@ -180,11 +192,13 @@ describe('run-engine command ordering', () => {
   it('records original pins and shown title before CAS and publication', async () => {
     const { engine, runs, runEvents, order, hub } = await started();
     await engine.command(CONTROL_MEMBER, frame('go-to', SECOND));
-    expect(order).toEqual(['record', 'advance', 'publish', 'publish', 'publish', 'publish']);
+    expect(order).toEqual(['record', 'advance', 'publish']);
+    expect(hub.publishChange).toHaveBeenCalledOnce();
+    expect(hub.changes[0]?.stateRevision).toBe(8);
     expect(runEvents.record).toHaveBeenCalledWith({ ...SESSION, correlationId: 'live:account:operator:command-1' }, {
       runId: 'run-1', kind: LIVE_EVENT_TYPES.slide, pinnedRevisions: PINS, shown: { itemId: 'item-2', reference: 'Second song' },
     });
-    expect(runs.advance).toHaveBeenCalledWith(expect.anything(), 'run-1', 7, expect.objectContaining({ public: SECOND }));
+    expect(runs.advance).toHaveBeenCalledWith(expect.anything(), 'run-1', 7, expect.objectContaining({ public: SECOND }), 9);
     expect(hub.publishToCalls.find((c) => c.channel === 'singer')?.state).toMatchObject({ next: SECOND });
     expect(hub.publishToCalls.find((c) => c.channel === 'audience')?.state).not.toHaveProperty('selected');
   });
@@ -258,7 +272,7 @@ describe('run-engine command ordering', () => {
     const { engine, runs } = await started();
     runs.resume.mockResolvedValue({ ...RECORD, stateRevision: 12, live: { ...LIVE, public: SECOND, selected: SECOND } });
     await engine.command(CONTROL_MEMBER, frame('previous'));
-    expect(runs.advance).toHaveBeenCalledWith(expect.anything(), 'run-1', 12, expect.objectContaining({ selected: { ...FIRST, slideIndex: 1 } }));
+    expect(runs.advance).toHaveBeenCalledWith(expect.anything(), 'run-1', 12, expect.objectContaining({ selected: { ...FIRST, slideIndex: 1 } }), 9);
   });
 
   it('refuses navigation from a position not found in the deck', async () => {
@@ -299,11 +313,13 @@ describe('run-engine command ordering', () => {
 
 describe('run-engine lifecycle', () => {
   it('starts with cached state, broadcasts and warms the deck', async () => {
-    const { engine, hub, deck } = setup();
+    const { engine, hub, deck, runs } = setup();
     expect(engine.state('missing')).toBeUndefined();
     expect(await engine.start(SESSION, { serviceId: 'service-1', mode: 'live' })).toEqual(RECORD);
     expect(engine.state('run-1')).toEqual(LIVE);
-    expect(hub.publish).toHaveBeenCalledWith('run-state-changed');
+    expect(runs.start).toHaveBeenCalledWith(SESSION, { serviceId: 'service-1', mode: 'live' }, 8);
+    expect(hub.changes).toMatchObject([{ type: 'run-state-changed', everyone: true, stateRevision: RECORD.stateRevision }]);
+    expect(Object.keys(hub.changes[0]?.states ?? {}).sort()).toEqual([...LIVE_CHANNELS].sort());
     expect(deck).toHaveBeenCalledWith(expect.objectContaining({ actor: SESSION.actor, correlationId: SESSION.correlationId }), RECORD);
   });
 
@@ -319,33 +335,57 @@ describe('run-engine lifecycle', () => {
     const { engine, hub, runs } = await started();
     expect(await engine.end(SESSION, 'run-1')).toMatchObject({ phase: 'ended' });
     expect(engine.state('run-1')).toEqual(LIVE);
-    expect(hub.publish).toHaveBeenCalledOnce();
+    expect(runs.end).toHaveBeenCalledWith(SESSION, 'run-1', 9);
+    expect(hub.changes).toEqual([{ type: 'run-state-changed', states: {}, everyone: true, stateRevision: RECORD.stateRevision }]);
     runs.end.mockResolvedValue(undefined);
     expect(await engine.end(SESSION, 'missing')).toBeUndefined();
-    expect(hub.publish).toHaveBeenCalledOnce();
+    expect(hub.publishChange).toHaveBeenCalledOnce();
   });
 });
 
 describe('run-engine restore', () => {
-  it('seeds the hub revision from the highest active run and does not replay events', async () => {
-    const { engine, runs, hub, runEvents, deck } = setup();
-    const highest = { ...RECORD, runId: 'run-2', stateRevision: 22, live: { ...LIVE, runId: 'run-2', selected: SECOND } };
-    runs.active.mockResolvedValue([RECORD, highest, { ...RECORD, runId: 'run-3', stateRevision: 10 }]);
+  it('seeds the hub from the highest revision of any run and each view from the latest active run', async () => {
+    const { engine, runs, hub, runEvents } = setup();
+    const latest = { ...RECORD, runId: 'run-2', stateRevision: 22, live: { ...LIVE, runId: 'run-2', selected: SECOND } };
+    const ended = { ...RECORD, runId: 'run-0', phase: 'ended' as const, stateRevision: 30 };
+    runs.list.mockResolvedValue([latest, ended, { ...RECORD, runId: 'run-3', stateRevision: 25 }]);
     await engine.restore();
-    expect(engine.state('run-1')).toEqual(LIVE);
-    expect(engine.state('run-2')).toEqual(highest.live);
-    expect(hub.seedStateRevision).toHaveBeenCalledWith(22);
+    expect(engine.state('run-2')).toEqual(latest.live);
+    expect(engine.state('run-3')).toBeDefined();
+    expect(engine.state('run-0')).toBeUndefined();
+    expect(hub.seedStateRevision).toHaveBeenCalledWith(30);
+    const [seeded] = hub.seedStates.mock.calls[0] ?? [];
+    expect(Object.keys(seeded ?? {}).sort()).toEqual([...LIVE_CHANNELS].sort());
+    expect(seeded?.['live-control']).toMatchObject({ view: 'control', state: { runId: 'run-2', selected: SECOND } });
+    expect(seeded?.singer).toMatchObject({ view: 'singer', frame: FIRST, next: { itemId: 'item-1', slideIndex: 1 } });
     expect(runEvents.log).not.toHaveBeenCalled();
-    expect(deck).not.toHaveBeenCalled();
-    expect(hub.publish).not.toHaveBeenCalled();
-    expect(runs.active).toHaveBeenCalledWith(expect.objectContaining({ actor: 'system', permissions: expect.arrayContaining(['presentationRuns.read']) }));
+    expect(hub.publishChange).not.toHaveBeenCalled();
+    expect(runs.list).toHaveBeenCalledWith(expect.objectContaining({ actor: 'system', permissions: expect.arrayContaining(['presentationRuns.read']) }));
     await engine.command(CONTROL_MEMBER, frame('pause'));
     expect(runs.resume).toHaveBeenCalledWith(expect.anything(), 'run-2');
   });
 
+  it('still seeds position, mode and theme when the deck cannot be derived on restore', async () => {
+    const { engine, hub, deck } = setup();
+    deck.mockRejectedValue(new Error('missing pin'));
+    await engine.restore();
+    const [seeded] = hub.seedStates.mock.calls[0] ?? [];
+    expect(seeded?.singer).toMatchObject({ frame: FIRST });
+    expect(seeded?.singer).not.toHaveProperty('next');
+  });
+
+  it('seeds only the revision when every run has ended', async () => {
+    const { engine, runs, hub } = setup();
+    runs.list.mockResolvedValue([{ ...RECORD, phase: 'ended' }]);
+    await engine.restore();
+    expect(hub.seedStateRevision).toHaveBeenCalledWith(7);
+    expect(hub.seedStates).not.toHaveBeenCalled();
+    expect(await engine.command(CONTROL_MEMBER, frame('pause'))).toEqual({ outcome: 'failed' });
+  });
+
   it('leaves an empty deployment without a current run or a revision bump', async () => {
     const { engine, runs, hub } = setup();
-    runs.active.mockResolvedValue([]);
+    runs.list.mockResolvedValue([]);
     await engine.restore();
     expect(hub.seedStateRevision).not.toHaveBeenCalled();
     expect(await engine.command(CONTROL_MEMBER, frame('pause'))).toEqual({ outcome: 'failed' });

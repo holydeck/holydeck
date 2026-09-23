@@ -379,6 +379,81 @@ describe('publishTo: a change addressed to the one channel it concerns', () => {
   });
 });
 
+describe('publishChange: one landed change per command, with per-channel state', () => {
+  const at = (view: ChannelState['view'], slideIndex: number): ChannelState => ({
+    view, runId: 'r', snapshotId: 's', frame: { itemId: 'i', slideIndex }, themeId: 'default', additionsRevision: 0, mode: 'live',
+  }) as ChannelState;
+  const resume = (fromSequence: number, channel: LiveChannel): string =>
+    JSON.stringify({ kind: 'resume', channel, fromSequence });
+
+  it('moves the revision once however many channels it reaches, to the revision the caller persisted', () => {
+    const hub = hubAt();
+    hub.seedStateRevision(4);
+    const audience = joined(hub, 'audience');
+    const stage = joined(hub, 'stage');
+    const landed = hub.publishChange({ type: 'current-slide-changed', states: { audience: at('audience', 1), stage: at('stage', 1) }, stateRevision: 5 });
+    expect(landed).toEqual({ stateRevision: 5, sequence: 1 });
+    expect(audience.far.frames().at(-1)).toMatchObject({ kind: 'event', stateRevision: 5, state: { view: 'audience' } });
+    expect(stage.far.frames().at(-1)).toMatchObject({ kind: 'event', stateRevision: 5, state: { view: 'stage' } });
+    // Never backwards, even when a caller names a revision the hub has already passed.
+    expect(hub.publishChange({ type: 'x', states: {}, stateRevision: 2 })).toEqual({ stateRevision: 6, sequence: 2 });
+  });
+
+  it('carries each channel its own current state in the snapshot a joining view is sent', () => {
+    const hub = hubAt();
+    hub.publishChange({ type: 'current-slide-changed', states: { audience: at('audience', 2), 'live-control': at('control', 3) } });
+    expect(joined(hub, 'audience').far.frames()[0]).toMatchObject({ kind: 'snapshot', state: { view: 'audience', frame: { slideIndex: 2 } } });
+    expect(joined(hub, 'live-control', OPERATOR).far.frames()[0]).toMatchObject({ kind: 'snapshot', state: { view: 'control' } });
+    expect(joined(hub, 'singer').far.frames()[0]).not.toHaveProperty('state');
+  });
+
+  it('seeds what each channel shows for a restarted process\'s first snapshot', () => {
+    const hub = hubAt();
+    hub.seedStateRevision(9);
+    hub.seedStates({ stage: at('stage', 4) });
+    expect(joined(hub, 'stage').far.frames()[0]).toMatchObject({ kind: 'snapshot', stateRevision: 9, state: { frame: { slideIndex: 4 } } });
+  });
+
+  it('clears the views an everyone-change leaves out of its states', () => {
+    const hub = hubAt();
+    hub.publishChange({ type: 'current-slide-changed', states: { audience: at('audience', 1) } });
+    const audience = joined(hub, 'audience');
+    hub.publishChange({ type: 'run-state-changed', states: {}, everyone: true });
+    expect(audience.far.frames().at(-1)).toMatchObject({ kind: 'event', type: 'run-state-changed' });
+    expect(audience.far.frames().at(-1)).not.toHaveProperty('state');
+    expect(joined(hub, 'audience').far.frames()[0]).not.toHaveProperty('state');
+  });
+
+  it('replays to a resuming audience none of the changes only stage and control were sent', () => {
+    const hub = hubAt();
+    hub.publishChange({ type: 'current-slide-changed', states: { audience: at('audience', 1), stage: at('stage', 1) } });
+    const audience = joined(hub, 'audience');
+    hub.publishChange({ type: 'current-slide-changed', states: { stage: at('stage', 2), 'live-control': at('control', 2) } });
+    hub.publishChange({ type: 'current-slide-changed', states: { stage: at('stage', 3), 'live-control': at('control', 3) } });
+    const before = audience.far.frames().length;
+    audience.connection?.receive(resume(1, 'audience'));
+    expect(audience.far.frames().slice(before)).toMatchObject([
+      { kind: 'snapshot', sequence: 1, stateRevision: 1, state: { frame: { slideIndex: 1 } } },
+    ]);
+    expect(audience.far.kinds().slice(before)).toEqual(['snapshot']);
+  });
+
+  it('replays a resuming channel its own changes, with the state each carried, from the state it had then', () => {
+    const hub = hubAt();
+    hub.publishChange({ type: 'current-slide-changed', states: { stage: at('stage', 1) } });
+    const stage = joined(hub, 'stage');
+    hub.publishChange({ type: 'current-slide-changed', states: { stage: at('stage', 2) } });
+    hub.publishChange({ type: 'current-slide-changed', states: { stage: at('stage', 3) } });
+    const before = stage.far.frames().length;
+    stage.connection?.receive(resume(1, 'stage'));
+    expect(stage.far.frames().slice(before)).toMatchObject([
+      { kind: 'snapshot', sequence: 1, stateRevision: 1, state: { frame: { slideIndex: 1 } } },
+      { kind: 'event', sequence: 2, stateRevision: 2, state: { frame: { slideIndex: 2 } } },
+      { kind: 'event', sequence: 3, stateRevision: 3, state: { frame: { slideIndex: 3 } } },
+    ]);
+  });
+});
+
 describe('a command sent twice under one idempotency key', () => {
   it('applies commands with the same key from two different client identities', () => {
     const hub = hubAt();
@@ -968,7 +1043,7 @@ describe('delegated commands', () => {
       return { outcome: frame.type === 'pause' ? 'applied' : 'invalid' };
     });
     const { connection, far } = joined(hub, 'live-control', OPERATOR, false, 'operator');
-    connection?.receive(command({ type: 'pause', clientStateRevision: 999 }));
+    connection?.receive(command({ type: 'pause' }));
     await vi.waitFor(() => expect(far.frames().at(-1)).toMatchObject({ outcome: 'applied', stateRevision: 1 }));
     expect(received).toMatchObject([{ member: { channel: 'live-control', grant: OPERATOR, identity: 'operator' } }]);
     connection?.receive(command({ type: 'pause' }));
@@ -976,11 +1051,32 @@ describe('delegated commands', () => {
     expect(received).toHaveLength(1);
     for (let i = 0; i < 2; i += 1) {
       const before = far.frames().length;
-      connection?.receive(command({ type: 'unknown', idempotencyKey: 'invalid' }));
+      connection?.receive(command({ type: 'unknown', idempotencyKey: 'invalid', clientStateRevision: hub.stateRevision() }));
       await vi.waitFor(() => expect(far.frames().length).toBeGreaterThan(before));
       expect(far.frames().at(-1)).toMatchObject({ outcome: 'invalid' });
     }
     expect(received).toHaveLength(3);
+  });
+
+  it('refuses a command against a revision that has moved, without delegating, and resends a snapshot', async () => {
+    const hub = hubAt();
+    const handler = vi.fn(async () => ({ outcome: 'applied' as const }));
+    hub.useCommands(handler);
+    hub.publishChange({ type: 'current-slide-changed', states: {} , stateRevision: 3 });
+    const { connection, far } = joined(hub, 'live-control', OPERATOR, false, 'operator');
+    connection?.receive(command({ type: 'next', clientStateRevision: 2 }));
+    await vi.waitFor(() => expect(far.kinds()).toEqual(['snapshot', 'ack', 'snapshot']));
+    expect(far.frames()[1]).toMatchObject({ outcome: 'stale', stateRevision: 3 });
+    expect(far.frames()[2]).toMatchObject({ kind: 'snapshot', stateRevision: 3, sequence: 1 });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('resends a snapshot when the handler itself answers stale', async () => {
+    const hub = hubAt();
+    hub.useCommands(async () => ({ outcome: 'stale' as const }));
+    const { connection, far } = joined(hub, 'live-control', OPERATOR, false, 'operator');
+    connection?.receive(command({ type: 'next' }));
+    await vi.waitFor(() => expect(far.kinds()).toEqual(['snapshot', 'ack', 'snapshot']));
   });
 
   it('runs a retry that arrives while the first attempt is in flight only once', async () => {
