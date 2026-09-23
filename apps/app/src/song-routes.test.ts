@@ -126,6 +126,7 @@ describe('song routes', () => {
     const refused = await ask('PUT', at(SONG_ID_PATH, id), { expectedRevision: 1, body: BODY });
     expect(refused.statusCode).toBe(409);
     expect(refused.json().error.code).toBe(ENTITY_CONFLICT);
+    expect(db.rows.get('conflict_shelf') ?? []).toMatchObject([{ kind: 'shelved', contentId: id, attempted: 2 }]);
   });
 
   test('reads raw YAML and refuses an invalid revision', async () => {

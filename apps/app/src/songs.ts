@@ -108,8 +108,11 @@ export interface SongStore {
   create(context: unknown, title: string, body: SongBody): Promise<SongRecord>;
   /** The standing configuration, or a named earlier version. Nothing is written either way. */
   current(context: unknown, id: string, revision?: number): Promise<SongRecord | undefined>;
-  /** Saves a configuration forward from the visual surface. */
-  edit(context: unknown, id: string, body: SongBody): Promise<SongRecord | undefined>;
+  /**
+   * Saves a configuration forward from the visual surface. Given the revision the editor read, a save over
+   * a newer one is shelved and refused as a conflict rather than written over what somebody else saved.
+   */
+  edit(context: unknown, id: string, body: SongBody, expectedRevision?: number): Promise<SongRecord | undefined>;
   /** The same configuration as the text the raw surface edits. */
   raw(context: unknown, id: string, revision?: number): Promise<string | undefined>;
   /** Saves what the raw surface typed. Refuses with located problems, having written nothing. */
@@ -244,8 +247,14 @@ export function songsOn(db: RepositoryDb, options: SongOptions): SongStore {
     listed: Pick<SongRecord, 'stamp' | 'title'>,
     id: string,
     body: SongBody,
+    expectedRevision?: number,
   ): Promise<SongRecord> => {
-    const outcome = await saveContent(revisions, conflictShelf)(context, { contentId: id, body, origin: 'manual-checkpoint' });
+    const outcome = await saveContent(revisions, conflictShelf)(context, {
+      contentId: id,
+      body,
+      origin: 'manual-checkpoint',
+      ...(expectedRevision === undefined ? {} : { expectedRevision }),
+    });
     return {
       stamp: listed.stamp,
       title: listed.title,
@@ -266,14 +275,14 @@ export function songsOn(db: RepositoryDb, options: SongOptions): SongStore {
 
     current: (context, id, revision) => own(() => standing(context, id, revision)),
 
-    edit: (context, id, body) =>
+    edit: (context, id, body, expectedRevision) =>
       own(async () => {
         // Graded before the song is even looked up, so a bad configuration is refused identically whether
         // or not the song it was meant for exists.
         const configuration = readBody(body);
         const row = await standing(context, id);
         if (row === undefined) return undefined;
-        return save(context, row, id, configuration);
+        return save(context, row, id, configuration, expectedRevision);
       }),
 
     raw: (context, id, revision) =>

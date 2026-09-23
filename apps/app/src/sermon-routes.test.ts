@@ -180,6 +180,7 @@ describe('sermon routes', () => {
     const stale = await ask('PUT', at(SERMON_ID_PATH, id), { expectedRevision: 2, body: BODY });
     expect(stale.statusCode).toBe(409);
     expect(stale.json().error.code).toBe(ENTITY_CONFLICT);
+    expect(db.rows.get('conflict_shelf') ?? []).toMatchObject([{ kind: 'shelved', contentId: id, attempted: 3 }]);
     const edited = { expectedRevision: 1, body: { ...BODY, languages: { ta: BODY.languages['ta'] } } };
     expect((await ask('PUT', at(SERMON_ID_PATH, id), edited)).statusCode).toBe(200);
     expect((await ask('PUT', at(SERMON_ID_PATH, 'missing'), { expectedRevision: 1, body: BODY })).statusCode).toBe(404);

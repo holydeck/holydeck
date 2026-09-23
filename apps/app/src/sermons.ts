@@ -56,12 +56,12 @@ export interface SermonRecord {
 export interface SermonStore {
   create(context: unknown, title: string, body: SermonBody): Promise<SermonRecord>;
   current(context: unknown, id: string, revision?: number): Promise<SermonRecord | undefined>;
-  /** Saves a configuration forward from the visual surface. */
-  edit(context: unknown, id: string, body: SermonBody): Promise<SermonRecord | undefined>;
+  /** Saves a configuration forward from the visual surface, shelving it when `expectedRevision` is stale. */
+  edit(context: unknown, id: string, body: SermonBody, expectedRevision?: number): Promise<SermonRecord | undefined>;
   /** The same configuration as the text the raw surface edits. */
   raw(context: unknown, id: string, revision?: number): Promise<string | undefined>;
   /** Saves what the raw surface typed. Refuses with a located problem, having written nothing. */
-  editRaw(context: unknown, id: string, text: string): Promise<SermonRecord | undefined>;
+  editRaw(context: unknown, id: string, text: string, expectedRevision?: number): Promise<SermonRecord | undefined>;
   history(context: unknown, id: string): Promise<readonly SermonRecord[]>;
   generate(context: unknown, id: string, input: SermonGeneration): Promise<SlideGroupRecord>;
 }
@@ -168,8 +168,10 @@ export function sermonsOn(db: RepositoryDb, options: SermonOptions): SermonStore
     }
     return record(row, held);
   };
-  const save = async (context: unknown, row: LibraryRecord, body: SermonBody): Promise<SermonRecord> => {
-    const saved = await saveContent(revisions, conflictShelf)(context, { contentId: row.stamp.id, body, origin: 'manual-checkpoint' });
+  const save = async (context: unknown, row: LibraryRecord, body: SermonBody, expectedRevision?: number): Promise<SermonRecord> => {
+    const saved = await saveContent(revisions, conflictShelf)(context, {
+      contentId: row.stamp.id, body, origin: 'manual-checkpoint', ...(expectedRevision === undefined ? {} : { expectedRevision }),
+    });
     return record(row, saved.revision);
   };
 
@@ -180,22 +182,22 @@ export function sermonsOn(db: RepositoryDb, options: SermonOptions): SermonStore
       return save(context, row, configuration);
     }),
     current: (context, id, revision) => own(() => standing(context, id, revision)),
-    edit: (context, id, body) => own(async () => {
+    edit: (context, id, body, expectedRevision) => own(async () => {
       const configuration = readBody(body);
       const row = await standing(context, id);
-      return row === undefined ? undefined : save(context, row, configuration);
+      return row === undefined ? undefined : save(context, row, configuration, expectedRevision);
     }),
     raw: (context, id, revision) => own(async () => {
       const row = await standing(context, id, revision);
       return row === undefined ? undefined : sermonToYaml(row.body);
     }),
-    editRaw: (context, id, text) => own(async () => {
+    editRaw: (context, id, text, expectedRevision) => own(async () => {
       const read = sermonFromYaml(text);
       if (!read.ok) {
         throw new SermonError('schema', read.problems[0]?.message ?? 'this text is not a sermon configuration', read.problems);
       }
       const row = await standing(context, id);
-      return row === undefined ? undefined : save(context, row, read.value);
+      return row === undefined ? undefined : save(context, row, read.value, expectedRevision);
     }),
     history: (context, id) => own(async () => {
       const row = await listed(context, id);

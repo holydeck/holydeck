@@ -121,6 +121,13 @@ export interface SaveInput {
   readonly contentId: string;
   readonly body: RevisionBody;
   readonly origin: RevisionOrigin;
+  /**
+   * The revision the writer last read, 0 for content with no history yet. Given, a save over anything
+   * newer is refused as the same conflict a race produces, so two editors saving one after the other are
+   * told about each other rather than the second quietly writing over the first. Left out, a save appends
+   * over whatever stands, which is what autosave-free writers such as a restore or an import want.
+   */
+  readonly expectedRevision?: number;
 }
 
 export interface SaveOutcome {
@@ -169,11 +176,17 @@ export function revisionsOn(db: RepositoryDb, options: RevisionStoreOptions): Re
   const store: RevisionStore = {
     async save(context, input) {
       const standing = await one(context, { contentId: input.contentId }, -1);
+      const held = standing?.revision ?? 0;
+      // Checked before the no-change answer below: an editor who read an older revision has not seen
+      // what somebody else wrote since, whatever the body they are sending happens to say.
+      if (input.expectedRevision !== undefined && input.expectedRevision !== held) {
+        throw new RevisionError('conflict', `${input.contentId} is now at revision ${held}, not ${input.expectedRevision}`);
+      }
       const hash = addressOf(input.body);
       if (standing?.hash === hash) return { appended: false, revision: standing };
       const record = {
         contentId: input.contentId,
-        revision: (standing?.revision ?? 0) + 1,
+        revision: held + 1,
         hash,
         origin: input.origin,
         at: options.now(),

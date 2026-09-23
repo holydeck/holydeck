@@ -15,7 +15,7 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
-import { settled, staleRevision } from './refusals.js';
+import { settled } from './refusals.js';
 import { CONTENT_EDIT } from './roles.js';
 import { SongError, songContext, subjectFor } from './songs.js';
 import { SongSingerChordsError, songSingerChordsContext, subjectFor as chordSubjectFor } from './song-singer-chords.js';
@@ -166,12 +166,9 @@ export function serveSongRoutes(app: FastifyInstance, { songs, chords, identity 
     const parsed = parseSongEdit(request.body, SONG_PATH);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
-    const context = call(request);
-    const current = await store.current(context, id);
-    if (current === undefined) return reply.code(404).send(notFound(request));
-    const stale = staleRevision(id, parsed.value.expectedRevision, current.revision);
-    if (stale !== undefined) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, stale, request.id));
-    const answer = await settled(() => store.edit(context, id, parsed.value.body), isRefusal);
+    // The revision check lives in the save itself, so a stale save is shelved for the conflict banner
+    // rather than only refused, and no second writer can land between a check here and the append.
+    const answer = await settled(() => store.edit(call(request), id, parsed.value.body, parsed.value.expectedRevision), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     await note(request, id, 'allowed', `saved revision ${answer.value.revision}`);

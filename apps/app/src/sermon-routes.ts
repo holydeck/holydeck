@@ -9,7 +9,7 @@ import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
-import { settled, staleRevision } from './refusals.js';
+import { settled } from './refusals.js';
 import { CONTENT_EDIT, SERVICES_MANAGE } from './roles.js';
 import { SERMON_PATH, parseSermonDraft, parseSermonEdit } from './sermon-body.js';
 import { sermonStoreFilesFromCorpus } from './sermon-corpus.js';
@@ -128,12 +128,8 @@ export function serveSermonRoutes(
     const parsed = parseSermonEdit(request.body, SERMON_PATH);
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const id = idIn(request);
-    const context = call(request);
-    const current = await store.current(context, id);
-    if (current === undefined) return reply.code(404).send(notFound(request));
-    const stale = staleRevision(id, parsed.value.expectedRevision, current.revision);
-    if (stale !== undefined) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, stale, request.id));
-    const answer = await settled(() => store.edit(context, id, parsed.value.body), isSermonRefusal);
+    // Checked by the save itself, which shelves a stale body for the conflict banner (COLAB-02).
+    const answer = await settled(() => store.edit(call(request), id, parsed.value.body, parsed.value.expectedRevision), isSermonRefusal);
     if (!answer.ok) return refused(request, reply, answer);
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     await note(request, id, 'allowed', `saved revision ${answer.value.revision}`);
@@ -157,12 +153,7 @@ export function serveSermonRoutes(
     const expectedRevision = ordinalIn(asked);
     if (expectedRevision === undefined) return reply.code(422).send(validationFailure(request.id, expectedRevisionProblem(asked)));
     const id = idIn(request);
-    const context = call(request);
-    const current = await store.current(context, id);
-    if (current === undefined) return reply.code(404).send(notFound(request));
-    const stale = staleRevision(id, expectedRevision, current.revision);
-    if (stale !== undefined) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, stale, request.id));
-    const answer = await settled(() => store.editRaw(context, id, request.body as string), isSermonRefusal);
+    const answer = await settled(() => store.editRaw(call(request), id, request.body as string, expectedRevision), isSermonRefusal);
     if (!answer.ok) return refused(request, reply, answer);
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     await note(request, id, 'allowed', `saved raw revision ${answer.value.revision}`);
