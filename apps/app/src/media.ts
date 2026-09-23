@@ -214,7 +214,7 @@ function mediaPurgeCandidates(
       ageDays: Math.floor((nowMs - Date.parse(row.stamp.archivedAt as string)) / MS_PER_DAY),
       protectedBy: purgeOptions.referencedBy(row.stamp.id),
     }));
-  return sweep(candidates, { 'media-asset': purgeOptions.graceDays });
+  return sweep(candidates, { mediaArchivedPurgeGraceDays: purgeOptions.graceDays });
 }
 
 export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): MediaLibrary {

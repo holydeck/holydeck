@@ -250,14 +250,14 @@ describe('protected content revisions never expire (ADR 0001)', () => {
 describe('archived media purge eligibility (OPS-14)', () => {
   it('is not eligible before its grace period elapses', () => {
     const error = thrown(() =>
-      guardRemoval(candidate({ class: 'media-asset', ageDays: 179 }), { 'media-asset': 180 }),
+      guardRemoval(candidate({ class: 'media-asset', ageDays: 179 }), { mediaArchivedPurgeGraceDays: 180 }),
     );
     expect(error.kind).toBe('too-recent');
   });
 
   it('is eligible once its age reaches the grace period', () => {
     expect(() =>
-      guardRemoval(candidate({ class: 'media-asset', ageDays: 180 }), { 'media-asset': 180 }),
+      guardRemoval(candidate({ class: 'media-asset', ageDays: 180 }), { mediaArchivedPurgeGraceDays: 180 }),
     ).not.toThrow();
   });
 
@@ -265,7 +265,7 @@ describe('archived media purge eligibility (OPS-14)', () => {
     const error = thrown(() =>
       guardRemoval(
         candidate({ class: 'media-asset', ageDays: 100_000, protectedBy: ['service:svc-1'] }),
-        { 'media-asset': 180 },
+        { mediaArchivedPurgeGraceDays: 180 },
       ),
     );
     expect(error.kind).toBe('referenced');
