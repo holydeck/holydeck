@@ -13,11 +13,13 @@ import { joinAllowedFor } from '@holydeck/contracts/services';
 import type { MessageKey } from '@holydeck/localization/messages';
 import type { ComponentChildren, JSX } from 'preact';
 
+import { ReadingEditor } from '../editors/ReadingEditor.js';
 import { t } from '../i18n.js';
 import { ExactPreview } from '../preview/ExactPreview.js';
 import {
   loadService, loadState, resetWorkspace, rightTab, selection, service,
 } from '../state/workspace-store.js';
+import { AddPanel } from './AddPanel.js';
 import { LifecycleMenu } from './LifecycleMenu.js';
 import { OrderPanel } from './OrderPanel.js';
 import { PropertiesPanel } from './PropertiesPanel.js';
@@ -108,14 +110,19 @@ function EditorPlaceholder(): JSX.Element {
   return <textarea aria-label={t('workspace.region.editor')} />;
 }
 
-/** The center region: the selected item's exact preview, or the bare editor until something is selected. */
+/** The center region: the selected item's editor where it has one, above its exact preview; the bare
+ *  editor until something is selected. Keyed by item, so switching items never carries an edit across. */
 function EditorCenter(): JSX.Element {
   const itemId = selection.value.itemId;
-  return itemId === undefined ? <EditorPlaceholder /> : <ExactPreview itemId={itemId} />;
-}
-
-function LibraryPlaceholder(): JSX.Element {
-  return <p>{t('workspace.tab.library')}</p>;
+  if (itemId === undefined) return <EditorPlaceholder />;
+  const view = service.value;
+  const kind = view === undefined ? undefined : findItem(view, itemId)?.kind;
+  return (
+    <>
+      {kind === 'reading' ? <ReadingEditor key={itemId} itemId={itemId} /> : null}
+      <ExactPreview key={itemId} itemId={itemId} />
+    </>
+  );
 }
 
 type FrameSlots = {
@@ -295,7 +302,7 @@ export function Workspace({ id }: { readonly id: string }): JSX.Element {
         order={<OrderPanel view={view} onEmpty={() => { rightTab.value = 'library'; mobileRegion.value = 'details'; }} />}
         center={<EditorCenter />}
         properties={<PropertiesPanel />}
-        library={<LibraryPlaceholder />}
+        library={<AddPanel />}
         status={<WorkspaceStatus />}
       />
     </div>

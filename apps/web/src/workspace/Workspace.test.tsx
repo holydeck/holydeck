@@ -175,6 +175,21 @@ describe('the service workspace', () => {
     await vi.waitFor(() => expect(selection.value.itemId).toBe('b'));
   });
 
+  it('opens the Reading editor above the preview for a selected reading', async () => {
+    const withReading = record('s1', ['a']);
+    const sections = [{ ...withReading.sections[0], items: [{
+      id: 'r', kind: 'reading', title: 'John 3', enabled: true, content: undefined,
+      body: { kind: 'reading', translation: 'KJV', compare: [], book: 'JHN', chapter: 3, verses: '16' },
+    }] }];
+    setFetching(fakeFetch({
+      'GET /api/v1/services/s1': reply(200, successEnvelope({ ...withReading, sections }, 'r1')),
+      'GET /api/v1/services/s1/content-drift': noDrift,
+    }));
+    await renderAt('/services/s1?item=r');
+
+    expect(await screen.findByRole('heading', { name: 'Reading', hidden: true })).toBeTruthy();
+  });
+
   it('shows the missing state with a link back to Services', async () => {
     setFetching(fakeFetch({
       'GET /api/v1/services/s1': reply(404, errorEnvelope('resource.not_found', 'none', 'r1')),
@@ -237,6 +252,6 @@ describe('the service workspace', () => {
     expect(rightTab.value).toBe('library');
     expect(screen.getByRole('tab', { name: 'Library', selected: true })).toBeTruthy();
     expect(document.getElementById('workspace-panel-library')?.hidden).toBe(false);
-    expect(await screen.findByText('Library', { selector: 'p' })).toBeTruthy();
+    expect(await screen.findByRole('searchbox', { name: 'Search content' })).toBeTruthy();
   });
 });
