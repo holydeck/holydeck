@@ -1,5 +1,5 @@
 import { constants, readFileSync, watch } from 'node:fs';
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,7 +24,7 @@ import { serveLive } from './live.js';
 import { maintenanceDb, maintenanceOn } from './maintenance.js';
 import { schemaStatus } from './migrations.js';
 import { mediaMigrationStateDb, mediaMigrationStateOn } from './media-migration-state.js';
-import { mediaLibraryOn } from './media.js';
+import { mediaLibraryOn, mediaPurgeDb } from './media.js';
 import { queueDb, queueOn } from './queue.js';
 import { redactingLogger, redactorFor, secretsIn } from './redaction.js';
 import { notificationDb } from './notification-store.js';
@@ -147,6 +147,7 @@ if (settings.values.mongoUrl !== '') {
     now,
     queue,
     mediaRoot: settings.values.mediaRoot,
+    purge: mediaPurgeDb(store.db()),
     write: async (root, key, bytes) => {
       await mkdir(root, { recursive: true });
       const path = join(root, key);
@@ -155,6 +156,13 @@ if (settings.values.mongoUrl !== '') {
     },
     async read(_root, key) {
       return new Uint8Array(await readFile(key));
+    },
+    // OPS-14: no content model in this deployment tracks media references yet — the same gap
+    // retention-sweep-handler.ts already documents and defers for autosave-revision. Every asset
+    // purges as unreferenced until that model exists; a maintainer building it wires this resolver
+    // for real.
+    async remove(_root, key) {
+      await rm(key, { force: true });
     },
   });
   backups = { db: repositoryDb(store.db()), queue };

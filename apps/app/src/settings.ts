@@ -55,6 +55,10 @@ export interface Settings {
   notificationReadRetentionDays: number;
   autosaveRetentionDays: number;
   auditRetentionDays: number;
+  /** How long an archived media asset stands before it becomes purge-eligible (OPS-14). Purging
+   *  itself is a separate, explicit Admin action — this only sets the window `purgeArchived` grades
+   *  candidates against. */
+  mediaArchivedPurgeGraceDays: number;
   /**
    * The per-file ceiling `@fastify/multipart` enforces (OPS-13). Read once, at `app.ts`'s boot-time
    * `app.register(multipart, ...)` call — a Fastify plugin's own options cannot change after registration,
@@ -93,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notificationReadRetentionDays: 30,
   autosaveRetentionDays: 30,
   auditRetentionDays: 400,
+  mediaArchivedPurgeGraceDays: 180,
   mediaUploadLimitBytes: 1_073_741_824,
   mediaFreeSpaceReserveBytes: 5_368_709_120,
 };
@@ -158,6 +163,7 @@ const ENV_KEYS: Record<keyof Settings, string> = {
   notificationReadRetentionDays: 'HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS',
   autosaveRetentionDays: 'HOLYDECK_AUTOSAVE_RETENTION_DAYS',
   auditRetentionDays: 'HOLYDECK_AUDIT_RETENTION_DAYS',
+  mediaArchivedPurgeGraceDays: 'HOLYDECK_MEDIA_ARCHIVED_PURGE_GRACE_DAYS',
   mediaUploadLimitBytes: 'HOLYDECK_MEDIA_UPLOAD_LIMIT_BYTES',
   mediaFreeSpaceReserveBytes: 'HOLYDECK_MEDIA_FREE_SPACE_RESERVE_BYTES',
 };
@@ -461,6 +467,12 @@ export function loadSettings(input: {
     layers,
   );
   const auditRetentionDays = resolve('auditRetentionDays', DEFAULT_SETTINGS.auditRetentionDays, parseBoundedInteger(1, 3_650), layers);
+  const mediaArchivedPurgeGraceDays = resolve(
+    'mediaArchivedPurgeGraceDays',
+    DEFAULT_SETTINGS.mediaArchivedPurgeGraceDays,
+    parseBoundedInteger(1, 3_650),
+    layers,
+  );
   const mediaUploadLimitBytes = resolve(
     'mediaUploadLimitBytes',
     DEFAULT_SETTINGS.mediaUploadLimitBytes,
@@ -497,6 +509,7 @@ export function loadSettings(input: {
       notificationReadRetentionDays: notificationReadRetentionDays.value,
       autosaveRetentionDays: autosaveRetentionDays.value,
       auditRetentionDays: auditRetentionDays.value,
+      mediaArchivedPurgeGraceDays: mediaArchivedPurgeGraceDays.value,
       mediaUploadLimitBytes: mediaUploadLimitBytes.value,
       mediaFreeSpaceReserveBytes: mediaFreeSpaceReserveBytes.value,
     },
@@ -520,6 +533,7 @@ export function loadSettings(input: {
       notificationReadRetentionDays: notificationReadRetentionDays.source,
       autosaveRetentionDays: autosaveRetentionDays.source,
       auditRetentionDays: auditRetentionDays.source,
+      mediaArchivedPurgeGraceDays: mediaArchivedPurgeGraceDays.source,
       mediaUploadLimitBytes: mediaUploadLimitBytes.source,
       mediaFreeSpaceReserveBytes: mediaFreeSpaceReserveBytes.source,
     },

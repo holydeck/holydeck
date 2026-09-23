@@ -1,12 +1,12 @@
 import { accessSync, constants, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { checkOwnSettingsMount, readSettingsText } from '@holydeck/app/boot';
 import { AUDIT_CATEGORIES, CATEGORY_OF, auditContext, auditReadContext, retentionSweepContext } from '@holydeck/app/audit';
 import { backupContext, backupDb } from '@holydeck/app/backups';
 import { capabilityDb, capabilitiesOn } from '@holydeck/app/capabilities';
-import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
+import { mediaContext, mediaLibraryOn, mediaPurgeDb } from '@holydeck/app/media';
 import { mediaMigrationStateDb, mediaMigrationStateOn } from '@holydeck/app/media-migration-state';
 import { notificationDb, notificationStoreOn } from '@holydeck/app/notification-store';
 import { SCHEMA_VERSION } from '@holydeck/app/migrations';
@@ -122,6 +122,9 @@ if (work.runs === 'nothing') {
     async read(_root: string, key: string): Promise<Uint8Array> {
       return new Uint8Array(await readFile(key));
     },
+    async remove(_root: string, key: string): Promise<void> {
+      await rm(key, { force: true });
+    },
   };
   const queue = queueOn(queueDb(store.db()), { now });
   // The repository is encrypted, so it has a password, and a deployment that was never given one gets one
@@ -155,7 +158,13 @@ if (work.runs === 'nothing') {
   const handlers = handlersOn({
     mediaIngest: {
       context: mediaContext('system', name),
-      media: mediaLibraryOn(repositoryDb(store.db()), { now, queue, mediaRoot: settings.values.mediaRoot, ...mediaStorage }),
+      media: mediaLibraryOn(repositoryDb(store.db()), {
+        now,
+        queue,
+        mediaRoot: settings.values.mediaRoot,
+        purge: mediaPurgeDb(store.db()),
+        ...mediaStorage,
+      }),
       storage: mediaStorage,
       mediaRoot: settings.values.mediaRoot,
       poster: ffmpegPosterGenerator(),

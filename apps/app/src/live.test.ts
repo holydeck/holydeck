@@ -56,6 +56,7 @@ const settings: LoadedSettings = {
     notificationReadRetentionDays: 'default',
     autosaveRetentionDays: 'default',
     auditRetentionDays: 'default',
+    mediaArchivedPurgeGraceDays: 'default',
     mediaUploadLimitBytes: 'default',
     mediaFreeSpaceReserveBytes: 'default',
   },

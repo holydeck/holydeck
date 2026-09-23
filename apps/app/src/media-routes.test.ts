@@ -25,6 +25,7 @@ import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
 import { fakeDb } from '../test/helpers/fake-db.js';
+import { fakeMediaPurgeDb } from '../test/helpers/media-purge-db.js';
 import { fakeMediaStorageIO } from '../test/helpers/media-storage-io.js';
 import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
@@ -146,12 +147,15 @@ beforeEach(async () => {
   };
   const io = fakeMediaStorageIO();
   let serial = 0;
-  const real = mediaLibraryOn(fakeDb(), {
+  const db = fakeDb();
+  const real = mediaLibraryOn(db, {
     now,
     newId: () => `media-${(serial += 1)}`,
     mediaRoot,
     write: io.write,
     read: io.read,
+    remove: io.remove,
+    purge: fakeMediaPurgeDb(db),
     queue: { enqueue: async (_context, input) => ({ id: `job-${input.idempotencyKey}`, created: true }) },
   });
   upload = vi.fn((...args: Parameters<MediaLibrary['upload']>) => real.upload(...args));

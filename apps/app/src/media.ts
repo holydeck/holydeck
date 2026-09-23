@@ -5,13 +5,16 @@ import { parseMediaManifestEntry, sniffMediaType } from '@holydeck/contracts/med
 
 import { requestContext } from './context.js';
 import { QUEUE_PERMISSIONS } from './queue.js';
-import { permissionsFor } from './records.js';
+import { RECORDS, permissionsFor } from './records.js';
+import { sweep } from './retention.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 
 import type { EntityStamp } from '@holydeck/contracts/entities';
 import type { MediaManifestEntry } from '@holydeck/contracts/media';
+import type { Db } from 'mongodb';
 import type { RequestContext } from './context.js';
 import type { Queue } from './queue.js';
+import type { RetainedCandidate, RetentionCandidate } from './retention.js';
 import type { Document, RepositoryDb } from './repositories.js';
 
 export const MEDIA_ASSET_RECORD = 'mediaAssets';
@@ -36,11 +39,16 @@ export const MEDIA_INDEXES = Object.freeze(DECLARED_INDEXES);
 
 const STAMP_SEPARATOR = '#';
 
+const MS_PER_DAY = 86_400_000;
+
 export interface MediaStorageIO {
   /** Stores bytes below this deployment's configured media root and returns their durable handle. */
   write(root: string, key: string, bytes: Uint8Array): Promise<string>;
   /** Reads bytes from a durable handle returned by write. */
   read(root: string, key: string): Promise<Uint8Array>;
+  /** Physically deletes bytes at a durable handle returned by write — reached only from
+   *  `purgeArchived` (OPS-14), never from any of this file's other operations. */
+  remove(root: string, key: string): Promise<void>;
 }
 
 export type MediaRefusal = 'schema' | 'invalid-type' | 'duplicate' | 'state' | 'corrupt';
@@ -69,6 +77,43 @@ export interface MediaRecord {
   readonly storageKey: string;
 }
 
+interface Filter {
+  readonly [key: string]: unknown;
+}
+
+/** The slice of a Mongo collection `purgeArchived` needs to physically remove rows — narrower even
+ *  than `notification-store.ts`'s own delete adapter, since purge only ever needs one bulk delete
+ *  by `assetId`. No `Repository`/`RepositoryCollection` exposes this (ADR 0009), so this is its own
+ *  adapter, the same way `NotificationDb`/`NotificationCollection` is its own. */
+export interface MediaPurgeCollection {
+  deleteMany(filter: Filter): Promise<{ deletedCount: number }>;
+}
+
+export interface MediaPurgeDb {
+  collection(name: string): MediaPurgeCollection;
+}
+
+/** The Mongo driver adapter for archived-media purge deletion (OPS-14) — the one place media.ts is
+ *  allowed to physically remove a row. */
+export function mediaPurgeDb(db: Db): MediaPurgeDb {
+  return { collection: (name) => db.collection(name) as unknown as MediaPurgeCollection };
+}
+
+/** What grades and grants purge eligibility: the grace window (a settings value the caller reads
+ *  and supplies — this file has no settings access of its own) and how to learn whether an asset is
+ *  still referenced. No content model in this codebase tracks media references yet — the same gap
+ *  `retention-sweep-handler.ts` already documents and defers for autosave-revision — so this is
+ *  injectable rather than resolved internally, and fully testable by that injection. */
+export interface MediaPurgeOptions {
+  readonly graceDays: number;
+  readonly referencedBy: (assetId: string) => readonly string[];
+}
+
+export interface MediaPurgeOutcome {
+  readonly purged: readonly string[];
+  readonly retained: readonly RetainedCandidate[];
+}
+
 export interface MediaLibrary {
   upload(context: unknown, upload: MediaUpload): Promise<MediaRecord>;
   inspect(context: unknown, id: string): Promise<MediaRecord | undefined>;
@@ -79,6 +124,11 @@ export interface MediaLibrary {
   completeProcessing(context: unknown, id: string, derivatives: MediaManifestEntry['derivatives']): Promise<MediaRecord | undefined>;
   failProcessing(context: unknown, id: string): Promise<MediaRecord | undefined>;
   retryProcessing(context: unknown, id: string): Promise<MediaRecord | undefined>;
+  /** Explicit, Admin-triggered (OPS-14) — never run by the daily retention sweep. Removes every
+   *  archived asset past `options.graceDays` and not reported referenced by `options.referencedBy`,
+   *  both the database rows and the stored bytes. Never auto-deletes: this method only runs when a
+   *  caller (Task 10-19's route) calls it. */
+  purgeArchived(context: unknown, options: MediaPurgeOptions): Promise<MediaPurgeOutcome>;
 }
 
 export interface MediaLibraryOptions extends MediaStorageIO {
@@ -86,6 +136,7 @@ export interface MediaLibraryOptions extends MediaStorageIO {
   readonly now: () => string;
   readonly mediaRoot: string;
   readonly newId?: () => string;
+  readonly purge: MediaPurgeDb;
 }
 
 const ID_BYTES = 16;
@@ -283,6 +334,31 @@ export function mediaLibraryOn(db: RepositoryDb, options: MediaLibraryOptions): 
           throw new MediaError('state', `${id} is ${row.manifest.processingState}, not failed`);
         }
         return processing(context, id, 'pending', []);
+      }),
+
+    purgeArchived: (context, purgeOptions) =>
+      own(async () => {
+        const rows = await everything(context);
+        const nowMs = Date.parse(options.now());
+        const candidates: RetentionCandidate[] = rows
+          .filter((row) => row.stamp.archivedAt !== undefined)
+          .map((row) => ({
+            id: row.stamp.id,
+            class: 'media-asset',
+            ageDays: Math.floor((nowMs - Date.parse(row.stamp.archivedAt as string)) / MS_PER_DAY),
+            protectedBy: purgeOptions.referencedBy(row.stamp.id),
+          }));
+        const { removable, retained } = sweep(candidates, { 'media-asset': purgeOptions.graceDays });
+
+        const purged: string[] = [];
+        for (const id of removable) {
+          const row = rows.find((candidate) => candidate.stamp.id === id);
+          if (row === undefined) continue;
+          await options.purge.collection(RECORDS.mediaAssets.collection).deleteMany({ assetId: id });
+          await options.remove(options.mediaRoot, row.storageKey);
+          purged.push(id);
+        }
+        return { purged, retained };
       }),
   };
 }

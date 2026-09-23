@@ -54,6 +54,7 @@ describe('precedence', () => {
       notificationReadRetentionDays: 'default',
       autosaveRetentionDays: 'default',
       auditRetentionDays: 'default',
+      mediaArchivedPurgeGraceDays: 'default',
       mediaUploadLimitBytes: 'default',
       mediaFreeSpaceReserveBytes: 'default',
     });
@@ -85,6 +86,7 @@ describe('precedence', () => {
       notificationReadRetentionDays: 'default',
       autosaveRetentionDays: 'default',
       auditRetentionDays: 'default',
+      mediaArchivedPurgeGraceDays: 'default',
       mediaUploadLimitBytes: 'default',
       mediaFreeSpaceReserveBytes: 'default',
     });
@@ -119,6 +121,7 @@ describe('precedence', () => {
       HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS: '31',
       HOLYDECK_AUTOSAVE_RETENTION_DAYS: '32',
       HOLYDECK_AUDIT_RETENTION_DAYS: '401',
+      HOLYDECK_MEDIA_ARCHIVED_PURGE_GRACE_DAYS: '181',
       HOLYDECK_MEDIA_UPLOAD_LIMIT_BYTES: '2147483648',
       HOLYDECK_MEDIA_FREE_SPACE_RESERVE_BYTES: '10737418240',
     });
@@ -142,10 +145,11 @@ describe('precedence', () => {
       notificationReadRetentionDays: 31,
       autosaveRetentionDays: 32,
       auditRetentionDays: 401,
+      mediaArchivedPurgeGraceDays: 181,
       mediaUploadLimitBytes: 2_147_483_648,
       mediaFreeSpaceReserveBytes: 10_737_418_240,
     });
-    expect(Object.values(loaded.sources)).toEqual(Array(21).fill('env'));
+    expect(Object.values(loaded.sources)).toEqual(Array(22).fill('env'));
   });
 });
 
@@ -257,7 +261,7 @@ describe('the media root and the Restic repository accept a filesystem path only
       'mongoUrl', 'timezone', 'developmentDiagnostics',
       'backupDailyAt', 'backupComponents', 'backupMinimumGapMinutes', 'backupRehearsalWeekday',
       'retentionSweepAt', 'notificationReadRetentionDays', 'autosaveRetentionDays', 'auditRetentionDays',
-      'mediaUploadLimitBytes', 'mediaFreeSpaceReserveBytes',
+      'mediaArchivedPurgeGraceDays', 'mediaUploadLimitBytes', 'mediaFreeSpaceReserveBytes',
     ]);
   });
 
@@ -310,6 +314,7 @@ describe('operations settings', () => {
     'notificationReadRetentionDays',
     'autosaveRetentionDays',
     'auditRetentionDays',
+    'mediaArchivedPurgeGraceDays',
   ] as const;
 
   it('defaults every operations setting when neither layer sets it', () => {
@@ -330,6 +335,7 @@ describe('operations settings', () => {
       'notificationReadRetentionDays: 31',
       'autosaveRetentionDays: 32',
       'auditRetentionDays: 401',
+      'mediaArchivedPurgeGraceDays: 181',
     ].join('\n'));
     expect(loaded.values).toMatchObject({
       backupDailyAt: '01:30',
@@ -340,6 +346,7 @@ describe('operations settings', () => {
       notificationReadRetentionDays: 31,
       autosaveRetentionDays: 32,
       auditRetentionDays: 401,
+      mediaArchivedPurgeGraceDays: 181,
     });
     for (const field of fields) expect(loaded.sources[field]).toBe('file');
   });
@@ -354,6 +361,7 @@ describe('operations settings', () => {
       'notificationReadRetentionDays: 31',
       'autosaveRetentionDays: 32',
       'auditRetentionDays: 401',
+      'mediaArchivedPurgeGraceDays: 181',
     ].join('\n'), {
       HOLYDECK_BACKUP_DAILY_AT: '03:30',
       HOLYDECK_BACKUP_COMPONENTS: 'settings,media',
@@ -363,6 +371,7 @@ describe('operations settings', () => {
       HOLYDECK_NOTIFICATION_READ_RETENTION_DAYS: '33',
       HOLYDECK_AUTOSAVE_RETENTION_DAYS: '34',
       HOLYDECK_AUDIT_RETENTION_DAYS: '402',
+      HOLYDECK_MEDIA_ARCHIVED_PURGE_GRACE_DAYS: '182',
     });
     expect(loaded.values).toMatchObject({
       backupDailyAt: '03:30',
@@ -373,6 +382,7 @@ describe('operations settings', () => {
       notificationReadRetentionDays: 33,
       autosaveRetentionDays: 34,
       auditRetentionDays: 402,
+      mediaArchivedPurgeGraceDays: 182,
     });
     for (const field of fields) expect(loaded.sources[field]).toBe('env');
   });
@@ -404,6 +414,7 @@ describe('operations settings', () => {
       ['notificationReadRetentionDays', 3_650],
       ['autosaveRetentionDays', 3_650],
       ['auditRetentionDays', 3_650],
+      ['mediaArchivedPurgeGraceDays', 3_650],
     ] as const) {
       for (const raw of [0, -1, max + 1, '12.5']) {
         expect(problemsOf(`${field}: ${raw}\n`)[0]).toContain(`expected a whole number between 1 and ${max}`);

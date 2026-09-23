@@ -40,6 +40,7 @@ describe('RETENTION_POLICIES', () => {
         'current-revision',
         'latest-autosave',
         'manual-checkpoint',
+        'media-asset',
         'prepared-snapshot',
         'run-event',
       ] satisfies RetentionClass[],
@@ -72,6 +73,25 @@ describe('policyFor with a settings-driven override', () => {
 
   it('leaves a class the overrides object does not name unaffected', () => {
     expect(policyFor('current-revision', { 'audit-entry': 90 }).retentionDays).toBe(3650);
+  });
+
+  it('supports an override for media-asset, the class this task adds', () => {
+    expect(policyFor('media-asset').retentionDays).toBe(180);
+    expect(policyFor('media-asset', { 'media-asset': 200 }).retentionDays).toBe(200);
+  });
+
+  it('threads through guardRemoval and sweep, not just policyFor directly (closes the pre-existing gap)', () => {
+    // Before this task, guardRemoval called policyFor(candidate.class) with no overrides at all, so an
+    // override reaching guardRemoval only through sweep's own new parameter is the exact case that used
+    // to be silently dropped.
+    expect(() =>
+      guardRemoval({ id: 'a', class: 'media-asset', ageDays: 50, protectedBy: [] }, { 'media-asset': 30 }),
+    ).not.toThrow();
+    const outcome = sweep(
+      [{ id: 'a', class: 'media-asset', ageDays: 50, protectedBy: [] }],
+      { 'media-asset': 30 },
+    );
+    expect(outcome.removable).toEqual(['a']);
   });
 });
 
@@ -193,5 +213,30 @@ describe('protected content revisions never expire (ADR 0001)', () => {
     );
     expect(outcome.removable).toEqual(['revision-1']);
     expect(outcome.retained.map((row) => row.id).toSorted()).toEqual(['revision-2', 'revision-3']);
+  });
+});
+
+describe('archived media purge eligibility (OPS-14)', () => {
+  it('is not eligible before its grace period elapses', () => {
+    const error = thrown(() =>
+      guardRemoval(candidate({ class: 'media-asset', ageDays: 179 }), { 'media-asset': 180 }),
+    );
+    expect(error.kind).toBe('too-recent');
+  });
+
+  it('is eligible once its age reaches the grace period', () => {
+    expect(() =>
+      guardRemoval(candidate({ class: 'media-asset', ageDays: 180 }), { 'media-asset': 180 }),
+    ).not.toThrow();
+  });
+
+  it('is never eligible while referenced, however old', () => {
+    const error = thrown(() =>
+      guardRemoval(
+        candidate({ class: 'media-asset', ageDays: 100_000, protectedBy: ['service:svc-1'] }),
+        { 'media-asset': 180 },
+      ),
+    );
+    expect(error.kind).toBe('referenced');
   });
 });

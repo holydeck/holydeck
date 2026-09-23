@@ -5,6 +5,7 @@ import { mediaContext, mediaLibraryOn } from '@holydeck/app/media';
 import { mediaIngestOn } from './media-ingest.js';
 import { runnerOn } from './runner.js';
 import { fakeDb } from '../../app/test/helpers/fake-db.js';
+import { fakeMediaPurgeDb } from '../../app/test/helpers/media-purge-db.js';
 
 import type { LeasedJob } from '@holydeck/contracts/jobs';
 import type { MediaLibrary, MediaStorageIO } from '@holydeck/app/media';
@@ -47,15 +48,20 @@ const open = (): { media: MediaLibrary; storage: MediaStorageIO; writes: Array<{
       if (value === undefined) throw new Error(`${key} is unreadable`);
       return value;
     },
+    async remove(_root, key) {
+      bytes.delete(key);
+    },
   };
   let serial = 0;
+  const db = fakeDb();
   return {
     storage,
     writes,
-    media: mediaLibraryOn(fakeDb(), {
+    media: mediaLibraryOn(db, {
       now: () => NOW,
       newId: () => `media-${(serial += 1)}`,
       mediaRoot: '/media',
+      purge: fakeMediaPurgeDb(db),
       ...storage,
       queue: { async enqueue() { return { id: 'job-1', created: true }; } },
     }),
