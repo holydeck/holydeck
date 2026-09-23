@@ -292,7 +292,7 @@ describe('POST /api/v1/sermons/import/preview', () => {
     expect(rowCount()).toBe(before);
   });
 
-  test('records an integration.call audit entry when the resolver runs', async () => {
+  test('records an integration.call audit entry when the resolver runs, carrying its token cost', async () => {
     await app.close();
     await serving(identity, sermons, answeringCorpus(), 'test-key', async () => ({
       status: 200,
@@ -300,6 +300,7 @@ describe('POST /api/v1/sermons/import/preview', () => {
         content: [
           { type: 'tool_use', id: 'toolu_test', name: RESOLVE_TOOL_NAME, input: { resolutions: [{ token: 'Xyzzy', usfm: 'JHN' }] } },
         ],
+        usage: { input_tokens: 512, output_tokens: 64 },
       }),
     }));
     const response = await preview({ text: 'Xyzzy 1:1\nHosea 4:6', translations: ['ta'] });
@@ -309,6 +310,8 @@ describe('POST /api/v1/sermons/import/preview', () => {
     expect(entry).toBeDefined();
     expect(typeof entry?.['subject']).toBe('string');
     expect(entry?.['subject']).not.toBe('');
+    expect(entry?.['requestTokens']).toBe(512);
+    expect(entry?.['responseTokens']).toBe(64);
     for (const row of events) expect(String(row['detail'] ?? '')).not.toContain('Xyzzy 1:1');
   });
 

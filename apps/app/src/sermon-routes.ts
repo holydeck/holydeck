@@ -222,7 +222,14 @@ export function serveSermonRoutes(
         try {
           await identity.audit.record(
             auditContext(actor, correlationFor(SERMON_PREFIX, request.id)),
-            { action: 'integration.call', subject: call.subject, outcome: call.outcome, detail: call.detail },
+            {
+              action: 'integration.call',
+              subject: call.subject,
+              outcome: call.outcome,
+              detail: call.detail,
+              requestTokens: call.requestTokens,
+              responseTokens: call.responseTokens,
+            },
           );
         } catch (error) {
           request.log.error({ err: error }, 'the resolver trail refused an entry');

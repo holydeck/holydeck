@@ -190,6 +190,9 @@ export interface AuditEntry {
   readonly outcome: AuditOutcome;
   /** Why, for a person reading the trail later. Never a secret. */
   readonly detail?: string;
+  /** What an `integration.call` cost, in tokens. Never set by any other action. */
+  readonly requestTokens?: number;
+  readonly responseTokens?: number;
 }
 
 export interface AuditTrail {
@@ -225,6 +228,8 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
         subject: entry.subject,
         outcome: entry.outcome,
         ...(entry.detail === undefined ? {} : { detail: entry.detail }),
+        ...(entry.requestTokens === undefined ? {} : { requestTokens: entry.requestTokens }),
+        ...(entry.responseTokens === undefined ? {} : { responseTokens: entry.responseTokens }),
       });
     },
   };
