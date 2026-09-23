@@ -42,7 +42,9 @@ export const KNOWN_INTEGRATION_GAPS = {
     'browser) cannot provide — likely belongs in tests/harness/e2e instead',
   'preparation-routes.ts': 'no harness test drives preparing a Service, its readiness checklist or an operator override over HTTP',
   'reference-routes.ts': 'no harness test looks a reference up or shows one over HTTP',
-  'run-routes.ts': "no harness test drives a live run's lifecycle over HTTP",
+  'run-routes.ts':
+    'tests/harness/e2e/live-run.spec.ts starts a run over HTTP and drives it over the socket, but no ' +
+    'tests/harness/integration test ends one or reads its deck, theme, additions, review or recap',
   'service-routes.ts': 'no harness test drives the Service workspace lifecycle over HTTP',
   'settings-routes.ts': 'no harness test reads or changes settings over HTTP',
   'slide-layout-routes.ts': 'no harness test creates, versions or archives a Slide Layout over HTTP',
