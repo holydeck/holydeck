@@ -142,7 +142,7 @@ describe('what a notification is derived from', () => {
   });
 
   it('never repeats the trail’s free prose, which is what keeps the trail the one place it is written', async () => {
-    const detail = 'restored from mongodb://root:hunter2@db.internal:27017';
+    const detail = 'restored from the offsite copy, whose passphrase is hunter2';
     const db = fakeDb();
     await recordOne(db, 'e1', { action: 'restore.run', outcome: 'allowed', detail }, AT);
     // The trail really is holding it, so what follows is a statement about the derivation rather than

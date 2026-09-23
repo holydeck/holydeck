@@ -6,8 +6,9 @@
 // nothing declares is refused, which is the same promise the record classes make about field names.
 //
 // Nothing here is ever handed a password or a token. `subject` names what was acted on and `detail` says
-// why in prose meant for a person, and both are written verbatim — so a caller passing a secret into
-// either has put it in the trail, which is the one thing the trail must never hold.
+// why in prose meant for a person, and both are written as given bar the narrowing `scrubAuditText` does
+// to addresses and URL passwords — so a caller passing any other secret into either has put it in the
+// trail, which is the one thing the trail must never hold.
 
 import { randomBytes } from 'node:crypto';
 
@@ -284,7 +285,9 @@ const ID_BYTES = 12;
 
 /**
  * Every current action defaults to `'verbatim'` — this file's own header already guarantees no `detail`
- * string carries a secret. An action added above without an entry here fails to compile, the map being
+ * string carries a secret, and `scrubAuditText` narrows whatever address or URL password one carries
+ * anyway. A `detail` is one prose string rather than a map of keys, so there is no per-key allow-list to
+ * keep: `'omit'` withholds an action's detail whole. An action added above without an entry here fails to compile, the map being
  * `Record<AuditAction, ...>`, and the exhaustiveness test in `audit.test.ts` fails with it.
  */
 export const AUDIT_DETAIL_REDACTION: Readonly<Record<AuditAction, 'verbatim' | 'omit'>> = {
@@ -349,9 +352,34 @@ export const AUDIT_DETAIL_REDACTION: Readonly<Record<AuditAction, 'verbatim' | '
   'integration.disable': 'verbatim',
 };
 
+const IPV4 = /\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}\b/gu;
+const IPV6 = /\b(?:[0-9a-f]{1,4}:){2,7}(?::|[0-9a-f]{1,4})\b/giu;
+const URL_PASSWORD = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+@/giu;
+const IPV6_KEPT_GROUPS = 3;
+const IPV6_MIN_COLONS = 3;
+
+/**
+ * What the trail keeps of a subject or a detail: an IPv4 address narrowed to its /24 and an IPv6 one to
+ * its /48, and the password in any `scheme://user:password@` URL replaced. No caller passes either today,
+ * but `detail` is free prose — a corpus address, a restore's error message — and COLAB-10 asks that no
+ * address beyond /24 and no credential ever comes back out, so it is enforced here rather than promised.
+ * Run when an entry is written and again when one is read, so a row written before this existed is held
+ * to the same rule. An IPv6 match needs three colons, which keeps a clock time like `09:30:00` intact.
+ */
+export function scrubAuditText(text: string): string {
+  return text
+    .replace(URL_PASSWORD, '$1[redacted]@')
+    .replace(IPV4, '$1.$2.$3.0/24')
+    .replace(IPV6, (address) =>
+      address.split(':').length - 1 < IPV6_MIN_COLONS
+        ? address
+        : `${address.split(':').slice(0, IPV6_KEPT_GROUPS).join(':')}::/48`,
+    );
+}
+
 export function redactAuditDetail(action: AuditAction, detail: string | undefined): string | undefined {
   if (detail === undefined) return undefined;
-  return AUDIT_DETAIL_REDACTION[action] === 'verbatim' ? detail : undefined;
+  return AUDIT_DETAIL_REDACTION[action] === 'verbatim' ? scrubAuditText(detail) : undefined;
 }
 
 function auditIdIn(_id: unknown): string {
@@ -363,7 +391,7 @@ function graded(document: Document): AuditRecordRead {
   const action = document['action'] as AuditAction;
   return {
     action,
-    subject: document['subject'] as string,
+    subject: scrubAuditText(document['subject'] as string),
     outcome: document['outcome'] as AuditOutcome,
     detail: redactAuditDetail(action, document['detail'] as string | undefined),
     id: auditIdIn(document['_id']),
@@ -396,9 +424,9 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
         at: options.now(),
         action: entry.action,
         category: CATEGORY_OF[entry.action],
-        subject: entry.subject,
+        subject: scrubAuditText(entry.subject),
         outcome: entry.outcome,
-        ...(entry.detail === undefined ? {} : { detail: entry.detail }),
+        ...(entry.detail === undefined ? {} : { detail: scrubAuditText(entry.detail) }),
         ...(entry.requestTokens === undefined ? {} : { requestTokens: entry.requestTokens }),
         ...(entry.responseTokens === undefined ? {} : { responseTokens: entry.responseTokens }),
         ...(entry.durationMs === undefined ? {} : { durationMs: entry.durationMs }),

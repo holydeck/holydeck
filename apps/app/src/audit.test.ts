@@ -268,6 +268,33 @@ describe('what an entry could never be made to carry', () => {
   });
 });
 
+describe('what the trail keeps of an address or a credential it is handed anyway', () => {
+  const LEAKY = 'from 203.0.113.57 and 2001:db8:85a3:8d3:1319:8a2e:370:7348 via mongodb://holydeck:hunter2@db:27017/holydeck at 09:30:00';
+  const KEPT = 'from 203.0.113.0/24 and 2001:db8:85a3::/48 via mongodb://holydeck:[redacted]@db:27017/holydeck at 09:30:00';
+
+  it('narrows an address to its /24 (or /48) and drops a URL password before anything is written', async () => {
+    const db = fakeDb();
+    await trailOn(db).record(auditContext('system', CORRELATION), {
+      action: 'session.signIn',
+      subject: 'client 198.51.100.23',
+      outcome: 'refused',
+      detail: LEAKY,
+    });
+    expect(entries(db)[0]).toMatchObject({ subject: 'client 198.51.100.0/24', detail: KEPT });
+    expect(JSON.stringify(entries(db))).not.toContain('hunter2');
+  });
+
+  it('narrows the same way when reading back a row written before the trail did', async () => {
+    const db = fakeDb();
+    await db.collection('audit_events').insertOne({
+      _id: 'audit:old', actor: 'system', correlationId: CORRELATION, at: AT, action: 'session.signIn',
+      subject: 'client 198.51.100.23', outcome: 'refused', detail: LEAKY,
+    });
+    const { entries: listed } = await trailOn(db).list(auditReadContext('account:1', CORRELATION), { limit: 10 });
+    expect(listed[0]).toMatchObject({ subject: 'client 198.51.100.0/24', detail: KEPT });
+  });
+});
+
 describe('integrationCallAudit', () => {
   it('records an integration.call entry with token/duration fields from the call info', async () => {
     const db = fakeDb();
