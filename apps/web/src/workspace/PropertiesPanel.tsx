@@ -8,6 +8,7 @@ import { locale } from '../app-state.js';
 import { t } from '../i18n.js';
 import { drift, selection, service } from '../state/workspace-store.js';
 import { DriftNotice } from './DriftNotice.js';
+import { OutputProfile } from './OutputProfile.js';
 import { findItem } from './service-data.js';
 
 const dateOf = (date: string): string =>
@@ -26,6 +27,7 @@ export function PropertiesPanel({ children }: { readonly children?: ComponentChi
       <p>{dateOf(view.date)}</p>
       <p>{view.site}</p>
       <p>{t(`service.state.${view.state}`)}</p>
+      {itemId === undefined ? <OutputProfile /> : null}
       {item === undefined || entry === undefined ? null : (
         <div>
           <table>

@@ -3,12 +3,25 @@
 import { render, screen } from '@testing-library/preact';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { successEnvelope } from '@holydeck/contracts/http';
 import type { ServiceItem } from '@holydeck/contracts/services';
 
+import type { FetchLike } from '../api.js';
 import type { ServiceView } from './service-data.js';
 
+import { setFetching } from '../request.js';
 import { drift, resetWorkspace, selection, service } from '../state/workspace-store.js';
+import { outputDefaults } from './output-defaults.js';
 import { PropertiesPanel } from './PropertiesPanel.js';
+
+const reply = (status: number, body: unknown) => ({ status, json: async (): Promise<unknown> => body });
+
+const noOutputDefaults: FetchLike = async () =>
+  reply(200, successEnvelope({
+    aspectRatio: '16:9',
+    safeAreaMargins: { top: 5, right: 5, bottom: 5, left: 5, unit: 'percent' },
+    uploadLimitBytes: 1_073_741_824,
+  }, 'r-defaults'));
 
 const view: ServiceView = {
   id: 's1', title: 'Sunday', date: '2026-09-27', site: 'Main Hall', state: 'upcoming', sections: [],
@@ -21,6 +34,8 @@ const itemA: ServiceItem = {
 
 beforeEach(() => {
   resetWorkspace();
+  outputDefaults.value = undefined;
+  setFetching(noOutputDefaults);
 });
 
 describe('PropertiesPanel', () => {
@@ -37,7 +52,16 @@ describe('PropertiesPanel', () => {
     expect(screen.getByText('Main Hall')).toBeTruthy();
     expect(screen.getByText('Upcoming')).toBeTruthy();
     expect(screen.getByText('Item properties')).toBeTruthy();
-    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  it('shows the output profile only while no item is selected', () => {
+    service.value = { ...view, sections: [{ id: 'sec', name: 'Welcome', items: [itemA] }] };
+    const { rerender } = render(<PropertiesPanel />);
+    expect(screen.queryByText('Output')).toBeTruthy();
+
+    selection.value = { itemId: 'a' };
+    rerender(<PropertiesPanel />);
+    expect(screen.queryByText('Output')).toBeNull();
   });
 
   it('shows a read-only compare for the selected item once it has drifted', () => {

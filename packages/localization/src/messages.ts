@@ -299,6 +299,20 @@ const en = {
   'drift.compare.pinned': 'Pinned revision {n}',
   'drift.compare.latest': 'Latest revision {n}',
   'drift.compare.later': 'A side-by-side comparison of the text appears once content details can be read here.',
+  'output.heading': 'Output',
+  'output.ratio': 'Aspect ratio: {ratio}',
+  'output.source.default': '(default)',
+  'output.source.service': '(this service)',
+  'output.ratio.custom': 'Custom',
+  'output.ratio.customField': 'Custom ratio (W:H)',
+  'output.ratio.invalid': 'Enter a ratio like 21:9.',
+  'output.margins': 'Safe area margins',
+  'output.margin.top': 'Top',
+  'output.margin.right': 'Right',
+  'output.margin.bottom': 'Bottom',
+  'output.margin.left': 'Left',
+  'output.useDefault': 'Use Default',
+  'output.locked': "The output can't change while the service is presenting.",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -594,6 +608,20 @@ const de: Catalog = {
   'drift.compare.pinned': 'Festgelegte Revision {n}',
   'drift.compare.latest': 'Neueste Revision {n}',
   'drift.compare.later': 'Ein direkter Textvergleich erscheint, sobald Inhaltsdetails hier lesbar sind.',
+  'output.heading': 'Ausgabe',
+  'output.ratio': 'Seitenverhältnis: {ratio}',
+  'output.source.default': '(Standard)',
+  'output.source.service': '(dieser Gottesdienst)',
+  'output.ratio.custom': 'Benutzerdefiniert',
+  'output.ratio.customField': 'Eigenes Verhältnis (B:H)',
+  'output.ratio.invalid': 'Geben Sie ein Verhältnis wie 21:9 ein.',
+  'output.margins': 'Sicherheitsabstände',
+  'output.margin.top': 'Oben',
+  'output.margin.right': 'Rechts',
+  'output.margin.bottom': 'Unten',
+  'output.margin.left': 'Links',
+  'output.useDefault': 'Standard verwenden',
+  'output.locked': 'Die Ausgabe kann nicht geändert werden, während der Gottesdienst live ist.',
 };
 
 const ta: Catalog = {
@@ -883,6 +911,20 @@ const ta: Catalog = {
   'drift.compare.pinned': 'பொருத்தப்பட்ட திருத்தம் {n}',
   'drift.compare.latest': 'சமீபத்திய திருத்தம் {n}',
   'drift.compare.later': 'உள்ளடக்க விவரங்களை இங்கே படிக்க முடியும் போது, உரையின் பக்கம்-பக்கமான ஒப்பீடு தோன்றும்.',
+  'output.heading': 'வெளியீடு',
+  'output.ratio': 'பக்க விகிதம்: {ratio}',
+  'output.source.default': '(இயல்நிலை)',
+  'output.source.service': '(இந்த சேவை)',
+  'output.ratio.custom': 'தனிப்பயன்',
+  'output.ratio.customField': 'தனிப்பயன் விகிதம் (அகலம்:உயரம்)',
+  'output.ratio.invalid': '21:9 போன்ற விகிதத்தை உள்ளிடவும்.',
+  'output.margins': 'பாதுகாப்பு விளிம்புகள்',
+  'output.margin.top': 'மேல்',
+  'output.margin.right': 'வலது',
+  'output.margin.bottom': 'கீழ்',
+  'output.margin.left': 'இடது',
+  'output.useDefault': 'இயல்நிலையைப் பயன்படுத்து',
+  'output.locked': 'சேவை நேரலையில் இருக்கும்போது வெளியீட்டை மாற்ற முடியாது.',
 };
 
 /** One catalog per shipped locale: adding a locale is a compile error until its copy exists. */

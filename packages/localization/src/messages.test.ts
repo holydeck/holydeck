@@ -96,6 +96,21 @@ describe('translating', () => {
     expect(translate('ta', 'output.launch.blocked', { view: 'பாடகர்' })).toContain('பாப்-அப்');
   });
 
+  it('names the output profile ratio and its source in every shipped locale', () => {
+    expect(translate('en', 'output.ratio', { ratio: '16:9' })).toBe('Aspect ratio: 16:9');
+    expect(translate('de', 'output.ratio', { ratio: '16:9' })).toBe('Seitenverhältnis: 16:9');
+    expect(translate('ta', 'output.ratio', { ratio: '16:9' })).toBe('பக்க விகிதம்: 16:9');
+
+    expect(translate('en', 'output.source.default')).toBe('(default)');
+    expect(translate('en', 'output.source.service')).toBe('(this service)');
+    expect(translate('de', 'output.source.default')).not.toBe(translate('en', 'output.source.default'));
+    expect(translate('ta', 'output.source.service')).not.toBe(translate('en', 'output.source.service'));
+
+    expect(translate('en', 'output.locked')).toContain('presenting');
+    expect(translate('de', 'output.locked')).not.toBe(translate('en', 'output.locked'));
+    expect(translate('ta', 'output.locked')).not.toBe(translate('en', 'output.locked'));
+  });
+
   it('formats a number it is given in the locale it is rendering', () => {
     expect(translate('en', 'service.slideCount.other', { count: 1234 })).toBe('1,234 slides');
     expect(translate('de', 'service.slideCount.other', { count: 1234 })).toBe('1.234 Folien');
