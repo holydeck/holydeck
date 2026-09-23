@@ -32,7 +32,7 @@ import type { LibraryKind } from '@holydeck/contracts/library';
 import type { LiveState } from '@holydeck/contracts/live-state';
 import type { Parsed } from '@holydeck/contracts/problems';
 import type { RouteNeed } from './authorization.js';
-import type { AuditAction } from './audit.js';
+import type { AuditAction, AuditOutcome } from './audit.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { ThemeStore } from './live-theme.js';
 import type { MidServiceStore } from './mid-service-additions.js';
@@ -220,10 +220,12 @@ export function serveRunRoutes(
 
   /** Written after the change, and logged rather than answered when the trail refuses it: a change this
    *  server made holds that, whether or not it managed to write it down (mirrors `accounts-routes.ts`). */
-  const note = async (request: FastifyRequest, action: AuditAction, actor: string, subject: string, detail: string): Promise<void> => {
+  const note = async (
+    request: FastifyRequest, action: AuditAction, actor: string, subject: string, detail: string, outcome: AuditOutcome = 'allowed',
+  ): Promise<void> => {
     if (identity === undefined) return;
     try {
-      await identity.audit.record(auditContext(actor, correlationFor('run:audit:', request.id)), { action, subject, outcome: 'allowed', detail });
+      await identity.audit.record(auditContext(actor, correlationFor('run:audit:', request.id)), { action, subject, outcome, detail });
     } catch (error: unknown) {
       request.log.error({ err: error }, 'the run trail refused an entry');
     }
@@ -334,17 +336,25 @@ export function serveRunRoutes(
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const runId = runIdIn(request);
     const session = operatorSession(request, 'run:theme:');
+    // Every refusal past this point is the operator's attempt on a named run, so the trail keeps it too.
+    const refused = (reason: string): Promise<void> =>
+      note(request, 'run.theme', session.actor, subjectFor(runId), `Refused a ${parsed.value.surface} theme change: ${reason}`, 'refused');
     const context = runContext(session.actor, session.correlationId);
     const record = await runs.resume(context, runId);
-    if (record === undefined) return reply.code(404).send(notFound(request));
+    if (record === undefined) {
+      await refused('no such run');
+      return reply.code(404).send(notFound(request));
+    }
 
     const theme = Object.values(DEFAULT_THEMES).find((candidate) => candidate.id === parsed.value.theme);
     if (theme === undefined) {
+      await refused('unknown theme');
       return reply.code(422).send(
         validationFailure(request.id, [{ path: 'run.theme', code: FIELD_CODES.notAllowed, message: `${parsed.value.theme} is not a known theme` }]),
       );
     }
     if (!meetsThemeContrast(theme)) {
+      await refused('insufficient contrast');
       return reply.code(422).send(errorEnvelope('theme.contrast', `${theme.id} does not meet the contrast this surface requires`, request.id));
     }
 
@@ -352,8 +362,14 @@ export function serveRunRoutes(
     try {
       changed = await runEngine.changeTheme(session, runId, parsed.value.surface, theme);
     } catch (error) {
-      if (error instanceof RunError && error.kind !== 'corrupt') return refusedEnd(request, reply, { ok: false, kind: error.kind, message: error.message });
-      if (error instanceof RunEventError && error.kind !== 'corrupt') return refusedEvent(request, reply, { ok: false, kind: error.kind, message: error.message });
+      if (error instanceof RunError && error.kind !== 'corrupt') {
+        await refused(error.kind);
+        return refusedEnd(request, reply, { ok: false, kind: error.kind, message: error.message });
+      }
+      if (error instanceof RunEventError && error.kind !== 'corrupt') {
+        await refused(error.kind);
+        return refusedEvent(request, reply, { ok: false, kind: error.kind, message: error.message });
+      }
       throw error;
     }
     await note(request, 'run.theme', session.actor, subjectFor(runId), `Changed the ${parsed.value.surface} theme to ${theme.id}`);
@@ -365,6 +381,8 @@ export function serveRunRoutes(
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const runId = runIdIn(request);
     const session = operatorSession(request, 'run:additions:');
+    const refusedAddition = (reason: string): Promise<void> =>
+      note(request, 'run.addition', session.actor, subjectFor(runId), `Refused a ${parsed.value.kind} mid-service addition: ${reason}`, 'refused');
     let answer;
     try {
       answer = await settledMidService(() => runEngine.add(session, {
@@ -377,10 +395,16 @@ export function serveRunRoutes(
     } catch (error) {
       // Only the additions-revision bump refuses this way, and only by losing a race: the run ended, or
       // kept moving, between the addition landing and the views being told.
-      if (error instanceof RunError && error.kind !== 'corrupt') return refusedEnd(request, reply, { ok: false, kind: error.kind, message: error.message });
+      if (error instanceof RunError && error.kind !== 'corrupt') {
+        await refusedAddition(error.kind);
+        return refusedEnd(request, reply, { ok: false, kind: error.kind, message: error.message });
+      }
       throw error;
     }
-    if (!answer.ok) return refusedMidService(request, reply, answer);
+    if (!answer.ok) {
+      await refusedAddition(answer.kind);
+      return refusedMidService(request, reply, answer);
+    }
     await note(request, 'run.addition', session.actor, subjectFor(runId), `Added a ${parsed.value.kind} mid-service`);
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
@@ -396,17 +420,23 @@ export function serveRunRoutes(
   });
 
   app.get(RUN_RECAP_PATH, { config: { need: RECAP_NEED } }, async (request, reply) => {
+    const runId = runIdIn(request);
+    const actor = provenSession(request).record.actor;
+    const refused = (reason: string): Promise<void> =>
+      note(request, 'run.recap.export', actor, subjectFor(runId), `Refused a run recap: ${reason}`, 'refused');
     const format = (request.query as Record<string, unknown>).format ?? 'md';
     if (format !== 'md' && format !== 'text') {
+      await refused('unknown format');
       return reply.code(422).send(validationFailure(request.id, [
         { path: 'format', code: FIELD_CODES.notAllowed, message: 'must be one of text, md' },
       ]));
     }
-    const runId = runIdIn(request);
-    const actor = provenSession(request).record.actor;
     const correlationId = correlationFor('run:recap:', request.id);
     const record = await runs.resume(runContext(actor, correlationId), runId);
-    if (record === undefined) return reply.code(404).send(notFound(request));
+    if (record === undefined) {
+      await refused('no such run');
+      return reply.code(404).send(notFound(request));
+    }
     const includeRehearsal = (request.query as Record<string, unknown>).includeRehearsal === 'true';
     const recap = await runReview.recap(runReviewContext(actor, correlationId), runId, { mode: record.mode, includeRehearsal });
     await note(request, 'run.recap.export', actor, subjectFor(runId), 'Exported a run recap');

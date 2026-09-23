@@ -34,6 +34,7 @@ import { fakeDb } from '../test/helpers/fake-db.js';
 import { memoryCapabilities } from '../test/helpers/capabilities.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 
+import type { Identity } from './onboarding.js';
 import type { CommandFrame } from '@holydeck/contracts/live';
 import type { ServiceDraft } from '@holydeck/contracts/services';
 import type { CapabilityStore } from './capabilities.js';
@@ -81,6 +82,9 @@ let deckItems: RunDeck['items'] = [];
 const deckFor = (): Promise<RunDeck> => Promise.resolve({ ...DECK, items: deckItems });
 let runEngine: RunEngine;
 let changes: LiveChange[] = [];
+// Only the trail is read by the run routes; the rest of an Identity is never reached from them.
+let audited: { action: string; outcome: string; detail: string }[] = [];
+const trail = { audit: { record: (_context: unknown, entry: { action: string; outcome: string; detail: string }) => { audited.push(entry); return Promise.resolve(); } } } as unknown as Identity;
 
 let app: FastifyInstance;
 let operator: StartedSession;
@@ -115,6 +119,7 @@ const building = async (): Promise<void> => {
   const runReview = runReviewOn(runEvents);
   deckItems = [];
   changes = [];
+  audited = [];
   runEngine = runEngineOn({ hub, runs, runEvents, themes, midService, deck: deckFor, clock: now });
   capabilities = capabilitiesOn(memoryCapabilities().db, { now });
   sessions = sessionsOn(memorySessions().db, { now });
@@ -139,6 +144,7 @@ const building = async (): Promise<void> => {
     midService,
     runEngine,
     deck: deckFor,
+    identity: trail,
   });
   await app.ready();
 };
@@ -340,6 +346,30 @@ describe('changing a run theme', () => {
   test('answers 404 when the run does not exist', async () => {
     const response = await asking('POST', runPath(RUN_THEME_PATH, 'run-unknown'), { surface: 'audience', theme: 'audience-default' }, operator);
     expect(response.statusCode).toBe(404);
+  });
+
+  test('audits a refused theme change as refused, and an applied one as allowed', async () => {
+    const runId = await startRun();
+    await asking('POST', runPath(RUN_THEME_PATH, runId), { surface: 'audience', theme: 'not-a-real-theme' }, operator);
+    await asking('POST', runPath(RUN_THEME_PATH, 'run-unknown'), { surface: 'audience', theme: 'audience-default' }, operator);
+    await asking('POST', runPath(RUN_THEME_PATH, runId), { surface: 'audience', theme: 'audience-default' }, operator);
+    await asking('POST', runPath(RUN_END_PATH, runId), undefined, operator);
+    await asking('POST', runPath(RUN_THEME_PATH, runId), { surface: 'audience', theme: 'audience-default' }, operator);
+    expect(audited.filter((entry) => entry.action === 'run.theme').map((entry) => entry.outcome))
+      .toEqual(['refused', 'refused', 'allowed', 'refused']);
+  });
+});
+
+describe('auditing refused additions and recaps', () => {
+  test('a refused addition and a refused recap each leave a refused entry', async () => {
+    await asking('POST', runPath(RUN_ADDITIONS_PATH, 'run-unknown'), { kind: 'reading', title: 'Late', body: 'text' }, operator);
+    await asking('GET', runPath(RUN_RECAP_PATH, 'run-unknown'), undefined, operator);
+    await asking('GET', `${runPath(RUN_RECAP_PATH, 'run-unknown')}?format=pdf`, undefined, operator);
+    expect(audited.map(({ action, outcome }) => ({ action, outcome }))).toEqual([
+      { action: 'run.addition', outcome: 'refused' },
+      { action: 'run.recap.export', outcome: 'refused' },
+      { action: 'run.recap.export', outcome: 'refused' },
+    ]);
   });
 });
 
