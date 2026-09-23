@@ -378,6 +378,12 @@ describe('adding content mid-service, reviewing and exporting a recap', () => {
     expect(recapped.statusCode).toBe(200);
     expect(recapped.headers['content-type']).toMatch(/text\/markdown/u);
     expect(recapped.body).toBe('1. An added reading');
+
+    const asText = await asking('GET', `${runPath(RUN_RECAP_PATH, runId)}?format=text`, undefined, reader);
+    expect(asText.headers['content-type']).toMatch(/text\/plain/u);
+    expect(asText.body).toBe('1. An added reading');
+    expect((await asking('GET', `${runPath(RUN_RECAP_PATH, runId)}?format=md`, undefined, reader)).headers['content-type']).toMatch(/text\/markdown/u);
+    expect((await asking('GET', `${runPath(RUN_RECAP_PATH, runId)}?format=pdf`, undefined, reader)).statusCode).toBe(422);
   });
 
   test('leaves a rehearsal out of its recap unless asked to include it (RUN-06)', async () => {

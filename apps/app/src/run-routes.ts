@@ -396,6 +396,12 @@ export function serveRunRoutes(
   });
 
   app.get(RUN_RECAP_PATH, { config: { need: RECAP_NEED } }, async (request, reply) => {
+    const format = (request.query as Record<string, unknown>).format ?? 'md';
+    if (format !== 'md' && format !== 'text') {
+      return reply.code(422).send(validationFailure(request.id, [
+        { path: 'format', code: FIELD_CODES.notAllowed, message: 'must be one of text, md' },
+      ]));
+    }
     const runId = runIdIn(request);
     const actor = provenSession(request).record.actor;
     const correlationId = correlationFor('run:recap:', request.id);
@@ -404,6 +410,7 @@ export function serveRunRoutes(
     const includeRehearsal = (request.query as Record<string, unknown>).includeRehearsal === 'true';
     const recap = await runReview.recap(runReviewContext(actor, correlationId), runId, { mode: record.mode, includeRehearsal });
     await note(request, 'run.recap.export', actor, subjectFor(runId), 'Exported a run recap');
-    return reply.type('text/markdown; charset=utf-8').send(recap.lines.join('\n'));
+    // The numbered lines read the same either way; the format only names what the client is saving.
+    return reply.type(`${format === 'text' ? 'text/plain' : 'text/markdown'}; charset=utf-8`).send(recap.lines.join('\n'));
   });
 }
