@@ -29,7 +29,7 @@ export function LifecycleMenu({ view }: { readonly view: ServiceView }): JSX.Ele
   const archived = view.state === 'archived';
 
   const saveSchedule = async (): Promise<void> => {
-    await mutate(API.serviceSchedule(view.id), { method: 'PATCH', body: { date } });
+    await mutate(API.serviceSchedule(view.id), { method: 'POST', body: { date } });
     setScheduling(false);
     setOpen(false);
   };
@@ -53,7 +53,7 @@ export function LifecycleMenu({ view }: { readonly view: ServiceView }): JSX.Ele
     if (nextState === undefined) return;
     if (CONFIRMED_TARGETS.has(nextState) && !globalThis.confirm(t('lifecycle.move.confirm', { state: t(`service.state.${nextState}`) }))) return;
     setOpen(false);
-    await mutate(API.serviceTransition(view.id), { method: 'PATCH', body: { state: nextState } });
+    await mutate(API.serviceTransition(view.id), { method: 'POST', body: { state: nextState } });
   };
 
   return (

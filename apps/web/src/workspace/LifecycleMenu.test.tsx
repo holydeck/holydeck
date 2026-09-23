@@ -66,7 +66,7 @@ describe('LifecycleMenu', () => {
   it('offers only the next lifecycle step, and confirms before moving into Presenting', async () => {
     const calls: string[] = [];
     setFetching(fakeFetch({
-      'PATCH /api/v1/services/s1/transition': reply(200, successEnvelope(record('presenting'), 'r2')),
+      'POST /api/v1/services/s1/transition': reply(200, successEnvelope(record('presenting'), 'r2')),
       'GET /api/v1/services/s1/content-drift': noDrift,
     }, calls));
     const confirming = vi.fn().mockReturnValue(true);
@@ -81,7 +81,7 @@ describe('LifecycleMenu', () => {
 
     expect(confirming).toHaveBeenCalledWith("Move this service to Presenting? This can't be undone.");
     await vi.waitFor(() => expect(calls).toEqual([
-      'PATCH /api/v1/services/s1/transition',
+      'POST /api/v1/services/s1/transition',
       'GET /api/v1/services/s1/content-drift',
     ]));
   });
@@ -110,7 +110,7 @@ describe('LifecycleMenu', () => {
   it('schedules a date only while upcoming', async () => {
     const calls: string[] = [];
     setFetching(fakeFetch({
-      'PATCH /api/v1/services/s1/schedule': reply(200, successEnvelope(record('upcoming'), 'r2')),
+      'POST /api/v1/services/s1/schedule': reply(200, successEnvelope(record('upcoming'), 'r2')),
       'GET /api/v1/services/s1/content-drift': noDrift,
     }, calls));
     render(<LifecycleMenu view={view} />);
@@ -121,7 +121,7 @@ describe('LifecycleMenu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Date' }));
 
     await vi.waitFor(() => expect(calls).toEqual([
-      'PATCH /api/v1/services/s1/schedule',
+      'POST /api/v1/services/s1/schedule',
       'GET /api/v1/services/s1/content-drift',
     ]));
 
