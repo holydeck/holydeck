@@ -316,7 +316,7 @@ export function serveRunRoutes(
 
     const context = runContext(actor, correlationId);
     const runDeck = await deck(context, record);
-    const projected = projectDeck(runDeck, view);
+    const projected = projectDeck(runDeck, view, record.live);
     const etag = `"${createHash('sha256').update(JSON.stringify(projected)).digest('hex')}"`;
     return reply
       .header('ETag', etag)

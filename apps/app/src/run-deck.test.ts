@@ -145,7 +145,7 @@ describe('projectDeck', () => {
 
   it('strips notes and key from the audience and singer projections but keeps them on stage', () => {
     for (const view of ['audience', 'singer'] as const) {
-      const projected = projectDeck(deck, view);
+      const projected = projectDeck(deck, view, { public: { itemId: 'item-1', slideIndex: 0 } });
       expect(projected.items[0]).not.toHaveProperty('notes');
       expect(projected.items[0]).not.toHaveProperty('key');
       expect(projected.items[0]).toMatchObject({ languages: ['ta'], slides: privateItem.slides });
@@ -157,6 +157,51 @@ describe('projectDeck', () => {
 
   it('control projection is the deck unchanged', () => {
     expect(projectDeck(deck, 'control')).toBe(deck);
+  });
+
+  // D-PLAN-09: nothing a guest-ticket holder or an output window receives may name an account, and the
+  // audience deck never runs ahead of the public next slide.
+  const addition: DeckItem = {
+    itemId: 'addition-1', kind: 'mid-service', title: 'Offering', audio: 'track-1',
+    slides: [{ slideId: 'offering-1', boxes: [] }],
+    provenance: { origin: 'mid-service', actor: 'account:operator', at: '2026-09-22T10:00:00.000Z' },
+  };
+  const songs: DeckItem[] = [0, 1, 2].map((index) => ({
+    itemId: `song-${index}`, kind: 'song', title: `Song ${index}`,
+    slides: [{ slideId: `s-${index}-0`, boxes: [] }, { slideId: `s-${index}-1`, boxes: [] }],
+  }));
+  const wide: RunDeck = { ...deck, items: [...songs, { itemId: 'gap', kind: 'mid-service', title: 'Gap', slides: [] }, addition] };
+  const live = (position: { itemId: string; slideIndex: number } | { standby: string }) => ({ public: position });
+
+  it.each(['audience', 'singer', 'stage'] as const)('never gives the %s view an account id', (view) => {
+    const projected = projectDeck(wide, view, live({ itemId: 'addition-1', slideIndex: 0 }));
+    expect(JSON.stringify(projected)).not.toContain('account:operator');
+    expect(projected.items.find((item) => item.itemId === 'addition-1')?.provenance).toEqual({ origin: 'mid-service', at: '2026-09-22T10:00:00.000Z' });
+  });
+
+  it.each(['audience', 'singer'] as const)('strips operator-only audio from the %s view', (view) => {
+    expect(JSON.stringify(projectDeck(wide, view, live({ itemId: 'addition-1', slideIndex: 0 })))).not.toContain('track-1');
+    expect(projectDeck(wide, 'stage').items.at(-1)?.audio).toBe('track-1');
+  });
+
+  it('windows the audience deck up to and including the public next slide', () => {
+    const projected = projectDeck(wide, 'audience', live({ itemId: 'song-0', slideIndex: 1 }));
+    expect(projected.items.map((item) => [item.itemId, item.slides.map((slide) => slide.slideId)])).toEqual([
+      ['song-0', ['s-0-0', 's-0-1']], ['song-1', ['s-1-0']],
+    ]);
+    expect(projectDeck(wide, 'audience', live({ itemId: 'song-2', slideIndex: 1 })).items.map((item) => item.itemId))
+      .toEqual(['song-0', 'song-1', 'song-2', 'addition-1']);
+  });
+
+  it.each([
+    ['standby', { standby: 'welcome' }], ['the empty screen', { itemId: '', slideIndex: 0 }], ['an unknown position', { itemId: 'gone', slideIndex: 0 }],
+  ] as const)('gives the audience no slides on %s, or with no live state at all', (_label, position) => {
+    expect(projectDeck(wide, 'audience', live(position)).items).toEqual([]);
+    expect(projectDeck(wide, 'audience').items).toEqual([]);
+  });
+
+  it('keeps the singer and stage decks whole: both already follow the next slide privately', () => {
+    expect(projectDeck(wide, 'singer', live({ itemId: 'song-0', slideIndex: 0 })).items).toHaveLength(5);
   });
 });
 

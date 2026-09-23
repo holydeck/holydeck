@@ -2,7 +2,7 @@
 // persisted beside them. Persisting it would duplicate content that can be reproduced exactly and could
 // drift from the snapshot; changing PreparedSnapshot persistence is deliberately outside this module.
 
-import type { LivePosition } from '@holydeck/contracts/live-state';
+import type { LivePosition, LiveState } from '@holydeck/contracts/live-state';
 import type { SafeAreaMargins, PreparedSnapshot } from '@holydeck/contracts/snapshots';
 
 import type { MidServiceAddition } from './mid-service-additions.js';
@@ -28,7 +28,8 @@ export type DeckItem = {
   readonly key?: string;
   readonly languages?: readonly string[];
   readonly audio?: unknown;
-  readonly provenance?: MidServiceProvenance;
+  /** Control's deck names who added an item; every other view gets the provenance without the account. */
+  readonly provenance?: MidServiceProvenance | Omit<MidServiceProvenance, 'actor'>;
 };
 
 export type RunDeck = {
@@ -107,16 +108,47 @@ export async function deriveDeck(
   return deck;
 }
 
+// D-PLAN-09. An account id is operator-only data: no view but Control is told who added an item, and
+// Audience and Singer (both reachable by a guest ticket) also lose the notes, key and audio track the
+// stage crew work from. Stage keeps those three: it is the band's screen, never a guest's.
+const withoutAccount = (item: DeckItem): DeckItem => {
+  if (item.provenance === undefined || !('actor' in item.provenance)) return item;
+  const { actor, ...provenance } = item.provenance;
+  void actor;
+  return { ...item, provenance };
+};
+
 const withoutPrivateFields = (item: DeckItem): DeckItem => {
-  const { notes, key, ...projected } = item;
+  const { notes, key, audio, ...projected } = withoutAccount(item);
   void notes;
   void key;
+  void audio;
   return projected;
 };
 
-export function projectDeck(deck: RunDeck, view: DeckView): RunDeck {
-  if (view === 'control' || view === 'stage') return deck;
-  return { ...deck, items: deck.items.map(withoutPrivateFields) };
+/** The audience deck runs up to and including the public next slide and no further (RUN-09): nothing
+ *  unshown past it reaches a projector or a guest's phone. Standby, the empty screen, or a public
+ *  position the deck does not hold windows it to nothing. The window moves with the public position,
+ *  so the deck route's ETag does too — an audience client revalidates on each public change. */
+const audienceWindow = (deck: RunDeck, live: Pick<LiveState, 'public'> | undefined): readonly DeckItem[] => {
+  if (live === undefined || 'standby' in live.public) return [];
+  const current = live.public;
+  const upcoming = adjacentPosition(deck, current, 'next');
+  if (upcoming === undefined) return [];
+  const window: DeckItem[] = [];
+  for (const item of deck.items) {
+    const last = item.itemId === upcoming.itemId ? upcoming.slideIndex : item.slides.length - 1;
+    if (last >= 0) window.push({ ...item, slides: item.slides.slice(0, last + 1) });
+    if (item.itemId === upcoming.itemId) break;
+  }
+  return window;
+};
+
+export function projectDeck(deck: RunDeck, view: DeckView, live?: Pick<LiveState, 'public'>): RunDeck {
+  if (view === 'control') return deck;
+  if (view === 'stage') return { ...deck, items: deck.items.map(withoutAccount) };
+  const items = view === 'audience' ? audienceWindow(deck, live) : deck.items;
+  return { ...deck, items: items.map(withoutPrivateFields) };
 }
 
 export function adjacentPosition(
