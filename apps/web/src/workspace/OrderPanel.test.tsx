@@ -138,6 +138,32 @@ describe('OrderPanel', () => {
     expect(body.sections[0]?.name).toBe('Praise');
   });
 
+  it('never re-sends an unchanged section name while the rename field stays open', async () => {
+    vi.useFakeTimers();
+    const fetching = vi.fn<FetchLike>(async (url, init) => {
+      if (init.method === 'PATCH' && url === '/api/v1/services/s1') {
+        return reply(200, successEnvelope(record([{ id: 'sec', name: 'Praise', itemIds: ['a'] }, { id: 'resp', name: 'Response', itemIds: [] }]), 'r2'));
+      }
+      if (url === '/api/v1/services/s1/content-drift') return noDrift;
+      throw new Error(`unexpected ${init.method ?? 'GET'} ${url}`);
+    });
+    setFetching(fetching);
+    const Live = () => <OrderPanel view={service.value ?? view} onEmpty={() => undefined} />;
+    render(<Live />);
+
+    const welcomeSection = screen.getByText('Welcome').closest('.order-section') as HTMLElement;
+    fireEvent.click(within(welcomeSection).getByRole('button', { name: 'Rename section' }));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(patchCallsOf(fetching)).toHaveLength(0);
+
+    fireEvent.input(screen.getByLabelText('Rename section'), { target: { value: 'Praise' } });
+    await vi.advanceTimersByTimeAsync(800);
+    expect(patchCallsOf(fetching)).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(patchCallsOf(fetching)).toHaveLength(1);
+  });
+
   it('adds a new section with one PATCH request', async () => {
     const fetching = vi.fn<FetchLike>(async (url, init) => {
       if (init.method === 'PATCH' && url === '/api/v1/services/s1') {

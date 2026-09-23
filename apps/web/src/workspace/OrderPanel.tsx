@@ -3,7 +3,7 @@
 // answer arrives (`order-actions.ts`) — and a section edit (rename, add, remove) always sends the whole
 // draft, because `parseServiceDraft` requires `title`/`date`/`site` even when only `sections` changed.
 
-import { useState } from 'preact/hooks';
+import { useCallback, useState } from 'preact/hooks';
 
 import type { ServiceSection } from '@holydeck/contracts/services';
 import type { JSX } from 'preact';
@@ -35,7 +35,13 @@ function SectionRenameField({ sectionId, name, onDone }: {
   readonly onDone: () => void;
 }): JSX.Element {
   const [draft, setDraft] = useState(name);
-  const { flush } = useAutosave(draft, (value) => patchSections((current) => renameSection(current, sectionId, value)));
+  // Kept stable, and only armed while the draft differs from the saved name: an unstable `save` re-arms
+  // autosave on every render, and each answered PATCH re-renders, so the same name would be sent forever.
+  const save = useCallback(
+    (value: string) => patchSections((current) => renameSection(current, sectionId, value)),
+    [sectionId],
+  );
+  const { flush } = useAutosave(draft, save, { enabled: draft !== name });
 
   return (
     <input
