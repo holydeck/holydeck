@@ -294,6 +294,9 @@ const en = {
   'security.totp.recoveryHint':
     'Save these codes somewhere safe. Each one signs you in once if the authenticator app is unavailable.',
   'security.totp.regenerate': 'Generate new recovery codes',
+  'security.totp.qrLabel': 'QR code to scan with the authenticator app',
+  'security.totp.downloadCodes': 'Download recovery codes',
+  'security.totp.printCodes': 'Print recovery codes',
   'security.totp.remove': 'Remove authenticator app',
   'security.totp.refused': 'That code was not accepted. Check the app and try again.',
   'security.totp.removeWrongPassword': 'That password was not accepted.',
@@ -1018,6 +1021,9 @@ const de: Catalog = {
   'security.totp.recoveryHint':
     'Bewahren Sie diese Codes sicher auf. Jeder meldet Sie einmal an, falls die Authentifizierungs-App nicht verfügbar ist.',
   'security.totp.regenerate': 'Neue Wiederherstellungscodes erzeugen',
+  'security.totp.qrLabel': 'QR-Code zum Scannen mit der Authentifizierungs-App',
+  'security.totp.downloadCodes': 'Wiederherstellungscodes herunterladen',
+  'security.totp.printCodes': 'Wiederherstellungscodes drucken',
   'security.totp.remove': 'Authentifizierungs-App entfernen',
   'security.totp.refused': 'Dieser Code wurde nicht akzeptiert. Prüfen Sie die App und versuchen Sie es erneut.',
   'security.totp.removeWrongPassword': 'Dieses Passwort wurde nicht akzeptiert.',
@@ -1736,6 +1742,9 @@ const ta: Catalog = {
   'security.totp.recoveryHint':
     'இந்தக் குறியீடுகளை பாதுகாப்பாகச் சேமிக்கவும். அங்கீகார செயலி கிடைக்காதபோது ஒவ்வொன்றும் ஒருமுறை உங்களை உள்நுழைய அனுமதிக்கும்.',
   'security.totp.regenerate': 'புதிய மீட்பு குறியீடுகளை உருவாக்கு',
+  'security.totp.qrLabel': 'அங்கீகரிப்பு செயலியால் ஸ்கேன் செய்ய வேண்டிய QR குறியீடு',
+  'security.totp.downloadCodes': 'மீட்பு குறியீடுகளைப் பதிவிறக்கு',
+  'security.totp.printCodes': 'மீட்பு குறியீடுகளை அச்சிடு',
   'security.totp.remove': 'அங்கீகார செயலியை அகற்று',
   'security.totp.refused': 'அந்தக் குறியீடு ஏற்கப்படவில்லை. செயலியைச் சரிபார்த்து மீண்டும் முயற்சிக்கவும்.',
   'security.totp.removeWrongPassword': 'அந்தக் கடவுச்சொல் ஏற்கப்படவில்லை.',

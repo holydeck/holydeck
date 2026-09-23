@@ -19,6 +19,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { switchAccount } from '../account-switch.js';
 import { csrf, session } from '../app-state.js';
 import { FormField } from '../components/form-field.js';
+import { QrCode } from '../components/qr-code.js';
 import { fieldErrors } from '../form-errors.js';
 import { t } from '../i18n.js';
 import {
@@ -76,6 +77,9 @@ export function SecurityPage({ browser = defaultBrowser() }: SecurityPageProps):
   const [removingTotp, setRemovingTotp] = useState(false);
   const [removeTotpPassword, setRemoveTotpPassword] = useState('');
   const [removeTotpError, setRemoveTotpError] = useState<string>();
+  const [regenerating, setRegenerating] = useState(false);
+  const [regeneratePassword, setRegeneratePassword] = useState('');
+  const [regenerateError, setRegenerateError] = useState<string>();
 
   const [passkeys, setPasskeys] = useState<readonly PasskeySummary[]>([]);
   const [passkeysLoading, setPasskeysLoading] = useState(permitted);
@@ -164,21 +168,48 @@ export function SecurityPage({ browser = defaultBrowser() }: SecurityPageProps):
     }
   };
 
-  const regenerateRecovery = async (): Promise<void> => {
+  // New codes are a way back into the account, so asking for them takes the password again (COLAB-06).
+  const regenerateRecovery = async (event: JSX.TargetedEvent<HTMLFormElement, SubmitEvent>): Promise<void> => {
+    event.preventDefault();
     setTotpBusy(true);
-    setTotpOther(undefined);
+    setRegenerateError(undefined);
     try {
-      const result = await request(TOTP_RECOVERY_PATH, { method: 'POST', csrf: csrf() ?? '' });
+      const result = await request(TOTP_RECOVERY_PATH, {
+        method: 'POST',
+        csrf: csrf() ?? '',
+        body: { password: regeneratePassword },
+      });
       if (!result.ok) {
-        setTotpOther(fieldErrors(result, []).other);
+        setRegenerateError(
+          result.code === SIGN_IN_REFUSED ? t('security.totp.removeWrongPassword') : fieldErrors(result, []).other,
+        );
         return;
       }
       const data = result.data as { readonly recoveryCodes: readonly string[] };
       setRecoveryCodes(data.recoveryCodes);
+      setRegenerating(false);
+      setRegeneratePassword('');
       say('polite', t('security.totp.announce.regenerated'));
     } finally {
       setTotpBusy(false);
     }
+  };
+
+  const cancelRegenerate = (): void => {
+    setRegenerating(false);
+    setRegeneratePassword('');
+    setRegenerateError(undefined);
+  };
+
+  // The codes are shown once; keeping them is the operator's job, so both usual ways are offered. The file
+  // is made in the browser from what is already on screen: nothing is asked of the server again.
+  const downloadRecovery = (codes: readonly string[]): void => {
+    const address = URL.createObjectURL(new Blob([codes.map((code) => `${code}\n`).join('')], { type: 'text/plain' }));
+    const link = document.createElement('a');
+    link.href = address;
+    link.download = 'holydeck-recovery-codes.txt';
+    link.click();
+    URL.revokeObjectURL(address);
   };
 
   const removeTotp = async (event: JSX.TargetedEvent<HTMLFormElement, SubmitEvent>): Promise<void> => {
@@ -341,6 +372,7 @@ export function SecurityPage({ browser = defaultBrowser() }: SecurityPageProps):
             <p>
               {t('security.totp.secretLabel')}: <code>{totpSecret.secret}</code>
             </p>
+            <QrCode value={totpSecret.uri} label={t('security.totp.qrLabel')} />
             <p>
               <a href={totpSecret.uri}>{t('security.totp.uriLabel')}</a>
             </p>
@@ -365,14 +397,35 @@ export function SecurityPage({ browser = defaultBrowser() }: SecurityPageProps):
               <>
                 <h3>{t('security.totp.recoveryHeading')}</h3>
                 <p>{t('security.totp.recoveryHint')}</p>
-                <ul>
+                <ul class="recovery-codes">
                   {recoveryCodes.map((code) => <li key={code}>{code}</li>)}
                 </ul>
+                <button type="button" onClick={() => downloadRecovery(recoveryCodes)}>
+                  {t('security.totp.downloadCodes')}
+                </button>
+                <button type="button" onClick={() => globalThis.print()}>{t('security.totp.printCodes')}</button>
               </>
             )}
-            <button type="button" onClick={() => void regenerateRecovery()} disabled={totpBusy}>
-              {t('security.totp.regenerate')}
-            </button>
+            {regenerating ? (
+              <form noValidate onSubmit={regenerateRecovery}>
+                {regenerateError === undefined ? null : <p role="alert">{regenerateError}</p>}
+                <FormField
+                  id="security-totp-regenerate-password"
+                  label={t('welcome.password')}
+                  type="password"
+                  value={regeneratePassword}
+                  onInput={setRegeneratePassword}
+                  autoComplete="current-password"
+                  required
+                />
+                <button type="submit" disabled={totpBusy}>{t('history.confirm')}</button>
+                <button type="button" onClick={cancelRegenerate}>{t('history.cancel')}</button>
+              </form>
+            ) : (
+              <button type="button" onClick={() => setRegenerating(true)} disabled={totpBusy}>
+                {t('security.totp.regenerate')}
+              </button>
+            )}
             {removingTotp ? (
               <form noValidate onSubmit={removeTotp}>
                 {removeTotpError === undefined ? null : <p role="alert">{removeTotpError}</p>}

@@ -208,6 +208,7 @@ button, a { min-inline-size: 44px; min-block-size: 44px; }
 }
 .app-name { margin: 0; font-weight: 700; font-size: var(--font-size-2); }
 .app-account { margin: 0; margin-inline-start: auto; display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--color-text-muted); }
+.qr-code { display: block; inline-size: min(16rem, 100%); block-size: auto; }
 .app-account-menu { position: relative; }
 .app-account-menu > ul {
   position: absolute;

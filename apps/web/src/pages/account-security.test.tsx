@@ -126,6 +126,8 @@ describe('SecurityPage', () => {
         return reply(200, successEnvelope({ recoveryCodes: ['aaaa-bbbb', 'cccc-dddd'] }, 'r-verify'));
       }
       if (path === TOTP_RECOVERY_PATH && init.method === 'POST') {
+        const body = JSON.parse(init.body ?? '{}') as { password?: string };
+        if (body.password !== 'right password') return reply(401, errorEnvelope(SIGN_IN_REFUSED, 'Wrong password', 'r-wrong'));
         return reply(200, successEnvelope({ recoveryCodes: ['eeee-ffff'] }, 'r-regen'));
       }
       if (path === TOTP_PATH && init.method === 'DELETE') {
@@ -140,6 +142,7 @@ describe('SecurityPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Set up an authenticator app' }));
     await screen.findByText('JBSWY3DPEHPK3PXP');
+    expect(screen.getByRole('img', { name: 'QR code to scan with the authenticator app' }).querySelector('path')).not.toBeNull();
     fireEvent.input(screen.getByLabelText('Code'), { target: { value: '123456' } });
     fireEvent.submit(screen.getByRole('button', { name: 'Verify' }).closest('form') as HTMLFormElement);
 
@@ -148,7 +151,15 @@ describe('SecurityPage', () => {
     expect(document.getElementById('announce-polite')?.textContent).toBe('Authenticator app set up.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Generate new recovery codes' }));
+    fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'wrong' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Confirm' }).closest('form') as HTMLFormElement);
+    expect((await screen.findByRole('alert')).textContent).toBe('That password was not accepted.');
+    expect(screen.getByText('aaaa-bbbb')).toBeTruthy();
+
+    fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'right password' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Confirm' }).closest('form') as HTMLFormElement);
     await screen.findByText('eeee-ffff');
+    expect(screen.queryByLabelText('Password')).toBeNull();
     expect(document.getElementById('announce-polite')?.textContent).toBe('New recovery codes generated.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove authenticator app' }));
@@ -163,6 +174,48 @@ describe('SecurityPage', () => {
 
     const verifyCall = fetching.mock.calls.find(([path, init]) => path === TOTP_VERIFICATION_PATH && init.method === 'POST');
     expect(JSON.parse(verifyCall?.[1].body ?? '{}')).toEqual({ code: '123456' });
+  });
+
+  it('offers the recovery codes as a file to keep and a page to print', async () => {
+    session.value = signedIn();
+    setFetching(vi.fn<FetchLike>(async (path, init) => {
+      if (path === PASSKEY_PATH && init.method === undefined) return emptyPasskeys();
+      if (path === TOTP_PATH && init.method === 'POST') {
+        return reply(201, successEnvelope({ secret: 'JBSWY3DPEHPK3PXP', uri: 'otpauth://totp/HolyDeck' }, 'r-start'));
+      }
+      if (path === TOTP_VERIFICATION_PATH && init.method === 'POST') {
+        return reply(200, successEnvelope({ recoveryCodes: ['aaaa-bbbb', 'cccc-dddd'] }, 'r-verify'));
+      }
+      throw new Error(`unexpected request ${String(init.method)} ${path}`);
+    }));
+    withLiveRegions();
+    const kept: Blob[] = [];
+    const createObjectURL = vi.fn((blob: Blob) => {
+      kept.push(blob);
+      return 'blob:recovery';
+    });
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', class extends URL {
+      static override createObjectURL = createObjectURL;
+      static override revokeObjectURL = revokeObjectURL;
+    });
+    const print = vi.fn();
+    vi.stubGlobal('print', print);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Set up an authenticator app' }));
+    await screen.findByText('JBSWY3DPEHPK3PXP');
+    fireEvent.input(screen.getByLabelText('Code'), { target: { value: '123456' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Verify' }).closest('form') as HTMLFormElement);
+    await screen.findByText('aaaa-bbbb');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download recovery codes' }));
+    expect(kept).toHaveLength(1);
+    expect(await kept[0]?.text()).toBe('aaaa-bbbb\ncccc-dddd\n');
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:recovery');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Print recovery codes' }));
+    expect(print).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
   });
 
   it('treats an already-enrolled refusal on setup as already set up', async () => {
