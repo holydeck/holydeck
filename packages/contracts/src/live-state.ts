@@ -71,6 +71,8 @@ export function projectFor(
     view,
     ...base,
     ...(extra.next === undefined ? {} : { next: extra.next }),
+    // Stage is the one output that previews: it is told what the operator has selected, never the guests.
+    selected: state.selected,
     mode: state.mode,
   };
 }

@@ -23,10 +23,9 @@ describe('projectFor', () => {
     expect(view).not.toHaveProperty('selected');
   });
 
-  it('gives stage the mode and an optional selected position', () => {
+  it('gives stage the mode and the selected position as its preview', () => {
     const view = projectFor('stage', BASE);
-    expect(view).toMatchObject({ view: 'stage', mode: 'live' });
-    expect((view as { selected?: unknown }).selected).toBeUndefined();
+    expect(view).toMatchObject({ view: 'stage', mode: 'live', selected: BASE.selected });
   });
 
   it('gives control the full authoritative state and connection counts', () => {
@@ -40,9 +39,9 @@ describe('projectFor', () => {
     expect((view as { frame: unknown }).frame).toEqual({ standby: 'screen-1' });
   });
 
-  it('never reads selectedPosition into an audience or singer or stage projection, even if selected changes', () => {
+  it('never reads selectedPosition into an audience or singer projection, even if selected changes', () => {
     const moved: LiveState = { ...BASE, selected: { itemId: 'ANYTHING-PRIVATE', slideIndex: 99 } };
-    for (const view of ['audience', 'singer', 'stage'] as const) {
+    for (const view of ['audience', 'singer'] as const) {
       expect(JSON.stringify(projectFor(view, moved))).not.toContain('ANYTHING-PRIVATE');
     }
   });
