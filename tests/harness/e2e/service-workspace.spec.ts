@@ -1,6 +1,7 @@
 // The service workspace journey WS-14 describes, driven through the page the way an operator uses it:
-// create a service, build its order from the Add panel, reorder, disable, remove and undo, preview a
-// slide, set the service's own output ratio, and come back to where they left off from the dashboard.
+// create a service, build its order from the Add panel, reorder by keyboard and by drag, disable, remove
+// and undo, select an existing item, preview a slide, set the service's own output ratio, and come back
+// to where they left off from the dashboard.
 // Every screen it passes through is graded against WCAG 2.1 AA on the way. The harness corpus and song
 // catalogue start empty, so the order is built from blank slides; Bible and Song inserts are proved by
 // their own component tests and by content.spec.ts's API journey.
@@ -85,6 +86,18 @@ test.describe('the service workspace', () => {
     await page.getByRole('button', { name: en('order.undo') }).click();
     await expect(orderRows(page)).toHaveCount(2);
     await expect(orderRows(page).first()).toHaveAttribute('data-item-id', secondId!);
+
+    // A pointer drag by the visible handle sends the same move the keyboard does: back to the first place.
+    const firstId = await orderRows(page).nth(1).getAttribute('data-item-id');
+    await orderRows(page).nth(1).getByRole('button', { name: en('order.drag', { title: en('blank.title') }) })
+      .dragTo(orderRows(page).first());
+    await expect(orderRows(page).first()).toHaveAttribute('data-item-id', firstId!);
+
+    // Choosing an existing item by its title selects it and records it in the address.
+    const chosen = orderRows(page).first().locator('.order-item-title');
+    await chosen.click();
+    await expect(chosen).toHaveAttribute('aria-pressed', 'true');
+    await expect(page).toHaveURL(new RegExp(`[?&]item=${firstId!}`, 'u'));
 
     // Expanding a slide draws its thumbnail; the selected slide's exact preview carries the safe-area legend.
     await orderRows(page).first().getByRole('button', { name: en('order.expand', { title: en('blank.title') }) }).click();
