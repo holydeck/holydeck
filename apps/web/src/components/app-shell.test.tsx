@@ -52,7 +52,56 @@ describe('the navigation shell', () => {
 
     session.value = signedIn(['settings.manage']);
     render(<AppShell><p>page</p></AppShell>);
-    expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('href')).toBe('/admin/users');
+    expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('href')).toBe('/admin/settings');
+  });
+
+  it('opens Administration for every permission an admin page asks for, at the first page it may see', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['accounts.manage', '/admin/users'],
+      ['settings.manage', '/admin/settings'],
+      ['audit.read', '/admin/audit'],
+      ['integrations.manage', '/admin/integrations'],
+      ['catalogue.manage', '/admin/languages'],
+    ];
+    for (const [permission, href] of cases) {
+      session.value = signedIn([permission], 'editor');
+      const view = render(<AppShell><p>page</p></AppShell>);
+      expect(screen.getByRole('link', { name: 'Administration' }).getAttribute('href')).toBe(href);
+      view.unmount();
+    }
+  });
+
+  it('lists each admin page the session may open while in Administration, marking the current one', () => {
+    session.value = signedIn(['accounts.manage', 'settings.manage', 'audit.read', 'integrations.manage', 'catalogue.manage']);
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.queryByRole('navigation', { name: 'Administration' })).toBeNull();
+
+    act(() => {
+      currentPath.value = '/admin/audit';
+    });
+    const admin = screen.getByRole('navigation', { name: 'Administration' });
+    const links = [...admin.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')]);
+    expect(links).toEqual([
+      ['Users', '/admin/users'],
+      ['Settings', '/admin/settings'],
+      ['Audit log', '/admin/audit'],
+      ['Integrations', '/admin/integrations'],
+      ['Content languages', '/admin/languages'],
+      ['Slide labels', '/admin/slide-labels'],
+    ]);
+    expect(admin.querySelector('a[href="/admin/audit"]')?.getAttribute('aria-current')).toBe('page');
+    expect(admin.querySelector('a[href="/admin/users"]')?.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('leaves out the admin pages a session may not open', () => {
+    session.value = signedIn(['catalogue.manage'], 'editor');
+    currentPath.value = '/admin/slide-labels';
+    render(<AppShell><p>page</p></AppShell>);
+    const admin = screen.getByRole('navigation', { name: 'Administration' });
+    expect([...admin.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual([
+      '/admin/languages',
+      '/admin/slide-labels',
+    ]);
   });
 
   it('marks the current section and links to the library', () => {
