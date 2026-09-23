@@ -25,9 +25,9 @@ const READY_POLL_SECONDS = '0.5';
 const scrub = (text, secrets) =>
   secrets.reduce((result, secret) => (secret ? result.split(secret).join('***') : result), text);
 
-const docker = (args, secrets = []) => {
+const docker = (args, secrets = [], input) => {
   try {
-    return execFileSync('docker', args, { encoding: 'utf8' });
+    return execFileSync('docker', args, { encoding: 'utf8', ...(input === undefined ? {} : { input }) });
   } catch (error) {
     // Deliberately not `{ cause: error }`: the caught error's own message/stdout/stderr can carry
     // a password (it is the unscrubbed argv/output this whole wrapper exists to scrub), and a
@@ -48,20 +48,24 @@ const containersUsing = (volume) =>
     .map((line) => line.trim())
     .filter((line) => line !== '');
 
-const mongoEval = (container, db, script, envVars, secrets) =>
-  docker(
-    [
-      'exec',
-      ...Object.entries(envVars).flatMap(([key, value]) => ['-e', `${key}=${value}`]),
-      container,
-      'mongosh',
-      db,
-      '--quiet',
-      '--eval',
-      script,
-    ],
-    secrets,
-  ).trim();
+// `docker exec -e KEY=VALUE` would put a password in this host's own process argv — readable by
+// anything else on the box via `ps`/`docker top` while the exec is in flight, no different from
+// printing it. Kept as a pure function of `container`/`db` alone, with no script or secret
+// parameter at all, so a test can pin its exact shape and rule that class of leak out by
+// construction rather than by review. The script instead travels over stdin into a container-side
+// temp file that mongosh runs and this one-liner always removes, success or failure.
+export const mongoExecArgs = (container, db) => [
+  'exec',
+  '-i',
+  container,
+  'sh',
+  '-c',
+  'f=$(mktemp) && cat > "$f" && mongosh "$1" --quiet "$f"; s=$?; rm -f "$f"; exit $s',
+  'sh',
+  db,
+];
+
+const mongoEval = (container, db, script, secrets = []) => docker(mongoExecArgs(container, db), secrets, script).trim();
 
 const waitUntilReady = (container) => {
   const deadline = Date.now() + READY_TIMEOUT_MS;
@@ -79,7 +83,10 @@ const waitUntilReady = (container) => {
 };
 
 const hasUser = (container, db, user) =>
-  mongoEval(container, db, `db.getUsers({ filter: { user: '${user}' } }).users.length > 0`, {}, []) === 'true';
+  // A script run from a file (not `--eval`) doesn't auto-print its last expression — an explicit
+  // `print()` is what `mongoEval`'s caller gets back.
+  mongoEval(container, db, `print(db.getUsers({ filter: { user: ${JSON.stringify(user)} } }).users.length > 0)`) ===
+  'true';
 
 /**
  * Ensures the root and application users exist against `container`'s data, creating whichever one
@@ -96,8 +103,7 @@ export function ensureUsers(container, { rootPassword, appPassword }) {
     mongoEval(
       container,
       'admin',
-      "db.createUser({ user: 'root', pwd: process.env.HOLYDECK_MONGO_ROOT_PASSWORD, roles: [{ role: 'root', db: 'admin' }] })",
-      { HOLYDECK_MONGO_ROOT_PASSWORD: rootPassword },
+      `db.createUser({ user: 'root', pwd: ${JSON.stringify(rootPassword)}, roles: [{ role: 'root', db: 'admin' }] })`,
       secrets,
     );
     report.root = 'created';
@@ -113,10 +119,9 @@ export function ensureUsers(container, { rootPassword, appPassword }) {
     mongoEval(
       container,
       'holydeck',
-      "db.createUser({ user: 'holydeck', pwd: process.env.HOLYDECK_MONGO_PASSWORD, roles: [" +
+      `db.createUser({ user: 'holydeck', pwd: ${JSON.stringify(appPassword)}, roles: [` +
         "{ role: 'readWrite', db: 'holydeck' }, { role: 'dbAdmin', db: 'holydeck' }, " +
         "{ role: 'readWrite', db: 'holydeck__restore_rehearsal' }, { role: 'dbAdmin', db: 'holydeck__restore_rehearsal' }] })",
-      { HOLYDECK_MONGO_PASSWORD: appPassword },
       secrets,
     );
     report.app = 'created';

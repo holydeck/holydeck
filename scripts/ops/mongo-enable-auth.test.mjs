@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 
-import { DEFAULT_CONTAINER, ensureUsers, run } from './mongo-enable-auth.mjs';
+import { DEFAULT_CONTAINER, ensureUsers, mongoExecArgs, run } from './mongo-enable-auth.mjs';
 
 const docker = (args) => execFileSync('docker', args, { encoding: 'utf8' });
 
@@ -227,4 +227,21 @@ test('never prints a password, including when a Docker command fails mid-migrati
 
 test('DEFAULT_CONTAINER is distinct from any test-only container name', () => {
   assert.equal(DEFAULT_CONTAINER.startsWith('holydeck-mongo-enable-auth'), true);
+});
+
+test('the docker exec argv mongosh runs under never carries a script or a secret', () => {
+  // `mongoExecArgs` takes only a container name and a db name — there is no parameter it could
+  // smuggle a password through, unlike the `-e KEY=VALUE` shape this replaced. Pinning its exact
+  // output means a future edit that reintroduces an `-e` flag (or otherwise threads a script
+  // argument into the argv) fails this test rather than only showing up in a `ps` listing.
+  assert.deepEqual(mongoExecArgs('some-container', 'admin'), [
+    'exec',
+    '-i',
+    'some-container',
+    'sh',
+    '-c',
+    'f=$(mktemp) && cat > "$f" && mongosh "$1" --quiet "$f"; s=$?; rm -f "$f"; exit $s',
+    'sh',
+    'admin',
+  ]);
 });
