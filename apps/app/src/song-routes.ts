@@ -1,5 +1,5 @@
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
-import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
+import { ENTITY_CONFLICT, errorEnvelope, locatedValidationFailure, successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import {
   SONG_PATH,
   SONGS_PATH,
@@ -195,7 +195,7 @@ export function serveSongRoutes(app: FastifyInstance, { songs, chords, identity 
     const answer = await settledText(() => store.editRaw(call(request), id, request.body as string));
     if (!answer.ok) {
       return answer.kind === 'schema'
-        ? reply.code(422).send(validationFailure(request.id, answer.problems))
+        ? reply.code(422).send(locatedValidationFailure(request.id, answer.problems))
         : reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     }
     if (answer.value === undefined) return reply.code(404).send(notFound(request));

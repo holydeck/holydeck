@@ -42,6 +42,7 @@ import { sermonsOn } from './sermons.js';
 import {
   SERVICE_DUPLICATE_PATH,
   SERVICE_ID_PATH,
+  SERVICE_ITEM_BODY_PATH,
   SERVICE_ITEMS_PATH,
   SERVICE_ITEMS_REORDER_PATH,
   SERVICE_ITEM_DISABLE_PATH,
@@ -51,12 +52,14 @@ import {
   SERVICE_ITEM_REVISE_PATH,
   SERVICE_PATH,
   SERVICE_SCHEDULE_PATH,
+  SERVICE_OUTPUT_PATH,
   SERVICE_STATUS_PATH,
   SERVICE_TRANSITION_PATH,
 } from './service-routes.js';
 import {
   SERVICE_TEMPLATE_FROM_SERVICE_PATH,
   SERVICE_TEMPLATE_ID_PATH,
+  SERVICE_TEMPLATE_INSTANTIATE_PATH,
   SERVICE_TEMPLATE_PATH,
   SERVICE_TEMPLATE_STATUS_PATH,
 } from './service-template-routes.js';
@@ -71,6 +74,7 @@ import { SONG_ID_PATH } from './song-routes.js';
 import { songSingerChordsOn } from './song-singer-chords.js';
 import { songsOn } from './songs.js';
 import { totpsOn } from './totp.js';
+import { WORKSPACE_POSITION_PATH } from './workspace-position-routes.js';
 import { UNGUARDED, mutatingRoutesOf } from './csrf.js';
 import { CORPUS_WORDING, type Fetching } from './corpus.js';
 import { SECURITY_HEADERS, readWebBuild } from './static.js';
@@ -194,13 +198,16 @@ describe('every route that changes something', () => {
       { method: 'POST', url: SERVICE_TRANSITION_PATH },
       { method: 'PATCH', url: SERVICE_ID_PATH },
       { method: 'PATCH', url: SERVICE_STATUS_PATH },
+      { method: 'PATCH', url: SERVICE_OUTPUT_PATH },
       { method: 'POST', url: SERVICE_ITEMS_PATH },
+      { method: 'PUT', url: SERVICE_ITEM_BODY_PATH },
       { method: 'DELETE', url: SERVICE_ITEM_PATH },
       { method: 'POST', url: SERVICE_ITEM_ENABLE_PATH },
       { method: 'POST', url: SERVICE_ITEM_DISABLE_PATH },
       { method: 'POST', url: SERVICE_ITEM_DUPLICATE_PATH },
       { method: 'POST', url: SERVICE_ITEMS_REORDER_PATH },
       { method: 'POST', url: SERVICE_ITEM_REVISE_PATH },
+      { method: 'PUT', url: WORKSPACE_POSITION_PATH },
       // A Service Template is Admin's by a permission of its own: creating one changes what New Service
       // offers, and saving it forward, archiving it, bringing it back or minting one from a Service already
       // run are the same permission's again.
@@ -208,6 +215,7 @@ describe('every route that changes something', () => {
       { method: 'PUT', url: SERVICE_TEMPLATE_ID_PATH },
       { method: 'PATCH', url: SERVICE_TEMPLATE_STATUS_PATH },
       { method: 'POST', url: SERVICE_TEMPLATE_FROM_SERVICE_PATH },
+      { method: 'POST', url: SERVICE_TEMPLATE_INSTANTIATE_PATH },
       // Preparation's own surface: preparing a Service into a manifest is Admin's or an Editor's, the
       // same permission Editing one already takes; overriding a readiness blocker is Control presentation's
       // alone, the one route in this module gated by a different permission than the rest.

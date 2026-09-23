@@ -25,6 +25,13 @@ import type { JSX } from 'preact';
 const OutputPage = lazy(() => import('./pages/output.js').then((module) => module.OutputPage));
 const ServicePage = lazy(() => import('./pages/service.js').then((module) => module.ServicePage));
 const AdminUsersPage = lazy(() => import('./pages/admin-users.js').then((module) => module.AdminUsersPage));
+const WorkspacePage = lazy(() => import('./workspace/Workspace.js').then((module) => module.Workspace)) as
+  (props: { readonly id: string }) => JSX.Element;
+const NewServicePage = lazy(() => import('./workspace/NewService.js').then((module) => module.NewService));
+const ReadinessPlaceholderPage = lazy(() =>
+  import('./pages/readiness-placeholder.js').then((module) => module.ReadinessPlaceholderPage));
+const ContentLibraryPage = lazy(() => import('./library/ContentLibrary.js').then((module) => module.ContentLibrary));
+const MediaLibraryPage = lazy(() => import('./library/MediaLibrary.js').then((module) => module.MediaLibrary));
 
 /** What the current route renders inside the shell. */
 function Page(): JSX.Element {
@@ -33,8 +40,18 @@ function Page(): JSX.Element {
   switch (current.name) {
     case 'services':
       return <ServicesPage />;
+    case 'service-new':
+      return <NewServicePage />;
     case 'service':
+      return <WorkspacePage id={current.id} />;
+    case 'service-live':
       return <ServicePage id={current.id} />;
+    case 'service-readiness':
+      return <ReadinessPlaceholderPage id={current.id} />;
+    case 'library':
+      return <ContentLibraryPage />;
+    case 'media':
+      return <MediaLibraryPage />;
     case 'admin-users':
       return <AdminUsersPage />;
     case 'welcome':

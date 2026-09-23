@@ -9,6 +9,7 @@ import {
   VALIDATION_FAILED,
   errorEnvelope,
   httpContractProblems,
+  locatedValidationFailure,
   messageCodeProblems,
   parseErrorEnvelope,
   parseSuccessEnvelope,
@@ -128,6 +129,18 @@ describe('envelopes', () => {
     expect(parseErrorEnvelope(envelope)).toEqual({ ok: true, value: envelope });
   });
 
+  it('keeps the line and column of a problem found in raw text, and leaves them out where there is none', () => {
+    const failure = locatedValidationFailure('req-4', [
+      { path: 'sections', code: 'field.invalid', message: 'Unknown label', at: { line: 3, column: 5 } },
+      { path: 'titles', code: 'field.required', message: 'is required' },
+    ]);
+    expect(failure.error.fields).toEqual([
+      { path: 'sections', code: 'field.invalid', message: 'Unknown label', line: 3, column: 5 },
+      { path: 'titles', code: 'field.required', message: 'is required' },
+    ]);
+    expect(parseValidationFailure(failure)).toEqual({ ok: true, value: failure });
+  });
+
   it('turns the problems a parser found into a validation failure that names each field', () => {
     const failure = validationFailure('req-3', [
       { path: 'service.title', code: 'field.required', message: 'is required' },
@@ -141,6 +154,11 @@ describe('envelopes', () => {
       },
     });
     expect(parseValidationFailure(failure)).toEqual({ ok: true, value: failure });
+  });
+
+  it('reads dropped off a success envelope that carries it, as a route revalidating a position does', () => {
+    const envelope = { data: { position: {} }, meta: { requestId: 'req-9', dropped: ['itemId', 'slideId'] } };
+    expect(parseSuccessEnvelope(envelope)).toEqual({ ok: true, value: envelope });
   });
 
   it('refuses a success envelope that is not one', () => {

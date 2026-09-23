@@ -39,7 +39,9 @@ const SECTIONS: readonly ServiceSection[] = [
   {
     id: 'section-1', name: 'Word', items: [
       { id: 'item-4', kind: 'sermon', title: 'Grace', enabled: true, content: { id: 'sermon-2', revision: 9, hash: undefined } },
-      { id: 'item-2', kind: 'reading', title: 'John 1', enabled: true, content: { id: 'reading-1', revision: 2, hash: 'fnv1a-12345678' } },
+      // A reading carries its passage inline (services.test.ts's contracts cover that shape); this
+      // fixture only exercises the service-record plumbing, so it stays unpinned.
+      { id: 'item-2', kind: 'reading', title: 'John 1', enabled: true, content: undefined },
     ],
   },
 ];
@@ -245,6 +247,86 @@ describe('scheduling and editing a Service', () => {
     await services.archive(ADMIN, created.stamp.id);
     await services.unarchive(ADMIN, created.stamp.id);
     expect(rows(db, STAMPS).map((row) => row['state'])).toEqual(Array(5).fill('presenting'));
+  });
+
+  it('refuses section and item changes after completion without writing', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    await services.transition(ADMIN, created.stamp.id, 'presenting');
+    await services.transition(ADMIN, created.stamp.id, 'completed');
+    expect((await refused(services.edit(ADMIN, created.stamp.id, []))).kind).toBe('state');
+    expect((await refused(services.disableItem(ADMIN, created.stamp.id, 'item-1'))).kind).toBe('state');
+    expect(rows(db, STAMPS)).toHaveLength(3);
+    expect(actions(db)).toEqual(['service.create', 'service.transition', 'service.transition']);
+  });
+});
+
+describe('setting a Service output profile', () => {
+  it('persists an output override, audits it, and preserves it through a later edit', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const output = { aspectRatio: '4:3' } as const;
+    const set = await services.setOutput(ADMIN, created.stamp.id, output);
+    expect(set).toMatchObject({ output });
+    expect(actions(db)).toEqual(['service.create', 'service.output']);
+    const edited = await services.edit(ADMIN, created.stamp.id, []);
+    expect(edited).toMatchObject({ output, sections: [] });
+  });
+
+  it('refuses an output override while presenting without writing', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    await services.transition(ADMIN, created.stamp.id, 'presenting');
+    expect((await refused(services.setOutput(ADMIN, created.stamp.id, { aspectRatio: '4:3' }))).kind).toBe('state');
+    expect(rows(db, STAMPS)).toHaveLength(2);
+    expect(actions(db)).toEqual(['service.create', 'service.transition']);
+  });
+});
+
+describe('setting a Service item body', () => {
+  it('sets a custom-slide body and audits the edit', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const body = { kind: 'custom-slide', boxes: [] } as const;
+    const set = await services.setItemBody(ADMIN, created.stamp.id, 'item-1', body);
+    expect(set?.sections[0]?.items[1]?.body).toEqual(body);
+    expect(actions(db)).toEqual(['service.create', 'service.item.body']);
+  });
+
+  it('refuses a body whose kind does not match its item', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const error = await refused(services.setItemBody(ADMIN, created.stamp.id, 'item-1', {
+      kind: 'reading', translation: 'NIV', compare: [], book: 'John', chapter: 1, verses: '1',
+    }));
+    expect(error.kind).toBe('schema');
+    expect(error.message).toContain('does not match');
+    expect(rows(db, STAMPS)).toHaveLength(1);
+    expect(actions(db)).toEqual(['service.create']);
+  });
+
+  it('refuses an unknown item id the same way every other item verb does', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    const error = await refused(services.setItemBody(ADMIN, created.stamp.id, 'item-404', {
+      kind: 'custom-slide', boxes: [],
+    }));
+    expect(error.kind).toBe('schema');
+    expect(error.message).toContain('does not name an item in this Service');
+    expect(rows(db, STAMPS)).toHaveLength(1);
+    expect(actions(db)).toEqual(['service.create']);
+  });
+
+  it('refuses a body edit once completed', async () => {
+    const { db, services } = store();
+    const created = await services.create(ADMIN, DRAFT);
+    await services.transition(ADMIN, created.stamp.id, 'presenting');
+    await services.transition(ADMIN, created.stamp.id, 'completed');
+    expect((await refused(services.setItemBody(ADMIN, created.stamp.id, 'item-1', {
+      kind: 'custom-slide', boxes: [],
+    }))).kind).toBe('state');
+    expect(rows(db, STAMPS)).toHaveLength(3);
+    expect(actions(db)).toEqual(['service.create', 'service.transition', 'service.transition']);
   });
 });
 
@@ -496,7 +578,7 @@ describe('archiving a Service and bringing it back', () => {
 describe('reading and refusing Service changes', () => {
   it.each([
     'duplicate', 'schedule', 'transition', 'edit', 'archive', 'unarchive',
-    'addItem', 'removeItem', 'enableItem', 'disableItem', 'duplicateItem', 'reorderItems',
+    'addItem', 'removeItem', 'enableItem', 'disableItem', 'setItemBody', 'duplicateItem', 'reorderItems',
   ] as const)(
     'refuses %s without audit permission before writing a service row', async (change) => {
       const { db, services } = store();
@@ -515,6 +597,7 @@ describe('reading and refusing Service changes', () => {
         removeItem: () => services.removeItem(writer, id, 'item-3'),
         enableItem: () => services.enableItem(writer, id, 'item-3'),
         disableItem: () => services.disableItem(writer, id, 'item-3'),
+        setItemBody: () => services.setItemBody(writer, id, 'item-1', { kind: 'custom-slide', boxes: [] }),
         duplicateItem: () => services.duplicateItem(writer, id, 'item-3'),
         reorderItems: () => services.reorderItems(writer, id, 'section-2', ['item-1', 'item-3']),
         archive: () => services.archive(writer, id),
@@ -541,6 +624,7 @@ describe('reading and refusing Service changes', () => {
     expect(await services.removeItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
     expect(await services.enableItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
     expect(await services.disableItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
+    expect(await services.setItemBody(ADMIN, 'service-404', 'item-1', { kind: 'custom-slide', boxes: [] })).toBeUndefined();
     expect(await services.duplicateItem(ADMIN, 'service-404', 'item-3')).toBeUndefined();
     expect(await services.reorderItems(ADMIN, 'service-404', 'section-2', [])).toBeUndefined();
     expect(await services.archive(ADMIN, 'service-404')).toBeUndefined();
@@ -595,7 +679,6 @@ describe('revising an item onto a later content revision', () => {
     sections: readonly ServiceSection[];
     serviceId: string;
     songContentId: string;
-    readingContentId: string;
     firstHash: string;
   }> => {
     const db = fakeDb();
@@ -613,17 +696,17 @@ describe('revising an item onto a later content revision', () => {
     });
 
     const song = await library.create(LIB, { kind: 'song', title: 'Amazing Grace' });
-    const reading = await library.create(LIB, { kind: 'reading', title: 'John 1' });
     const rev1 = await revisions.save(REV, { contentId: song.stamp.id, body: { verse: 1 }, origin: 'autosave' });
     await revisions.save(REV, { contentId: song.stamp.id, body: { verse: 2 }, origin: 'autosave' });
-    await revisions.save(REV, { contentId: reading.stamp.id, body: { text: 'In the beginning' }, origin: 'autosave' });
 
+    // item-3 is a reading: it carries its passage inline, so — unlike song/sermon — it never pins
+    // library content and never drifts.
     const sections: readonly ServiceSection[] = [
       {
         id: 'section-1', name: 'Worship', items: [
           { id: 'item-1', kind: 'song', title: 'Amazing Grace', enabled: true, content: { id: song.stamp.id, revision: 1, hash: rev1.revision.hash } },
           { id: 'item-2', kind: 'custom-slide', title: 'Welcome', enabled: true, content: undefined },
-          { id: 'item-3', kind: 'reading', title: 'John 1', enabled: true, content: { id: reading.stamp.id, revision: 1, hash: undefined } },
+          { id: 'item-3', kind: 'reading', title: 'John 1', enabled: true, content: undefined },
           { id: 'item-4', kind: 'sermon', title: 'Ghost', enabled: true, content: { id: 'ghost-content', revision: 1, hash: undefined } },
         ],
       },
@@ -634,7 +717,7 @@ describe('revising an item onto a later content revision', () => {
 
     return {
       db, services, revisions, REV, sections,
-      serviceId: created.stamp.id, songContentId: song.stamp.id, readingContentId: reading.stamp.id,
+      serviceId: created.stamp.id, songContentId: song.stamp.id,
       firstHash: rev1.revision.hash,
     };
   };
@@ -647,12 +730,11 @@ describe('revising an item onto a later content revision', () => {
   });
 
   it('surfaces drift without applying it, and excludes items with no content reference', async () => {
-    const { services, revisions, REV, serviceId, songContentId, readingContentId, firstHash } = await setup();
+    const { services, revisions, REV, serviceId, songContentId, firstHash } = await setup();
     await revisions.save(REV, { contentId: songContentId, body: { verse: 3 }, origin: 'autosave' });
     const drift = await services.contentDrift(ADMIN, serviceId);
     expect(drift).toEqual([
       { itemId: 'item-1', contentId: songContentId, pinnedRevision: 1, latestRevision: 3, drifted: true },
-      { itemId: 'item-3', contentId: readingContentId, pinnedRevision: 1, latestRevision: 1, drifted: false },
       { itemId: 'item-4', contentId: 'ghost-content', pinnedRevision: 1, latestRevision: 1, drifted: false },
     ]);
     const content = (await services.current(ADMIN, serviceId))?.sections[0]?.items[0]?.content;

@@ -12,9 +12,11 @@ import { guardMutations } from './csrf.js';
 import { notFound, withSafeErrors } from './failures.js';
 import { serveLibraryRoutes } from './library-routes.js';
 import { isUpgrade } from './live.js';
+import { serveMediaDeliveryRoutes } from './media-delivery-routes.js';
 import { MEDIA_SIZE_CEILING_BYTES, serveMediaRoutes } from './media-routes.js';
 import { serveOnboarding } from './onboarding.js';
 import { serveOrderRoutes } from './order-routes.js';
+import { serveOutputDefaultsRoutes } from './output-defaults-routes.js';
 import { servePasskeyRoutes } from './passkey-routes.js';
 import { servePptxRoutes } from './pptx-routes.js';
 import { servePreparationRoutes } from './preparation-routes.js';
@@ -33,12 +35,14 @@ import { serveSongRoutes } from './song-routes.js';
 import { serveTotpRoutes } from './totp-routes.js';
 import { serveTranslationOffsetRoutes } from './translation-offset-routes.js';
 import { serveWebClient, shellFallback, withSecurityHeaders } from './static.js';
+import { serveWorkspacePositionRoutes } from './workspace-position-routes.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { Fetching } from './corpus.js';
 import type { LibraryStore } from './library.js';
+import type { MediaByteSource } from './media-delivery-routes.js';
 import type { MediaLibrary } from './media.js';
 import type { MidServiceStore } from './mid-service-additions.js';
 import type { Identity } from './onboarding.js';
@@ -66,6 +70,7 @@ import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 import type { ThemeStore } from './live-theme.js';
 import type { WebAsset } from './static.js';
+import type { WorkspacePositionStore } from './workspace-positions.js';
 
 const PUBLIC: RouteNeed = { kind: 'public' };
 
@@ -91,8 +96,14 @@ export interface AppOptions {
   slideLayouts?: SlideLayoutStore;
   /** Where an uploaded file becomes a media asset. Without it, there is nowhere for one to be uploaded to. */
   media?: MediaLibrary;
+  /** Reads the retained bytes behind a media record without buffering the whole file. */
+  mediaBytes?: MediaByteSource;
   /** Where a translation's offset is kept. Without it, there is none to read or configure. */
   translationOffsets?: TranslationOffsetStore;
+  /** Where an account's last workspace position is kept. Without it, there is none to read or save. */
+  workspacePositions?: WorkspacePositionStore;
+  /** Checks whether a library content record remains available to its owner. */
+  contentExists?: (context: unknown, id: string) => Promise<boolean>;
   /** Where what an operator showed is recorded. Without it, this deployment shows no reference at all. */
   shownReferences?: ShownReferenceStore;
   services?: ServiceStore;
@@ -153,7 +164,10 @@ export function buildApp({
   settingsAdmin,
   slideLayouts,
   media,
+  mediaBytes,
   translationOffsets,
+  workspacePositions,
+  contentExists,
   shownReferences,
   services,
   serviceTemplates,
@@ -317,6 +331,7 @@ export function buildApp({
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.
   serveMediaRoutes(app, { media, identity });
+  serveMediaDeliveryRoutes(app, { media, bytes: mediaBytes });
 
   // Reading is public, the same as the corpus routes above: BIBL-02 calls an offset inspectable, and
   // there is nothing in one worth a session. Setting one is behind the same permission once again.
@@ -327,8 +342,10 @@ export function buildApp({
   // the capability surface above is behind, because running a presentation is what this surface is for.
   serveReferenceRoutes(app, { corpus, shownReferences, runReview, runs, deck });
   serveOrderRoutes(app, { services, slideLabels });
+  serveOutputDefaultsRoutes(app);
   serveServiceRoutes(app, { services });
-  serveServiceTemplateRoutes(app, { serviceTemplates, identity });
+  serveWorkspacePositionRoutes(app, { workspacePositions, services, contentExists });
+  serveServiceTemplateRoutes(app, { serviceTemplates, identity, services });
   servePreparationRoutes(app, { preparation, runs });
 
   // The presentation run surface itself: starting and ending a run, its state and its deck, its theme,

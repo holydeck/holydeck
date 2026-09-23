@@ -13,7 +13,7 @@
 import { canonicalJson } from '@holydeck/contracts/canonical';
 
 import { deepFreeze } from './internal/freeze.js';
-import { geometry } from './internal/numbers.js';
+import { MEASUREMENT_PRECISION, geometry, roundTo } from './internal/numbers.js';
 
 import type { MediaFit } from './media-fit.js';
 import type { AspectRatio, Canvas } from './output-profile.js';
@@ -42,6 +42,8 @@ export interface RenderedBox {
   readonly fontSizePx?: number;
   readonly lineHeightPx?: number;
   readonly lineCount?: number;
+  /** Present only when the layout spaces its letters: the same canvas pixels preparation measured with. */
+  readonly letterSpacingPx?: number;
   readonly mediaKind?: MediaKind;
   readonly fit?: MediaFit;
   /** Where to draw the picture inside `frame`; `cover` and `original` reach past it, and are clipped. */
@@ -71,7 +73,7 @@ export interface RenderFrame {
   readonly readiness: Readiness;
 }
 
-const paintBox = (box: PreparedBox, order: number): RenderedBox => {
+const paintBox = (box: PreparedBox, order: number, canvas: Canvas): RenderedBox => {
   const common = { id: box.id, importance: box.importance, order, frame: box.frame };
   if (box.kind === 'decoration') return { ...common, kind: 'decoration' };
   // A media box is painted whatever its playback state says, geometry and all. Withholding the rectangle
@@ -97,6 +99,9 @@ const paintBox = (box: PreparedBox, order: number): RenderedBox => {
     fontSizePx: box.fontSizePx,
     lineHeightPx: geometry(box.fontSizePx * box.font.lineHeight),
     lineCount: box.lineCount,
+    ...(box.font.letterSpacingRatio === undefined
+      ? {}
+      : { letterSpacingPx: roundTo(box.font.letterSpacingRatio * canvas.height, MEASUREMENT_PRECISION) }),
   };
 };
 
@@ -112,7 +117,7 @@ export function renderPrepared(prepared: PreparedRenderModel): RenderFrame {
       id: slide.id,
       index,
       letterbox: slide.letterbox,
-      boxes: slide.boxes.map(paintBox),
+      boxes: slide.boxes.map((box, order) => paintBox(box, order, prepared.canvas)),
     })),
     findings: prepared.findings,
     readiness: prepared.readiness,

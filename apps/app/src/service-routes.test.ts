@@ -33,7 +33,7 @@ const DRAFT: ServiceDraft = {
 const ROOT = '/api/v1/services/service-1';
 const ITEMS = `${ROOT}/sections/section-1/items`;
 const ITEM_ACTIONS = `${ROOT}/items`;
-type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 const ROUTES: readonly (readonly [Method, string, unknown])[] = [
   ['POST', '/api/v1/services', DRAFT],
   ['GET', '/api/v1/services', undefined],
@@ -44,7 +44,9 @@ const ROUTES: readonly (readonly [Method, string, unknown])[] = [
   ['POST', `${ROOT}/transition`, { state: 'presenting' }],
   ['PATCH', ROOT, DRAFT],
   ['PATCH', `${ROOT}/status`, { archived: true }],
+  ['PATCH', `${ROOT}/output`, { aspectRatio: '4:3' }],
   ['POST', ITEMS, { ...ITEM, id: 'item-2' }],
+  ['PUT', `${ITEM_ACTIONS}/item-1/body`, { kind: 'custom-slide', boxes: [] }],
   ['DELETE', `${ITEM_ACTIONS}/item-1`, undefined],
   ['POST', `${ITEM_ACTIONS}/item-1/enable`, undefined],
   ['POST', `${ITEM_ACTIONS}/item-1/disable`, undefined],
@@ -194,6 +196,26 @@ describe('service workspace routes', () => {
     expect(entries().map((entry) => entry['action'])).toEqual(['service.create', 'service.archive', 'service.archive']);
   });
 
+  test('sets an output override, validates it, and refuses it while presenting', async () => {
+    await creating();
+    const output = await asking('PATCH', `${ROOT}/output`, { aspectRatio: '4:3' });
+    expect(output.statusCode).toBe(200);
+    expect(output.json().data.output).toEqual({ aspectRatio: '4:3' });
+    expect((await asking('PATCH', `${ROOT}/output`, { aspectRatio: 'bad' })).statusCode).toBe(422);
+    expect((await asking('POST', `${ROOT}/transition`, { state: 'presenting' })).statusCode).toBe(200);
+    expect((await asking('PATCH', `${ROOT}/output`, { aspectRatio: '16:9' })).statusCode).toBe(409);
+  });
+
+  test('sets an item body and validates its item and payload', async () => {
+    await creating();
+    const body = { kind: 'custom-slide', boxes: [] } as const;
+    const response = await asking('PUT', `${ITEM_ACTIONS}/item-1/body`, body);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.sections[0].items[0].body).toEqual(body);
+    expect((await asking('PUT', `${ITEM_ACTIONS}/item-1/body`, {})).statusCode).toBe(422);
+    expect((await asking('PUT', `${ITEM_ACTIONS}/unknown/body`, body)).statusCode).toBe(404);
+  });
+
   test('adds, disables, enables, duplicates, reorders and removes items', async () => {
     await creating();
     const added = await asking('POST', ITEMS, { ...ITEM, id: 'item-2' });
@@ -294,6 +316,7 @@ describe('service workspace routes', () => {
     ['POST', `${ROOT}/transition`, 'transition'],
     ['PATCH', `${ROOT}/status`, 'archive'],
     ['POST', ITEMS, 'addItem'],
+    ['PUT', `${ITEM_ACTIONS}/item-1/body`, 'setItemBody'],
     ['POST', `${ITEMS}/reorder`, 'reorderItems'],
     ['POST', `${ITEM_ACTIONS}/item-1/revise`, 'reviseItem'],
   ] as const)('rejects malformed bodies before %s %s reaches %s', async (method, url, operation) => {

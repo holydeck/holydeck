@@ -40,6 +40,7 @@ export default defineConfig({
     'src/scripture.ts',
     'src/totp.ts',
     'src/translation-offsets.ts',
+    'src/workspace.ts',
     'src/webauthn.ts',
   ],
   format: ['esm'],

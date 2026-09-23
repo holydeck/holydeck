@@ -12,6 +12,8 @@
 // puppeteer is an optional peer dependency, imported lazily, the same way `@holydeck/core` treats it: an
 // install that only ever replays prepared models never pays for a Chromium download.
 
+import { MEASUREMENT_PRECISION } from './internal/numbers.js';
+
 export interface MeasureRequest {
   readonly text: string;
   readonly fontFamily: string;
@@ -104,8 +106,7 @@ export const MEASUREMENT_DOCUMENT =
 
 export const REFERENCE_VIEWPORT = Object.freeze({ width: 1920, height: 1080, deviceScaleFactor: 1 });
 
-/** Subpixel noise below this is not a layout decision; rounding it keeps a re-preparation byte-stable. */
-export const MEASUREMENT_PRECISION = 2;
+export { MEASUREMENT_PRECISION };
 
 const rounded = (value: number): number => Number(value.toFixed(MEASUREMENT_PRECISION));
 

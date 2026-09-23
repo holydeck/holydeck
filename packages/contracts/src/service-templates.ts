@@ -17,7 +17,7 @@
 // it was instantiated from, wired in now because it costs nothing extra, without building the comparison.
 
 import { FIELD_CODES, type ParseFn, type Parsed, parseObject } from './problems.js';
-import { ITEM_KINDS, parseRevisionRef } from './services.js';
+import { ITEM_KINDS, isCalendarDay, parseRevisionRef } from './services.js';
 
 import type { ItemKind, RevisionRef, Service, ServiceItem } from './services.js';
 
@@ -129,6 +129,34 @@ export type EntryFill = {
   readonly title: string;
   readonly content: RevisionRef | undefined;
 };
+
+/** The event details and typed-entry fills supplied when a Service Template creates a service. */
+export type TemplateInstantiation = {
+  readonly title: string;
+  readonly date: string;
+  readonly site: string;
+  readonly fills: readonly EntryFill[];
+};
+
+/** Reads the event details and pinned content used to instantiate a Service Template. */
+export function parseTemplateInstantiation(value: unknown): Parsed<TemplateInstantiation> {
+  return parseObject(value, 'templateInstantiation', (reader) => {
+    const date = reader.text('date');
+    if (date !== '' && !isCalendarDay(date)) {
+      reader.reject('date', FIELD_CODES.notAllowed, 'must be a calendar day such as 2026-09-13');
+    }
+    return {
+      title: reader.text('title'),
+      date,
+      site: reader.text('site'),
+      fills: reader.parsedList('fills', (fill, path) => parseObject(fill, path, (entry) => ({
+        entryId: entry.text('entryId'),
+        title: entry.text('title'),
+        content: entry.optionalParsed('content', parseRevisionRef),
+      }))),
+    };
+  });
+}
 
 export type InstantiationError = {
   readonly entryId: string;

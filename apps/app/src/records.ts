@@ -252,6 +252,7 @@ export const RECORDS = {
       site: 'required',
       state: 'required',
       sections: 'required',
+      output: 'optional',
       stamp: 'required',
     },
   },

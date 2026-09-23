@@ -44,6 +44,14 @@ describe('the rendered frame', () => {
     expect(box?.lineCount).toBeGreaterThan(0);
   });
 
+  it('carries a letter spacing in canvas pixels only when the layout sets one', async () => {
+    const spaced = await render(songModel([lyricBox({ font: { family: 'Inter', weight: 600, sizeRatio: 0.09, lineHeight: 1.2, letterSpacingRatio: 0.002 } })]));
+    const plain = await render(songModel());
+
+    expect(spaced.slides[0]?.boxes[0]?.letterSpacingPx).toBe(2.16);
+    expect(plain.slides[0]?.boxes[0]).not.toHaveProperty('letterSpacingPx');
+  });
+
   it('leaves a decoration box with no type on it at all', async () => {
     const frame = await render({ id: 'set-1', outputType: 'main', slides: [{ id: 'slide-1', boxes: [decoration()] }] });
     const box = frame.slides[0]?.boxes[0];

@@ -117,6 +117,10 @@
       "types": "./dist/services.d.ts",
       "import": "./dist/services.js"
     },
+    "./workspace": {
+      "types": "./dist/workspace.d.ts",
+      "import": "./dist/workspace.js"
+    },
     "./content-languages": {
       "types": "./dist/content-languages.d.ts",
       "import": "./dist/content-languages.js"

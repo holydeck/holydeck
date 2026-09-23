@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   instantiate,
+  parseTemplateInstantiation,
   parseServiceTemplateBody,
   parseServiceTemplateDraft,
   parseServiceTemplateName,
@@ -25,6 +26,17 @@ const VALID_BODY = {
     },
   ],
 };
+
+describe('parseTemplateInstantiation', () => {
+  it('reads title, date, site and fills', () => {
+    const body = { title: 'Sunday', date: '2026-09-27', site: 'Main', fills: [{ entryId: 'e1', title: 'Song', content: { id: 'g', revision: 2, hash: 'fnv1a-6fe1d1e9' } }] };
+    expect(parseTemplateInstantiation(body)).toMatchObject({ ok: true, value: { title: 'Sunday', fills: [{ entryId: 'e1' }] } });
+  });
+
+  it('refuses a date that is not a calendar day', () => {
+    expect(parseTemplateInstantiation({ title: 'S', date: '27.09.2026', site: 'M', fills: [] }).ok).toBe(false);
+  });
+});
 
 describe('parseServiceTemplateBody', () => {
   it('reads fixed and typed-slot entries', () => {

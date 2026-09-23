@@ -268,7 +268,8 @@ export const parseBoxBinding: ParseFn<BoxBinding> = (value, path) =>
     return mode === 'static' ? { mode, text: reader.text('text') } : keyed(reader);
   });
 
-const parseTextBoxStyle: ParseFn<TextBoxStyle> = (value, path) =>
+/** Reads the shared text presentation vocabulary used by Layout and custom-slide boxes alike. */
+export const parseTextBoxStyle: ParseFn<TextBoxStyle> = (value, path) =>
   parseObject(value, path, (reader) => ({
     fontFamily: reader.text('fontFamily'),
     fontWeight: weight(reader),

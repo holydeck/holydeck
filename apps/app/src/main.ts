@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { constants, readFileSync, watch } from 'node:fs';
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { constants, createReadStream, readFileSync, watch } from 'node:fs';
+import { access, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -59,12 +59,14 @@ import { songsOn } from './songs.js';
 import { songSingerChordsOn } from './song-singer-chords.js';
 import { totpDb, totpsOn } from './totp.js';
 import { translationOffsetDb, translationOffsetsOn } from './translation-offsets.js';
+import { workspacePositionDb, workspacePositionsOn } from './workspace-positions.js';
 import { loadSettings, settingsPath } from './settings.js';
 import { readWebBuild } from './static.js';
 
 import type { CapabilityStore } from './capabilities.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { LibraryStore } from './library.js';
+import type { MediaByteSource } from './media-delivery-routes.js';
 import type { MediaLibrary, MediaLibraryOptions } from './media.js';
 import type { MidServiceStore } from './mid-service-additions.js';
 import type { Identity } from './onboarding.js';
@@ -92,6 +94,7 @@ import type { SongStore } from './songs.js';
 import type { SongSingerChordsStore } from './song-singer-chords.js';
 import type { TranslationOffsetStore } from './translation-offsets.js';
 import type { ThemeStore } from './live-theme.js';
+import type { WorkspacePositionStore } from './workspace-positions.js';
 
 checkReleasedContracts();
 
@@ -158,9 +161,12 @@ let slideLayouts: SlideLayoutStore | undefined;
 // The media library is kept the same way and administered by the same Admin: a deployment with nowhere to
 // keep one has nothing here to upload to, and its route answers not-found the same way.
 let media: MediaLibrary | undefined;
+let mediaBytes: MediaByteSource | undefined;
 // A translation's offset is kept the same way and for the same reason: a deployment with nowhere to
 // keep one has none to read or configure, and its routes answer not-found the same way.
 let translationOffsets: TranslationOffsetStore | undefined;
+let workspacePositions: WorkspacePositionStore | undefined;
+let contentExists: ((context: unknown, id: string) => Promise<boolean>) | undefined;
 // What an operator showed is recorded the same way and for the same reason: a deployment with nowhere to
 // write it down may show nothing, because a passage displayed without its revision recorded is the one
 // thing BIBL-04 rules out, and its routes answer not-found the same way.
@@ -232,11 +238,14 @@ if (settings.values.mongoUrl !== '') {
   slideLabels = slideLabelsOn(repositoryDb(store.db()), { now });
   slideLayouts = slideLayoutsOn(repositoryDb(store.db()), { now });
   translationOffsets = translationOffsetsOn(translationOffsetDb(store.db()));
+  workspacePositions = workspacePositionsOn(workspacePositionDb(store.db()), { now });
+  const libraryStore = libraryOn(repositoryDb(store.db()), { now });
+  library = libraryStore;
+  contentExists = async (context, id) => (await libraryStore.get(context, id)) !== undefined;
   shownReferences = shownReferencesOn(shownReferenceDb(store.db()), { now });
   songs = songsOn(repositoryDb(store.db()), { now });
   chords = songSingerChordsOn(repositoryDb(store.db()), { now });
   sermons = sermonsOn(repositoryDb(store.db()), { now });
-  library = libraryOn(repositoryDb(store.db()), { now });
   contentLanguages = contentLanguagesOn(repositoryDb(store.db()), { now });
   // First-run seed data (SEED-01): the records a fresh instance needs before any Admin has hand-built
   // a catalogue. Runs every boot, but is idempotent — see seed.ts's own header for how.
@@ -256,6 +265,10 @@ if (settings.values.mongoUrl !== '') {
     },
   };
   media = mediaLibraryOn(repositoryDb(store.db()), mediaOptions);
+  mediaBytes = {
+    size: async (key) => (await stat(key)).size,
+    stream: (key, range) => createReadStream(key, range === undefined ? {} : { start: range.start, end: range.end }),
+  };
   pptxImport = pptxImportOn(repositoryDb(store.db()), { ...mediaOptions, runner: workerPptxRunner() });
   pptxReview = pptxReviewOn(repositoryDb(store.db()), { now });
   pptxCommit = pptxCommitOn(repositoryDb(store.db()), { now, newId });
@@ -305,7 +318,10 @@ const app = buildApp({
   settingsAdmin,
   slideLayouts,
   media,
+  mediaBytes,
   translationOffsets,
+  workspacePositions,
+  contentExists,
   shownReferences,
   services,
   serviceTemplates,

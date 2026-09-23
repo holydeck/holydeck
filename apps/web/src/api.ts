@@ -11,6 +11,8 @@ import type { Problem } from '@holydeck/contracts/problems';
 export interface ResponseLike {
   readonly status: number;
   json(): Promise<unknown>;
+  /** Read only by `askText`, for the one kind of answer that is not an envelope (a song's raw YAML). */
+  text?(): Promise<string>;
 }
 
 export interface RequestInitLike {
@@ -33,12 +35,18 @@ export interface Change {
   readonly csrf: string;
   /** Absent where the change is the request itself — a revocation names its subject in the path. */
   readonly body?: unknown;
+  /** Sent as plain text instead of JSON, for a route that takes raw text (a song's raw YAML). */
+  readonly text?: string;
 }
 
 const initFor = (change: Change | undefined): RequestInitLike => {
   const headers: Record<string, string> = { [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) };
   if (change === undefined) return { headers };
   headers[CSRF_HEADER] = change.csrf;
+  if (change.text !== undefined) {
+    headers['content-type'] = 'text/plain';
+    return { method: change.method, headers, body: change.text };
+  }
   if (change.body === undefined) return { method: change.method, headers };
   headers['content-type'] = 'application/json';
   return { method: change.method, headers, body: JSON.stringify(change.body) };
@@ -63,6 +71,8 @@ export type Answered<T> = {
   readonly data: T;
   readonly requestId: string;
   readonly version: number | undefined;
+  /** Set only by the one route that revalidates a stored position; every other answer leaves it undefined. */
+  readonly dropped: readonly string[] | undefined;
 };
 
 export type ApiResult<T> = Answered<T> | Refused;
@@ -93,10 +103,21 @@ export async function ask(path: string, fetching: FetchLike, change?: Change): P
     return failed(error instanceof TypeError ? NETWORK_UNREACHABLE : UNREADABLE_RESPONSE, message);
   }
 
-  if (response.status >= 200 && response.status < 300) {
+  return readEnvelope(response.status, body);
+}
+
+/** Reads an answer's JSON body as the envelope its status promises: a success for 2xx, else an error. */
+export function readEnvelope(status: number, body: unknown): ApiResult<unknown> {
+  if (status >= 200 && status < 300) {
     const parsed = parseSuccessEnvelope(body);
     return parsed.ok
-      ? { ok: true, data: parsed.value.data, requestId: parsed.value.meta.requestId, version: parsed.value.meta.version }
+      ? {
+        ok: true,
+        data: parsed.value.data,
+        requestId: parsed.value.meta.requestId,
+        version: parsed.value.meta.version,
+        dropped: parsed.value.meta.dropped,
+      }
       : unreadable(parsed.problems);
   }
 
@@ -104,6 +125,31 @@ export async function ask(path: string, fetching: FetchLike, change?: Change): P
   if (!parsed.ok) return unreadable(parsed.problems);
   const { code, message, requestId, fields } = parsed.value.error;
   return { ok: false, code, message, requestId, fields: fields ?? [] };
+}
+
+/**
+ * A read whose success is raw text rather than an envelope — a song's raw YAML. A refusal is still an
+ * error envelope, read the way `ask` reads one.
+ */
+export async function askText(path: string, fetching: FetchLike): Promise<ApiResult<string>> {
+  let response: ResponseLike;
+  try {
+    response = await fetching(path, initFor(undefined));
+  } catch (error) {
+    return failed(NETWORK_UNREACHABLE, error instanceof Error ? error.message : String(error));
+  }
+  try {
+    if (response.status >= 200 && response.status < 300) {
+      if (response.text === undefined) return failed(UNREADABLE_RESPONSE, 'the answer carried no text');
+      return { ok: true, data: await response.text(), requestId: '', version: undefined, dropped: undefined };
+    }
+    const parsed = parseErrorEnvelope(await response.json());
+    if (!parsed.ok) return unreadable(parsed.problems);
+    const { code, message, requestId, fields } = parsed.value.error;
+    return { ok: false, code, message, requestId, fields: fields ?? [] };
+  } catch (error) {
+    return failed(UNREADABLE_RESPONSE, error instanceof Error ? error.message : String(error));
+  }
 }
 
 /** True when the refusal is the one no retry can fix: this client is older than the server serves. */

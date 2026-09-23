@@ -59,7 +59,7 @@ const LIST_PERMISSION: RouteNeed = { kind: 'any-permission', needs: [CONTENT_EDI
 const ROUTES = [
   ['GET', SLIDE_LAYOUTS_PATH, LIST_PERMISSION],
   ['POST', SLIDE_LAYOUTS_PATH, PERMISSION],
-  ['GET', LAYOUT_PATH, PERMISSION],
+  ['GET', LAYOUT_PATH, LIST_PERMISSION],
   ['GET', LAYOUT_REVISIONS_PATH, PERMISSION],
   ['PUT', LAYOUT_BOXES_PATH, PERMISSION],
   ['POST', LAYOUT_REVISION_PATH, PERMISSION],
@@ -166,7 +166,7 @@ export function serveSlideLayoutRoutes(
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
-  app.get(LAYOUT_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+  app.get(LAYOUT_PATH, { config: { need: LIST_PERMISSION } }, async (request, reply) => {
     const asked = (request.query as { readonly revision?: string }).revision;
     const revision = ordinalIn(asked);
     if (asked !== undefined && revision === undefined) {

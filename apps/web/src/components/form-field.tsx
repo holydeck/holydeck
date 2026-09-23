@@ -8,7 +8,7 @@ import type { JSX } from 'preact';
 export function FormField(props: {
   readonly id: string;
   readonly label: string;
-  readonly type?: 'text' | 'password';
+  readonly type?: 'text' | 'password' | 'date';
   readonly value: string;
   readonly onInput: (value: string) => void;
   readonly hint?: string;

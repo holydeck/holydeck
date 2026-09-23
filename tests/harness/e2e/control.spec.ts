@@ -13,7 +13,7 @@ import { claimOrSignIn } from './journey.js';
 import type { Page } from '@playwright/test';
 
 /** Any service id reaches the workspace today; service records and their own orders arrive in spec 03. */
-const SERVICE = '/services/harness-service';
+const SERVICE = '/services/harness-service/live';
 
 /** Signs in through the page and opens the operator workspace, where every test here starts. */
 const openWorkspace = async (page: Page, fragment = ''): Promise<void> => {

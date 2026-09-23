@@ -86,9 +86,11 @@ export const AUDIT_ACTIONS = [
   'service.archive',
   'service.edit',
   'service.transition',
+  'service.output',
   // A Service item's own history: adding, removing, enabling, disabling, duplicating, and reordering
   // items within a Service's sections. Same caller as the service-level actions above — `services.ts`.
   'service.item.add',
+  'service.item.body',
   'service.item.remove',
   'service.item.enable',
   'service.item.disable',
@@ -176,7 +178,9 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'service.archive': 'content',
   'service.edit': 'content',
   'service.transition': 'content',
+  'service.output': 'content',
   'service.item.add': 'content',
+  'service.item.body': 'content',
   'service.item.remove': 'content',
   'service.item.enable': 'content',
   'service.item.disable': 'content',

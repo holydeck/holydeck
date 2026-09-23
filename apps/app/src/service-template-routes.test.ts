@@ -2,7 +2,7 @@ import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/client
 import { ENTITY_CONFLICT, VALIDATION_FAILED } from '@holydeck/contracts/http';
 import { CSRF_HEADER, sessionCookie } from '@holydeck/contracts/sessions';
 import Fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { accountsOn } from './accounts.js';
 import { attemptsOn } from './attempts.js';
@@ -15,13 +15,14 @@ import { SERVICES_MANAGE, SERVICE_TEMPLATES_MANAGE, SETTINGS_MANAGE } from './ro
 import {
   SERVICE_TEMPLATE_FROM_SERVICE_PATH,
   SERVICE_TEMPLATE_ID_PATH,
+  SERVICE_TEMPLATE_INSTANTIATE_PATH,
   SERVICE_TEMPLATE_PATH,
   SERVICE_TEMPLATE_REVISIONS_PATH,
   SERVICE_TEMPLATE_STATUS_PATH,
   serveServiceTemplateRoutes,
 } from './service-template-routes.js';
 import { serviceTemplatesOn } from './service-templates.js';
-import { serviceContext, servicesOn } from './services.js';
+import { ServiceError, serviceContext, servicesOn } from './services.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
@@ -31,7 +32,7 @@ import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
-import type { ServiceTemplateBody, ServiceTemplateDraft } from '@holydeck/contracts/service-templates';
+import type { ServiceTemplateBody, ServiceTemplateDraft, TemplateInstantiation } from '@holydeck/contracts/service-templates';
 import type { Identity } from './onboarding.js';
 import type { Document } from './repositories.js';
 import type { ServiceStore } from './services.js';
@@ -74,6 +75,27 @@ const SERVICE_DRAFT = {
       items: [{ id: 'opener', kind: 'custom-slide' as const, title: 'Welcome slide', enabled: true, content: undefined }],
     },
   ],
+};
+
+// A blank left for the caller to fill, alongside the fixed slide every instantiation carries unchanged.
+const INSTANTIATION_BODY: ServiceTemplateBody = {
+  sections: [
+    {
+      id: 'welcome',
+      name: 'Welcome',
+      entries: [
+        { id: 'opener', slot: 'fixed', itemKind: 'custom-slide', title: 'Welcome slide', content: undefined },
+        { id: 'response', slot: 'typed', itemKind: 'custom-slide', required: true },
+      ],
+    },
+  ],
+};
+const WIRE_INSTANTIATION_DRAFT = { name: 'Sunday service', ...INSTANTIATION_BODY };
+const INSTANTIATION: TemplateInstantiation = {
+  title: 'Sunday Morning',
+  date: '2026-09-27',
+  site: 'Main Hall',
+  fills: [{ entryId: 'response', title: 'Response', content: undefined }],
 };
 
 let app: FastifyInstance;
@@ -128,6 +150,9 @@ const fromService = (serviceId: string, payload: unknown, held: StartedSession =
     payload: payload as never,
   });
 
+const instantiating = (id: string, payload: unknown, held: StartedSession = admin) =>
+  app.inject({ method: 'POST', url: at(SERVICE_TEMPLATE_INSTANTIATE_PATH, id), headers: withHeaders(held), payload: payload as never });
+
 /** One Service Template, created through the surface, so every test below starts from a real stamp. */
 const created = async (payload: unknown = WIRE_DRAFT): Promise<string> => {
   const response = await creating(payload);
@@ -136,15 +161,17 @@ const created = async (payload: unknown = WIRE_DRAFT): Promise<string> => {
 
 // `store` has no default: an explicit `undefined` argument would otherwise be indistinguishable from an
 // omitted one and silently fall back to `templates`, defeating the one test below that needs it absent.
+// `heldServices` is the same story for the Service store the instantiate route reaches into.
 const serving = async (
   held: Identity | undefined,
   store: ServiceTemplateStore | undefined,
+  heldServices: ServiceStore | undefined,
 ): Promise<void> => {
   app = Fastify({ logger: false });
   withSafeErrors(app);
   guardMutations(app, { sessions });
   enforceAuthorization(app, { sessions, identity: undefined });
-  serveServiceTemplateRoutes(app, { serviceTemplates: store, identity: held });
+  serveServiceTemplateRoutes(app, { serviceTemplates: store, identity: held, services: heldServices });
   await app.ready();
 };
 
@@ -167,7 +194,7 @@ beforeEach(async () => {
   let serial = 0;
   services = servicesOn(db, { now, newId: () => `service-${(serial += 1)}` });
   templates = serviceTemplatesOn(db, { now, newId: () => `template-${(serial += 1)}`, services });
-  await serving(identity, templates);
+  await serving(identity, templates, services);
   admin = await sessions.start(sessionContext(CORRELATION), {
     actor: ADMINISTRATOR,
     permissions: [SERVICE_TEMPLATES_MANAGE, SERVICES_MANAGE],
@@ -176,6 +203,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await app.close();
+  vi.restoreAllMocks();
 });
 
 describe('creating a Service Template', () => {
@@ -212,7 +240,7 @@ describe('creating a Service Template', () => {
   test('refuses a creation that lost the race for the identifier it was given', async () => {
     await app.close();
     templates = serviceTemplatesOn(db, { now, newId: () => 'template-twice', services });
-    await serving(identity, templates);
+    await serving(identity, templates, services);
     expect((await creating(WIRE_DRAFT)).statusCode).toBe(201);
     const second = await creating({ name: 'Evening service', sections: [] });
     expect(second.statusCode).toBe(409);
@@ -224,7 +252,11 @@ describe('creating a Service Template', () => {
 
   test('a trail that refuses an entry does not cost the Template', async () => {
     await app.close();
-    await serving({ ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } }, templates);
+    await serving(
+      { ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } },
+      templates,
+      services,
+    );
     expect((await creating(WIRE_DRAFT)).statusCode).toBe(201);
   });
 });
@@ -424,6 +456,60 @@ describe('minting a Service Template from a Service', () => {
   });
 });
 
+describe('instantiating a Service from a Service Template', () => {
+  test('fills typed entries and copies fixed ones into a new Service', async () => {
+    const id = await created(WIRE_INSTANTIATION_DRAFT);
+    const response = await instantiating(id, INSTANTIATION);
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data).toMatchObject({ title: INSTANTIATION.title, date: INSTANTIATION.date, site: INSTANTIATION.site });
+    expect(response.json().data.sections[0].items).toMatchObject([
+      { id: 'opener', title: 'Welcome slide' },
+      { id: 'response', title: 'Response' },
+    ]);
+  });
+
+  test('refuses a required typed entry left unfilled', async () => {
+    const id = await created(WIRE_INSTANTIATION_DRAFT);
+    const response = await instantiating(id, { ...INSTANTIATION, fills: [] });
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.fields?.[0]).toMatchObject({ path: 'fills.response', code: 'field.required' });
+  });
+
+  test('answers not-found for a Template nobody created', async () => {
+    expect((await instantiating('template-99', INSTANTIATION)).statusCode).toBe(404);
+  });
+
+  test('lets an Editor holding only services.manage instantiate, though not manage Templates', async () => {
+    const id = await created(WIRE_INSTANTIATION_DRAFT);
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [SERVICES_MANAGE] });
+    expect((await instantiating(id, INSTANTIATION, editor)).statusCode).toBe(201);
+  });
+
+  test('refuses instantiation from a session without services.manage', async () => {
+    const id = await created(WIRE_INSTANTIATION_DRAFT);
+    const guest = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [SETTINGS_MANAGE] });
+    expect((await instantiating(id, INSTANTIATION, guest)).statusCode).toBe(403);
+  });
+
+  test('answers not-found when no Service store is configured, even with Templates configured', async () => {
+    const id = await created(WIRE_INSTANTIATION_DRAFT);
+    await app.close();
+    await serving(identity, templates, undefined);
+    expect((await instantiating(id, INSTANTIATION)).statusCode).toBe(404);
+  });
+
+  test('maps a schema refusal from the Service it creates to 422, and any other refusal to 409', async () => {
+    const id = await created(WIRE_INSTANTIATION_DRAFT);
+    const create = vi.spyOn(services, 'create');
+    create.mockRejectedValueOnce(new ServiceError('schema', 'this is not a Service'));
+    expect((await instantiating(id, INSTANTIATION)).statusCode).toBe(422);
+    create.mockRejectedValueOnce(new ServiceError('conflict', 'competing write'));
+    const response = await instantiating(id, INSTANTIATION);
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe(ENTITY_CONFLICT);
+  });
+});
+
 describe('who may ask any of it', () => {
   test('every route that changes a Template is behind the guard, and the three that read are not', () => {
     expect(mutatingRoutesOf(app)).toEqual([
@@ -431,6 +517,7 @@ describe('who may ask any of it', () => {
       { method: 'PUT', url: SERVICE_TEMPLATE_ID_PATH },
       { method: 'PATCH', url: SERVICE_TEMPLATE_STATUS_PATH },
       { method: 'POST', url: SERVICE_TEMPLATE_FROM_SERVICE_PATH },
+      { method: 'POST', url: SERVICE_TEMPLATE_INSTANTIATE_PATH },
     ]);
   });
 
@@ -462,7 +549,7 @@ describe('who may ask any of it', () => {
 describe('what this surface refuses to answer at all', () => {
   test('a deployment that keeps neither serves every path, and answers not-found from each', async () => {
     await app.close();
-    await serving(undefined, undefined);
+    await serving(undefined, undefined, undefined);
     expect((await creating(WIRE_DRAFT)).statusCode).toBe(404);
     expect((await listTemplates())).toHaveProperty('statusCode', 404);
     expect((await previewing('template-1')).statusCode).toBe(404);
@@ -470,11 +557,12 @@ describe('what this surface refuses to answer at all', () => {
     expect((await versioning('template-1', WIRE_OTHER_BODY)).statusCode).toBe(404);
     expect((await statusing('template-1', { archived: true })).statusCode).toBe(404);
     expect((await fromService('service-1', { name: 'Anything' })).statusCode).toBe(404);
+    expect((await instantiating('template-1', INSTANTIATION)).statusCode).toBe(404);
   });
 
   test('answers not-found from the identity gate alone, even with a store configured', async () => {
     await app.close();
-    await serving(undefined, templates);
+    await serving(undefined, templates, services);
     expect((await creating(WIRE_DRAFT)).statusCode).toBe(404);
     expect((await listTemplates())).toHaveProperty('statusCode', 404);
     expect((await previewing('template-1')).statusCode).toBe(404);
@@ -482,7 +570,7 @@ describe('what this surface refuses to answer at all', () => {
 
   test('answers not-found from the store gate alone, even with an identity configured', async () => {
     await app.close();
-    await serving(identity, undefined);
+    await serving(identity, undefined, services);
     expect((await creating(WIRE_DRAFT)).statusCode).toBe(404);
     expect((await listTemplates())).toHaveProperty('statusCode', 404);
     expect((await previewing('template-1')).statusCode).toBe(404);

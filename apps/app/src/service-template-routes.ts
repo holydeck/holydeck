@@ -19,9 +19,11 @@ import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { ENTITY_CONFLICT, errorEnvelope, successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import { FIELD_CODES } from '@holydeck/contracts/problems';
 import {
+  instantiate,
   parseServiceTemplateDraft,
   parseServiceTemplateName,
   parseServiceTemplateStatus,
+  parseTemplateInstantiation,
 } from '@holydeck/contracts/service-templates';
 
 import { auditContext } from './audit.js';
@@ -31,12 +33,16 @@ import { notFound } from './failures.js';
 import { settled } from './refusals.js';
 import { SERVICES_MANAGE, SERVICE_TEMPLATES_MANAGE } from './roles.js';
 import { ServiceTemplateError, serviceTemplateContext, subjectFor } from './service-templates.js';
+import { ServiceError, serviceContext } from './services.js';
 
 import type { AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
+import type { Answer } from './refusals.js';
 import type { Identity } from './onboarding.js';
 import type { ServiceTemplateStore } from './service-templates.js';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { ServiceItem } from '@holydeck/contracts/services';
+import type { ServiceStore } from './services.js';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 const TEMPLATE_PREFIX = 'serviceTemplate:';
 
@@ -44,6 +50,7 @@ export const SERVICE_TEMPLATE_PATH = '/api/v1/service-templates';
 
 /** One Service Template: its stamp, its name and the entries of whichever revision was asked for. */
 export const SERVICE_TEMPLATE_ID_PATH = `${SERVICE_TEMPLATE_PATH}/:id`;
+export const SERVICE_TEMPLATE_INSTANTIATE_PATH = `${SERVICE_TEMPLATE_ID_PATH}/instantiate`;
 
 /** Its entries over time: what each ordinal is, and never what is in it. */
 export const SERVICE_TEMPLATE_REVISIONS_PATH = `${SERVICE_TEMPLATE_ID_PATH}/revisions`;
@@ -58,6 +65,7 @@ const PERMISSION: RouteNeed = { kind: 'permission', need: SERVICE_TEMPLATES_MANA
 // The list alone is readable with `services.manage`, so an Editor building a New Service can offer
 // Templates without also holding the Admin-only reach to define one.
 const LIST_PERMISSION: RouteNeed = { kind: 'permission', need: SERVICES_MANAGE };
+const INSTANTIATE_PERMISSION: RouteNeed = { kind: 'permission', need: SERVICES_MANAGE };
 
 /** Every route this module serves, in the order it registers them. */
 const ROUTES = [
@@ -68,6 +76,7 @@ const ROUTES = [
   ['GET', SERVICE_TEMPLATE_REVISIONS_PATH, PERMISSION],
   ['PATCH', SERVICE_TEMPLATE_STATUS_PATH, PERMISSION],
   ['POST', SERVICE_TEMPLATE_FROM_SERVICE_PATH, PERMISSION],
+  ['POST', SERVICE_TEMPLATE_INSTANTIATE_PATH, INSTANTIATE_PERMISSION],
 ] as const;
 
 /** Counting from one, the same as history does. A leading zero is not an ordinal anything wrote. */
@@ -93,16 +102,37 @@ const serviceIdIn = (request: FastifyRequest): string =>
 const isRefusal = (error: unknown): error is ServiceTemplateError & { kind: 'state' | 'conflict' } =>
   error instanceof ServiceTemplateError && (error.kind === 'state' || error.kind === 'conflict');
 
+type InstantiateRefusal = 'schema' | 'state' | 'conflict';
+
+// Both a template refusal and a service refusal (instantiation ends in `services.create`) share this
+// shape and the same kinds, so one guard covers every `settled` call the instantiate route makes.
+const isInstantiateRefusal = (
+  error: unknown,
+): error is (ServiceTemplateError | ServiceError) & { kind: InstantiateRefusal } =>
+  (error instanceof ServiceTemplateError || error instanceof ServiceError) && error.kind !== 'corrupt';
+
+// `schema` reaches here because instantiation's fills are graded against a Template's blanks after this
+// route's own body parsing, not before it, unlike every other write in this file.
+const refused = (
+  request: FastifyRequest,
+  reply: FastifyReply,
+  answer: Extract<Answer<never, InstantiateRefusal>, { ok: false }>,
+) =>
+  answer.kind === 'schema'
+    ? reply.code(422).send(validationFailure(request.id, [{ path: '', code: 'invalid', message: answer.message }]))
+    : reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
+
 export interface ServiceTemplateRoutesOptions {
   /** Absent whenever `identity` is, per `main.ts`'s wiring — never independently, from this module's view. */
   readonly serviceTemplates: ServiceTemplateStore | undefined;
   /** Absent in a deployment that keeps no identity, which has nothing here to audit a change against. */
   readonly identity: Identity | undefined;
+  readonly services: ServiceStore | undefined;
 }
 
 export function serveServiceTemplateRoutes(
   app: FastifyInstance,
-  { serviceTemplates, identity }: ServiceTemplateRoutesOptions,
+  { serviceTemplates, identity, services }: ServiceTemplateRoutesOptions,
 ): void {
   // A deployment with nowhere to keep an identity, or no Service Template store, has nothing here to
   // audit or serve. `main.ts` always wires the two together, but `buildApp` accepts them as independent
@@ -240,6 +270,36 @@ export function serveServiceTemplateRoutes(
     // is not saying which Services exist any more than the id route above says which Templates do.
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
     await note(request, 'serviceTemplate.fromService', answer.value.stamp.id, 'allowed', `converted from ${serviceId}`);
+    return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
+  });
+
+  app.post(SERVICE_TEMPLATE_INSTANTIATE_PATH, { config: { need: INSTANTIATE_PERMISSION } }, async (request, reply) => {
+    if (services === undefined) return reply.code(404).send(notFound(request));
+    const parsed = parseTemplateInstantiation(request.body);
+    if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
+    const preview = await templates.preview(call(request), idIn(request));
+    if (preview === undefined) return reply.code(404).send(notFound(request));
+    const outcome = instantiate(preview.body, parsed.value.fills);
+    if (!outcome.ok) {
+      return reply.code(422).send(validationFailure(request.id, outcome.errors.map((error) => ({
+        path: `fills.${error.entryId}`,
+        code: error.kind === 'content-not-allowed' ? 'field.not_allowed' : 'field.required',
+        message: error.message,
+      }))));
+    }
+    const itemsById = new Map(outcome.items.map((item) => [item.id, item]));
+    const sections = preview.body.sections.map((section) => ({
+      id: section.id,
+      name: section.name,
+      items: section.entries
+        .map((entry) => itemsById.get(entry.id))
+        .filter((item): item is ServiceItem => item !== undefined),
+    }));
+    const answer = await settled(() => services.create(
+      serviceContext(provenSession(request).record.actor, correlationFor('service:', request.id)),
+      { title: parsed.value.title, date: parsed.value.date, site: parsed.value.site, sections },
+    ), isInstantiateRefusal);
+    if (!answer.ok) return refused(request, reply, answer);
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 }

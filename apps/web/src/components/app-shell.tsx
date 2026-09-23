@@ -18,6 +18,7 @@ import { can, session } from '../app-state.js';
 import { ExpiryBanner } from './expiry-banner.js';
 import { t } from '../i18n.js';
 import { route, type Route } from '../router.js';
+import { ToastRegion } from './toast.js';
 import { UpdateDialog } from './update-dialog.js';
 
 import type { ComponentChildren, JSX } from 'preact';
@@ -32,8 +33,18 @@ export const ADMINISTRATION_PERMISSIONS = Object.freeze(['accounts.manage', 'set
 const roleLabel = (role: AccountRole): string => t(`app.role.${role}`);
 
 /** Which primary section a route belongs to, so its link can say `aria-current="page"`. */
-const sectionOf = (current: Route): 'services' | 'administration' | undefined => {
-  if (current.name === 'services' || current.name === 'service') return 'services';
+const sectionOf = (current: Route): 'services' | 'library' | 'media' | 'administration' | undefined => {
+  if (
+    current.name === 'services' ||
+    current.name === 'service-new' ||
+    current.name === 'service' ||
+    current.name === 'service-live' ||
+    current.name === 'service-readiness'
+  ) {
+    return 'services';
+  }
+  if (current.name === 'library') return 'library';
+  if (current.name === 'media') return 'media';
   if (current.name === 'admin-users') return 'administration';
   return undefined;
 };
@@ -66,6 +77,7 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
   const account = current?.account;
   const section = sectionOf(route.value);
   const administers = ADMINISTRATION_PERMISSIONS.some((permission) => can(permission));
+  const managesMedia = can('media.manage');
 
   return (
     <>
@@ -91,10 +103,13 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
               <a href="/services" aria-current={section === 'services' ? 'page' : undefined}>{t('app.nav.services')}</a>
             </li>
             <li>
-              {/* Not a link until the library exists (spec 03): no href keeps it out of the tab order,
-                  and aria-disabled still tells a screen reader the section is coming. */}
-              <a aria-disabled="true">{t('app.nav.library')}</a>
+              <a href="/library" aria-current={section === 'library' ? 'page' : undefined}>{t('app.nav.library')}</a>
             </li>
+            {managesMedia ? (
+              <li>
+                <a href="/media" aria-current={section === 'media' ? 'page' : undefined}>{t('app.nav.media')}</a>
+              </li>
+            ) : null}
             {administers ? (
               <li>
                 <a href="/admin/users" aria-current={section === 'administration' ? 'page' : undefined}>
@@ -108,6 +123,7 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
       <ExpiryBanner />
       <main id="main" tabindex={-1}>{children}</main>
       <UpdateDialog />
+      <ToastRegion />
       <LiveRegions />
     </>
   );
