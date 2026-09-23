@@ -93,7 +93,9 @@ function Section({ section, readOnly }: { readonly section: ServiceSection; read
           row happens by clicking its own expand button, which leaves that button focused, so in practice
           the row that was just expanded is kept — but a row expanded once, then left unfocused after
           scrolling elsewhere, is not specially pinned beyond that. */}
-      <ol id={itemsId} hidden={!expanded}>
+      {/* `role="list"` rather than `<ol>`: the windowing wrappers between the list and its `<li>` rows are
+          presentational, which ARIA flattens, but an `<ol>` may only hold `<li>` children directly. */}
+      <div role="list" id={itemsId} hidden={!expanded}>
         <WindowedList
           items={section.items}
           rowHeightPx={48}
@@ -102,7 +104,7 @@ function Section({ section, readOnly }: { readonly section: ServiceSection; read
             <OrderItem key={item.id} sectionId={section.id} item={item} index={index} total={section.items.length} />
           )}
         />
-      </ol>
+      </div>
     </div>
   );
 }
@@ -112,10 +114,18 @@ export function OrderPanel({ view, onEmpty }: { readonly view: ServiceView; read
   const readOnly = isReadOnly.value;
   const selecting = bulkSelecting.value;
 
+  const addNewSection = (): void => {
+    void patchSections((current) => addSection(current, t('order.section.new'), globalThis.crypto.randomUUID()));
+  };
+
   if (itemsOf(view).length === 0) {
+    // A blank service starts with no section, and every Add tab inserts into one: offer the first here.
     return (
       <div>
         <p>{t('workspace.empty')}</p>
+        {view.sections.length === 0 ? (
+          <button type="button" disabled={readOnly} onClick={addNewSection}>{t('order.section.add')}</button>
+        ) : null}{' '}
         <button type="button" onClick={onEmpty}>{t('workspace.empty.add')}</button>
       </div>
     );
@@ -137,7 +147,7 @@ export function OrderPanel({ view, onEmpty }: { readonly view: ServiceView; read
       <button
         type="button"
         disabled={readOnly}
-        onClick={() => void patchSections((current) => addSection(current, t('order.section.new'), globalThis.crypto.randomUUID()))}
+        onClick={addNewSection}
       >
         {t('order.section.add')}
       </button>

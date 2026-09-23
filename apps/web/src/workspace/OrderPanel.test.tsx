@@ -82,6 +82,34 @@ describe('OrderPanel', () => {
     expect(onEmpty).toHaveBeenCalledOnce();
   });
 
+  it('offers a service with no section its first one from the empty state', async () => {
+    const noSections: ServiceView = { ...view, sections: [] };
+    service.value = noSections;
+    const fetching = vi.fn<FetchLike>(async (url, init) => {
+      if (init.method === 'PATCH' && url === '/api/v1/services/s1') {
+        return reply(200, successEnvelope(record([{ id: 'new-1', name: 'New Section', itemIds: [] }]), 'r2'));
+      }
+      throw new Error(`unexpected ${init.method ?? 'GET'} ${url}`);
+    });
+    setFetching(fetching);
+    render(<OrderPanel view={noSections} onEmpty={() => undefined} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Section' }));
+
+    await vi.waitFor(() => expect(patchCallsOf(fetching)).toHaveLength(1));
+    const [, init] = patchCallsOf(fetching)[0] ?? [];
+    const body = JSON.parse((init as { body?: string })?.body ?? '{}') as { sections: { name: string }[] };
+    expect(body.sections.map((section) => section.name)).toEqual(['New Section']);
+  });
+
+  it('keeps the empty state to Add Content once a section exists', () => {
+    service.value = emptyView;
+    setFetching(async () => { throw new Error('no request expected'); });
+    render(<OrderPanel view={emptyView} onEmpty={() => undefined} />);
+
+    expect(screen.queryByRole('button', { name: 'Add Section' })).toBeNull();
+  });
+
   it('renames a section with one PATCH request 800ms after the last keystroke', async () => {
     vi.useFakeTimers();
     const fetching = vi.fn<FetchLike>(async (url, init) => {

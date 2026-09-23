@@ -70,8 +70,8 @@ export function WindowedList<T>(props: {
   };
 
   // `role="presentation"` on every wrapper div: a caller such as OrderPanel renders this inside an
-  // `<ol>` around `<li>` rows, and these wrappers exist only for positioning/keying, not to mean
-  // anything themselves — without it, browsers vary on whether the `<ol>`/`<li>` list relationship
+  // `role="list"` around `<li>` rows, and these wrappers exist only for positioning/keying, not to mean
+  // anything themselves — without it, browsers vary on whether the list/`<li>` relationship
   // survives a `<div>` in between, which would silently drop list semantics for assistive tech.
   if (!virtualize) {
     return (
