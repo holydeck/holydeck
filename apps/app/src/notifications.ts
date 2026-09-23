@@ -242,6 +242,8 @@ export interface DerivationOptions {
   /** The instant the caller last derived up to. Entries at or before it are ones they have already had. */
   readonly since?: string;
   readonly limit?: number;
+  /** When present, only these actions are read — a caller narrowing the trail to what it may see. */
+  readonly actions?: readonly AuditAction[];
 }
 
 export interface NotificationDerivation {
@@ -277,9 +279,10 @@ export async function deriveNotifications(
   preferences: readonly NotificationPreference[],
   options: DerivationOptions = {},
 ): Promise<NotificationDerivation> {
-  const { since } = options;
+  const { since, actions } = options;
   const limit = options.limit ?? NOTIFICATION_PAGE_LIMIT;
-  const documents = await events.read(context, {}, { limit, sort: { at: -1 } });
+  const filter = actions === undefined ? {} : { action: { $in: actions } };
+  const documents = await events.read(context, filter, { limit, sort: { at: -1 } });
 
   // Whether the page reached back over the caller's watermark. The page holds the newest entries there
   // are, so one entry on it at or before `since` puts every entry *off* it older still — all of them

@@ -9,6 +9,7 @@ const matches = (row: Document, filter: Document): boolean =>
     if ('$exists' in comparison) return (row[key] !== undefined) === comparison['$exists'];
     if ('$lt' in comparison) return typeof row[key] === 'string' && row[key] < String(comparison['$lt']);
     if ('$lte' in comparison) return typeof row[key] === 'string' && row[key] <= String(comparison['$lte']);
+    if ('$in' in comparison && Array.isArray(comparison['$in'])) return comparison['$in'].includes(row[key]);
     throw new Error('unsupported notification filter');
   });
 

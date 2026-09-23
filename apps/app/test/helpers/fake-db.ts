@@ -29,9 +29,16 @@ const compares = (actual: unknown, comparison: Comparison): boolean =>
     }
   });
 
+const isIn = (value: unknown): value is { readonly $in: readonly unknown[] } =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) &&
+  Object.keys(value).length === 1 && Array.isArray((value as { $in?: unknown })['$in']);
+
 const matches = (document: Document, filter: Filter): boolean =>
-  Object.entries(filter).every(([field, value]) =>
-    isComparison(value) ? compares(document[field], value) : document[field] === value);
+  Object.entries(filter).every(([field, value]) => {
+    if (isComparison(value)) return compares(document[field], value);
+    if (isIn(value)) return value.$in.includes(document[field]);
+    return document[field] === value;
+  });
 
 /** Enough of a Mongo database to replay a ledger: unique `_id`, equality filters, named indexes. */
 export function fakeDb(): FakeDb {

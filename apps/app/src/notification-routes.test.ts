@@ -162,6 +162,32 @@ describe('an account notification inbox', () => {
     expect((await getInbox()).json().data.notifications).toMatchObject([{ event: 'audit:e2', accountId }]);
   });
 
+  test('never surfaces a restricted-category event to a caller without operations.read', async () => {
+    await identity.audit.record(auditContext('system', CORRELATION), {
+      action: 'session.signIn', subject: accountId, outcome: 'allowed',
+    });
+    await entry();
+    const response = await getInbox();
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.notifications).toMatchObject([{ action: 'content.change' }]);
+  });
+
+  test('surfaces every category to a caller with operations.read', async () => {
+    const operator = await sessions.start(sessionContext(CORRELATION), {
+      actor: 'account:' + 'E'.repeat(22),
+      permissions: [...permissionsFor({
+        id: 'E'.repeat(22), name: 'admin', displayName: 'Admin', role: 'admin', createdAt: NOW,
+        controlPresentation: false, disabled: false,
+      })],
+    });
+    await identity.audit.record(auditContext('system', CORRELATION), {
+      action: 'session.signIn', subject: 'account:' + 'E'.repeat(22), outcome: 'allowed',
+    });
+    const response = await app.inject({ method: 'GET', url: NOTIFICATIONS_PATH, headers: withHeaders(operator) });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.notifications).toMatchObject([{ action: 'session.signIn' }]);
+  });
+
   test('returns an empty inbox without creating a watermark when no events exist', async () => {
     expect((await getInbox()).json().data.notifications).toEqual([]);
     expect(await store.watermarkFor(accountId)).toBeUndefined();

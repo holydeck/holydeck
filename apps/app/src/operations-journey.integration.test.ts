@@ -39,7 +39,7 @@ import { repositoryDb } from './repositories.js';
 import { applyRestore, fileRestoreTarget } from './restore-apply.js';
 import { RESTORES_PATH } from './restore-routes.js';
 import { rehearsalDatabaseName, rehearseRestore, restoreContext, restoreDb } from './restores.js';
-import { BACKUP_MANAGE, JOBS_MANAGE, NOTIFICATIONS_USE, RESTORE_MANAGE } from './roles.js';
+import { BACKUP_MANAGE, JOBS_MANAGE, NOTIFICATIONS_USE, OPERATIONS_READ, RESTORE_MANAGE } from './roles.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 import { SessionError, sessionContext, sessionDb, sessionsOn } from './sessions.js';
 import { totpDb, totpsOn } from './totp.js';
@@ -183,7 +183,7 @@ describe('operations, end to end against a real database', () => {
   test('back up, notify, refuse an unrehearsed restore, rehearse, apply, and recover a deleted fixture', async () => {
     let admin = await sessions.start(sessionContext('req-sign-in'), {
       actor: actorFor(ID),
-      permissions: [BACKUP_MANAGE, RESTORE_MANAGE, JOBS_MANAGE, NOTIFICATIONS_USE],
+      permissions: [BACKUP_MANAGE, RESTORE_MANAGE, JOBS_MANAGE, NOTIFICATIONS_USE, OPERATIONS_READ],
     });
 
     await live.collection<ContentDoc>(RECORDS.services.collection).insertOne({ _id: SONG_ID, name: 'Sunday Gathering' });
@@ -252,7 +252,7 @@ describe('operations, end to end against a real database', () => {
 
     admin = await sessions.start(sessionContext('req-sign-in-2'), {
       actor: actorFor(ID),
-      permissions: [BACKUP_MANAGE, RESTORE_MANAGE, JOBS_MANAGE, NOTIFICATIONS_USE],
+      permissions: [BACKUP_MANAGE, RESTORE_MANAGE, JOBS_MANAGE, NOTIFICATIONS_USE, OPERATIONS_READ],
     });
 
     // Retry: a passing rehearsal is now on file.

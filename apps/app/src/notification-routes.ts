@@ -3,14 +3,14 @@ import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import { parseNotificationPreferences } from '@holydeck/contracts/notifications';
 
-import { auditContext, auditReadContext } from './audit.js';
+import { AUDIT_ACTIONS, CATEGORY_OF, auditContext, auditReadContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { notFound } from './failures.js';
 import { provenSession, refuseAsForbidden } from './csrf.js';
 import { deriveNotifications } from './notifications.js';
-import { NOTIFICATIONS_USE } from './roles.js';
+import { NOTIFICATIONS_USE, OPERATIONS_READ } from './roles.js';
 
-import type { AuditAction, AuditOutcome } from './audit.js';
+import type { AuditAction, AuditCategory, AuditOutcome } from './audit.js';
 import type { RouteNeed } from './authorization.js';
 import type { Identity } from './onboarding.js';
 import type { NotifiableEventReader } from './notifications.js';
@@ -26,6 +26,17 @@ export const NOTIFICATIONS_READ_ALL_PATH = `${NOTIFICATIONS_PATH}/read-all`;
 export const NOTIFICATIONS_PREFERENCES_PATH = `${NOTIFICATIONS_PATH}/preferences`;
 
 const PERMISSION: RouteNeed = { kind: 'permission', need: NOTIFICATIONS_USE };
+
+// The two categories every signed-in account may hear about regardless of role: what changed in the
+// content and what ran on stage. Every other category names something an operator did to the deployment
+// itself, which `NOTIFICATIONS_USE`'s blanket grant (every account, every role) was never meant to expose
+// — only `OPERATIONS_READ` (admin alone) reaches the unrestricted trail.
+const OPEN_CATEGORIES: readonly AuditCategory[] = ['content', 'presentation'];
+const OPEN_ACTIONS: readonly AuditAction[] = AUDIT_ACTIONS.filter((action) => OPEN_CATEGORIES.includes(CATEGORY_OF[action]));
+
+/** `undefined` reads the whole trail; a narrower list restricts a caller without `OPERATIONS_READ` to it. */
+const actionsAllowedFor = (permissions: readonly string[]): readonly AuditAction[] | undefined =>
+  permissions.includes(OPERATIONS_READ) ? undefined : OPEN_ACTIONS;
 
 const ROUTES = [
   ['GET', NOTIFICATIONS_PATH],
@@ -82,9 +93,13 @@ export function serveNotificationRoutes(
     if (accountId === undefined) return reply;
     const watermark = await store.watermarkFor(accountId);
     const preference = await store.preferencesFor(accountId);
-    const actor = provenSession(request).record.actor;
+    const session = provenSession(request);
+    const actor = session.record.actor;
     const context = auditReadContext(actor, correlationFor(NOTIFICATIONS_PREFIX, request.id));
-    const derivation = await deriveNotifications(events, context, [{ ...preference, recipient: actor }], { since: watermark });
+    const derivation = await deriveNotifications(events, context, [{ ...preference, recipient: actor }], {
+      since: watermark,
+      actions: actionsAllowedFor(session.record.permissions),
+    });
     await store.materialize(derivation.notifications.map((notification) => ({ ...notification, recipient: accountId })));
     if (derivation.watermark !== undefined) await store.setWatermark(accountId, derivation.watermark);
     const unread = (request.query as { readonly unread?: string }).unread === 'true';
