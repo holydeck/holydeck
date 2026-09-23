@@ -48,6 +48,7 @@ export const MONGO_CONTENTS: readonly MongoContent[] = Object.freeze([
   { record: 'contentRevisions', class: 'content-revisions' },
   { record: 'mediaAssets', class: 'media-assets' },
   { record: 'midServiceAdditions', class: 'mid-service-additions' },
+  { record: 'pptxImportSessions', class: 'pptx-import-sessions' },
   { record: 'preparedSnapshots', class: 'prepared-snapshots' },
   { record: 'presentationRuns', class: 'presentation-runs' },
   { record: 'restores', class: 'restores' },
