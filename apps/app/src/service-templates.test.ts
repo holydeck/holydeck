@@ -323,7 +323,7 @@ describe('fromService', () => {
     ],
   };
 
-  it('converts an existing Service into a new Service Template, one fixed entry per item', async () => {
+  it('keeps a custom slide fixed and turns any other item into a required typed slot', async () => {
     const { templates, services } = store();
     const service = await services.create(serviceContext(ADMINISTRATOR, 'req-41-service-templates'), SERVICE_DRAFT);
     const templated = await templates.fromService(ADMIN, service.stamp.id, 'From Sunday Gathering');
@@ -335,13 +335,7 @@ describe('fromService', () => {
           name: 'Welcome',
           entries: [
             { id: 'opener', slot: 'fixed', itemKind: 'custom-slide', title: 'Welcome slide', content: undefined },
-            {
-              id: 'song-1',
-              slot: 'fixed',
-              itemKind: 'song',
-              title: 'Amazing Grace',
-              content: { id: 'song-amazing-grace', revision: 3, hash: undefined },
-            },
+            { id: 'song-1', slot: 'typed', itemKind: 'song', required: true },
           ],
         },
       ],

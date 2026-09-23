@@ -307,7 +307,7 @@ const SERVICE: Service = {
 };
 
 describe('templateFromService', () => {
-  it('converts each item into a fixed entry with a matching id', () => {
+  it('keeps a custom slide fixed with its content, and turns any other item into a required typed slot', () => {
     const body = templateFromService(SERVICE);
     expect(body).toEqual({
       sections: [
@@ -316,13 +316,7 @@ describe('templateFromService', () => {
           name: 'Welcome',
           entries: [
             { id: 'opener', slot: 'fixed', itemKind: 'custom-slide', title: 'Welcome slide', content: undefined },
-            {
-              id: 'song-1',
-              slot: 'fixed',
-              itemKind: 'song',
-              title: 'Amazing Grace',
-              content: { id: 'song-amazing-grace', revision: 3, hash: undefined },
-            },
+            { id: 'song-1', slot: 'typed', itemKind: 'song', required: true },
           ],
         },
       ],
