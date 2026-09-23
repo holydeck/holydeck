@@ -7,6 +7,7 @@ import {
   SNAPSHOT_PINS,
   aspectRatioLabel,
   aspectRatioOf,
+  parsePreparationInputs,
   parsePreparedSnapshot,
 } from './snapshots.js';
 
@@ -205,5 +206,64 @@ describe('the ratio a snapshot resolved to', () => {
     expect(aspectRatioLabel({ width: 1920, height: 1080 })).toBe('16:9');
     expect(aspectRatioLabel({ width: 16, height: 9 })).toBe('16:9');
     expect(aspectRatioLabel({ width: 1024, height: 768 })).toBe('4:3');
+  });
+});
+
+describe('parsePreparationInputs', () => {
+  const preparation = () => ({
+    slideLayout: { id: 'layout-1', revision: 3 },
+    serviceTemplate: 'template-rev-2',
+    settings: 'settings-rev-7',
+    media: 'media-rev-4',
+    corpus: 'corpus-rev-1',
+    aspectRatio: '16:9',
+    safeAreaMargins: { top: 5, right: 5, bottom: 8, left: 5, unit: 'percent' },
+    generatedSlides: snapshot().generatedSlides,
+  });
+
+  it('parses all preparation inputs and optional fields', () => {
+    expect(parsePreparationInputs(preparation())).toEqual({ ok: true, value: preparation() });
+  });
+
+  it('leaves absent optional fields undefined', () => {
+    const value = preparation();
+    delete (value as { safeAreaMargins?: unknown }).safeAreaMargins;
+    delete (value as { generatedSlides?: unknown }).generatedSlides;
+    const parsed = parsePreparationInputs(value);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok ? parsed.value.safeAreaMargins : 'refused').toBeUndefined();
+    expect(parsed.ok ? parsed.value.generatedSlides : 'refused').toBeUndefined();
+  });
+
+  it.each([
+    ['slideLayout', (value: ReturnType<typeof preparation>) => delete (value as { slideLayout?: unknown }).slideLayout],
+    ['slideLayout.id', (value: ReturnType<typeof preparation>) => delete (value.slideLayout as { id?: string }).id],
+    ['serviceTemplate', (value: ReturnType<typeof preparation>) => delete (value as { serviceTemplate?: unknown }).serviceTemplate],
+    ['settings', (value: ReturnType<typeof preparation>) => delete (value as { settings?: unknown }).settings],
+    ['media', (value: ReturnType<typeof preparation>) => delete (value as { media?: unknown }).media],
+    ['corpus', (value: ReturnType<typeof preparation>) => delete (value as { corpus?: unknown }).corpus],
+    ['aspectRatio', (value: ReturnType<typeof preparation>) => delete (value as { aspectRatio?: unknown }).aspectRatio],
+  ])('refuses missing %s', (_field, change) => {
+    const value = preparation();
+    change(value);
+    expect(parsePreparationInputs(value).ok).toBe(false);
+  });
+
+  it('refuses wrong required field types', () => {
+    const layout = preparation();
+    (layout.slideLayout as { revision: unknown }).revision = '3';
+    expect(parsePreparationInputs(layout).ok).toBe(false);
+    const template = preparation();
+    (template as { serviceTemplate: unknown }).serviceTemplate = 3;
+    expect(parsePreparationInputs(template).ok).toBe(false);
+  });
+
+  it('refuses malformed optional safe area margins', () => {
+    const value = preparation();
+    value.safeAreaMargins.top = 50;
+    expect(parsePreparationInputs(value).ok).toBe(false);
+    const missingEdge = preparation();
+    delete (missingEdge.safeAreaMargins as { left?: number }).left;
+    expect(parsePreparationInputs(missingEdge).ok).toBe(false);
   });
 });

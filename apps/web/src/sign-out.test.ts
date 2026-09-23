@@ -10,6 +10,7 @@ import { SESSION_EXPIRED, SESSION_PATH, type SessionView } from '@holydeck/contr
 import type { FetchLike } from './api.js';
 
 import { resetAppState, session } from './app-state.js';
+import { DRAFT_PREFIX } from './drafts.js';
 import { setFetching } from './request.js';
 import { currentPath } from './router.js';
 import { signOut } from './sign-out.js';
@@ -30,12 +31,14 @@ describe('signOut', () => {
     resetAppState();
     resetRoute();
     session.value = signedIn;
+    sessionStorage.clear();
     document.body.innerHTML = '<p id="announce-assertive" aria-live="assertive"></p>';
   });
 
   it('ends a confirmed session and replaces the current history entry', async () => {
     const fetching = vi.fn<FetchLike>(async () => reply(200, successEnvelope({}, 'request-1')));
     setFetching(fetching);
+    sessionStorage.setItem(`${DRAFT_PREFIX}users`, JSON.stringify({ name: 'Ruth' }));
 
     await signOut();
 
@@ -45,6 +48,7 @@ describe('signOut', () => {
     }));
     expect(session.value).toBeNull();
     expect(currentPath.value).toBe('/sign-in');
+    expect(sessionStorage.getItem(`${DRAFT_PREFIX}users`)).toBeNull();
   });
 
   it('treats an already expired session as a completed sign-out', async () => {
@@ -64,5 +68,14 @@ describe('signOut', () => {
     expect(session.value).toBe(signedIn);
     expect(currentPath.value).toBe('/services');
     expect(document.getElementById('announce-assertive')?.textContent).toBe('Signing out failed. Try again.');
+  });
+
+  it('clears drafts after a refused sign-out', async () => {
+    sessionStorage.setItem(`${DRAFT_PREFIX}users`, JSON.stringify({ name: 'Ruth' }));
+    setFetching(async () => reply(500, errorEnvelope('server.unexpected_error', 'Failed', 'request-1')));
+
+    await signOut();
+
+    expect(sessionStorage.getItem(`${DRAFT_PREFIX}users`)).toBeNull();
   });
 });

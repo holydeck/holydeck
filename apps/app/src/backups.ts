@@ -57,6 +57,7 @@ export const MONGO_CONTENTS: readonly MongoContent[] = Object.freeze([
   { record: 'services', class: 'services' },
   { record: 'slideLabels', class: 'slide-labels' },
   { record: 'slideLayouts', class: 'slide-layouts' },
+  { record: 'songSingerChords', class: 'song-singer-chords' },
 ]);
 
 export interface ExcludedRecord {

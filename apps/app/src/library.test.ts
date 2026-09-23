@@ -87,6 +87,27 @@ describe('listing the library', () => {
     expect(await library.list(CTX, { kind: 'sermon' })).toEqual([sermon]);
   });
 
+  it('filters titles by a case-insensitive partial query', async () => {
+    const { library } = store();
+    const matched = await library.create(CTX, { kind: 'song', title: 'Amazing Grace' });
+    await library.create(CTX, { kind: 'sermon', title: 'Grace Abounding' });
+    expect(await library.list(CTX, { q: 'MAZING' })).toEqual([matched]);
+    expect(await library.list(CTX, { q: 'missing' })).toEqual([]);
+  });
+
+  it('excludes archived rows by default and includes them when asked', async () => {
+    const { db, library } = store();
+    const stamp = {
+      id: 'archived-1', kind: 'song', schemaVersion: 1,
+      createdAt: '2026-09-13T09:30:00.000Z', createdBy: LIBRARIAN,
+      updatedAt: '2026-09-13T09:30:01.000Z', updatedBy: LIBRARIAN,
+      archivedAt: '2026-09-13T09:30:02.000Z', archivedBy: LIBRARIAN,
+    };
+    db.rows.set(STAMPS, [{ _id: 'archived-1#1', contentId: 'archived-1', sequence: 1, at: stamp.updatedAt, title: 'Archived Song', stamp, actor: LIBRARIAN, correlationId: CTX.correlationId }]);
+    expect(await library.list(CTX)).toEqual([]);
+    expect((await library.list(CTX, { archived: true })).map((row) => row.title)).toEqual(['Archived Song']);
+  });
+
   it('reduces a standing row by highest sequence via a Map, not by row order or a database sort', async () => {
     const { db, library } = store();
     const stamp = {

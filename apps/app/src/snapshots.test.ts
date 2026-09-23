@@ -362,7 +362,7 @@ describe('readiness', () => {
 
     await built.preparation.prepare(CONTEXT, service.stamp.id, INPUTS);
 
-    expect((await built.preparation.readiness(CONTEXT, service.stamp.id))?.state).toBe('ready');
+    expect((await built.preparation.readiness(CONTEXT, service.stamp.id, {}))?.state).toBe('ready');
   });
 
   it('reports blocked while a blocker is open', async () => {
@@ -377,7 +377,7 @@ describe('readiness', () => {
     const { services, preparation, serviceId } = await prepared();
     for (const item of ['item-1', 'item-2', 'item-3']) await services.disableItem(EDITOR, serviceId, item);
 
-    const checklist = await preparation.readiness(CONTEXT, serviceId);
+    const checklist = await preparation.readiness(CONTEXT, serviceId, {});
 
     expect(checklist?.state).toBe('blocked');
     expect(checklist?.blockers.map((check) => check.group)).toEqual(['Content']);
@@ -405,6 +405,16 @@ describe('readiness', () => {
 
     expect(checklist?.state).toBe('ready');
     expect(checklist?.completed.map((check) => check.name)).toContain('Content: the Slide Layout pinned is still current');
+  });
+
+  it('uses the configured observation when the caller gives none', async () => {
+    const observed: ReadinessObservation = { checks: [MEDIA_MISSING], slideLayoutRevision: 4 };
+    const { preparation, serviceId } = await prepared(observed);
+
+    const checklist = await preparation.readiness(CONTEXT, serviceId);
+
+    expect(checklist?.state).toBe('outdated');
+    expect(checklist?.blockers).toEqual(expect.arrayContaining([MEDIA_MISSING]));
   });
 });
 
@@ -622,6 +632,8 @@ describe('the Operator override', () => {
       SERVICE_TEMPLATES_MANAGE,
       'media.manage',
       'services.manage',
+      'content.edit',
+      'catalogue.manage',
     ]);
   });
 
@@ -684,6 +696,19 @@ describe('the Operator override', () => {
     expect(String(entry?.['detail'])).toContain('The backup projector is on standby');
     for (const check of [MEDIA_MISSING, NO_OUTPUT]) expect(String(entry?.['detail'])).toContain(check.name);
     expect(CATEGORY_OF[OVERRIDE_ACTION]).toBe('presentation');
+  });
+
+  it('turns a concurrent override event collision into a conflict', async () => {
+    const { db, preparation, serviceId } = await prepared();
+    db.failOn = (collection, document) =>
+      collection === RUN_EVENTS && document['_id'] === 'run-1#1'
+        ? Object.assign(new Error('E11000 duplicate key: run-1#1'), { code: 11_000 })
+        : undefined;
+
+    const error = await refused(preparation.override(OPERATOR_SESSION, request(serviceId)));
+
+    expect(error.kind).toBe('conflict');
+    expect(rows(db, AUDIT).filter((row) => row['action'] === OVERRIDE_ACTION)).toHaveLength(0);
   });
 
   it('reports the run as live overridden for its whole duration', async () => {

@@ -21,7 +21,7 @@ test.describe('signing in through the page', () => {
     };
 
     await claimOrSignIn(page);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText(en('app.services.title'));
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(en('dashboard.title'));
     const administration = page.getByRole('navigation', { name: en('app.nav.label') }).getByRole('link', {
       name: en('app.nav.administration'),
     });

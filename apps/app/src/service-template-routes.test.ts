@@ -117,14 +117,37 @@ describe('Service Template routes', () => {
     expect(previewed.json().data).toEqual(created.json().data);
   });
 
-  test('gates both routes from an editor session before calling the store', async () => {
-    const editor = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [SETTINGS_MANAGE] });
+  test('lists every Service Template on file', async () => {
+    await asking('POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT);
+    const listed = await asking('GET', SERVICE_TEMPLATE_PATH);
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().data).toMatchObject([{ id: 'template-1', name: DRAFT.name }]);
+  });
+
+  test('lets an Editor holding only services.manage list but not create or preview Templates', async () => {
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [SERVICES_MANAGE] });
+    await asking('POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT);
+    const listed = await asking('GET', SERVICE_TEMPLATE_PATH, undefined, editor);
+    expect(listed.statusCode).toBe(200);
     const create = vi.spyOn(templates, 'create');
     const preview = vi.spyOn(templates, 'preview');
     expect((await asking('POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT, editor)).statusCode).toBe(403);
     expect((await asking('GET', templatePath('template-1'), undefined, editor)).statusCode).toBe(403);
     expect(create).not.toHaveBeenCalled();
     expect(preview).not.toHaveBeenCalled();
+  });
+
+  test('gates every route from an editor session before calling the store', async () => {
+    const editor = await sessions.start(sessionContext(CORRELATION), { actor: OPERATOR, permissions: [SETTINGS_MANAGE] });
+    const create = vi.spyOn(templates, 'create');
+    const preview = vi.spyOn(templates, 'preview');
+    const list = vi.spyOn(templates, 'list');
+    expect((await asking('POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT, editor)).statusCode).toBe(403);
+    expect((await asking('GET', templatePath('template-1'), undefined, editor)).statusCode).toBe(403);
+    expect((await asking('GET', SERVICE_TEMPLATE_PATH, undefined, editor)).statusCode).toBe(403);
+    expect(create).not.toHaveBeenCalled();
+    expect(preview).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
   });
 
   test('returns 404 when a Service Template was never created', async () => {
@@ -190,6 +213,7 @@ describe('Service Template routes', () => {
     ['POST', SERVICE_TEMPLATE_PATH, WIRE_DRAFT],
     ['GET', templatePath('template-1'), undefined],
     ['POST', instantiatePath('template-1'), INSTANTIATION],
+    ['GET', SERVICE_TEMPLATE_PATH, undefined],
   ] as const)('serves a gated 404 fallback for %s %s without a store', async (method, url, payload) => {
     await app.close();
     await building(undefined);

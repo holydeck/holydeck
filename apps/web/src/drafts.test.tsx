@@ -6,7 +6,7 @@ import { fireEvent, render, screen } from '@testing-library/preact';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resetAppState } from './app-state.js';
-import { DRAFT_PREFIX, readDraft, saveDraft, useDraft } from './drafts.js';
+import { clearAllDrafts, DRAFT_PREFIX, readDraft, saveDraft, useDraft } from './drafts.js';
 
 import type { JSX } from 'preact';
 
@@ -17,7 +17,7 @@ const DraftForm = (): JSX.Element => {
 
 beforeEach(() => {
   resetAppState();
-  localStorage.clear();
+  sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -32,7 +32,7 @@ describe('form drafts', () => {
   });
 
   it('does not throw when browser storage refuses reads or writes', () => {
-    vi.stubGlobal('localStorage', {
+    vi.stubGlobal('sessionStorage', {
       getItem: () => { throw new Error('storage denied'); },
       setItem: () => { throw new Error('storage denied'); },
       removeItem: () => { throw new Error('storage denied'); },
@@ -43,7 +43,7 @@ describe('form drafts', () => {
   });
 
   it('treats malformed JSON as no draft', () => {
-    localStorage.setItem(`${DRAFT_PREFIX}service`, '{not json');
+    sessionStorage.setItem(`${DRAFT_PREFIX}service`, '{not json');
 
     expect(readDraft('service')).toBeUndefined();
   });
@@ -52,6 +52,28 @@ describe('form drafts', () => {
     saveDraft('sign-in', { name: 'Ruth', password: 'secret', secondCode: '123456' });
 
     expect(readDraft('sign-in')).toEqual({ name: 'Ruth' });
+  });
+
+  it('removes every draft in this tab without touching another session record', () => {
+    saveDraft('service', { name: 'Sunday' });
+    saveDraft('users', { name: 'Ruth' });
+    sessionStorage.setItem('holydeck:locale', 'en');
+
+    clearAllDrafts();
+
+    expect(sessionStorage.getItem(`${DRAFT_PREFIX}service`)).toBeNull();
+    expect(sessionStorage.getItem(`${DRAFT_PREFIX}users`)).toBeNull();
+    expect(sessionStorage.getItem('holydeck:locale')).toBe('en');
+  });
+
+  it('does not throw when browser storage refuses clearing every draft', () => {
+    vi.stubGlobal('sessionStorage', {
+      get length(): number { throw new Error('storage denied'); },
+      key: () => null,
+      removeItem: () => { throw new Error('storage denied'); },
+    });
+
+    expect(() => clearAllDrafts()).not.toThrow();
   });
 
   it('restores a saved value after the form unmounts and mounts again', () => {

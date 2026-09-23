@@ -54,6 +54,7 @@ const renderAt = async (): Promise<void> => {
 beforeEach(() => {
   resetAppState();
   localStorage.clear();
+  sessionStorage.clear();
   session.value = signedIn();
 });
 

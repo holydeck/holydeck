@@ -56,19 +56,15 @@ const posting = async (
 /** The name and value only: the attributes are the browser's business, and this is not a browser. */
 const cookieIn = (response: Response): string => (response.headers.get('set-cookie') ?? '').split(';', 1).join('');
 
-/**
- * Claims the instance if it is still claimable and signs in as the operator that claimed it. The claim
- * is allowed to have happened already — a second browser project drives the same stack — which is the
- * one status this helper reads without refusing.
- */
-export async function signInTo(baseUrl: string, fetching: Fetching = fetch): Promise<SignedIn> {
-  const claim = await posting(fetching, baseUrl, ONBOARDING_PATH, OPERATOR);
-  if (claim.status !== 201 && claim.status !== 404) throw new HarnessSignInError('claim the instance', claim.status);
+export interface Credentials {
+  readonly name: string;
+  readonly password: string;
+}
 
-  const opened = await posting(fetching, baseUrl, SESSION_PATH, {
-    name: OPERATOR.name,
-    password: OPERATOR.password,
-  });
+/** Signs in with credentials for an account this run already created — the same request `signInTo`
+ *  makes once it has claimed the instance, generalized to whichever name and password a caller has. */
+export async function signInAs(baseUrl: string, credentials: Credentials, fetching: Fetching = fetch): Promise<SignedIn> {
+  const opened = await posting(fetching, baseUrl, SESSION_PATH, credentials);
   if (opened.status !== 201) throw new HarnessSignInError('sign in', opened.status);
   const body = (await opened.json()) as { data: { csrf: string } };
   const cookie = cookieIn(opened);
@@ -86,6 +82,17 @@ export async function signInTo(baseUrl: string, fetching: Fetching = fetch): Pro
       return ticket.data.ticket;
     },
   };
+}
+
+/**
+ * Claims the instance if it is still claimable and signs in as the operator that claimed it. The claim
+ * is allowed to have happened already — a second browser project drives the same stack — which is the
+ * one status this helper reads without refusing.
+ */
+export async function signInTo(baseUrl: string, fetching: Fetching = fetch): Promise<SignedIn> {
+  const claim = await posting(fetching, baseUrl, ONBOARDING_PATH, OPERATOR);
+  if (claim.status !== 201 && claim.status !== 404) throw new HarnessSignInError('claim the instance', claim.status);
+  return signInAs(baseUrl, { name: OPERATOR.name, password: OPERATOR.password }, fetching);
 }
 
 /** Self-granting control revokes every operator session, so only the fresh sign-in may be used. */

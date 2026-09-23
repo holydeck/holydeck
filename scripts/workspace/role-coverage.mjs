@@ -27,12 +27,36 @@ export const KNOWN_INTEGRATION_GAPS = {
   'capability-routes.ts POST GUEST_INVITATION_PATH PRESENTATION_CONTROL': 'no harness test refuses guest invitations without Control presentation',
   'capability-routes.ts POST OUTPUT_CAPABILITY_PATH PRESENTATION_CONTROL': 'no harness test refuses output capabilities without Control presentation',
   'capability-routes.ts DELETE REVOKE_PATH PRESENTATION_CONTROL': 'no harness test refuses capability revocation without Control presentation',
+  'content-language-routes.ts GET CONTENT_LANGUAGES_PATH CATALOGUE_MANAGE': 'no harness test refuses the content language list to a non-admin',
+  'content-language-routes.ts POST CONTENT_LANGUAGES_PATH CATALOGUE_MANAGE': 'no harness test refuses content language creation to a non-admin',
+  'content-language-routes.ts GET CONTENT_LANGUAGE_CATALOGUE_PATH CONTENT_EDIT': 'no harness test refuses the content language catalogue without content.edit',
+  'content-language-routes.ts GET CONTENT_LANGUAGE_KEY_PATH CATALOGUE_MANAGE': 'no harness test refuses a content language read to a non-admin',
+  'content-language-routes.ts PUT CONTENT_LANGUAGE_KEY_PATH CATALOGUE_MANAGE': 'no harness test refuses a content language edit to a non-admin',
+  'content-language-routes.ts PATCH CONTENT_LANGUAGE_STATUS_PATH CATALOGUE_MANAGE': 'no harness test refuses content language archival to a non-admin',
+  'library-routes.ts GET LIBRARY_PATH CONTENT_EDIT': 'no harness test refuses the library list without content.edit',
+  'library-routes.ts GET LIBRARY_ID_PATH CONTENT_EDIT': 'no harness test refuses a library entry read without content.edit',
   'live.ts GET LIVE_CONNECTIONS_PATH PRESENTATION_CONTROL': 'no harness test refuses live connection counts without Control presentation',
+  'media-routes.ts GET MEDIA_PATH CONTENT_EDIT|MEDIA_MANAGE': 'no harness test refuses the media list to a session with neither permission',
   'media-routes.ts POST MEDIA_PATH MEDIA_MANAGE': 'no harness test refuses media uploads to a non-admin',
+  'media-routes.ts GET MEDIA_ID_PATH CONTENT_EDIT': 'no harness test refuses a media inspect without content.edit',
+  'media-routes.ts PATCH MEDIA_STATUS_PATH MEDIA_MANAGE': 'no harness test refuses media archival or restore to a non-admin',
+  'media-routes.ts POST MEDIA_RETRY_PATH MEDIA_MANAGE': 'no harness test refuses a media retry to a non-admin',
   'order-routes.ts GET ORDER_PATH PRESENTATION_CONTROL': 'no harness test refuses the running order without Control presentation',
+  'preparation-routes.ts POST PREPARATION_PREPARE_PATH SERVICES_MANAGE': 'no harness test refuses preparing a Service without services.manage',
+  'preparation-routes.ts GET PREPARATION_PREPARED_PATH SERVICES_MANAGE': 'no harness test refuses reading a prepared manifest without services.manage',
+  'preparation-routes.ts GET PREPARATION_READINESS_PATH SERVICES_MANAGE': 'no harness test refuses the readiness checklist without services.manage',
+  'preparation-routes.ts POST PREPARATION_OVERRIDE_PATH PRESENTATION_CONTROL': 'no harness test refuses an operator override without Control presentation',
   'reference-routes.ts GET LOOKUP_PATH PRESENTATION_CONTROL': 'no harness test refuses reference lookup without Control presentation',
   'reference-routes.ts POST SHOWN_REFERENCES_PATH PRESENTATION_CONTROL': 'no harness test refuses showing references without Control presentation',
   'reference-routes.ts GET SHOWN_REFERENCES_PATH PRESENTATION_CONTROL': 'no harness test refuses reference history without Control presentation',
+  'scripture-routes.ts GET SCRIPTURE_SEARCH_PATH CONTENT_EDIT|PRESENTATION_CONTROL': 'no harness test refuses scripture search to a session with neither permission',
+  'sermon-routes.ts POST SERMONS_PATH CONTENT_EDIT': 'no harness test refuses sermon creation without content.edit',
+  'sermon-routes.ts GET SERMON_ID_PATH CONTENT_EDIT': 'no harness test refuses a sermon read without content.edit',
+  'sermon-routes.ts PUT SERMON_ID_PATH CONTENT_EDIT': 'no harness test refuses a sermon edit without content.edit',
+  'sermon-routes.ts GET SERMON_RAW_PATH CONTENT_EDIT': 'no harness test refuses a sermon raw read without content.edit',
+  'sermon-routes.ts PUT SERMON_RAW_PATH CONTENT_EDIT': 'no harness test refuses a sermon raw edit without content.edit',
+  'sermon-routes.ts GET SERMON_HISTORY_PATH CONTENT_EDIT': 'no harness test refuses sermon history without content.edit',
+  'sermon-routes.ts POST SERMON_SLIDES_PATH CONTENT_EDIT': 'no harness test refuses sermon slide generation without content.edit',
   'service-routes.ts POST SERVICE_PATH SERVICES_MANAGE': 'no harness test refuses service creation without services.manage',
   'service-routes.ts GET SERVICE_PATH SERVICES_MANAGE': 'no harness test refuses the service list without services.manage',
   'service-routes.ts GET SERVICE_CURRENT_PATH SERVICES_MANAGE': 'no harness test refuses the current service without services.manage',
@@ -54,6 +78,29 @@ export const KNOWN_INTEGRATION_GAPS = {
   'service-routes.ts GET SERVICE_CONTENT_DRIFT_PATH SERVICES_MANAGE': 'no harness test refuses a content-drift read without services.manage',
   'settings-routes.ts GET SETTINGS_PATH SETTINGS_MANAGE': 'no harness test refuses settings reads to a non-admin',
   'settings-routes.ts PATCH SETTINGS_PATH SETTINGS_MANAGE': 'no harness test refuses settings changes to a non-admin',
+  'slide-group-routes.ts POST SLIDE_GROUPS_PATH CONTENT_EDIT': 'no harness test refuses slide group creation without content.edit',
+  'slide-group-routes.ts GET SLIDE_GROUP_ID_PATH CONTENT_EDIT': 'no harness test refuses a slide group read without content.edit',
+  'slide-group-routes.ts PUT SLIDE_GROUP_ID_PATH CONTENT_EDIT': 'no harness test refuses a slide group edit without content.edit',
+  'slide-group-routes.ts POST SLIDE_GROUP_DUPLICATE_PATH CONTENT_EDIT': 'no harness test refuses slide group duplication without content.edit',
+  'slide-group-routes.ts PATCH SLIDE_GROUP_STATUS_PATH CONTENT_EDIT': 'no harness test refuses slide group enable or disable without content.edit',
+  'slide-group-routes.ts POST SLIDE_GROUP_REGENERATE_PATH CONTENT_EDIT': 'no harness test refuses slide group regeneration without content.edit',
+  'slide-group-routes.ts GET SLIDE_GROUP_HISTORY_PATH CONTENT_EDIT': 'no harness test refuses slide group history without content.edit',
+  'slide-group-routes.ts PUT SLIDE_GROUP_SLIDE_ORDER_PATH CONTENT_EDIT': 'no harness test refuses slide reordering without content.edit',
+  'slide-group-routes.ts PATCH SLIDE_PATH CONTENT_EDIT': 'no harness test refuses a slide enable or disable without content.edit',
+  'slide-group-routes.ts POST SLIDE_DUPLICATE_PATH CONTENT_EDIT': 'no harness test refuses slide duplication without content.edit',
+  'slide-group-routes.ts PUT SLIDE_LAYOUT_OVERRIDE_PATH CONTENT_EDIT': 'no harness test refuses a slide layout override without content.edit',
+  'slide-group-routes.ts DELETE SLIDE_LAYOUT_OVERRIDE_PATH CONTENT_EDIT': 'no harness test refuses clearing a slide layout override without content.edit',
+  'slide-group-routes.ts PUT SLIDE_BACKGROUND_OVERRIDE_PATH CONTENT_EDIT': 'no harness test refuses a slide background override without content.edit',
+  'slide-group-routes.ts DELETE SLIDE_BACKGROUND_OVERRIDE_PATH CONTENT_EDIT': 'no harness test refuses clearing a slide background override without content.edit',
+  'slide-group-routes.ts POST LANGUAGE_BLOCK_DUPLICATE_PATH CONTENT_EDIT': 'no harness test refuses language block duplication without content.edit',
+  'slide-group-routes.ts PUT LANGUAGE_BLOCK_ORDER_PATH CONTENT_EDIT': 'no harness test refuses language block reordering without content.edit',
+  'slide-label-routes.ts GET SLIDE_LABELS_PATH CATALOGUE_MANAGE': 'no harness test refuses the slide label list to a non-admin',
+  'slide-label-routes.ts POST SLIDE_LABELS_PATH CATALOGUE_MANAGE': 'no harness test refuses slide label creation to a non-admin',
+  'slide-label-routes.ts GET SLIDE_LABEL_CATALOGUE_PATH CONTENT_EDIT': 'no harness test refuses the slide label catalogue without content.edit',
+  'slide-label-routes.ts GET SLIDE_LABEL_ID_PATH CATALOGUE_MANAGE': 'no harness test refuses a slide label read to a non-admin',
+  'slide-label-routes.ts PUT SLIDE_LABEL_ID_PATH CATALOGUE_MANAGE': 'no harness test refuses a slide label edit to a non-admin',
+  'slide-label-routes.ts PATCH SLIDE_LABEL_STATUS_PATH CATALOGUE_MANAGE': 'no harness test refuses slide label archival to a non-admin',
+  'slide-layout-routes.ts GET SLIDE_LAYOUTS_PATH CONTENT_EDIT|LAYOUTS_MANAGE': 'no harness test refuses the layout list to a session with neither permission',
   'slide-layout-routes.ts POST SLIDE_LAYOUTS_PATH LAYOUTS_MANAGE': 'no harness test refuses layout creation to a non-admin',
   'slide-layout-routes.ts GET LAYOUT_PATH LAYOUTS_MANAGE': 'no harness test refuses layout reads to a non-admin',
   'slide-layout-routes.ts GET LAYOUT_REVISIONS_PATH LAYOUTS_MANAGE': 'no harness test refuses layout revision reads to a non-admin',
@@ -61,8 +108,21 @@ export const KNOWN_INTEGRATION_GAPS = {
   'slide-layout-routes.ts POST LAYOUT_REVISION_PATH LAYOUTS_MANAGE': 'no harness test refuses layout restoration to a non-admin',
   'slide-layout-routes.ts PATCH LAYOUT_STATUS_PATH LAYOUTS_MANAGE': 'no harness test refuses layout archival to a non-admin',
   'service-template-routes.ts POST SERVICE_TEMPLATE_PATH SERVICE_TEMPLATES_MANAGE': 'no harness test refuses template creation to a non-admin',
+  'service-template-routes.ts GET SERVICE_TEMPLATE_PATH SERVICES_MANAGE': 'no harness test refuses the template list without services.manage',
   'service-template-routes.ts GET SERVICE_TEMPLATE_ID_PATH SERVICE_TEMPLATES_MANAGE': 'no harness test refuses template previews to a non-admin',
   'service-template-routes.ts POST SERVICE_TEMPLATE_INSTANTIATE_PATH SERVICES_MANAGE': 'no harness test refuses template instantiation without services.manage',
+  'song-routes.ts POST SONGS_PATH CONTENT_EDIT': 'no harness test refuses song creation without content.edit',
+  'song-routes.ts GET SONG_ID_PATH CONTENT_EDIT': 'no harness test refuses a song read without content.edit',
+  'song-routes.ts PUT SONG_ID_PATH CONTENT_EDIT': 'no harness test refuses a song edit without content.edit',
+  'song-routes.ts GET SONG_RAW_PATH CONTENT_EDIT': 'no harness test refuses a song raw read without content.edit',
+  'song-routes.ts PUT SONG_RAW_PATH CONTENT_EDIT': 'no harness test refuses a song raw edit without content.edit',
+  'song-routes.ts GET SONG_EXPORT_PATH CONTENT_EDIT': 'no harness test refuses a song export without content.edit',
+  'song-routes.ts POST SONG_IMPORT_PATH CONTENT_EDIT': 'no harness test refuses song import without content.edit',
+  'song-routes.ts GET SONG_HISTORY_PATH CONTENT_EDIT': 'no harness test refuses song history without content.edit',
+  'song-routes.ts POST SONG_SLIDES_PATH CONTENT_EDIT': 'no harness test refuses song slide generation without content.edit',
+  'song-routes.ts POST SONG_SINGER_CHORDS_PATH CONTENT_EDIT': 'no harness test refuses creating song-singer chords without content.edit',
+  'song-routes.ts GET SONG_SINGER_CHORDS_PATH CONTENT_EDIT': 'no harness test refuses reading song-singer chords without content.edit',
+  'song-routes.ts PUT SONG_SINGER_CHORDS_PATH CONTENT_EDIT': 'no harness test refuses editing song-singer chords without content.edit',
   'translation-offset-routes.ts PUT SET_PATH SETTINGS_MANAGE': 'no harness test refuses translation offset changes to a non-admin',
 };
 
@@ -163,12 +223,21 @@ export function permissionRoutesIn(routeSources) {
       const guard = need !== undefined && ts.isIdentifier(need) ? constants.get(need.text) : need;
       const kind = property(guard, 'kind');
       const permission = property(guard, 'need');
+      const needs = property(guard, 'needs');
       let signature;
       if (kind !== undefined && ts.isStringLiteral(kind) && ['public', 'session'].includes(kind.text)) {
         signature = kind.text;
       } else if (kind !== undefined && ts.isStringLiteral(kind) && kind.text === 'permission' &&
                  permission !== undefined && (ts.isIdentifier(permission) || ts.isStringLiteral(permission))) {
         signature = permission.getText(tree);
+        routes.push(`${route} ${signature}`);
+      } else if (kind !== undefined && ts.isStringLiteral(kind) && kind.text === 'any-permission' &&
+                 needs !== undefined && ts.isArrayLiteralExpression(needs) &&
+                 needs.elements.every((element) => ts.isIdentifier(element) || ts.isStringLiteral(element))) {
+        // Joined with `|` rather than kept as a list, so the same route asked for a different pair of
+        // permissions — or the same pair in a different order — is a route this census no longer knows,
+        // the same way any other weakened guard becomes one.
+        signature = needs.elements.map((element) => element.getText(tree)).join('|');
         routes.push(`${route} ${signature}`);
       } else {
         problems.push(`${route} has no recognizable authorization guard`);

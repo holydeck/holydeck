@@ -23,12 +23,15 @@ import type { SessionStore } from './sessions.js';
 /**
  * What a route needs before its handler runs. `public` needs nothing; `session` needs one proved, and
  * proves it for a safe route the way `csrf.ts` already does for a mutating one; `permission` needs that
- * session's record to carry the named permission besides.
+ * session's record to carry the named permission besides; `any-permission` needs it to carry at least one
+ * of several — a route two unrelated permissions both open, such as Bible search to whoever may either
+ * edit content or control a presentation, without inventing a third permission that means only "or".
  */
 export type RouteNeed =
   | { readonly kind: 'public' }
   | { readonly kind: 'session' }
-  | { readonly kind: 'permission'; readonly need: string };
+  | { readonly kind: 'permission'; readonly need: string }
+  | { readonly kind: 'any-permission'; readonly needs: readonly string[] };
 
 export interface Route {
   /** Fastify's own spelling of a method, so a table of these can be replayed against the application. */
@@ -55,6 +58,23 @@ const NEEDS = new WeakMap<FastifyInstance, Map<string, RouteNeed>>();
 const keyFor = (method: string, url: string): string => `${method} ${url}`;
 
 const AUTHZ_PREFIX = 'authz:';
+
+/**
+ * What is missing for `held` to satisfy `need`, or `undefined` once it does. `public` and `session` are
+ * never asked here — this check runs only once a session is already proven, and neither names a
+ * permission for one to carry.
+ */
+function shortfall(need: RouteNeed, held: readonly string[]): string | undefined {
+  if (need.kind === 'permission') {
+    return held.includes(need.need) ? undefined : `this session may not ${need.need}`;
+  }
+  if (need.kind === 'any-permission') {
+    return need.needs.some((one) => held.includes(one))
+      ? undefined
+      : `this session may not ${need.needs.join(' or ')}`;
+  }
+  return undefined;
+}
 
 /** The need declared for every route this check is installed on. A route it was never put on has none. */
 export function needsOf(app: FastifyInstance): ReadonlyMap<string, RouteNeed> {
@@ -98,8 +118,8 @@ export function enforceAuthorization(app: FastifyInstance, { sessions, identity 
     if (proven === undefined) return;
     if (!mutates(request.method)) rememberProvenSession(request, proven);
 
-    if (need.kind === 'permission' && !proven.record.permissions.includes(need.need)) {
-      const detail = `this session may not ${need.need}`;
+    const detail = shortfall(need, proven.record.permissions);
+    if (detail !== undefined) {
       if (identity !== undefined) {
         try {
           await identity.audit.record(auditContext(proven.record.actor, correlationFor(AUTHZ_PREFIX, request.id)), {

@@ -2,11 +2,42 @@ import { describe, expect, it } from 'vitest';
 
 import { CONTENT_LANGUAGES } from './content-languages.js';
 import { FIELD_CODES } from './problems.js';
-import { SLIDE_GROUP_MODES, parseLanguageBlock, parseSlide, parseSlideGroupBody, resolveSlide } from './slide-groups.js';
+import { SLIDE_GROUP_MODES, parseLanguageBlock, parseLanguageBlockOrder, parseSlide, parseSlideBackgroundOverride, parseSlideGroupBody, parseSlideGroupDraft, parseSlideGroupStatus, parseSlideLayoutOverride, parseSlideOrder, resolveSlide } from './slide-groups.js';
 
 import type { LanguageBlock, Slide, SlideGroupBody } from './slide-groups.js';
 
 const SLIDE = { id: 'slide-1', enabled: true, label: 'Welcome', languageBlocks: [] };
+
+describe('reading slide group route payloads', () => {
+  const body = { mode: 'custom', enabled: true, slideLayoutId: 'layout', slides: [] };
+
+  it('accepts a SlideGroupDraft', () => {
+    const value = { kind: 'slideGroup', title: 'Set', body };
+    expect(parseSlideGroupDraft(value, 'group')).toEqual({ ok: true, value });
+  });
+
+  it('refuses each required SlideGroupDraft field', () => {
+    expect(parseSlideGroupDraft({ title: 'Set', body }, 'group')).toEqual({ ok: false, problems: [{ path: 'group.kind', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSlideGroupDraft({ kind: 'slideGroup', body }, 'group')).toEqual({ ok: false, problems: [{ path: 'group.title', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSlideGroupDraft({ kind: 'slideGroup', title: 'Set' }, 'group')).toEqual({ ok: false, problems: [{ path: 'group.body', code: FIELD_CODES.required, message: 'is required' }] });
+  });
+
+  it('accepts the group status and order/override payloads', () => {
+    expect(parseSlideGroupStatus({ enabled: true })).toEqual({ ok: true, value: { enabled: true } });
+    expect(parseSlideOrder({ slideIds: ['a', 'b'] }, 'group')).toEqual({ ok: true, value: { slideIds: ['a', 'b'] } });
+    expect(parseLanguageBlockOrder({ blockIds: ['a'] }, 'group')).toEqual({ ok: true, value: { blockIds: ['a'] } });
+    expect(parseSlideLayoutOverride({ slideLayoutId: 'layout' }, 'group')).toEqual({ ok: true, value: { slideLayoutId: 'layout' } });
+    expect(parseSlideBackgroundOverride({ background: 'navy' }, 'group')).toEqual({ ok: true, value: { background: 'navy' } });
+  });
+
+  it('refuses the required status, order, and override fields', () => {
+    expect(parseSlideGroupStatus({})).toEqual({ ok: false, problems: [{ path: 'slideGroup.enabled', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSlideOrder({}, 'group')).toEqual({ ok: false, problems: [{ path: 'group.slideIds', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseLanguageBlockOrder({}, 'group')).toEqual({ ok: false, problems: [{ path: 'group.blockIds', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSlideLayoutOverride({}, 'group')).toEqual({ ok: false, problems: [{ path: 'group.slideLayoutId', code: FIELD_CODES.required, message: 'is required' }] });
+    expect(parseSlideBackgroundOverride({}, 'group')).toEqual({ ok: false, problems: [{ path: 'group.background', code: FIELD_CODES.required, message: 'is required' }] });
+  });
+});
 
 describe('reading a Slide', () => {
   it('round-trips id, enabled, and label', () => {

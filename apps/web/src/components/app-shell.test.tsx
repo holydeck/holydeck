@@ -107,4 +107,18 @@ describe('the navigation shell', () => {
     expect(screen.getByRole('navigation')).toBeTruthy();
     expect(document.getElementById('announce-polite')?.textContent).toBe('Saved');
   });
+
+  it('allows every navigation label to grow by 30% without nowrap or hidden overflow', () => {
+    session.value = signedIn(['accounts.manage']);
+    render(<AppShell><p>page</p></AppShell>);
+    const controls = [...document.querySelectorAll('.app-nav a')];
+
+    for (const control of controls) {
+      const original = control.textContent ?? '';
+      control.textContent = original + 'x'.repeat(Math.ceil(original.length * 0.3));
+      expect(control.textContent.length).toBeGreaterThanOrEqual(Math.ceil(original.length * 1.3));
+      expect(getComputedStyle(control).whiteSpace).not.toBe('nowrap');
+      expect(getComputedStyle(control).overflow).not.toBe('hidden');
+    }
+  });
 });

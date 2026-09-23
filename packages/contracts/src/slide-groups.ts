@@ -45,7 +45,9 @@
 // between slides changes anything about it), so it is declared once here and not on `Slide`.
 
 import { isContentLanguageKey } from './content-languages.js';
-import { FIELD_CODES, type FieldReader, isRecord, type ParseFn, parseObject } from './problems.js';
+import { FIELD_CODES, type FieldReader, isRecord, type Parsed, type ParseFn, parseObject } from './problems.js';
+
+export const SLIDE_GROUPS_PATH = '/api/v1/slide-groups';
 
 /** One block of ordered, language-specific content on a slide (LANG-01): its own text, in one
  *  language of the content-language registry. */
@@ -168,6 +170,52 @@ export const parseSlideGroupBody: ParseFn<SlideGroupBody> = (value, path) =>
       ...(generatedFrom === undefined ? {} : { generatedFrom }),
     };
   });
+
+const EMPTY_SLIDE_GROUP_BODY: SlideGroupBody = {
+  mode: 'custom',
+  enabled: true,
+  slideLayoutId: 'none',
+  slides: [],
+};
+
+export type SlideGroupDraft = {
+  readonly kind: 'slideGroup' | 'reusableSlide';
+  readonly title: string;
+  readonly body: SlideGroupBody;
+};
+
+export const parseSlideGroupDraft: ParseFn<SlideGroupDraft> = (value, path) =>
+  parseObject(value, path, (reader) => ({
+    kind: reader.choice('kind', ['slideGroup', 'reusableSlide']),
+    title: reader.text('title'),
+    body: reader.parsed('body', parseSlideGroupBody, EMPTY_SLIDE_GROUP_BODY),
+  }));
+
+export type SlideGroupStatus = { readonly enabled: boolean };
+
+export function parseSlideGroupStatus(value: unknown): Parsed<SlideGroupStatus> {
+  return parseObject(value, 'slideGroup', (reader) => ({ enabled: reader.flag('enabled') }));
+}
+
+export type SlideOrder = { readonly slideIds: readonly string[] };
+
+export const parseSlideOrder: ParseFn<SlideOrder> = (value, path) =>
+  parseObject(value, path, (reader) => ({ slideIds: reader.textList('slideIds') }));
+
+export type LanguageBlockOrder = { readonly blockIds: readonly string[] };
+
+export const parseLanguageBlockOrder: ParseFn<LanguageBlockOrder> = (value, path) =>
+  parseObject(value, path, (reader) => ({ blockIds: reader.textList('blockIds') }));
+
+export type SlideLayoutOverride = { readonly slideLayoutId: string };
+
+export const parseSlideLayoutOverride: ParseFn<SlideLayoutOverride> = (value, path) =>
+  parseObject(value, path, (reader) => ({ slideLayoutId: reader.text('slideLayoutId') }));
+
+export type SlideBackgroundOverride = { readonly background: string };
+
+export const parseSlideBackgroundOverride: ParseFn<SlideBackgroundOverride> = (value, path) =>
+  parseObject(value, path, (reader) => ({ background: reader.text('background') }));
 
 /** Whether an effective value came from the group's own default or a slide's explicit override. */
 export type InheritanceSource = 'inherited' | 'override';

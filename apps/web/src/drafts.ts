@@ -1,10 +1,11 @@
 // Form drafts survive a required reload without becoming another source of credentials: this narrow
 // storage seam only keeps flat strings, tolerates browsers that deny storage, and excludes fields that
-// could be a password or one-time code before any JSON reaches localStorage.
+// could be a password or one-time code before any JSON reaches sessionStorage. Drafts belong only to
+// this tab, so they cannot outlive it or be read by the next account using a shared browser.
 
 import { useState } from 'preact/hooks';
 
-/** The localStorage namespace shared by form drafts and kept separate from every other browser record. */
+/** The sessionStorage namespace shared by form drafts, isolated to this tab and its current account boundary. */
 export const DRAFT_PREFIX = 'holydeck:draft:';
 
 const isSafeField = (name: string): boolean => !/(?:password|code)/iu.test(name);
@@ -22,7 +23,7 @@ const isDraft = (value: unknown): value is Readonly<Record<string, string>> =>
 export function saveDraft(key: string, value: Readonly<Record<string, string>>): void {
   try {
     const safe = Object.fromEntries(Object.entries(value).filter(([name]) => isSafeField(name)));
-    globalThis.localStorage.setItem(`${DRAFT_PREFIX}${key}`, JSON.stringify(safe));
+    globalThis.sessionStorage.setItem(`${DRAFT_PREFIX}${key}`, JSON.stringify(safe));
   } catch {
     // Browser storage can be absent, full or unavailable in a private browsing context.
   }
@@ -31,7 +32,7 @@ export function saveDraft(key: string, value: Readonly<Record<string, string>>):
 /** Reads one validated form draft, treating absent, malformed or inaccessible storage as no draft. */
 export function readDraft(key: string): Readonly<Record<string, string>> | undefined {
   try {
-    const raw = globalThis.localStorage.getItem(`${DRAFT_PREFIX}${key}`);
+    const raw = globalThis.sessionStorage.getItem(`${DRAFT_PREFIX}${key}`);
     if (raw === null) return undefined;
     const parsed: unknown = JSON.parse(raw);
     return isDraft(parsed) ? parsed : undefined;
@@ -43,19 +44,39 @@ export function readDraft(key: string): Readonly<Record<string, string>> | undef
 /** Removes one saved form draft, without letting a browser storage failure interrupt the form itself. */
 export function clearDraft(key: string): void {
   try {
-    globalThis.localStorage.removeItem(`${DRAFT_PREFIX}${key}`);
+    globalThis.sessionStorage.removeItem(`${DRAFT_PREFIX}${key}`);
   } catch {
     // Browser storage can be absent, full or unavailable in a private browsing context.
   }
 }
 
+/** Removes every form draft from this tab when its account boundary ends, ignoring storage failures. */
+export function clearAllDrafts(): void {
+  let keys: string[];
+  try {
+    const storage = globalThis.sessionStorage;
+    keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
+      .filter((key): key is string => key?.startsWith(DRAFT_PREFIX) ?? false);
+  } catch {
+    // Browser storage can be absent, full or unavailable in a private browsing context.
+    return;
+  }
+  for (const key of keys) {
+    try {
+      globalThis.sessionStorage.removeItem(key);
+    } catch {
+      // One inaccessible record must not leave the rest of this tab's drafts behind.
+    }
+  }
+}
+
 /** Keeps a form draft in component state while writing each safe change for a later reload to restore. */
-export function useDraft(
+export function useDraft<T extends Readonly<Record<string, string>>>(
   key: string,
-  initial: Readonly<Record<string, string>>,
-): readonly [Readonly<Record<string, string>>, (next: Readonly<Record<string, string>>) => void, () => void] {
-  const [draft, setDraft] = useState<Readonly<Record<string, string>>>(() => readDraft(key) ?? initial);
-  const set = (next: Readonly<Record<string, string>>): void => {
+  initial: T,
+): readonly [T, (next: T) => void, () => void] {
+  const [draft, setDraft] = useState<T>(() => ({ ...initial, ...(readDraft(key) ?? {}) }));
+  const set = (next: T): void => {
     setDraft(next);
     saveDraft(key, next);
   };

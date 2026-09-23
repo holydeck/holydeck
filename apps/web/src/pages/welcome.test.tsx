@@ -123,6 +123,22 @@ describe('WelcomePage', () => {
     ]);
   });
 
+  it('returns to sign-in with an explanation when the new account cannot open a session', async () => {
+    setFetching(async (path, init) => path === ONBOARDING_PATH && init.method === 'POST'
+      ? reply(201, successEnvelope({}, 'request-1'))
+      : reply(401, errorEnvelope('session.sign_in_refused', 'Refused', 'request-2')));
+    render(<App />);
+    fill();
+
+    submit();
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe(
+      'Signing in failed. Check the handle and the password, and try again in a few minutes.',
+    );
+    expect(currentPath.value).toBe('/sign-in?notice=claim-sign-in-refused');
+  });
+
   it('shows the sign-in link once a claim has already happened', () => {
     onboarding.value = 'claimed';
     render(<App />);

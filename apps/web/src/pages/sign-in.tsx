@@ -15,7 +15,7 @@ import { boot, request } from '../request.js';
 import type { JSX } from 'preact';
 
 /** The session-opening form, with an optional safe destination supplied by the router. */
-export function SignInPage({ next }: { readonly next: string | undefined }): JSX.Element {
+export function SignInPage({ next, notice }: { readonly next: string | undefined; readonly notice?: 'claim-sign-in-refused' }): JSX.Element {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -48,6 +48,7 @@ export function SignInPage({ next }: { readonly next: string | undefined }): JSX
     <form noValidate onSubmit={submit}>
       <h1>{t('signIn.title')}</h1>
       {session.value === null && next !== undefined ? <p role="status">{t('signIn.expired')}</p> : null}
+      {notice === 'claim-sign-in-refused' ? <p role="status">{t('signIn.refused')}</p> : null}
       {error === undefined ? null : <p role="alert">{error}</p>}
       <FormField id="sign-in-name" label={t('signIn.name')} value={name} onInput={setName} autoComplete="username" required />
       <FormField

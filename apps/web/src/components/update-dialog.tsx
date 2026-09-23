@@ -1,6 +1,6 @@
 // A server can retire an older client while an operator is editing a form. This dialog makes reloading
-// unavoidable while keeping its sole action focused and contained; drafts already persist with each
-// keystroke, so reload itself has no additional saving work to do.
+// unavoidable while keeping its sole action focused and contained; forms that use `useDraft` — currently
+// the Users create form — persist safe fields with each keystroke, so reload itself has no additional work.
 
 import { useEffect, useRef } from 'preact/hooks';
 
