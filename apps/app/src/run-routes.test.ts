@@ -288,6 +288,26 @@ describe('reading a run deck', () => {
     const response = await asking('GET', runPath(RUN_DECK_PATH, 'run-unknown'), undefined, operator);
     expect(response.statusCode).toBe(404);
   });
+
+  test.each([
+    ['no session and no ticket', {}],
+    ['only a ticket, which names no run the caller can prove', { [LIVE_TICKET_HEADER]: 'not-a-ticket' }],
+  ])('answers 403, not 404, for an unknown run to a caller with %s', async (_label, headers) => {
+    const response = await asking('GET', runPath(RUN_DECK_PATH, 'run-unknown'), undefined, undefined, headers);
+    expect(response.statusCode).toBe(403);
+  });
+
+  test('answers 304 with no body when the client already holds the current deck', async () => {
+    const runId = await startRun();
+    const first = await asking('GET', runPath(RUN_DECK_PATH, runId), undefined, operator);
+    const etag = String(first.headers.etag);
+    const again = await asking('GET', runPath(RUN_DECK_PATH, runId), undefined, operator, { 'if-none-match': etag });
+    expect(again.statusCode).toBe(304);
+    expect(again.body).toBe('');
+    expect(again.headers.etag).toBe(etag);
+    const stale = await asking('GET', runPath(RUN_DECK_PATH, runId), undefined, operator, { 'if-none-match': '"other"' });
+    expect(stale.statusCode).toBe(200);
+  });
 });
 
 describe('changing a run theme', () => {

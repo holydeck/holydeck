@@ -267,14 +267,16 @@ export function serveRunRoutes(
     return reply.send(successEnvelope(view, request.id, CLIENT_WINDOW.current));
   });
 
-  // Public: an output window or a Guest holds a capability, never a session (D-4). The run is resolved
-  // first — from a neutral, server-asserted context, the same way `run-engine.ts`'s own `restore()` reads
-  // — so the ticket path below has a `serviceId` to check the ticket against before it is spent.
+  // Public: an output window or a Guest holds a capability, never a session (D-4). A session is checked
+  // first and needs no run; the run is resolved next — from a neutral, server-asserted context, the same
+  // way `run-engine.ts`'s own `restore()` reads — so the ticket path has a `serviceId` to check the
+  // ticket against before it is spent. Only a proven session is ever told a run does not exist: every
+  // other caller gets the same 403 for an unknown run as for a refused one.
   app.get(RUN_DECK_PATH, { config: { need: PUBLIC } }, async (request, reply) => {
     const runId = runIdIn(request);
     const correlationId = correlationFor('run:deck:', request.id);
-    const record = await runs.resume(runContext('system', correlationId), runId);
-    if (record === undefined) return reply.code(404).send(notFound(request));
+    const forbidden = () =>
+      reply.code(403).send(errorEnvelope(FORBIDDEN, 'no session or live ticket authorizes this deck view', request.id));
 
     const rawView = (request.query as Record<string, unknown>).view;
     const view: DeckView = typeof rawView === 'string' && isDeckView(rawView) ? rawView : 'audience';
@@ -297,31 +299,34 @@ export function serveRunRoutes(
 
     // A ticket authorizes a guest or output view only — never `'control'`, which `CapabilityView`
     // structurally excludes, and only once a session has already failed to authorize this request.
-    if (actor === undefined && view !== 'control') {
-      const ticket = request.headers[LIVE_TICKET_HEADER];
-      if (typeof ticket === 'string' && ticket !== '') {
-        try {
-          await capabilities.redeem(capabilityContext(correlationId), ticket, { service: record.serviceId, view });
-          actor = 'live-ticket';
-        } catch (error: unknown) {
-          if (!(error instanceof CapabilityError)) throw error;
-          // The ticket did not authorize this view; falls through to the 403 below.
-        }
+    const header = request.headers[LIVE_TICKET_HEADER];
+    const ticket = actor === undefined && view !== 'control' && typeof header === 'string' && header !== '' ? header : undefined;
+    if (actor === undefined && ticket === undefined) return forbidden();
+
+    const record = await runs.resume(runContext('system', correlationId), runId);
+    if (record === undefined) return actor === undefined ? forbidden() : reply.code(404).send(notFound(request));
+
+    if (ticket !== undefined && view !== 'control') {
+      try {
+        await capabilities.redeem(capabilityContext(correlationId), ticket, { service: record.serviceId, view });
+        actor = 'live-ticket';
+      } catch (error: unknown) {
+        if (!(error instanceof CapabilityError)) throw error;
+        // The ticket did not authorize this view; falls through to the 403 below.
       }
     }
 
-    if (actor === undefined) {
-      return reply.code(403).send(errorEnvelope(FORBIDDEN, 'no session or live ticket authorizes this deck view', request.id));
-    }
+    if (actor === undefined) return forbidden();
 
     const context = runContext(actor, correlationId);
     const runDeck = await deck(context, record);
     const projected = projectDeck(runDeck, view, record.live);
     const etag = `"${createHash('sha256').update(JSON.stringify(projected)).digest('hex')}"`;
-    return reply
-      .header('ETag', etag)
-      .header('Cache-Control', 'private, max-age=0, must-revalidate')
-      .send(successEnvelope(projected, request.id, CLIENT_WINDOW.current));
+    reply.header('ETag', etag).header('Cache-Control', 'private, max-age=0, must-revalidate');
+    // A revalidating client that already holds this exact projection is told so without the body.
+    const held = request.headers['if-none-match'];
+    if (typeof held === 'string' && held.split(',').some((tag) => tag.trim() === etag)) return reply.code(304).send();
+    return reply.send(successEnvelope(projected, request.id, CLIENT_WINDOW.current));
   });
 
   app.post(RUN_THEME_PATH, { config: { need: CONTROL_PERMISSION } }, async (request, reply) => {
