@@ -59,6 +59,9 @@ const EMPTY_SCREEN: LivePosition = { itemId: '', slideIndex: 0 };
 
 // The generic mode model always holds a position. The persisted/wire model distinguishes a standby
 // screen from a slide, so translate its screen identifier into a synthetic position only for reducers.
+// The reducers only ever copy that synthetic object by reference, so identity tells `fromModeState`
+// whether a reducer really moved a position or merely carried the standby screen along — a pause or
+// return-to-live issued in standby must never publish `{itemId: '<screenId>', slideIndex: 0}` as a slide.
 const toModeState = (live: LiveState): LiveModeState<LivePosition> => ({
   mode: live.mode,
   publicPosition: 'standby' in live.public ? { itemId: live.public.standby, slideIndex: 0 } : live.public,
@@ -66,12 +69,17 @@ const toModeState = (live: LiveState): LiveModeState<LivePosition> => ({
   emptyScreen: EMPTY_SCREEN,
 });
 
-const fromModeState = (base: LiveState, next: LiveModeState<LivePosition>): LiveState => ({
-  ...base,
-  mode: next.mode,
-  public: next.mode === 'standby' ? { standby: next.publicPosition.itemId } : next.publicPosition,
-  selected: next.selectedPosition,
-});
+const fromModeState = (base: LiveState, prior: LiveModeState<LivePosition>, next: LiveModeState<LivePosition>): LiveState => {
+  const standbyScreen = 'standby' in base.public ? prior.publicPosition : undefined;
+  const carried = (position: LivePosition): boolean => standbyScreen !== undefined && position === standbyScreen;
+  return {
+    ...base,
+    mode: next.mode,
+    public: carried(next.publicPosition) ? base.public
+      : next.mode === 'standby' ? { standby: next.publicPosition.itemId } : next.publicPosition,
+    selected: carried(next.selectedPosition) ? base.selected : next.selectedPosition,
+  };
+};
 
 type Command =
   | { readonly type: 'go-to' | 'select'; readonly position: LivePosition }
@@ -224,9 +232,10 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
         return { outcome: error instanceof RunEventError && (error.kind === 'schema' || error.kind === 'permission') ? 'invalid' : 'failed' };
       }
     }
-    const nextMode = reduce(command, toModeState(run.live), deck);
+    const prior = toModeState(run.live);
+    const nextMode = reduce(command, prior, deck);
     if (nextMode === undefined) return { outcome: 'invalid' };
-    const next = fromModeState(run.live, nextMode);
+    const next = fromModeState(run.live, prior, nextMode);
     const kind = kindFor(command.type);
     await options.runEvents.record(session, {
       runId, kind, pinnedRevisions: deck.pinnedRevisions,

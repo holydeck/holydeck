@@ -328,6 +328,16 @@ describe('run-engine command ordering', () => {
     expect(engine.state('run-1')).toMatchObject({ mode: 'live', public: SECOND });
   });
 
+  it.each(['pause', 'return-to-live'] as const)('%s from standby keeps the standby screen public, never a fake slide', async (command) => {
+    const { engine, hub } = await started();
+    await engine.command(CONTROL_MEMBER, frame('standby', { screenId: 'welcome' }));
+    await engine.command(CONTROL_MEMBER, frame('select', SECOND));
+    hub.publishToCalls.length = 0;
+    expect(await engine.command(CONTROL_MEMBER, frame(command))).toEqual({ outcome: 'applied' });
+    expect(engine.state('run-1')).toMatchObject({ public: { standby: 'welcome' }, selected: SECOND });
+    expect(hub.publishToCalls.map((c) => c.channel)).not.toContain('audience');
+  });
+
   it('return-to-live discards private selection without moving public', async () => {
     const { engine } = await started();
     await engine.command(CONTROL_MEMBER, frame('pause'));
