@@ -69,6 +69,13 @@ export const AUDIT_ACTIONS = [
   // upload (including a refused one) and the commit that turns a reviewed import into a Song.
   'pptx.import',
   'pptx.commit',
+  // A Service Template's own history, apart from `content.change`: creating stays on the shared action
+  // (TMPL-04, AUTH-09), but saving forward, archiving, bringing back and converting from a Service each
+  // get their own, per the same spec.
+  'serviceTemplate.version',
+  'serviceTemplate.archive',
+  'serviceTemplate.unarchive',
+  'serviceTemplate.fromService',
   // A Service's own history: creating, duplicating, scheduling, archiving/unarchiving, transitioning
   // through its lifecycle, and editing its sections and items. `services.ts` is the only caller — no
   // routes task exists yet to carry this the way `accounts-routes.ts` carries `account.*`, so the
@@ -149,6 +156,10 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'content.change': 'content',
   'pptx.import': 'content',
   'pptx.commit': 'content',
+  'serviceTemplate.version': 'content',
+  'serviceTemplate.archive': 'content',
+  'serviceTemplate.unarchive': 'content',
+  'serviceTemplate.fromService': 'content',
   'service.create': 'content',
   'service.duplicate': 'content',
   'service.schedule': 'content',

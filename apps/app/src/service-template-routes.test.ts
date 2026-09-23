@@ -267,7 +267,7 @@ describe('saving a Service Template forward', () => {
     const id = await created();
     const response = await versioning(id, WIRE_OTHER_BODY);
     expect(response.statusCode).toBe(200);
-    expect(response.json().data).toEqual({ appended: true, revision: 2 });
+    expect(response.json().data).toEqual({ appended: true, renamed: false, revision: 2 });
     expect((await previewing(id)).json().data.body).toEqual(OTHER_BODY);
   });
 
@@ -275,22 +275,24 @@ describe('saving a Service Template forward', () => {
     const id = await created();
     const response = await versioning(id, WIRE_BODY);
     expect(response.statusCode).toBe(200);
-    expect(response.json().data).toEqual({ appended: false, revision: 1 });
+    expect(response.json().data).toEqual({ appended: false, renamed: false, revision: 1 });
     expect(actions()).toEqual(['content.change']);
   });
 
-  test('saves a new name even when the entries did not change, and a later preview reads it back', async () => {
+  test('saves a new name even when the entries did not change, and audits the rename', async () => {
     const id = await created();
     const response = await versioning(id, { ...WIRE_BODY, name: 'Sunday service v2' });
     expect(response.statusCode).toBe(200);
-    expect(response.json().data).toEqual({ appended: false, revision: 1 });
+    expect(response.json().data).toEqual({ appended: false, renamed: true, revision: 1 });
     expect((await previewing(id)).json().data.name).toBe('Sunday service v2');
+    expect(actions()).toEqual(['content.change', 'serviceTemplate.version']);
+    expect(entries()[1]).toMatchObject({ subject: `serviceTemplate:${id}`, detail: 'renamed' });
   });
 
   test('records one entry per ordinal it appended, naming the ordinal', async () => {
     const id = await created();
     await versioning(id, WIRE_OTHER_BODY);
-    expect(actions()).toEqual(['content.change', 'content.change']);
+    expect(actions()).toEqual(['content.change', 'serviceTemplate.version']);
     expect(entries()[1]).toMatchObject({ subject: `serviceTemplate:${id}`, detail: 'saved revision 2' });
   });
 
@@ -349,6 +351,7 @@ describe('archiving a Service Template and bringing it back', () => {
     await statusing(id, { archived: true });
     await statusing(id, { archived: false });
     expect(entries().map((entry) => entry['detail'])).toEqual(['created', 'archived', 'brought back']);
+    expect(actions()).toEqual(['content.change', 'serviceTemplate.archive', 'serviceTemplate.unarchive']);
   });
 });
 
@@ -399,6 +402,7 @@ describe('minting a Service Template from a Service', () => {
     expect(response.json().data.body.sections[0].entries[0]).toMatchObject({ id: 'opener', slot: 'fixed' });
     expect(entries()).toContainEqual(
       expect.objectContaining({
+        action: 'serviceTemplate.fromService',
         subject: `serviceTemplate:${response.json().data.stamp.id}`,
         detail: `converted from ${service.stamp.id}`,
       }),

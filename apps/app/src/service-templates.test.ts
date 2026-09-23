@@ -181,6 +181,7 @@ describe('version', () => {
     const created = await templates.create(ADMIN, DRAFT);
     expect(await templates.version(ADMIN, created.stamp.id, { name: created.name, body: OTHER_BODY })).toEqual({
       appended: true,
+      renamed: false,
       revision: 2,
     });
     expect(rows(db, REVISIONS)).toHaveLength(2);
@@ -196,6 +197,7 @@ describe('version', () => {
     const created = await templates.create(ADMIN, DRAFT);
     expect(await templates.version(ADMIN, created.stamp.id, { name: created.name, body: BODY })).toEqual({
       appended: false,
+      renamed: false,
       revision: 1,
     });
     expect(rows(db, REVISIONS)).toHaveLength(1);
@@ -207,6 +209,7 @@ describe('version', () => {
     const created = await templates.create(ADMIN, DRAFT);
     expect(await templates.version(ADMIN, created.stamp.id, { name: 'Sunday Service v2', body: BODY })).toEqual({
       appended: false,
+      renamed: true,
       revision: 1,
     });
     expect(rows(db, REVISIONS)).toHaveLength(1);

@@ -5,8 +5,9 @@
 // the list, which an Editor may also read under `services.manage` alone (see `service-templates.ts`'s own
 // context for why). A deployment with nowhere to keep an identity serves the same paths answering
 // not-found — nothing here to audit a change against. Reading is never audited; a change that actually
-// happened is, exactly once, through the same shared `content.change` action every other content surface
-// uses, with the direction said in its `detail` rather than in an action of its own.
+// happened is, exactly once — creating stays on the shared `content.change` action every other content
+// surface uses, but saving forward, archiving, bringing back and converting from a Service each get their
+// own action instead, with the direction said in the detail beside archive/unarchive rather than in two.
 //
 // `/status` is whether a Template is offered at all; the bare id path saved with PUT is what it is built
 // from. Saving entries onto an archived Template is refused rather than quietly bringing it back, which is
@@ -126,11 +127,11 @@ export function serveServiceTemplateRoutes(
 
   /**
    * Written after the change, and logged rather than answered when the trail refuses it: a Template that
-   * was created or saved forward holds that, whether or not this server managed to write it down. One
-   * action for all of them — the content surface has one — with the direction in the detail beside it.
+   * was created or saved forward holds that, whether or not this server managed to write it down.
    */
   const note = async (
     request: FastifyRequest,
+    action: 'content.change' | 'serviceTemplate.version' | 'serviceTemplate.archive' | 'serviceTemplate.unarchive' | 'serviceTemplate.fromService',
     id: string,
     outcome: AuditOutcome,
     detail: string,
@@ -138,7 +139,7 @@ export function serveServiceTemplateRoutes(
     try {
       await identity.audit.record(
         auditContext(provenSession(request).record.actor, correlationFor(TEMPLATE_PREFIX, request.id)),
-        { action: 'content.change', subject: subjectFor(id), outcome, detail },
+        { action, subject: subjectFor(id), outcome, detail },
       );
     } catch (error: unknown) {
       request.log.error({ err: error }, 'the Service Template trail refused an entry');
@@ -156,7 +157,7 @@ export function serveServiceTemplateRoutes(
     if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
     const answer = await settled(() => templates.create(call(request), parsed.value), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
-    await note(request, answer.value.stamp.id, 'allowed', 'created');
+    await note(request, 'content.change', answer.value.stamp.id, 'allowed', 'created');
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
@@ -180,8 +181,13 @@ export function serveServiceTemplateRoutes(
     const answer = await settled(() => templates.version(call(request), id, parsed.value), isRefusal);
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
-    // A save that changed nothing is not a change, and the trail is a record of changes.
-    if (answer.value.appended) await note(request, id, 'allowed', `saved revision ${answer.value.revision}`);
+    // A save that changed neither the entries nor the name is not a change, and the trail is a record of
+    // changes — but a rename alone still writes a stamp row, so it is still worth an entry.
+    if (answer.value.appended) {
+      await note(request, 'serviceTemplate.version', id, 'allowed', `saved revision ${answer.value.revision}`);
+    } else if (answer.value.renamed) {
+      await note(request, 'serviceTemplate.version', id, 'allowed', 'renamed');
+    }
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
@@ -210,8 +216,14 @@ export function serveServiceTemplateRoutes(
     );
     if (!answer.ok) return reply.code(409).send(errorEnvelope(ENTITY_CONFLICT, answer.message, request.id));
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
-    // The direction is in the detail rather than in two actions, because the content surface names one.
-    await note(request, id, 'allowed', parsed.value.archived ? 'archived' : 'brought back');
+    // The direction is in the detail as well as in the action, so either alone still says which happened.
+    await note(
+      request,
+      parsed.value.archived ? 'serviceTemplate.archive' : 'serviceTemplate.unarchive',
+      id,
+      'allowed',
+      parsed.value.archived ? 'archived' : 'brought back',
+    );
     return reply.send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 
@@ -227,7 +239,7 @@ export function serveServiceTemplateRoutes(
     // A Service nobody created and a Template nobody may build from it are the same not-found: this server
     // is not saying which Services exist any more than the id route above says which Templates do.
     if (answer.value === undefined) return reply.code(404).send(notFound(request));
-    await note(request, answer.value.stamp.id, 'allowed', `converted from ${serviceId}`);
+    await note(request, 'serviceTemplate.fromService', answer.value.stamp.id, 'allowed', `converted from ${serviceId}`);
     return reply.code(201).send(successEnvelope(answer.value, request.id, CLIENT_WINDOW.current));
   });
 }

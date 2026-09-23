@@ -116,6 +116,8 @@ export interface ServiceTemplatePreview extends ServiceTemplateRecord {
 export interface VersionOutcome {
   /** False when the entries did not change: the ordinal below is the one that already stood. */
   readonly appended: boolean;
+  /** True when the name changed, whether or not the entries did — a new stamp row either way. */
+  readonly renamed: boolean;
   readonly revision: number;
 }
 
@@ -307,13 +309,13 @@ export function serviceTemplatesOn(db: RepositoryDb, options: ServiceTemplateOpt
     const renamed = name !== row.name;
     // Neither changed: nothing to save, and nothing is written — not even a touch, matching how a save
     // with unchanged entries alone always behaved here.
-    if (!entriesChanged && !renamed) return { appended: false, revision: held.revision };
+    if (!entriesChanged && !renamed) return { appended: false, renamed: false, revision: held.revision };
     // A stamp row is written whenever the name changed even if the entries did not, or a rename made
     // through this same save would otherwise never reach the row that holds it.
     await stampOnto(context, touched, name, row.sequence + 1);
-    if (!entriesChanged) return { appended: false, revision: held.revision };
+    if (!entriesChanged) return { appended: false, renamed: true, revision: held.revision };
     const outcome = await save();
-    return { appended: outcome.appended, revision: outcome.revision.revision };
+    return { appended: outcome.appended, renamed, revision: outcome.revision.revision };
   };
 
   const restamp = async (
