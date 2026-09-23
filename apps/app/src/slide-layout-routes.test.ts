@@ -217,7 +217,13 @@ describe('creating a Slide Layout', () => {
 
   test('a trail that refuses an entry does not cost the Layout', async () => {
     await app.close();
-    await serving({ ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } });
+    await serving({
+      ...identity,
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
+    });
     expect((await creating(DRAFT)).statusCode).toBe(201);
   });
 });

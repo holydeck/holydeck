@@ -226,7 +226,13 @@ describe('the trail this route writes', () => {
   });
 
   test('a trail that refuses an entry does not cost the change', async () => {
-    identity = { ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
+    };
     await app.close();
     app = Fastify({ logger: false });
     withSafeErrors(app);

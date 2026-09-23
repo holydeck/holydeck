@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACCOUNTS_MANAGE,
+  AUDIT_READ,
   CONTENT_HISTORY_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
@@ -28,7 +29,7 @@ const accountOf = (role: AccountRecord['role'], controlPresentation: boolean): A
 });
 
 describe('what a role grants', () => {
-  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, presence and history', () => {
+  it('grants an admin accounts, settings, Layouts, media, services, Service Templates, presence, history and audit', () => {
     expect(permissionsFor(accountOf('admin', false))).toEqual([
       ACCOUNTS_MANAGE,
       SETTINGS_MANAGE,
@@ -38,6 +39,7 @@ describe('what a role grants', () => {
       SERVICES_MANAGE,
       PRESENCE_USE,
       CONTENT_HISTORY_MANAGE,
+      AUDIT_READ,
     ]);
   });
 
@@ -84,6 +86,7 @@ describe('what Control presentation is', () => {
       SERVICES_MANAGE,
       PRESENCE_USE,
       CONTENT_HISTORY_MANAGE,
+      AUDIT_READ,
       PRESENTATION_CONTROL,
     ]);
   });

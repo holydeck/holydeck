@@ -35,6 +35,7 @@ import { codeAt, stepAt } from './otp.js';
 import { passkeyContext, passkeysOn } from './passkeys.js';
 import {
   ACCOUNTS_MANAGE,
+  AUDIT_READ,
   CONTENT_HISTORY_MANAGE,
   LAYOUTS_MANAGE,
   MEDIA_MANAGE,
@@ -363,6 +364,7 @@ describe('signing in', () => {
         SERVICES_MANAGE,
         PRESENCE_USE,
         CONTENT_HISTORY_MANAGE,
+        AUDIT_READ,
       ],
     });
     const cookie = String(response.headers['set-cookie']);
@@ -441,6 +443,7 @@ describe('signing in with a passkey', () => {
         SERVICES_MANAGE,
         PRESENCE_USE,
         CONTENT_HISTORY_MANAGE,
+        AUDIT_READ,
       ],
     });
     const cookie = String(response.headers['set-cookie']);
@@ -1146,13 +1149,27 @@ describe('what recording must never cost', () => {
   });
 
   test('a trail that refuses the entry does not undo the sign-in that happened', async () => {
-    app = await serving(deaf({ audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } }));
+    app = await serving(
+      deaf({
+        audit: {
+          record: () => Promise.reject(new Error('the trail is unavailable')),
+          list: () => Promise.reject(new Error('the trail is unavailable')),
+        },
+      }),
+    );
     expect((await signingIn()).statusCode).toBe(201);
     expect((await failing()).statusCode).toBe(401);
   });
 
   test('a trail that refuses the entry does not undo the slot switch that happened', async () => {
-    app = await serving(deaf({ audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } }));
+    app = await serving(
+      deaf({
+        audit: {
+          record: () => Promise.reject(new Error('the trail is unavailable')),
+          list: () => Promise.reject(new Error('the trail is unavailable')),
+        },
+      }),
+    );
     const { control, member } = await joined();
     const controlId = slotIdOf(control.token, control.record.actor);
     expect((await asking('PATCH', SESSION_PATH, member, { active: controlId })).statusCode).toBe(200);

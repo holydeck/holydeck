@@ -131,6 +131,7 @@ describe('appending a durable record', () => {
     const entry = {
       at: '2026-09-13T09:00:00.000Z',
       action: 'settings.changed',
+      category: 'settings',
       subject: 'settings',
       outcome: 'allowed',
       actor: audit.actor,

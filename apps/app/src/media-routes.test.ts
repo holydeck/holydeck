@@ -164,7 +164,13 @@ describe('uploading a file', () => {
   });
 
   test('a trail that refuses an entry does not cost the upload', async () => {
-    identity = { ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
+    };
     await app.close();
     app = await served({ media });
     const response = await uploading({ filename: 'a.png', contentType: 'image/png', bytes: png(4, 4) });

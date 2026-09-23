@@ -10,6 +10,7 @@ import { successEnvelope, validationFailure } from '@holydeck/contracts/http';
 import { parseRevisionCompareQuery } from '@holydeck/contracts/revisions';
 import { diffRevisions } from '@holydeck/core/diff-revisions';
 
+import { auditContext } from './audit.js';
 import { correlationFor } from './context.js';
 import { provenSession } from './csrf.js';
 import { notFound } from './failures.js';
@@ -17,6 +18,7 @@ import { revisionContext } from './revisions.js';
 import { CONTENT_HISTORY_MANAGE } from './roles.js';
 
 import type { RouteNeed } from './authorization.js';
+import type { Identity } from './onboarding.js';
 import type { RevisionStore } from './revisions.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -45,9 +47,11 @@ function revisionNumberIn(raw: string): number | undefined {
 
 export interface RevisionRoutesOptions {
   readonly revisions: RevisionStore | undefined;
+  /** Where the restore below is recorded. Without one, the restore still happens; nothing notes it happened. */
+  readonly identity: Identity | undefined;
 }
 
-export function serveRevisionRoutes(app: FastifyInstance, { revisions }: RevisionRoutesOptions): void {
+export function serveRevisionRoutes(app: FastifyInstance, { revisions, identity }: RevisionRoutesOptions): void {
   if (revisions === undefined) {
     for (const [method, url] of ROUTES) {
       app.route({
@@ -64,6 +68,24 @@ export function serveRevisionRoutes(app: FastifyInstance, { revisions }: Revisio
 
   const call = (request: FastifyRequest) =>
     revisionContext(provenSession(request).record.actor, correlationFor(REVISION_PREFIX, request.id));
+
+  /**
+   * Written after the restore, and logged rather than answered when the trail refuses it: a restore
+   * holds that it happened, whether or not this server managed to write it down.
+   */
+  const note = async (request: FastifyRequest, actor: string, contentId: string, number: number): Promise<void> => {
+    if (identity === undefined) return;
+    try {
+      await identity.audit.record(auditContext(actor, correlationFor(REVISION_PREFIX, request.id)), {
+        action: 'content.revision.restore',
+        subject: contentId,
+        outcome: 'allowed',
+        detail: `restored revision ${String(number)}`,
+      });
+    } catch (error: unknown) {
+      request.log.error({ err: error }, 'the revision trail refused an entry');
+    }
+  };
 
   app.get(REVISIONS_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
     const { contentId } = request.params as { contentId: string };
@@ -120,6 +142,7 @@ export function serveRevisionRoutes(app: FastifyInstance, { revisions }: Revisio
     if (target === undefined) return reply.code(404).send(notFound(request));
 
     const outcome = await store.restore(context, { contentId, revision: number });
+    await note(request, context.actor, contentId, number);
     return reply.send(successEnvelope(outcome, request.id, CLIENT_WINDOW.current));
   });
 }

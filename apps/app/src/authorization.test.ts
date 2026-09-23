@@ -217,7 +217,10 @@ describe('a permission refusal, with an identity to audit against', () => {
   test('still refuses with 403 even when the trail itself refuses the entry', async () => {
     app = await serving(store, {
       ...identityWith(trail),
-      audit: { record: () => Promise.reject(new Error('the trail is unavailable')) },
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
     });
     const session = await signedIn([]);
     const response = await app.inject({

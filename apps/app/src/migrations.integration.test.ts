@@ -146,7 +146,7 @@ describe('migrating a real database', () => {
   test('undoes the shipped migrations and leaves the collections it found', async () => {
     await migrate(db, CONTEXT, { now: clock });
     expect(await rollback(db, CONTEXT, { now: clock })).toMatchObject({ recorded: SCHEMA_VERSION - 1 });
-    expect(await indexNames('restores')).toEqual(['_id_']);
+    expect(await indexNames('audit_events')).toEqual(['_id_', 'audit_time']);
     for (let step = SCHEMA_VERSION - 1; step > 0; step -= 1) await rollback(db, CONTEXT, { now: clock });
 
     expect(await indexNames('content_languages')).toEqual(['_id_']);
@@ -157,5 +157,7 @@ describe('migrating a real database', () => {
     expect(await indexNames('schema_migrations')).toEqual(['_id_']);
     expect(await indexNames('jobs')).toEqual(['_id_']);
     expect(await indexNames('mid_service_additions')).toEqual(['_id_']);
+    expect(await indexNames('restores')).toEqual(['_id_']);
+    expect(await indexNames('audit_events')).toEqual(['_id_']);
   });
 });

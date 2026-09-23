@@ -4,6 +4,7 @@ import multipart from '@fastify/multipart';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
 
 import { serveAccountRoutes } from './accounts-routes.js';
+import { serveAuditRoutes } from './audit-routes.js';
 import { enforceAuthorization } from './authorization.js';
 import { serveCapabilityRoutes } from './capability-routes.js';
 import { REFERENCE_MALFORMED, corpusClient, referenceFrom, selectReference } from './corpus.js';
@@ -248,7 +249,10 @@ export function buildApp({
 
   // Behind a permission of its own, granted to Admin and Editor: reading, comparing and restoring an
   // earlier revision of whatever content already versions itself through `revisions.ts`.
-  serveRevisionRoutes(app, { revisions });
+  serveRevisionRoutes(app, { revisions, identity });
+
+  // Behind a permission of its own, Admin's alone: reading the administrative trail `audit.ts` writes.
+  serveAuditRoutes(app, { identity });
 
   // Behind the same permission again, by a vocabulary of its own: uploading to the media library is
   // Admin's, and THR-07's defenses stand between this route and `MediaLibrary.upload()` — never inside it.

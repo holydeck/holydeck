@@ -328,7 +328,10 @@ describe('what this surface refuses to answer at all', () => {
     await app.close();
     app = await serving({
       ...identity,
-      audit: { record: () => Promise.reject(new Error('the trail is unavailable')) },
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
     });
     const response = await asking('POST', TOTP_PATH);
     expect(response.statusCode).toBe(201);

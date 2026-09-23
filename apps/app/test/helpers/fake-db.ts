@@ -7,8 +7,48 @@ export interface FakeDb extends RepositoryDb {
   failOn?: (collection: string, document: Document) => Error | undefined;
 }
 
-const matches = (document: Document, filter: Filter): boolean =>
-  Object.entries(filter).every(([field, value]) => document[field] === value);
+// Ordered the way Mongo orders it: numbers by value, everything else lexicographically — which is exactly
+// right for the ISO instants every `at` field in this codebase is stored as.
+function compared(left: unknown, right: unknown): number {
+  if (typeof left === 'number' && typeof right === 'number') return left - right;
+  const [a, b] = [String(left), String(right)];
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// A field's value in a filter is either the value itself or an operator object naming what it is compared
+// against — `$eq`/`$gt`/`$gte`/`$lt`/`$lte`, the same handful `repositories.ts` lets a nested field carry
+// through unvalidated. Every operator an object names must hold, the same as Mongo reads it.
+function valueMatches(actual: unknown, expected: unknown): boolean {
+  if (expected === null || typeof expected !== 'object' || Array.isArray(expected)) return actual === expected;
+  return Object.entries(expected as Record<string, unknown>).every(([operator, operand]) => {
+    switch (operator) {
+      case '$eq':
+        return actual === operand;
+      case '$gt':
+        return compared(actual, operand) > 0;
+      case '$gte':
+        return compared(actual, operand) >= 0;
+      case '$lt':
+        return compared(actual, operand) < 0;
+      case '$lte':
+        return compared(actual, operand) <= 0;
+      default:
+        return actual === operand;
+    }
+  });
+}
+
+// `$and`/`$nor`/`$or` nest, the same three `repositories.ts` validates and no others — a filter this fake
+// answers is exactly a filter the real layer would have let through.
+function matches(document: Document, filter: Filter): boolean {
+  return Object.entries(filter).every(([key, value]) => {
+    const clauses = value as readonly Filter[];
+    if (key === '$and') return clauses.every((clause) => matches(document, clause));
+    if (key === '$or') return clauses.some((clause) => matches(document, clause));
+    if (key === '$nor') return !clauses.some((clause) => matches(document, clause));
+    return valueMatches(document[key], value);
+  });
+}
 
 /** Enough of a Mongo database to replay a ledger: unique `_id`, equality filters, named indexes. */
 export function fakeDb(): FakeDb {
@@ -38,8 +78,14 @@ export function fakeDb(): FakeDb {
           const found = stored.filter((row) => matches(row, filter));
           const sort = options.sort;
           if (sort !== undefined) {
-            const [[field, direction]] = Object.entries(sort) as [[string, 1 | -1]];
-            found.sort((left, right) => (Number(left[field]) - Number(right[field])) * direction);
+            const keys = Object.entries(sort) as [string, 1 | -1][];
+            found.sort((left, right) => {
+              for (const [field, direction] of keys) {
+                const compare = compared(left[field], right[field]) * direction;
+                if (compare !== 0) return compare;
+              }
+              return 0;
+            });
           }
           return { toArray: async () => (options.limit === undefined ? found : found.slice(0, options.limit)) };
         },

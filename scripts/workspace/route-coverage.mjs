@@ -34,6 +34,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'app.ts GET /api/v1/translations/:abbr/verses': 'no harness test reads verses over HTTP',
   'live.ts GET LIVE_CONNECTIONS_PATH': 'no harness test reads live connection counts over HTTP',
   'accounts-routes.ts': 'no harness test drives the admin account lifecycle over HTTP',
+  'audit-routes.ts': 'no harness test reads the audit trail over HTTP',
   'capability-routes.ts': 'no harness test issues or revokes a guest or output capability over HTTP',
   'media-routes.ts': 'no harness test uploads a file over HTTP',
   'order-routes.ts': 'no harness test reads the running order over HTTP',

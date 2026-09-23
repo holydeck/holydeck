@@ -28,6 +28,7 @@ describe('what the trail records', () => {
         correlationId: CORRELATION,
         at: AT,
         action: 'instance.claim',
+        category: 'authentication',
         subject: 'account:7f3a',
         outcome: 'allowed',
       },
@@ -150,6 +151,10 @@ describe('the context the trail is written under', () => {
       'readiness.override',
       'backup.run',
       'restore.run',
+      'content.conflict.resolve',
+      'content.revision.restore',
+      'integration.call',
+      'integration.disable',
     ]);
   });
 });
@@ -172,14 +177,10 @@ describe('the category taxonomy', () => {
     expect(Object.keys(CATEGORY_OF).sort()).toEqual([...AUDIT_ACTIONS].sort());
   });
 
-  it('gives every category except the reserved integration category at least one member action', () => {
+  it('gives every category at least one member action', () => {
     for (const category of AUDIT_CATEGORIES) {
       const members = AUDIT_ACTIONS.filter((action) => CATEGORY_OF[action] === category);
-      if (category === 'integration') {
-        expect(members).toEqual([]);
-      } else {
-        expect(members.length, `category ${category} has no member action`).toBeGreaterThan(0);
-      }
+      expect(members.length, `category ${category} has no member action`).toBeGreaterThan(0);
     }
   });
 });
@@ -187,9 +188,17 @@ describe('the category taxonomy', () => {
 describe('the actions reserved for a surface not yet built', () => {
   it('accepts each one, so the surface that calls it for the first time finds the trail already open', async () => {
     const db = fakeDb();
-    const trail = trailOn(db, ['r1', 'r2', 'r3', 'r4']);
+    const trail = trailOn(db, ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
     const context = auditContext('system', CORRELATION);
-    const reserved = ['content.change', 'presentation.run', 'backup.run', 'restore.run'] as const;
+    const reserved = [
+      'content.change',
+      'presentation.run',
+      'backup.run',
+      'restore.run',
+      'content.conflict.resolve',
+      'integration.call',
+      'integration.disable',
+    ] as const;
     for (const action of reserved) {
       await expect(trail.record(context, { action, subject: 'reserved', outcome: 'allowed' })).resolves.toBeTruthy();
     }

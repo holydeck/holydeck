@@ -127,6 +127,7 @@ describe('before the instance is claimed', () => {
         correlationId: expect.stringMatching(/^claim:/u) as unknown as string,
         at: NOW,
         action: 'instance.claim',
+        category: 'authentication',
         subject: 'lucia',
         outcome: 'allowed',
       },
@@ -219,7 +220,10 @@ describe('once the instance is claimed', () => {
 describe('when the trail refuses the entry', () => {
   const deaf = (store: AccountStore): Identity => ({
     ...identityOf(store),
-    audit: { record: () => Promise.reject(new Error('the trail is unavailable')) },
+    audit: {
+      record: () => Promise.reject(new Error('the trail is unavailable')),
+      list: () => Promise.reject(new Error('the trail is unavailable')),
+    },
   });
 
   // The trail records what happened; it does not decide it. An account that exists has to be answered as

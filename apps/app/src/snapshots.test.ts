@@ -9,6 +9,7 @@ import { repositoriesOn } from './repositories.js';
 import { revisionsOn } from './revisions.js';
 import {
   ACCOUNTS_MANAGE,
+  AUDIT_READ,
   CONTENT_HISTORY_MANAGE,
   PRESENTATION_CONTROL,
   SERVICE_TEMPLATES_MANAGE,
@@ -640,6 +641,7 @@ describe('the Operator override', () => {
       'services.manage',
       'presence.use',
       CONTENT_HISTORY_MANAGE,
+      AUDIT_READ,
     ]);
   });
 

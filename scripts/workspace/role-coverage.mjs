@@ -20,6 +20,7 @@ export const ROLE_INTEGRATION_TESTS = {};
 // Move a key into ROLE_INTEGRATION_TESTS when its negative integration case is implemented.
 export const KNOWN_INTEGRATION_GAPS = {
   'accounts-routes.ts GET ACCOUNTS_PATH ACCOUNTS_MANAGE': 'no harness test refuses the accounts list to a non-admin',
+  'audit-routes.ts GET AUDIT_PATH AUDIT_READ': 'no harness test refuses the audit trail without audit.read',
   'accounts-routes.ts PATCH CONTROL_PATH ACCOUNTS_MANAGE': 'no harness test refuses a control-presentation grant to a non-admin',
   'accounts-routes.ts POST ACCOUNTS_PATH ACCOUNTS_MANAGE': 'no harness test refuses account creation to a non-admin',
   'accounts-routes.ts PATCH STATUS_PATH ACCOUNTS_MANAGE': 'no harness test refuses account status changes to a non-admin',

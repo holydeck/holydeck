@@ -298,7 +298,13 @@ describe('what this surface refuses to answer at all', () => {
 
   test('a trail that refuses an entry does not cost the caller the capability they were issued', async () => {
     await app.close();
-    identity = { ...identity, audit: { record: () => Promise.reject(new Error('the trail is unavailable')) } };
+    identity = {
+      ...identity,
+      audit: {
+        record: () => Promise.reject(new Error('the trail is unavailable')),
+        list: () => Promise.reject(new Error('the trail is unavailable')),
+      },
+    };
     app = await serving(capabilities, identity);
     const response = await issuingGuest();
     expect(response.statusCode).toBe(201);

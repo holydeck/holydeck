@@ -16,7 +16,8 @@ import { permissionsFor } from './records.js';
 import { RepositoryError, repositoriesOn } from './repositories.js';
 
 import type { RequestContext } from './context.js';
-import type { RepositoryDb } from './repositories.js';
+import type { RecordName } from './records.js';
+import type { Document, Filter, RepositoryDb } from './repositories.js';
 
 /** Every action this release records. One entry per thing an administrator can be answerable for. */
 export const AUDIT_ACTIONS = [
@@ -92,6 +93,13 @@ export const AUDIT_ACTIONS = [
   'backup.run',
   // Reserved for the restore surface T101+ builds. Exercised only by this task's own tests today.
   'restore.run',
+  // A losing edit's shelf row settled: `collaboration.ts`'s own caller, naming which revision won.
+  'content.conflict.resolve',
+  // An earlier revision brought back over what a piece of content held: `revision-routes.ts`'s restore.
+  'content.revision.restore',
+  // A third-party integration reached, and given up: the sermon-AI surface's own two entries, spec v1c-09.
+  'integration.call',
+  'integration.disable',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -158,10 +166,29 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'readiness.override': 'presentation',
   'backup.run': 'backup',
   'restore.run': 'restore',
+  'content.conflict.resolve': 'content',
+  'content.revision.restore': 'content',
+  'integration.call': 'integration',
+  'integration.disable': 'integration',
 };
 
 /** Whether the thing the actor asked for happened. A refusal is recorded exactly as an allowance is. */
 export type AuditOutcome = 'allowed' | 'refused';
+
+/** The record class this store owns. Named once, because the migration that indexes it reads off it. */
+export const AUDIT_RECORD: RecordName = 'auditEvents';
+
+export interface AuditIndex {
+  readonly name: string;
+  readonly keys: Readonly<Record<string, 1 | -1>>;
+  readonly options: Readonly<Record<string, unknown>>;
+}
+
+// `audit_time` already exists, from the trail's own first migration. This is the second: a listing
+// narrowed to one category still wants its newest-first order, and a collection scan cannot give it that.
+const DECLARED_INDEXES: readonly AuditIndex[] = [{ name: 'audit_category', keys: { category: 1, at: -1 }, options: {} }];
+
+export const AUDIT_INDEXES = Object.freeze(DECLARED_INDEXES);
 
 export interface AuditEntry {
   readonly action: AuditAction;
@@ -172,9 +199,37 @@ export interface AuditEntry {
   readonly detail?: string;
 }
 
+/** One written entry, read back: everything `AuditEntry` carries, plus what `record()` stamped on it. */
+export interface AuditRecordRead extends AuditEntry {
+  readonly id: string;
+  readonly at: string;
+  readonly category: AuditCategory;
+  readonly actor: string;
+  readonly correlationId: string;
+}
+
+export interface AuditListQuery {
+  readonly category?: AuditCategory;
+  readonly action?: AuditAction;
+  readonly actor?: string;
+  readonly outcome?: AuditOutcome;
+  /** An inclusive ISO instant bound: `from` and `to` narrow `at`, either or both. */
+  readonly from?: string;
+  readonly to?: string;
+  readonly cursor?: { readonly at: string; readonly id: string };
+  readonly limit: number;
+}
+
+export interface AuditPage {
+  readonly entries: readonly AuditRecordRead[];
+  readonly nextCursor?: { readonly at: string; readonly id: string };
+}
+
 export interface AuditTrail {
   /** Appends one entry and answers with its identifier. */
   record(context: unknown, entry: AuditEntry): Promise<string>;
+  /** Newest first, redacted the way `AUDIT_DETAIL_REDACTION` says its action is. */
+  list(context: unknown, query: AuditListQuery): Promise<AuditPage>;
 }
 
 export interface AuditOptions {
@@ -183,6 +238,85 @@ export interface AuditOptions {
 }
 
 const ID_BYTES = 12;
+
+/**
+ * Every current action defaults to `'verbatim'` — this file's own header already guarantees no `detail`
+ * string carries a secret. An action added above without an entry here fails to compile, the map being
+ * `Record<AuditAction, ...>`, and the exhaustiveness test in `audit.test.ts` fails with it.
+ */
+export const AUDIT_DETAIL_REDACTION: Readonly<Record<AuditAction, 'verbatim' | 'omit'>> = {
+  'instance.claim': 'verbatim',
+  'session.signIn': 'verbatim',
+  'session.lock': 'verbatim',
+  'totp.enroll': 'verbatim',
+  'totp.verify': 'verbatim',
+  'totp.use': 'verbatim',
+  'totp.regenerate': 'verbatim',
+  'totp.revoke': 'verbatim',
+  'passkey.register': 'verbatim',
+  'passkey.name': 'verbatim',
+  'passkey.use': 'verbatim',
+  'passkey.revoke': 'verbatim',
+  'account.control': 'verbatim',
+  'account.create': 'verbatim',
+  'account.disable': 'verbatim',
+  'account.restore': 'verbatim',
+  'account.role': 'verbatim',
+  'authorization.refuse': 'verbatim',
+  'session.slot.add': 'verbatim',
+  'session.slot.switch': 'verbatim',
+  'capability.guest.issue': 'verbatim',
+  'capability.output.issue': 'verbatim',
+  'capability.revoke': 'verbatim',
+  'settings.update': 'verbatim',
+  'content.change': 'verbatim',
+  'service.create': 'verbatim',
+  'service.duplicate': 'verbatim',
+  'service.schedule': 'verbatim',
+  'service.archive': 'verbatim',
+  'service.edit': 'verbatim',
+  'service.transition': 'verbatim',
+  'service.item.add': 'verbatim',
+  'service.item.remove': 'verbatim',
+  'service.item.enable': 'verbatim',
+  'service.item.disable': 'verbatim',
+  'service.item.duplicate': 'verbatim',
+  'service.item.reorder': 'verbatim',
+  'service.item.revise': 'verbatim',
+  'presentation.run': 'verbatim',
+  'readiness.override': 'verbatim',
+  'backup.run': 'verbatim',
+  'restore.run': 'verbatim',
+  'content.conflict.resolve': 'verbatim',
+  'content.revision.restore': 'verbatim',
+  'integration.call': 'verbatim',
+  'integration.disable': 'verbatim',
+};
+
+export function redactAuditDetail(action: AuditAction, detail: string | undefined): string | undefined {
+  if (detail === undefined) return undefined;
+  return AUDIT_DETAIL_REDACTION[action] === 'verbatim' ? detail : undefined;
+}
+
+function auditIdIn(_id: unknown): string {
+  const id = String(_id);
+  return id.startsWith('audit:') ? id.slice('audit:'.length) : id;
+}
+
+function graded(document: Document): AuditRecordRead {
+  const action = document['action'] as AuditAction;
+  return {
+    action,
+    subject: document['subject'] as string,
+    outcome: document['outcome'] as AuditOutcome,
+    detail: redactAuditDetail(action, document['detail'] as string | undefined),
+    id: auditIdIn(document['_id']),
+    at: document['at'] as string,
+    category: document['category'] as AuditCategory,
+    actor: document['actor'] as string,
+    correlationId: document['correlationId'] as string,
+  };
+}
 
 export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
   const newId = options.newId ?? ((): string => randomBytes(ID_BYTES).toString('base64url'));
@@ -202,10 +336,35 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
         correlationId: checked.correlationId,
         at: options.now(),
         action: entry.action,
+        category: CATEGORY_OF[entry.action],
         subject: entry.subject,
         outcome: entry.outcome,
         ...(entry.detail === undefined ? {} : { detail: entry.detail }),
       });
+    },
+    async list(context, query) {
+      const clauses: Filter[] = [];
+      if (query.category !== undefined) clauses.push({ category: query.category });
+      if (query.action !== undefined) clauses.push({ action: query.action });
+      if (query.actor !== undefined) clauses.push({ actor: query.actor });
+      if (query.outcome !== undefined) clauses.push({ outcome: query.outcome });
+      if (query.from !== undefined || query.to !== undefined) {
+        const at: Record<string, string> = {};
+        if (query.from !== undefined) at['$gte'] = query.from;
+        if (query.to !== undefined) at['$lte'] = query.to;
+        clauses.push({ at });
+      }
+      if (query.cursor !== undefined) {
+        const { at, id } = query.cursor;
+        clauses.push({ $or: [{ at: { $lt: at } }, { at, _id: { $lt: `audit:${id}` } }] });
+      }
+      const filter: Filter = clauses.length === 0 ? {} : clauses.length === 1 ? clauses[0]! : { $and: clauses };
+
+      const rows = await events.read(context, filter, { sort: { at: -1, _id: -1 }, limit: query.limit + 1 });
+      const page = rows.slice(0, query.limit).map(graded);
+      const last = page[page.length - 1];
+      const nextCursor = rows.length > query.limit && last !== undefined ? { at: last.at, id: last.id } : undefined;
+      return { entries: page, nextCursor };
     },
   };
   return Object.freeze(trail);
@@ -214,4 +373,9 @@ export function auditOn(db: RepositoryDb, options: AuditOptions): AuditTrail {
 /** The context the server writes its own trail under: able to append an entry, and to do nothing else. */
 export function auditContext(actor: string, correlationId: string): RequestContext {
   return requestContext({ actor, permissions: [permissionsFor('auditEvents').append], correlationId });
+}
+
+/** The context an admin reads the trail under: able to list it, and to do nothing else. */
+export function auditReadContext(actor: string, correlationId: string): RequestContext {
+  return requestContext({ actor, permissions: [permissionsFor('auditEvents').read], correlationId });
 }
