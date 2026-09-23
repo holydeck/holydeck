@@ -42,6 +42,7 @@ import type { MediaMigrationStateStore } from './media-migration-state.js';
 import type { MediaLibrary } from './media.js';
 import type { NotificationDb } from './notification-store.js';
 import type { Identity } from './onboarding.js';
+import type { MongoHealthDb } from './operational-sources.js';
 import type { Queue } from './queue.js';
 import type { RepositoryDb } from './repositories.js';
 import type { ServiceStore } from './services.js';
@@ -88,6 +89,10 @@ export interface AppOptions {
   /** Where a backup is recorded and where an on-demand run is queued. Without both, there is
    * nothing here to trigger or list. */
   backups?: { readonly db: RepositoryDb; readonly queue: Queue };
+  /** The same driver `Db` `backups.db`/`contentDb` are `RepositoryDb` views of, narrowed differently for
+   * OPS-09's own database health reading. Without it, the operational health route answers not-found,
+   * the same as it does without `backups`/`media`. */
+  mongoDb?: MongoHealthDb;
   /** The restore-apply lease `guardMaintenance` reads. Without it, no request is ever refused for one. */
   readonly maintenance?: MaintenanceStore;
   /** Where the last media storage-root migration is recorded (OPS-16). Without it, there is
@@ -123,6 +128,7 @@ export function buildApp({
   media,
   contentDb,
   backups,
+  mongoDb,
   maintenance,
   migrationState,
   translationOffsets,
@@ -326,6 +332,10 @@ export function buildApp({
     dataDir: settings.values.dataDir,
     now: () => new Date().toISOString(),
     identity,
+    mongoDb,
+    corpus,
+    corpusConfigured: settings.values.corpusUrl !== '',
+    settingsAdmin,
   });
 
   serveNotificationRoutes(app, {

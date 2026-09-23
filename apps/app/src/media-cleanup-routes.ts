@@ -78,9 +78,11 @@ function routeContext(actor: string, correlationId: string): RequestContext {
  * "GET and POST both read the same live state at the moment each is called" — never cached across
  * requests, or a purge could act on a reference an edit just added or just dropped. `db === undefined`
  * degrades to "nothing is referenced" rather than throwing, the same fail-open-to-404 posture the rest
- * of this file already takes when a deployment is missing a dependency it needs.
+ * of this file already takes when a deployment is missing a dependency it needs. Exported so
+ * `operational-sources.ts` can reuse it verbatim for OPS-15's media-cleanup health reading, rather than
+ * duplicating this scan.
  */
-async function referencedByFor(
+export async function referencedByFor(
   db: RepositoryDb | undefined,
   now: () => string,
   actor: string,

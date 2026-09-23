@@ -14,6 +14,7 @@ import { OPERATIONS_HEALTH_PATH, serveOperationsRoutes } from './operations-rout
 import { queueOn } from './queue.js';
 import { passkeysOn } from './passkeys.js';
 import { sessionContext, sessionsOn } from './sessions.js';
+import { DEFAULT_SETTINGS } from './settings.js';
 import { totpsOn } from './totp.js';
 import { memoryAccounts } from '../test/helpers/accounts.js';
 import { memoryAttempts } from '../test/helpers/attempts.js';
@@ -22,10 +23,13 @@ import { memoryPasskeys } from '../test/helpers/passkeys.js';
 import { memorySessions } from '../test/helpers/sessions.js';
 import { memoryTotp } from '../test/helpers/totp.js';
 
+import type { corpusClient } from './corpus.js';
 import type { Identity } from './onboarding.js';
+import type { MongoHealthDb } from './operational-sources.js';
 import type { Queue, QueueDb } from './queue.js';
 import type { Document } from './repositories.js';
 import type { MediaLibrary, MediaRecord } from './media.js';
+import type { SettingsAdmin } from './settings-admin.js';
 import type { SessionStore, StartedSession } from './sessions.js';
 import type { FakeDb } from '../test/helpers/fake-db.js';
 import type { FastifyInstance } from 'fastify';
@@ -45,6 +49,9 @@ let queue: Queue;
 let media: MediaLibrary;
 let mediaRows: readonly MediaRecord[];
 let admin: StartedSession;
+let mongoDb: MongoHealthDb;
+let corpus: Pick<ReturnType<typeof corpusClient>, 'translations'>;
+let settingsAdmin: Pick<SettingsAdmin, 'current'>;
 
 const withHeaders = (held: StartedSession = admin) => ({
   [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current),
@@ -54,7 +61,9 @@ const withHeaders = (held: StartedSession = admin) => ({
   cookie: sessionCookie(held.token, 60),
 });
 
-const served = async (missing?: 'db' | 'queue' | 'media' | 'identity' | 'all'): Promise<FastifyInstance> => {
+const served = async (
+  missing?: 'db' | 'queue' | 'media' | 'identity' | 'mongoDb' | 'all',
+): Promise<FastifyInstance> => {
   const built = Fastify({ logger: false });
   withSafeErrors(built);
   guardMutations(built, { sessions });
@@ -66,6 +75,10 @@ const served = async (missing?: 'db' | 'queue' | 'media' | 'identity' | 'all'): 
     dataDir: '/tmp/holydeck-operations-routes-test',
     now,
     identity: missing === 'identity' || missing === 'all' ? undefined : identity,
+    mongoDb: missing === 'mongoDb' || missing === 'all' ? undefined : mongoDb,
+    corpus,
+    corpusConfigured: false,
+    settingsAdmin,
   });
   await built.ready();
   return built;
@@ -115,7 +128,23 @@ beforeEach(async () => {
     failProcessing: async () => undefined,
     retryProcessing: async () => undefined,
     purgeArchived: async () => { throw new Error('not used in this test'); },
-    purgeReport: async () => { throw new Error('not used in this test'); },
+    purgeReport: async () => ({ items: [] }),
+  };
+  mongoDb = {
+    command: async () => ({ ok: 1 }),
+    stats: async () => ({ storageSize: 1_000_000 }),
+  };
+  corpus = {
+    translations: async () => { throw new Error('not used in this test: corpusConfigured is false'); },
+  };
+  settingsAdmin = {
+    current: () => ({
+      // `mediaFreeSpaceReserveBytes: 0` so `disk.ok` never depends on how much space the machine
+      // running this test actually has free.
+      values: { ...DEFAULT_SETTINGS, mediaRoot: '/tmp', mediaFreeSpaceReserveBytes: 0 },
+      sources: {} as never,
+      path: '/data/holydeck/config/settings.yaml',
+    }),
   };
   app = await served();
   admin = await sessions.start(sessionContext(CORRELATION), { actor: ADMINISTRATOR, permissions: [OPERATIONS_READ] });
@@ -131,9 +160,10 @@ describe('the operational health report', () => {
     expect(response.statusCode).toBe(200);
     const { health } = response.json().data;
     expect(health.at).toBe(NOW);
-    expect(health.statuses).toHaveLength(7);
+    expect(health.statuses).toHaveLength(11);
     expect(health.statuses.map((status: { readonly domain: string }) => status.domain)).toEqual([
       'health', 'storage', 'queue', 'backup', 'restore', 'media', 'readiness',
+      'database', 'corpus', 'disk', 'process',
     ]);
   });
 
@@ -168,7 +198,7 @@ describe('who may read operational health', () => {
     expect(response.json().error.code).toBe(FORBIDDEN);
   });
 
-  test.each(['db', 'queue', 'media', 'identity', 'all'] as const)('answers not-found without %s', async (missing) => {
+  test.each(['db', 'queue', 'media', 'identity', 'mongoDb', 'all'] as const)('answers not-found without %s', async (missing) => {
     await app.close();
     app = await served(missing);
     const response = await app.inject({ method: 'GET', url: OPERATIONS_HEALTH_PATH, headers: withHeaders() });

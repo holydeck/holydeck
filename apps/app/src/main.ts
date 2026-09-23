@@ -215,6 +215,9 @@ const app = buildApp({
   media,
   contentDb: backups?.db,
   backups,
+  // The same driver `Db` `backups.db`/`contentDb` are `RepositoryDb` views of, narrowed differently
+  // for OPS-09's own ping/stats reading (`operational-sources.ts`'s `MongoHealthDb`).
+  mongoDb: store?.db(),
   notificationDb: notificationDatabase,
   maintenance,
   migrationState,
