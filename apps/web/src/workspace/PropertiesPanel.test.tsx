@@ -64,17 +64,39 @@ describe('PropertiesPanel', () => {
     expect(screen.queryByText('Output')).toBeNull();
   });
 
-  it('shows a read-only compare for the selected item once it has drifted', () => {
+  it('shows a read-only compare of both revisions once the selected item has drifted', async () => {
+    const history = [
+      { stamp: { id: 'c1' }, title: 'Song A', revision: 2, at: 'x', body: { sections: [{ label: 'Verse 1' }, { label: 'Chorus' }] } },
+      { stamp: { id: 'c1' }, title: 'Song A (new)', revision: 5, at: 'y', body: { sections: [{ label: 'Verse 1' }, { label: 'Bridge' }] } },
+    ];
+    setFetching(async (url, init) => (String(url) === '/api/v1/songs/c1/history' ? reply(200, successEnvelope(history, 'r')) : noOutputDefaults(url, init)));
     service.value = { ...view, sections: [{ id: 'sec', name: 'Welcome', items: [itemA] }] };
     selection.value = { itemId: 'a' };
     drift.value = [{ itemId: 'a', latestRevision: 5 }];
     render(<PropertiesPanel />);
 
-    expect(screen.getByRole('columnheader', { name: 'Pinned revision 2' })).toBeTruthy();
+    expect(screen.getByText('Reading both revisions…')).toBeTruthy();
+    expect(await screen.findByRole('columnheader', { name: 'Pinned revision 2' })).toBeTruthy();
     expect(screen.getByRole('columnheader', { name: 'Latest revision 5' })).toBeTruthy();
-    expect(screen.getAllByText('Song A')).toHaveLength(2);
-    expect(screen.getByText('A side-by-side comparison of the text appears once content details can be read here.')).toBeTruthy();
+    expect(screen.getByRole('cell', { name: 'Song A' })).toBeTruthy();
+    expect(screen.getByRole('cell', { name: 'Song A (new)' })).toBeTruthy();
+    expect(screen.getByRole('cell', { name: 'Verse 1, Chorus' })).toBeTruthy();
+    expect(screen.getByRole('cell', { name: 'Verse 1, Bridge' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Update to revision 5' })).toBeTruthy();
+  });
+
+  it('says so when the history cannot be read, and offers no compare for kinds without one', async () => {
+    setFetching(async (url, init) => (String(url).endsWith('/history') ? reply(404, { error: { code: 'not_found', message: 'x' } }) : noOutputDefaults(url, init)));
+    service.value = { ...view, sections: [{ id: 'sec', name: 'Welcome', items: [itemA, { ...itemA, id: 'r', kind: 'reading', title: 'Reading' }] }] };
+    selection.value = { itemId: 'a' };
+    drift.value = [{ itemId: 'a', latestRevision: 5 }, { itemId: 'r', latestRevision: 3 }];
+    const { rerender } = render(<PropertiesPanel />);
+    expect(await screen.findByText('The two revisions could not be read.')).toBeTruthy();
+
+    selection.value = { itemId: 'r' };
+    rerender(<PropertiesPanel />);
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Update to revision 3' })).toBeTruthy();
   });
 
   it('shows no compare table for an item that has not drifted', () => {

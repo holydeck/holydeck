@@ -102,7 +102,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'slide-label-routes.ts PATCH SLIDE_LABEL_STATUS_PATH CATALOGUE_MANAGE': 'no harness test refuses slide label archival to a non-admin',
   'slide-layout-routes.ts GET SLIDE_LAYOUTS_PATH CONTENT_EDIT|LAYOUTS_MANAGE': 'no harness test refuses the layout list to a session with neither permission',
   'slide-layout-routes.ts POST SLIDE_LAYOUTS_PATH LAYOUTS_MANAGE': 'no harness test refuses layout creation to a non-admin',
-  'slide-layout-routes.ts GET LAYOUT_PATH LAYOUTS_MANAGE': 'no harness test refuses layout reads to a non-admin',
+  'slide-layout-routes.ts GET LAYOUT_PATH CONTENT_EDIT|LAYOUTS_MANAGE': 'no harness test refuses one layout read to a session with neither permission',
   'slide-layout-routes.ts GET LAYOUT_REVISIONS_PATH LAYOUTS_MANAGE': 'no harness test refuses layout revision reads to a non-admin',
   'slide-layout-routes.ts PUT LAYOUT_BOXES_PATH LAYOUTS_MANAGE': 'no harness test refuses layout edits to a non-admin',
   'slide-layout-routes.ts POST LAYOUT_REVISION_PATH LAYOUTS_MANAGE': 'no harness test refuses layout restoration to a non-admin',

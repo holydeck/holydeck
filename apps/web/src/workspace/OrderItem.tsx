@@ -19,7 +19,8 @@ import { runOrderSteps } from './order-actions.js';
 import { moveWithin, neighbours, reorderPlan, type Neighbours } from './order-ops.js';
 import { itemsOf } from './service-data.js';
 
-const KIND_KEY: Record<ServiceItem['kind'], MessageKey> = {
+/** The label key naming each kind of service item. */
+export const KIND_KEY: Readonly<Record<ServiceItem['kind'], MessageKey>> = {
   song: 'order.kind.song',
   sermon: 'order.kind.sermon',
   reading: 'order.kind.reading',

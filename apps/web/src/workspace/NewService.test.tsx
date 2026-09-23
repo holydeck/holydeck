@@ -158,4 +158,110 @@ describe('creating a service', () => {
     expect(currentPath.value).toBe('/services');
     vi.unstubAllGlobals();
   });
+
+  const TEMPLATE = {
+    id: 't1', name: 'Sunday order', createdAt: 'x', createdBy: 'y', revision: 1,
+    body: {
+      sections: [{
+        id: 'sec', name: 'Welcome',
+        entries: [
+          { id: 'e1', slot: 'fixed', itemKind: 'song', title: 'Opening song', content: { id: 'c1', revision: 1 } },
+          { id: 'e2', slot: 'typed', itemKind: 'custom-slide', required: true },
+          { id: 'e3', slot: 'typed', itemKind: 'sermon', required: false },
+          { id: 'bad', slot: 'typed', itemKind: 'unknown' },
+          null,
+        ],
+      }, null],
+    },
+  };
+
+  const fillEvent = (): void => {
+    fireEvent.input(screen.getByLabelText('Date'), { target: { value: '2026-04-05' } });
+    fireEvent.input(screen.getByLabelText('Title'), { target: { value: 'Easter' } });
+    fireEvent.input(screen.getByLabelText('Site'), { target: { value: 'Main hall' } });
+  };
+
+  it('creates a service from a template, filling its custom-slide slot, and opens it', async () => {
+    const calls: string[] = [];
+    let sent: unknown;
+    const base = fakeFetch({
+      'GET /api/v1/services': reply(200, successEnvelope([], 'r-list')),
+      'GET /api/v1/service-templates': reply(200, successEnvelope([{ id: 't1', name: 'Sunday order' }, { id: 't2', name: 'Evening' }, { nope: 1 }], 'r-t')),
+      'GET /api/v1/service-templates/t1': reply(200, successEnvelope(TEMPLATE, 'r-t1')),
+      'GET /api/v1/service-templates/t2': reply(403, errorEnvelope('auth.forbidden', 'no', 'r-t2')),
+      'POST /api/v1/service-templates/t1/instantiate': reply(201, successEnvelope(record('s7', 'Easter', '2026-04-05'), 'r-i')),
+    }, calls);
+    setFetching(async (url, init) => {
+      if (init.method === 'POST') sent = JSON.parse(String(init.body));
+      return base(url, init);
+    });
+    await renderAt();
+
+    await waitFor(() => expect((screen.getByRole('radio', { name: 'Admin Template' }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('radio', { name: 'Admin Template' }));
+    const picker = screen.getByLabelText('Template to use') as HTMLSelectElement;
+    expect(picker.value).toBe('t1');
+    expect(await screen.findByText('Welcome: Song “Opening song”')).toBeTruthy();
+    expect(screen.getByText('Welcome: Sermon slot — choose its content in the workspace once the service exists.')).toBeTruthy();
+
+    fireEvent.change(picker, { target: { value: 't2' } });
+    expect(await screen.findByText('This template’s entries are added as the service is created.')).toBeTruthy();
+    fireEvent.change(picker, { target: { value: 't1' } });
+    const slot = await screen.findByLabelText('Welcome: title for the Custom Slide slot (required)');
+    fireEvent.input(slot, { target: { value: '  Announcements ' } });
+    fillEvent();
+    fireEvent.submit(screen.getByRole('button', { name: 'Create Service' }).closest('form') as HTMLFormElement);
+
+    await waitFor(() => expect(currentPath.value).toBe('/services/s7'));
+    expect(sent).toEqual({ title: 'Easter', date: '2026-04-05', site: 'Main hall', fills: [{ entryId: 'e2', title: 'Announcements' }] });
+  });
+
+  it('puts a refusal the server names for one entry beside that entry', async () => {
+    setFetching(fakeFetch({
+      'GET /api/v1/services': reply(200, successEnvelope([], 'r-list')),
+      'GET /api/v1/service-templates': reply(200, successEnvelope([{ id: 't1', name: 'Sunday order' }], 'r-t')),
+      'GET /api/v1/service-templates/t1': reply(200, successEnvelope(TEMPLATE, 'r-t1')),
+      'POST /api/v1/service-templates/t1/instantiate': reply(422, errorEnvelope('request.validation_failed', 'no', 'r-i', [
+        { path: 'fills.e3', code: 'field.required', message: 'e3 must be filled with pinned content' },
+      ])),
+    }));
+    await renderAt();
+
+    await waitFor(() => expect((screen.getByRole('radio', { name: 'Admin Template' }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('radio', { name: 'Admin Template' }));
+    await screen.findByLabelText('Welcome: title for the Custom Slide slot (required)');
+    fillEvent();
+    fireEvent.submit(screen.getByRole('button', { name: 'Create Service' }).closest('form') as HTMLFormElement);
+
+    expect(await screen.findByText('e3 must be filled with pinned content')).toBeTruthy();
+    await waitFor(() => expect(document.activeElement?.id).toBe('service-new-fill-e3'));
+    expect(currentPath.value).toBe('/services/new');
+  });
+
+  it('asks for the title and site on the template path too', async () => {
+    setFetching(fakeFetch({
+      'GET /api/v1/services': reply(200, successEnvelope([], 'r-list')),
+      'GET /api/v1/service-templates': reply(200, successEnvelope([{ id: 't1', name: 'Sunday order' }], 'r-t')),
+      'GET /api/v1/service-templates/t1': reply(200, successEnvelope({ nope: true }, 'r-t1')),
+    }));
+    await renderAt();
+
+    await waitFor(() => expect((screen.getByRole('radio', { name: 'Admin Template' }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('radio', { name: 'Admin Template' }));
+    expect(await screen.findByText('This template’s entries are added as the service is created.')).toBeTruthy();
+    fireEvent.input(screen.getByLabelText('Date'), { target: { value: '2026-04-05' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Create Service' }).closest('form') as HTMLFormElement);
+    await waitFor(() => expect(document.activeElement?.id).toBe('service-new-title'));
+  });
+
+  it('disables Admin Template with an explanation when none are available', async () => {
+    setFetching(fakeFetch({
+      'GET /api/v1/services': reply(200, successEnvelope([], 'r-list')),
+      'GET /api/v1/service-templates': reply(403, errorEnvelope('auth.forbidden', 'no', 'r-t')),
+    }));
+    await renderAt();
+
+    expect(await screen.findByText('No templates are available to you.')).toBeTruthy();
+    expect((screen.getByRole('radio', { name: 'Admin Template' }) as HTMLInputElement).disabled).toBe(true);
+  });
 });

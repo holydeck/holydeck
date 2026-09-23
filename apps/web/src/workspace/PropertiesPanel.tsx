@@ -5,16 +5,22 @@
 
 import type { ComponentChildren, JSX } from 'preact';
 
+import type { ServiceItem } from '@holydeck/contracts/services';
+
+import type { HistoryKind } from '../api-routes.js';
 import { locale } from '../app-state.js';
 import { BoxProperties } from '../editors/BoxProperties.js';
 import { t } from '../i18n.js';
 import { drift, selection, service } from '../state/workspace-store.js';
+import { ContentCompare } from './ContentCompare.js';
 import { DriftNotice } from './DriftNotice.js';
 import { OutputProfile } from './OutputProfile.js';
 import { findItem } from './service-data.js';
 
 const dateOf = (date: string): string =>
   new Intl.DateTimeFormat(locale.value, { dateStyle: 'full', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`));
+
+const HISTORY_KINDS: Partial<Record<ServiceItem['kind'], HistoryKind>> = { song: 'song', sermon: 'sermon', 'slide-group': 'slideGroup' };
 
 /** The service summary, read-only, followed by whatever properties the current selection adds. */
 export function PropertiesPanel({ children }: { readonly children?: ComponentChildren }): JSX.Element | null {
@@ -23,6 +29,7 @@ export function PropertiesPanel({ children }: { readonly children?: ComponentChi
   const itemId = selection.value.itemId;
   const item = itemId === undefined ? undefined : findItem(view, itemId);
   const entry = itemId === undefined ? undefined : drift.value.find((candidate) => candidate.itemId === itemId);
+  const compareKind = item === undefined ? undefined : HISTORY_KINDS[item.kind];
   return (
     <div>
       <h2>{view.title}</h2>
@@ -32,21 +39,15 @@ export function PropertiesPanel({ children }: { readonly children?: ComponentChi
       {itemId === undefined ? <OutputProfile /> : null}
       {item === undefined || entry === undefined ? null : (
         <div>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">{t('drift.compare.pinned', { n: item.content?.revision ?? 0 })}</th>
-                <th scope="col">{t('drift.compare.latest', { n: entry.latestRevision })}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{item.title}</td>
-                <td>{item.title}</td>
-              </tr>
-            </tbody>
-          </table>
-          <p>{t('drift.compare.later')}</p>
+          {compareKind === undefined || item.content === undefined ? null : (
+            <ContentCompare
+              key={item.id}
+              kind={compareKind}
+              contentId={item.content.id}
+              pinned={item.content.revision}
+              latest={entry.latestRevision}
+            />
+          )}
           <DriftNotice itemId={item.id} />
         </div>
       )}
