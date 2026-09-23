@@ -11,6 +11,7 @@ import { guardMutations } from './csrf.js';
 import { withSafeErrors } from './failures.js';
 import { LOOKUP_BUDGET_MS, REFERENCE_LOOKUP_PATH, SHOWN_REFERENCES_PATH, serveReferenceRoutes } from './reference-routes.js';
 import { PRESENTATION_CONTROL, SETTINGS_MANAGE } from './roles.js';
+import { RunEventError } from './run-events.js';
 import { sessionContext, sessionsOn } from './sessions.js';
 import { shownReferencesOn } from './shown-references.js';
 import { memorySessions } from '../test/helpers/sessions.js';
@@ -129,6 +130,42 @@ beforeEach(async () => {
 afterEach(async () => {
   await app.close();
 });
+
+const RUN: RunRecord = {
+  runId: 'run-1',
+  serviceId: 'service-1',
+  snapshotId: 'snapshot-1',
+  phase: 'active',
+  mode: 'live',
+  position: 0,
+  live: {
+    runId: 'run-1',
+    snapshotId: 'snapshot-1',
+    mode: 'live',
+    public: { itemId: 'item-1', slideIndex: 0 },
+    selected: { itemId: 'item-1', slideIndex: 0 },
+    themes: { audience: 'default', stage: 'default', singer: 'default', operator: 'default' },
+    additionsRevision: 0,
+  },
+  stateRevision: 1,
+  at: NOW,
+};
+const RUN_DECK: RunDeck = {
+  snapshotId: 'snapshot-1',
+  standbyScreens: [],
+  pinnedRevisions: {
+    service: 'r1',
+    content: 'r1',
+    slideLayout: 'r1',
+    serviceTemplate: 'r1',
+    settings: 'r1',
+    media: 'r1',
+    corpus: 'r1',
+  },
+  aspectRatio: '16:9',
+  safeAreaMargins: DEFAULT_SAFE_AREA_MARGINS,
+  items: [],
+};
 
 describe('looking a reference up mid-service', () => {
   test('answers the verses and the revision they were read at', async () => {
@@ -256,41 +293,6 @@ describe('showing a reference', () => {
 
   test('appends through run-review.show when shown-references is posted with a runId', async () => {
     await app.close();
-    const run: RunRecord = {
-      runId: 'run-1',
-      serviceId: 'service-1',
-      snapshotId: 'snapshot-1',
-      phase: 'active',
-      mode: 'live',
-      position: 0,
-      live: {
-        runId: 'run-1',
-        snapshotId: 'snapshot-1',
-        mode: 'live',
-        public: { itemId: 'item-1', slideIndex: 0 },
-        selected: { itemId: 'item-1', slideIndex: 0 },
-        themes: { audience: 'default', stage: 'default', singer: 'default', operator: 'default' },
-        additionsRevision: 0,
-      },
-      stateRevision: 1,
-      at: NOW,
-    };
-    const deck: RunDeck = {
-      snapshotId: 'snapshot-1',
-      standbyScreens: [],
-      pinnedRevisions: {
-        service: 'r1',
-        content: 'r1',
-        slideLayout: 'r1',
-        serviceTemplate: 'r1',
-        settings: 'r1',
-        media: 'r1',
-        corpus: 'r1',
-      },
-      aspectRatio: '16:9',
-      safeAreaMargins: DEFAULT_SAFE_AREA_MARGINS,
-      items: [],
-    };
     const shows: unknown[] = [];
     const runReview: RunReviewStore = Object.freeze({
       show: (session: Parameters<RunReviewStore['show']>[0], request: Parameters<RunReviewStore['show']>[1]) => {
@@ -309,8 +311,8 @@ describe('showing a reference', () => {
     });
     await building(answering(), shownReferences, {
       runReview,
-      runs: { resume: () => Promise.resolve(run) },
-      deck: () => Promise.resolve(deck),
+      runs: { resume: () => Promise.resolve(RUN) },
+      deck: () => Promise.resolve(RUN_DECK),
     });
     const response = await showing({ abbr: 'KJV', book: 'GEN', chapter: 1, verses: '1', runId: 'run-1' });
     expect(response.statusCode).toBe(201);
@@ -319,8 +321,40 @@ describe('showing a reference', () => {
       runId: 'run-1',
       itemId: 'reference:KJV:GEN:1',
       reference: expect.any(String),
-      pinnedRevisions: deck.pinnedRevisions,
+      pinnedRevisions: RUN_DECK.pinnedRevisions,
     });
+  });
+
+  describe('naming a run that cannot take the show', () => {
+    const runShowing = async (
+      held: RunRecord | undefined, show: RunReviewStore['show'] = () => Promise.reject(new Error('show must not be reached')),
+    ) => {
+      await app.close();
+      await building(answering(), shownReferences, {
+        runReview: { show, review: () => Promise.resolve([]), recap: () => Promise.resolve({ runId: 'run-1', lines: [] }) },
+        runs: { resume: () => Promise.resolve(held) },
+        deck: () => Promise.resolve(RUN_DECK),
+      });
+      return showing({ abbr: 'KJV', book: 'GEN', chapter: 1, verses: '1', runId: 'run-1' });
+    };
+
+    test('answers 404 for a run this server does not hold, and records nothing', async () => {
+      expect((await runShowing(undefined)).statusCode).toBe(404);
+      expect(recorded.rows).toEqual([]);
+    });
+
+    test('answers 409 for a run that has ended, and records nothing', async () => {
+      expect((await runShowing({ ...RUN, phase: 'ended' })).statusCode).toBe(409);
+      expect(recorded.rows).toEqual([]);
+    });
+
+    test.each([['conflict', 409], ['schema', 422], ['permission', 403]] as const)(
+      'maps a %s refusal from the run log to %i, and records nothing in shown references', async (kind, status) => {
+        const response = await runShowing(RUN, () => Promise.reject(new RunEventError(kind, `run log: ${kind}`)));
+        expect(response.statusCode).toBe(status);
+        expect(recorded.rows).toEqual([]);
+      },
+    );
   });
 
   test('is Control presentation, not merely a proved session', async () => {
