@@ -8,7 +8,7 @@ import { API } from '../api-routes.js';
 import { can, csrf } from '../app-state.js';
 import { NETWORK_UNREACHABLE, type ApiResult, type Change, type Refused } from '../api.js';
 import { request } from '../request.js';
-import { readServiceView, type ServiceView } from '../workspace/service-data.js';
+import { itemsOf, readServiceView, type ServiceView } from '../workspace/service-data.js';
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'offline' | 'checking';
 
@@ -49,6 +49,19 @@ effect(() => {
   } catch {
     // Browser storage can be absent, full or unavailable in a private browsing context.
   }
+});
+
+// An item the service no longer has — removed here, in bulk, by Undo's opposite, or by another client —
+// cannot stay selected: the editor and exact preview would point at nothing, and a bulk action would send
+// requests for an id the server has already forgotten.
+effect(() => {
+  const view = service.value;
+  if (view === undefined) return;
+  const present = new Set(itemsOf(view).map(({ item }) => item.id));
+  const selected = selection.peek().itemId;
+  if (selected !== undefined && !present.has(selected)) selection.value = {};
+  const bulk = [...bulkSelection.peek()];
+  if (bulk.some((id) => !present.has(id))) bulkSelection.value = new Set(bulk.filter((id) => present.has(id)));
 });
 
 export async function loadService(id: string): Promise<void> {

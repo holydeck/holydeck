@@ -22,7 +22,7 @@ const localStorage = {
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: localStorage });
 
-const { isReadOnly, loadService, mutate, pending, resetWorkspace, rightTab, saveState, service } = await import('./workspace-store.js');
+const { bulkSelection, isReadOnly, loadService, mutate, pending, resetWorkspace, rightTab, saveState, selection, service } = await import('./workspace-store.js');
 
 const csrf = 'c'.repeat(43);
 const me: AccountRecord = {
@@ -183,6 +183,21 @@ describe('workspace store', () => {
     await Promise.all([put, patch]);
     expect(sent.map(({ key }) => key)).toEqual(['PUT /body', 'PATCH /sections']);
     expect(sent[1]?.body).toEqual({ sections: [['A2']] });
+  });
+
+  it('drops a selected or bulk-selected item once the service no longer has it', () => {
+    const item = (id: string) => ({ id, kind: 'custom-slide' as const, title: id, enabled: true, content: undefined });
+    const base = { id: 's1', title: 'Sunday', date: '2026-09-27', site: 'Main Hall', state: 'upcoming' as const, revision: 'r0' };
+    service.value = { ...base, sections: [{ id: 'sec', name: 'Welcome', items: [item('a'), item('b'), item('c')] }] };
+    selection.value = { itemId: 'a' };
+    bulkSelection.value = new Set(['a', 'b']);
+
+    service.value = { ...base, revision: 'r1', sections: [{ id: 'sec', name: 'Welcome', items: [item('a'), item('b'), item('c')] }] };
+    expect(selection.value).toEqual({ itemId: 'a' });
+
+    service.value = { ...base, revision: 'r2', sections: [{ id: 'sec', name: 'Welcome', items: [item('b'), item('c')] }] };
+    expect(selection.value).toEqual({});
+    expect([...bulkSelection.value]).toEqual(['b']);
   });
 
   it('persists rightTab to localStorage and survives a throwing storage', async () => {
