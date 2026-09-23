@@ -15,6 +15,7 @@ import { API } from '../api-routes.js';
 import { can, csrf } from '../app-state.js';
 import { t } from '../i18n.js';
 import { request } from '../request.js';
+import { selection } from '../state/workspace-store.js';
 import { readSlideGroup, type SlideGroupRecord } from '../workspace/tabs/song-sources.js';
 import { LanguageBlocks } from './LanguageBlocks.js';
 import { activeSlide, type ActiveSlide } from './SlideOverrides.js';
@@ -104,6 +105,13 @@ export function SlideGroupEditor({ groupId }: { readonly groupId: string }): JSX
   useEffect(() => () => {
     activeSlide.value = undefined;
   }, []);
+  // The slide open here is where the operator is looking inside the selected item: the position writer
+  // follows `selection`, so reopening the service can resume on this slide, not only on its item.
+  useEffect(() => {
+    const { itemId, slideId } = selection.peek();
+    if (itemId === undefined || slideId === open) return;
+    selection.value = open === undefined ? { itemId } : { itemId, slideId: open };
+  }, [open]);
 
   if (loaded.status === 'loading' || body === undefined) {
     return loaded.status === 'error'

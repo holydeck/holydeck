@@ -11,6 +11,7 @@ import type { FetchLike } from '../api.js';
 import { API } from '../api-routes.js';
 import { session } from '../app-state.js';
 import { setFetching } from '../request.js';
+import { selection } from '../state/workspace-store.js';
 import { SlideGroupEditor } from './SlideGroupEditor.js';
 import { activeSlide, SlideOverrides } from './SlideOverrides.js';
 
@@ -91,6 +92,15 @@ const renderEditor = async (): Promise<void> => {
 };
 
 describe('SlideGroupEditor', () => {
+  it('records the opened slide in the selection, so the stored position carries it', async () => {
+    selection.value = { itemId: 'i1' };
+    await renderEditor();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit slide 2' }));
+    await settle();
+    expect(selection.value).toEqual({ itemId: 'i1', slideId: 's2' });
+    selection.value = {};
+  });
+
   it('overrides one slide layout, labels it, and clears it', async () => {
     routes[`PUT ${API.slideLayoutOverride('g', 's1')}`] = () => ok(group(['s1', 's2'], { s1: { layout: 'L2' } }));
     routes[`DELETE ${API.slideLayoutOverride('g', 's1')}`] = () => ok(group(['s1', 's2']));
