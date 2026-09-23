@@ -59,6 +59,14 @@ const emptyView: ServiceView = {
   sections: [{ id: 'sec', name: 'Welcome', items: [] }],
 };
 
+// happy-dom's elements lack `ondragover`/`ondrop`, so Preact listens under the JSX casing ("DragOver").
+const drag = (target: Element, type: 'DragOver' | 'Drop', dataTransfer: object): Event => {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+  target.dispatchEvent(event);
+  return event;
+};
+
 beforeEach(() => {
   resetWorkspace();
   session.value = signedIn();
@@ -162,6 +170,41 @@ describe('OrderPanel', () => {
 
     await vi.advanceTimersByTimeAsync(5000);
     expect(patchCallsOf(fetching)).toHaveLength(1);
+  });
+
+  it('moves an item dropped on another section to that section\'s end, even an empty one', async () => {
+    const fetching = vi.fn<FetchLike>(async (url, init) => {
+      if (init.method === 'PATCH' && url === '/api/v1/services/s1') {
+        return reply(200, successEnvelope(record([{ id: 'sec', name: 'Welcome', itemIds: [] }, { id: 'resp', name: 'Response', itemIds: ['a'] }]), 'r2'));
+      }
+      if (url === '/api/v1/services/s1/content-drift') return noDrift;
+      throw new Error(`unexpected ${init.method ?? 'GET'} ${url}`);
+    });
+    setFetching(fetching);
+    render(<OrderPanel view={view} onEmpty={() => undefined} />);
+
+    const response = screen.getByText('Response').closest('.order-section') as HTMLElement;
+    const dataTransfer = { getData: () => 'a', dropEffect: 'none' };
+    expect(drag(response, 'DragOver', dataTransfer).defaultPrevented).toBe(true);
+    drag(response, 'Drop', dataTransfer);
+
+    await vi.waitFor(() => expect(patchCallsOf(fetching)).toHaveLength(1));
+    const [, init] = patchCallsOf(fetching)[0] ?? [];
+    const body = JSON.parse((init as { body?: string })?.body ?? '{}') as { sections: { id: string; items: { id: string }[] }[] };
+    expect(body.sections.map((section) => section.items.map((item) => item.id))).toEqual([[], ['a']]);
+  });
+
+  it('refuses a drop while the workspace is read-only', () => {
+    service.value = { ...view, state: 'completed' };
+    const fetching = vi.fn<FetchLike>(async () => { throw new Error('no request expected'); });
+    setFetching(fetching);
+    render(<OrderPanel view={{ ...view, state: 'completed' }} onEmpty={() => undefined} />);
+
+    const response = screen.getByText('Response').closest('.order-section') as HTMLElement;
+    const dataTransfer = { getData: () => 'a', dropEffect: 'none' };
+    expect(drag(response, 'DragOver', dataTransfer).defaultPrevented).toBe(false);
+    drag(response, 'Drop', dataTransfer);
+    expect(fetching).not.toHaveBeenCalled();
   });
 
   it('adds a new section with one PATCH request', async () => {

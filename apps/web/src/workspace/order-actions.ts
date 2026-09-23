@@ -3,8 +3,10 @@
 // since `OrderItem` renders `MoveToDialog` for its own Move To… action.
 
 import { API } from '../api-routes.js';
-import { mutate, pending } from '../state/workspace-store.js';
-import { movedSections, type OrderStep } from './order-ops.js';
+import type { JSX } from 'preact';
+
+import { isReadOnly, mutate, pending, service } from '../state/workspace-store.js';
+import { movedSections, reorderPlan, type OrderStep } from './order-ops.js';
 
 /**
  * Runs `steps` in order, keeping `itemId` marked pending for the whole sequence rather than flickering
@@ -37,4 +39,36 @@ export async function runOrderSteps(serviceId: string, itemId: string, steps: re
     next.delete(itemId);
     pending.value = next;
   }
+}
+
+/** The drag data type a row's handle carries: the item id, and nothing a drop elsewhere could misread. */
+export const DRAG_TYPE = 'text/plain';
+
+type DragHandlers = {
+  readonly onDragOver: (event: JSX.TargetedDragEvent<HTMLElement>) => void;
+  readonly onDrop: (event: JSX.TargetedDragEvent<HTMLElement>) => void;
+};
+
+/**
+ * Makes an element a drop target that moves the dragged item to `target` — a row (its own place) or a
+ * section (its end). A drop runs exactly the `reorderPlan` a keyboard or Move To… move to that place
+ * would, through `runOrderSteps`, so pointer and keyboard can never produce different requests.
+ */
+export function dropTarget(target: { sectionId: string; index: number }): DragHandlers {
+  return {
+    onDragOver: (event) => {
+      if (isReadOnly.value) return;
+      event.preventDefault();
+      if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'move';
+    },
+    onDrop: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const itemId = event.dataTransfer?.getData(DRAG_TYPE) ?? '';
+      const view = service.value;
+      if (isReadOnly.value || itemId === '' || view === undefined) return;
+      const steps = reorderPlan(view, itemId, target);
+      if (steps.length > 0) void runOrderSteps(view.id, itemId, steps);
+    },
+  };
 }

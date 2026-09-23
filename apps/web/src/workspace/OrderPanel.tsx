@@ -13,6 +13,7 @@ import { useAutosave } from '../editors/use-autosave.js';
 import { t } from '../i18n.js';
 import { bulkSelecting, isReadOnly, mutate, service } from '../state/workspace-store.js';
 import { BulkBar, leaveSelectionMode } from './BulkBar.js';
+import { dropTarget } from './order-actions.js';
 import { OrderItem } from './OrderItem.js';
 import { addSection, removeSection, renameSection } from './order-ops.js';
 import { itemsOf, type ServiceView } from './service-data.js';
@@ -84,7 +85,8 @@ function Section({ section, readOnly }: { readonly section: ServiceSection; read
   };
 
   return (
-    <div class="order-section">
+    // Dropping anywhere in the section but on a row puts the item at its end — an empty section included.
+    <div class="order-section" {...dropTarget({ sectionId: section.id, index: section.items.length })}>
       <div class="order-section-header">
         <button type="button" aria-expanded={expanded} aria-controls={itemsId} onClick={() => setExpanded(!expanded)}>
           {section.name}

@@ -11,11 +11,11 @@ import type { JSX } from 'preact';
 import { showToast } from '../components/toast.js';
 import { t } from '../i18n.js';
 import { Thumbnail } from '../preview/Thumbnail.js';
-import { bulkSelecting, bulkSelection, isReadOnly, mutate, pending, service } from '../state/workspace-store.js';
+import { bulkSelecting, bulkSelection, isReadOnly, mutate, pending, selection, service } from '../state/workspace-store.js';
 import { API } from '../api-routes.js';
 import { DriftNotice } from './DriftNotice.js';
 import { MoveToDialog } from './MoveToDialog.js';
-import { runOrderSteps } from './order-actions.js';
+import { DRAG_TYPE, dropTarget, runOrderSteps } from './order-actions.js';
 import { moveWithin, neighbours, reorderPlan, type Neighbours } from './order-ops.js';
 import { itemsOf } from './service-data.js';
 
@@ -43,6 +43,19 @@ async function undoRemove(serviceId: string, sectionId: string, atIndex: number,
   if (restored === undefined) return;
   const itemIds = moveWithin(restored.items.map((item) => item.id), snapshot.id, atIndex);
   await mutate(API.sectionReorder(serviceId, sectionId), { method: 'POST', body: { itemIds } }, snapshot.id);
+}
+
+/** Selects `itemId` for the editor and exact preview, and remembers it as `?item=` so a reload (and the
+ *  position writer, which follows `selection`) resumes on it. Replaces the entry: selecting is not a page. */
+function selectItem(itemId: string): void {
+  selection.value = { itemId };
+  try {
+    const url = new URL(globalThis.location.href);
+    url.searchParams.set('item', itemId);
+    globalThis.history.replaceState(globalThis.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // Without a history (an embedding host, a test document) the selection itself still holds.
+  }
 }
 
 export function OrderItem({ sectionId, item, index }: {
@@ -103,7 +116,10 @@ export function OrderItem({ sectionId, item, index }: {
   };
 
   return (
-    <li id={`workspace-item-${item.id}`} class="order-item" aria-busy={busy ? 'true' : undefined} data-item-id={item.id}>
+    <li
+      id={`workspace-item-${item.id}`} class="order-item" aria-busy={busy ? 'true' : undefined} data-item-id={item.id}
+      {...dropTarget({ sectionId, index })}
+    >
       {bulkSelecting.value ? (
         <input
           type="checkbox"
@@ -117,7 +133,10 @@ export function OrderItem({ sectionId, item, index }: {
         aria-label={t('order.drag', { title: item.title })}
         draggable={!readOnly}
         disabled={readOnly}
-        onDragStart={(event) => event.dataTransfer?.setData('text/plain', item.id)}
+        onDragStart={(event) => {
+          event.dataTransfer?.setData(DRAG_TYPE, item.id);
+          if (event.dataTransfer !== null) event.dataTransfer.effectAllowed = 'move';
+        }}
         onKeyDown={(event) => {
           if (event.key === 'ArrowUp' && at.up !== undefined) {
             event.preventDefault();
@@ -133,7 +152,13 @@ export function OrderItem({ sectionId, item, index }: {
       <button type="button" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
         {t('order.expand', { title: item.title })}
       </button>
-      <span title={item.title}>{item.title}</span>
+      <button
+        type="button" class="order-item-title" title={item.title}
+        aria-pressed={selection.value.itemId === item.id}
+        onClick={() => selectItem(item.id)}
+      >
+        {item.title}
+      </button>
       <span>{t(KIND_KEY[item.kind])}</span>
       {item.content === undefined ? null : <span>{t('order.revision', { n: item.content.revision })}</span>}
       <DriftNotice itemId={item.id} />

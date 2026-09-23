@@ -12,7 +12,7 @@ import type { FetchLike } from '../api.js';
 import { session } from '../app-state.js';
 import { ToastRegion, toasts } from '../components/toast.js';
 import { setFetching } from '../request.js';
-import { drift, resetWorkspace, service } from '../state/workspace-store.js';
+import { drift, resetWorkspace, selection, service } from '../state/workspace-store.js';
 import { OrderItem } from './OrderItem.js';
 import type { ServiceView } from './service-data.js';
 
@@ -60,6 +60,16 @@ const fakeFetch = (map: Record<string, ReturnType<typeof reply> | (() => Promise
     if (response === undefined) throw new Error(`No reply for ${key}`);
     return typeof response === 'function' ? await response() : response;
   };
+
+// happy-dom's elements have no `ondragover`/`ondrop`/`ondragstart` properties, so Preact registers those
+// handlers under their JSX casing ("DragOver", ...) rather than the lowercase DOM type a browser fires.
+// Dispatching that casing reaches the very handlers a real drag would; the harness journey drags for real.
+const drag = (target: Element, type: 'DragStart' | 'DragOver' | 'Drop', dataTransfer: object): Event => {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
+  target.dispatchEvent(event);
+  return event;
+};
 
 beforeEach(() => {
   resetWorkspace();
@@ -155,6 +165,46 @@ describe('OrderItem', () => {
 
     expect(screen.getByText('A newer revision is available')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Update to revision 4' })).toBeTruthy();
+  });
+
+  it('selects an existing item from its title, remembering it in the address', () => {
+    setFetching(fakeFetch({}));
+    globalThis.history.replaceState(null, '', '/services/s1?tab=x');
+    render(<OrderItem sectionId="sec" item={itemA} index={0} total={2} />);
+
+    const title = screen.getByRole('button', { name: 'Song A' });
+    expect(title.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(title);
+
+    expect(selection.value).toEqual({ itemId: 'a' });
+    expect(title.getAttribute('aria-pressed')).toBe('true');
+    expect(new URLSearchParams(globalThis.location.search).get('item')).toBe('a');
+    expect(new URLSearchParams(globalThis.location.search).get('tab')).toBe('x');
+  });
+
+  it('reorders an item dropped on another row with the same request the keyboard move sends', async () => {
+    const calls: string[] = [];
+    const bodies: unknown[] = [];
+    setFetching(async (url, init) => {
+      const key = `${init.method ?? 'GET'} ${url}`;
+      calls.push(key);
+      if (init.body !== undefined) bodies.push(JSON.parse(init.body as string));
+      if (key === 'POST /api/v1/services/s1/sections/sec/items/reorder') return reply(200, successEnvelope(record(['b', 'a']), 'r2'));
+      if (key === 'GET /api/v1/services/s1/content-drift') return noDrift;
+      throw new Error(`No reply for ${key}`);
+    });
+    render(<><OrderItem sectionId="sec" item={itemA} index={0} total={2} /><OrderItem sectionId="sec" item={itemB} index={1} total={2} /></>);
+
+    const data = new Map<string, string>();
+    const dataTransfer = { setData: (type: string, value: string) => data.set(type, value), getData: (type: string) => data.get(type) ?? '', dropEffect: 'none', effectAllowed: 'all' };
+    drag(screen.getByRole('button', { name: 'Drag Song B' }), 'DragStart', dataTransfer);
+    const rowA = document.getElementById('workspace-item-a') as HTMLElement;
+    expect(drag(rowA, 'DragOver', dataTransfer).defaultPrevented).toBe(true);
+    expect(dataTransfer.dropEffect).toBe('move');
+    drag(rowA, 'Drop', dataTransfer);
+
+    await vi.waitFor(() => expect(calls).toContain('POST /api/v1/services/s1/sections/sec/items/reorder'));
+    expect(bodies[0]).toEqual({ itemIds: ['b', 'a'] });
   });
 
   it('opens Move To… from the keyboard and returns focus to Actions on Escape', () => {
