@@ -406,7 +406,7 @@ export function buildApp({
     : () => sermonAiSwitch(settingsAdmin.current().values, anthropicApiKey);
   serveSermonRoutes(app, { sermons, corpus, identity, anthropicApiKey, sermonAi });
   serveSlideGroupRoutes(app, { slideGroups, identity });
-  serveLibraryRoutes(app, { library, identity });
+  serveLibraryRoutes(app, { library, identity, services, serviceTemplates });
   serveScriptureSearchRoutes(app, { corpus });
 
   // Their own permission again, the same Admin's tier as the Slide Layout and media surfaces above but not

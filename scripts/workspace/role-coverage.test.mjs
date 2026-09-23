@@ -186,9 +186,9 @@ test('in-process route tests cannot be claimed as harness integration evidence',
 test('the repository itself accounts for every permission registration it ships', () => {
   const repo = readRoles();
   assert.equal(Object.keys(repo.routeSources).length, 33);
-  assert.equal(permissionRoutesIn(repo.routeSources).routes.length, 140);
+  assert.equal(permissionRoutesIn(repo.routeSources).routes.length, 142);
   assert.deepEqual(verifyRoleCoverage(repo), []);
-  assert.equal(verifyRoleCoverage(repo, { tested: {}, gaps: {} }).length, 140);
+  assert.equal(verifyRoleCoverage(repo, { tested: {}, gaps: {} }).length, 142);
 });
 
 test('repository guard removal is detected even while its negative test is a known gap', () => {

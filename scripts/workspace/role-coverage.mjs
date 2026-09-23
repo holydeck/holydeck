@@ -41,6 +41,8 @@ export const KNOWN_INTEGRATION_GAPS = {
   'integration-routes.ts PATCH INTEGRATION_ID_PATH INTEGRATIONS_MANAGE': 'no harness test refuses toggling an integration to a non-admin',
   'library-routes.ts GET LIBRARY_PATH CONTENT_EDIT': 'no harness test refuses the library list without content.edit',
   'library-routes.ts GET LIBRARY_ID_PATH CONTENT_EDIT': 'no harness test refuses a library entry read without content.edit',
+  'library-routes.ts PATCH LIBRARY_STATUS_PATH CONTENT_EDIT': 'no harness test refuses library archival or restore without content.edit',
+  'library-routes.ts GET LIBRARY_DEPENDENTS_PATH CONTENT_EDIT': 'no harness test refuses a library dependents read without content.edit',
   'live.ts GET LIVE_CONNECTIONS_PATH PRESENTATION_CONTROL': 'no harness test refuses live connection counts without Control presentation',
   'media-routes.ts GET MEDIA_PATH CONTENT_EDIT|MEDIA_MANAGE': 'no harness test refuses the media list to a session with neither permission',
   'media-routes.ts POST MEDIA_PATH MEDIA_MANAGE': 'no harness test refuses media uploads to a non-admin',

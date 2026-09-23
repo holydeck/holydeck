@@ -282,6 +282,8 @@ describe('every route that changes something', () => {
       { method: 'DELETE', url: `${SLIDE_PATH}/background` },
       { method: 'POST', url: `${SLIDE_PATH}/language-blocks/:blockId/duplicate` },
       { method: 'PUT', url: `${SLIDE_PATH}/language-block-order` },
+      // Archiving or restoring any library item is an Editor's, the same as authoring one is.
+      { method: 'PATCH', url: `${LIBRARY_PATH}/:id/status` },
       // Behind the same permission as the Slide Layout and media surfaces above: administering the
       // content-language registry and the slide-label catalogue is Admin's, the same vocabulary again.
       { method: 'POST', url: CONTENT_LANGUAGES_PATH },
@@ -372,6 +374,8 @@ describe('the content surfaces this spec wires, with every store present', () =>
       [`PUT ${SLIDE_GROUP_ID_PATH}`]: contentEdit,
       [`PATCH ${SLIDE_PATH}`]: contentEdit,
       [`GET ${LIBRARY_PATH}`]: contentEdit,
+      [`PATCH ${LIBRARY_PATH}/:id/status`]: contentEdit,
+      [`GET ${LIBRARY_PATH}/:id/dependents`]: contentEdit,
       [`GET ${SCRIPTURE_SEARCH_PATH}`]: { kind: 'any-permission', needs: [CONTENT_EDIT, PRESENTATION_CONTROL] },
       [`POST ${CONTENT_LANGUAGES_PATH}`]: catalogueManage,
       [`PATCH ${CONTENT_LANGUAGE_STATUS_PATH}`]: catalogueManage,
