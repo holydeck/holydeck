@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { capabilityContext, capabilitiesOn, tokenDigest } from './capabilities.js';
-import { GuestJoinError, admitGuest } from './guest-join.js';
+import { GuestJoinError, admitGuest, admitOutput } from './guest-join.js';
 import { VIEW_GRANTS } from './live-protocol.js';
 import { serviceContext, servicesOn } from './services.js';
 
@@ -141,4 +141,73 @@ describe('a Guest joining the Audience view', () => {
       expect(error.kind).toBe('state');
     });
   }
+});
+
+describe('an output window opening one of its channels', () => {
+  it('grants watch-only access to the view its capability names, whatever state the Service is in', async () => {
+    const { services, capabilities } = harness();
+    const service = await serviceAt(services);
+    const { token } = await capabilities.issue(capabilityContext(CORRELATION), ADMINISTRATOR, {
+      kind: 'output', service, view: 'stage', expiresAt: new Date(START + 60_000).toISOString(),
+    });
+    const grant = await admitOutput(capabilities, CORRELATION, { token, service, view: 'stage' });
+    expect(grant).toEqual({ ...VIEW_GRANTS.stage, capabilityId: tokenDigest(token) });
+  });
+
+  it('refuses a capability that has expired', async () => {
+    const { capabilities, advance } = harness();
+    const { token } = await capabilities.issue(capabilityContext(CORRELATION), ADMINISTRATOR, {
+      kind: 'output', service: 'service-1', view: 'audience', expiresAt: new Date(START + 1000).toISOString(),
+    });
+    advance(2000);
+    const error = await refused(
+      admitOutput(capabilities, CORRELATION, { token, service: 'service-1', view: 'audience' }),
+    );
+    expect(error.kind).toBe('capability');
+  });
+
+  it('refuses a capability presented against a different service', async () => {
+    const { capabilities } = harness();
+    const { token } = await capabilities.issue(capabilityContext(CORRELATION), ADMINISTRATOR, {
+      kind: 'output', service: 'service-1', view: 'audience', expiresAt: new Date(START + 60_000).toISOString(),
+    });
+    const error = await refused(
+      admitOutput(capabilities, CORRELATION, { token, service: 'a-different-service', view: 'audience' }),
+    );
+    expect(error.kind).toBe('capability');
+  });
+
+  it('refuses a capability presented against a different view', async () => {
+    const { capabilities } = harness();
+    const { token } = await capabilities.issue(capabilityContext(CORRELATION), ADMINISTRATOR, {
+      kind: 'output', service: 'service-1', view: 'stage', expiresAt: new Date(START + 60_000).toISOString(),
+    });
+    const error = await refused(
+      admitOutput(capabilities, CORRELATION, { token, service: 'service-1', view: 'audience' }),
+    );
+    expect(error.kind).toBe('capability');
+  });
+
+  it('refuses a capability that has been revoked', async () => {
+    const { capabilities } = harness();
+    const { token, capabilityId } = await capabilities.issue(capabilityContext(CORRELATION), ADMINISTRATOR, {
+      kind: 'output', service: 'service-1', view: 'audience', expiresAt: new Date(START + 60_000).toISOString(),
+    });
+    await capabilities.revoke(capabilityContext(CORRELATION), capabilityId);
+    const error = await refused(
+      admitOutput(capabilities, CORRELATION, { token, service: 'service-1', view: 'audience' }),
+    );
+    expect(error.kind).toBe('capability');
+  });
+
+  it('refuses a guest-kind capability, which opens no output window', async () => {
+    const { capabilities } = harness();
+    const { token } = await capabilities.issue(capabilityContext(CORRELATION), ADMINISTRATOR, {
+      kind: 'guest', service: 'service-1', view: 'audience', expiresAt: new Date(START + 60_000).toISOString(),
+    });
+    const error = await refused(
+      admitOutput(capabilities, CORRELATION, { token, service: 'service-1', view: 'audience' }),
+    );
+    expect(error.kind).toBe('capability');
+  });
 });

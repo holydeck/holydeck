@@ -1,20 +1,21 @@
-// Admitting an anonymous Guest to the Audience view (spec LIVE-03, 9.3, 9.5), and nothing else this
-// module could be mistaken for. Two things gate a join, both read live and neither cached: the
-// capability itself — T32's `capabilities.ts`, redeemed exactly as an output window's is, against the
-// service and view the caller names — and the Service that capability names, which a Guest may only
-// reach while ADR 0002 has it Presenting (`joinAllowedFor`, T44). A capability that redeems clean against
-// a Service in any of the other three states is still refused: the capability outliving the one window
-// it was scoped to is not this module's failure to catch, `capabilities.ts`'s expiry is, and this is the
-// second, independent gate spec 9.3 asks for on top of it.
+// Admitting two different callers to a live channel (spec LIVE-03, 9.3, 9.5, OUT-02): an anonymous Guest
+// to the Audience view, and an output window to whichever view its capability names. Both gate on the
+// same first check, read live and never cached — the capability itself, T32's `capabilities.ts`, redeemed
+// against the service and view the caller names — and only a Guest's join gates on a second: the Service
+// that capability names must be Presenting (`joinAllowedFor`, T44, ADR 0002) or the join is refused, even
+// though the capability itself redeemed clean. An output window carries no such gate (OUT-02): a
+// controller opens its own output windows while rehearsing, long before a Service presents, so
+// `admitOutput` accepts a redeemed `output` capability in any Service state.
 //
-// What redeeming answers with carries no identity at all (`RedeemedCapability`'s `guest` arm), and
-// nothing here adds one: a Guest's `LiveGrant` names a view to watch, never who is watching it — spec
-// 9.5's whole privacy contract is kept by there being no field here for a name, an email or an account to
-// go in, not by a promise to leave one blank.
+// What redeeming answers with carries no identity at all (`RedeemedCapability`'s `guest` and `output`
+// arms alike), and nothing here adds one: a `LiveGrant` names a view to watch, never who is watching it —
+// spec 9.5's whole privacy contract is kept by there being no field here for a name, an email or an
+// account to go in, not by a promise to leave one blank.
 //
-// An output capability redeems through the same store and the same shape, but is refused here: this door
-// is a Guest's alone, and consuming an output window's capability through the live socket is a later
-// task's to build.
+// Wiring either grant into an actual live socket's handshake is this module's callers' job, not this
+// module's: `admitGuest` is already consumed by the query-string join path in `live.ts`; `admitOutput`'s
+// own consumer — minting the tickets OUT-01 describes from the grant it returns — is a later task's to
+// build.
 
 import { joinAllowedFor } from '@holydeck/contracts/services';
 
@@ -82,6 +83,37 @@ export async function admitGuest(
       'state',
       `${request.service} is not Presenting, and a Guest capability opens only while its Service is`,
     );
+  }
+  return { ...VIEW_GRANTS[redeemed.view], capabilityId: tokenDigest(request.token) };
+}
+
+export interface OutputJoinRequest {
+  readonly token: string;
+  readonly service: string;
+  readonly view: OutputChannel;
+}
+
+/**
+ * Admits an output window to one channel, or refuses — the same capability check `admitGuest` makes,
+ * without the second, Presenting-only gate: an output window opens on its capability alone (OUT-02).
+ */
+export async function admitOutput(
+  capabilities: CapabilityStore,
+  correlationId: string,
+  request: OutputJoinRequest,
+): Promise<LiveGrant> {
+  let redeemed;
+  try {
+    redeemed = await capabilities.redeem(capabilityContext(correlationId), request.token, {
+      service: request.service,
+      view: request.view,
+    });
+  } catch (error: unknown) {
+    if (error instanceof CapabilityError) throw new GuestJoinError('capability', error.message);
+    throw error;
+  }
+  if (redeemed.kind !== 'output') {
+    throw new GuestJoinError('capability', 'capabilities: that capability does not open an output window');
   }
   return { ...VIEW_GRANTS[redeemed.view], capabilityId: tokenDigest(request.token) };
 }
