@@ -194,4 +194,20 @@ describe('completion', () => {
     expect(setup.stdout()).toContain('holydeck completion --arg-hint');
     expect(setup.stdout()).toContain('_message');
   });
+
+  it('completes translations for sync status at CURRENT == 4 in the zsh script', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', 'zsh'])).resolves.toBe(0);
+    const script = setup.stdout();
+    expect(script).toContain('if [[ "$words[3]" == "status" ]]; then');
+    expect(script).toContain('if (( CURRENT >= 4 )); then');
+  });
+
+  it('completes translations for sync status in the bash script', async () => {
+    const setup = makeContext();
+    await expect(runCli(setup.ctx, ['completion', 'bash'])).resolves.toBe(0);
+    const script = setup.stdout();
+    expect(script).toContain('if [ "${COMP_WORDS[2]}" == "status" ]; then');
+    expect(script).toContain('if [ "$COMP_CWORD" -ge 3 ]; then');
+  });
 });
