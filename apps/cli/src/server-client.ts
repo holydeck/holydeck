@@ -36,6 +36,36 @@ export interface ServerHealth {
   store: string;
 }
 
+export interface ServerSyncJobReport {
+  planned: number;
+  fetched: number;
+  unchanged: number;
+  newRevisions: number;
+  failed: Array<{ book: string; chapter: string; code: string }>;
+  metadataBuildChanged?: { from: number; to: number };
+}
+
+export interface ServerSyncJobStatus {
+  translation: string;
+  state: 'running' | 'completed' | 'failed';
+  refresh: boolean;
+  startedAt: string;
+  finishedAt?: string;
+  progress: { done: number; total: number };
+  report?: ServerSyncJobReport;
+  error?: { code: string; message: string };
+}
+
+export interface ServerStatsResponse {
+  translations: Array<{
+    abbr: string;
+    chapters: { stored: number; total: number };
+    revisions: number;
+    updatedAt: string;
+  }>;
+  totals: { translations: number; chapters: number; revisions: number };
+}
+
 const ACCEPT = { accept: 'application/json' };
 
 function bad(url: string, reason: string): never {
@@ -57,6 +87,59 @@ function asNumber(value: unknown, url: string, field: string): number {
   return value;
 }
 
+function parseSyncJobReport(value: Record<string, unknown>, url: string): ServerSyncJobReport {
+  if (!Array.isArray(value['failed'])) bad(url, 'field "report.failed" is not an array');
+  const report: ServerSyncJobReport = {
+    planned: asNumber(value['planned'], url, 'report.planned'),
+    fetched: asNumber(value['fetched'], url, 'report.fetched'),
+    unchanged: asNumber(value['unchanged'], url, 'report.unchanged'),
+    newRevisions: asNumber(value['newRevisions'], url, 'report.newRevisions'),
+    failed: value['failed'].map((item) => {
+      const entry = asRecord(item, url, 'report.failed[] entry is not an object');
+      return {
+        book: asString(entry['book'], url, 'report.failed[].book'),
+        chapter: asString(entry['chapter'], url, 'report.failed[].chapter'),
+        code: asString(entry['code'], url, 'report.failed[].code'),
+      };
+    }),
+  };
+  if (value['metadataBuildChanged'] !== undefined) {
+    const changed = asRecord(value['metadataBuildChanged'], url, 'field "report.metadataBuildChanged" is not an object');
+    report.metadataBuildChanged = {
+      from: asNumber(changed['from'], url, 'report.metadataBuildChanged.from'),
+      to: asNumber(changed['to'], url, 'report.metadataBuildChanged.to'),
+    };
+  }
+  return report;
+}
+
+function parseSyncJobStatus(value: Record<string, unknown>, url: string): ServerSyncJobStatus {
+  const state = asString(value['state'], url, 'state');
+  if (state !== 'running' && state !== 'completed' && state !== 'failed') {
+    bad(url, 'field "state" is not "running", "completed" or "failed"');
+  }
+  const progress = asRecord(value['progress'], url, 'field "progress" is not an object');
+  const status: ServerSyncJobStatus = {
+    translation: asString(value['translation'], url, 'translation'),
+    state,
+    refresh: value['refresh'] === true,
+    startedAt: asString(value['startedAt'], url, 'startedAt'),
+    progress: {
+      done: asNumber(progress['done'], url, 'progress.done'),
+      total: asNumber(progress['total'], url, 'progress.total'),
+    },
+  };
+  if (typeof value['finishedAt'] === 'string') status.finishedAt = value['finishedAt'];
+  if (value['report'] !== undefined) {
+    status.report = parseSyncJobReport(asRecord(value['report'], url, 'field "report" is not an object'), url);
+  }
+  if (value['error'] !== undefined) {
+    const error = asRecord(value['error'], url, 'field "error" is not an object');
+    status.error = { code: asString(error['code'], url, 'error.code'), message: asString(error['message'], url, 'error.message') };
+  }
+  return status;
+}
+
 export class ServerClient {
   readonly baseUrl: string;
   private readonly httpGet: HttpGet;
@@ -70,21 +153,26 @@ export class ServerClient {
     this.accessToken = options.accessToken;
   }
 
-  private async send(url: string, post: string | undefined, token: string | undefined): Promise<{ status: number; body: string }> {
+  private async send(
+    url: string,
+    post: string | undefined,
+    token: string | undefined,
+    contentType: string,
+  ): Promise<{ status: number; body: string }> {
     const headers: Record<string, string> = { ...ACCEPT };
     if (token !== undefined) headers['authorization'] = `Bearer ${token}`;
     return post === undefined
       ? await this.httpGet(url, headers)
-      : await this.httpPost(url, post, { ...headers, 'content-type': 'text/plain; charset=utf-8' });
+      : await this.httpPost(url, post, { ...headers, 'content-type': contentType });
   }
 
-  private async request(url: string, post?: string): Promise<unknown> {
+  private async request(url: string, post?: string, contentType = 'text/plain; charset=utf-8'): Promise<unknown> {
     let response: { status: number; body: string };
     try {
       const token = await this.accessToken?.();
-      response = await this.send(url, post, token);
+      response = await this.send(url, post, token, contentType);
       if (response.status === 401 && token !== undefined && this.accessToken !== undefined) {
-        response = await this.send(url, post, await this.accessToken(true));
+        response = await this.send(url, post, await this.accessToken(true), contentType);
       }
     } catch (error) {
       if (error instanceof HolyDeckError) throw error;
@@ -116,6 +204,20 @@ export class ServerClient {
       );
     }
     return parsed;
+  }
+
+  /** Wraps {@link request} for the admin-only routes, remapping a 401/403 to a distinct error so the
+   *  caller can tell "wrong token" apart from every other request failure. */
+  private async requestAdmin(url: string, post?: string, contentType?: string): Promise<unknown> {
+    try {
+      return await this.request(url, post, contentType);
+    } catch (error) {
+      if (error instanceof HolyDeckError && error.code === 'server_error') {
+        const status = error.params['status'];
+        if (status === 401 || status === 403) throw new HolyDeckError('server_admin_token_required', { url });
+      }
+      throw error;
+    }
   }
 
   async health(): Promise<ServerHealth> {
@@ -183,5 +285,50 @@ export class ServerClient {
     const data = asRecord(await this.request(url, sermonText), url, 'not an object');
     const notices = Array.isArray(data['notices']) ? data['notices'].map((n) => asString(n, url, 'notices[]')) : [];
     return { output: asString(data['output'], url, 'output'), notices };
+  }
+
+  async sync(abbr: string, options: { refresh?: boolean } = {}): Promise<ServerSyncJobStatus> {
+    const url = `${this.baseUrl}/api/v1/translations/${encodeURIComponent(abbr)}/sync`;
+    const body = JSON.stringify({ refresh: options.refresh === true });
+    const data = asRecord(await this.requestAdmin(url, body, 'application/json'), url, 'not an object');
+    return parseSyncJobStatus(data, url);
+  }
+
+  async syncStatus(abbr: string): Promise<ServerSyncJobStatus | undefined> {
+    const url = `${this.baseUrl}/api/v1/translations/${encodeURIComponent(abbr)}/sync`;
+    try {
+      return parseSyncJobStatus(asRecord(await this.requestAdmin(url), url, 'not an object'), url);
+    } catch (error) {
+      if (error instanceof HolyDeckError && error.code === 'server_error' && error.params['status'] === 404) return undefined;
+      throw error;
+    }
+  }
+
+  async stats(): Promise<ServerStatsResponse> {
+    const url = `${this.baseUrl}/api/v1/stats`;
+    const data = asRecord(await this.requestAdmin(url), url, 'not an object');
+    if (!Array.isArray(data['translations'])) bad(url, 'field "translations" is not an array');
+    const translations = data['translations'].map((item) => {
+      const entry = asRecord(item, url, 'translation entry is not an object');
+      const chapters = asRecord(entry['chapters'], url, 'field "chapters" is not an object');
+      return {
+        abbr: asString(entry['abbr'], url, 'abbr'),
+        chapters: {
+          stored: asNumber(chapters['stored'], url, 'chapters.stored'),
+          total: asNumber(chapters['total'], url, 'chapters.total'),
+        },
+        revisions: asNumber(entry['revisions'], url, 'revisions'),
+        updatedAt: asString(entry['updatedAt'], url, 'updatedAt'),
+      };
+    });
+    const totals = asRecord(data['totals'], url, 'field "totals" is not an object');
+    return {
+      translations,
+      totals: {
+        translations: asNumber(totals['translations'], url, 'totals.translations'),
+        chapters: asNumber(totals['chapters'], url, 'totals.chapters'),
+        revisions: asNumber(totals['revisions'], url, 'totals.revisions'),
+      },
+    };
   }
 }

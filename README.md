@@ -130,6 +130,25 @@ The corpus syncs through the Chromium in its own image, so `POST /api/v1/transla
 works from the dev stack too. `apps/corpus/compose.example.yaml` is the deployment example
 instead: it pulls the published image rather than building one.
 
+### Syncing and reporting against a server
+
+Every `sync`/`stats` invocation runs against the local datastore unless `--server-url` (or
+`HOLYDECK_SERVER_URL`) points it at a corpus server, in which case the CLI drives that server's
+sync jobs and reports instead of touching disk:
+
+```sh
+export HOLYDECK_SERVER_TOKEN=<admin-token>
+node apps/cli/dist/cli.js sync KJV --server-url https://holydeck.example.com
+node apps/cli/dist/cli.js sync status KJV --server-url https://holydeck.example.com
+node apps/cli/dist/cli.js stats --server-url https://holydeck.example.com
+```
+
+`sync` starts (or attaches to an already-running) job and polls it to completion, printing
+`[ABBR] done/total` progress lines. Every server-mode call — `sync`, `sync status` and `stats`
+alike — requires the admin token (`HOLYDECK_SERVER_TOKEN`); without it, the server refuses with a
+`server_admin_token_required` error naming the missing variable. `--dry-run` is local-only and is
+refused against a server.
+
 ## License
 
 [MIT](LICENSE)

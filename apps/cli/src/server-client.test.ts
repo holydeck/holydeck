@@ -287,3 +287,180 @@ describe('ServerClient errors', () => {
     await expect(client.health()).rejects.toBe(expected);
   });
 });
+
+describe('sync', () => {
+  it('starts a sync job and parses the 202 job status', async () => {
+    const httpPost: HttpPost = async () => ({
+      status: 202,
+      body: JSON.stringify({
+        translation: 'KJV',
+        state: 'running',
+        refresh: false,
+        startedAt: 't',
+        progress: { done: 0, total: 10 },
+      }),
+    });
+    const client = new ServerClient('https://holydeck.example.com', { httpGet: noGet, httpPost });
+    await expect(client.sync('KJV', {})).resolves.toEqual({
+      translation: 'KJV',
+      state: 'running',
+      refresh: false,
+      startedAt: 't',
+      progress: { done: 0, total: 10 },
+    });
+  });
+
+  it('sends refresh as a JSON body, not text/plain', async () => {
+    const posts: Array<{ url: string; body: string; contentType: string }> = [];
+    const httpPost: HttpPost = async (url, body, headers) => {
+      posts.push({ url, body, contentType: headers['content-type'] ?? '' });
+      return {
+        status: 202,
+        body: JSON.stringify({
+          translation: 'KJV',
+          state: 'running',
+          refresh: true,
+          startedAt: 't',
+          progress: { done: 0, total: 0 },
+        }),
+      };
+    };
+    const client = new ServerClient('https://holydeck.example.com', { httpGet: noGet, httpPost });
+    await client.sync('KJV', { refresh: true });
+    expect(posts).toEqual([
+      {
+        url: 'https://holydeck.example.com/api/v1/translations/KJV/sync',
+        body: '{"refresh":true}',
+        contentType: 'application/json',
+      },
+    ]);
+  });
+
+  it('maps a 409 to server_error with status 409 (caller attaches to the running job)', async () => {
+    const httpPost: HttpPost = async () => ({
+      status: 409,
+      body: JSON.stringify({ error: { code: 'sync_already_running', message: 'running' } }),
+    });
+    const client = new ServerClient('https://holydeck.example.com', { httpGet: noGet, httpPost });
+    const error = await client.sync('KJV', {}).catch((e: unknown) => e as HolyDeckError);
+    expect(error).toBeInstanceOf(HolyDeckError);
+    expect((error as HolyDeckError).code).toBe('server_error');
+    expect((error as HolyDeckError).params['status']).toBe(409);
+  });
+
+  it('maps a 401 to server_admin_token_required', async () => {
+    const httpPost: HttpPost = async () => ({
+      status: 401,
+      body: JSON.stringify({ error: { code: 'auth_failed', message: 'no token' } }),
+    });
+    const client = new ServerClient('https://holydeck.example.com', { httpGet: noGet, httpPost });
+    const error = await client.sync('KJV', {}).catch((e: unknown) => e as HolyDeckError);
+    expect((error as HolyDeckError).code).toBe('server_admin_token_required');
+  });
+
+  it('maps a 403 to server_admin_token_required too', async () => {
+    const httpPost: HttpPost = async () => ({
+      status: 403,
+      body: JSON.stringify({ error: { code: 'auth_failed', message: 'no token' } }),
+    });
+    const client = new ServerClient('https://holydeck.example.com', { httpGet: noGet, httpPost });
+    const error = await client.sync('KJV', {}).catch((e: unknown) => e as HolyDeckError);
+    expect((error as HolyDeckError).code).toBe('server_admin_token_required');
+  });
+});
+
+describe('syncStatus', () => {
+  it('returns the latest job status', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/api/v1/translations/KJV/sync': {
+        status: 200,
+        body: JSON.stringify({
+          translation: 'KJV',
+          state: 'completed',
+          refresh: false,
+          startedAt: 't',
+          finishedAt: 't2',
+          progress: { done: 2, total: 2 },
+          report: { planned: 2, fetched: 2, unchanged: 0, newRevisions: 2, failed: [] },
+        }),
+      },
+    });
+    await expect(client.syncStatus('KJV')).resolves.toEqual({
+      translation: 'KJV',
+      state: 'completed',
+      refresh: false,
+      startedAt: 't',
+      finishedAt: 't2',
+      progress: { done: 2, total: 2 },
+      report: { planned: 2, fetched: 2, unchanged: 0, newRevisions: 2, failed: [] },
+    });
+  });
+
+  it('returns undefined on a 404', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/api/v1/translations/KJV/sync': {
+        status: 404,
+        body: JSON.stringify({ error: { code: 'sync_job_not_found', message: 'none' } }),
+      },
+    });
+    await expect(client.syncStatus('KJV')).resolves.toBeUndefined();
+  });
+
+  it('maps a 401 on status to server_admin_token_required', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/api/v1/translations/KJV/sync': {
+        status: 401,
+        body: JSON.stringify({ error: { code: 'auth_failed', message: 'no token' } }),
+      },
+    });
+    const error = await client.syncStatus('KJV').catch((e: unknown) => e as HolyDeckError);
+    expect((error as HolyDeckError).code).toBe('server_admin_token_required');
+  });
+});
+
+describe('stats', () => {
+  it('parses the stats response', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/api/v1/stats': {
+        status: 200,
+        body: JSON.stringify({
+          translations: [
+            { abbr: 'KJV', chapters: { stored: 2, total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' },
+          ],
+          totals: { translations: 1, chapters: 2, revisions: 3 },
+        }),
+      },
+    });
+    await expect(client.stats()).resolves.toEqual({
+      translations: [
+        { abbr: 'KJV', chapters: { stored: 2, total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' },
+      ],
+      totals: { translations: 1, chapters: 2, revisions: 3 },
+    });
+  });
+
+  it('maps a 401 to server_admin_token_required', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/api/v1/stats': {
+        status: 401,
+        body: JSON.stringify({ error: { code: 'auth_failed', message: 'no token' } }),
+      },
+    });
+    const error = await client.stats().catch((e: unknown) => e as HolyDeckError);
+    expect((error as HolyDeckError).code).toBe('server_admin_token_required');
+  });
+
+  it('rejects a malformed chapters field', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/api/v1/stats': {
+        status: 200,
+        body: JSON.stringify({
+          translations: [{ abbr: 'KJV', chapters: { total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' }],
+          totals: { translations: 1, chapters: 2, revisions: 3 },
+        }),
+      },
+    });
+    const error = await client.stats().catch((e: unknown) => e as HolyDeckError);
+    expect((error as HolyDeckError).code).toBe('server_bad_response');
+  });
+});
