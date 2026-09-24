@@ -30,10 +30,19 @@ const FIXER = [
   '',
 ].join('\n');
 
+// A hook runs with GIT_DIR, GIT_INDEX_FILE and friends pointing at the repository being pushed. Passed on
+// as they are, every `git -C <scratch>` below would act on that repository instead: re-initialise it, write
+// this harness's identity into its config and commit over its branch. So the scratch repository only ever
+// sees an environment without them.
+function environmentFor(directory) {
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')));
+  return { ...environment, HOME: directory };
+}
+
 function repository() {
   const directory = mkdtempSync(join(tmpdir(), 'holydeck-hooks-'));
   const git = (...args) =>
-    execFileSync('git', ['-C', directory, ...args], { encoding: 'utf8', env: { ...process.env, HOME: directory } });
+    execFileSync('git', ['-C', directory, ...args], { encoding: 'utf8', env: environmentFor(directory) });
   git('init', '--quiet', '--initial-branch=main');
   git('config', 'user.email', 'harness@localhost.invalid');
   git('config', 'user.name', 'Harness');
@@ -63,7 +72,7 @@ test('a commit of one hunk keeps the hunk that was not staged, after the checks 
     execFileSync('sh', [join(directory, 'pre-commit')], {
       cwd: directory,
       encoding: 'utf8',
-      env: { ...process.env, HOME: directory },
+      env: environmentFor(directory),
     });
     git('commit', '--quiet', '--no-verify', '-m', 'the staged hunk');
 
@@ -95,7 +104,7 @@ test('a commit is refused when a staged file does not pass', () => {
         execFileSync('sh', [join(directory, 'pre-commit')], {
           cwd: directory,
           stdio: 'ignore',
-          env: { ...process.env, HOME: directory },
+          env: environmentFor(directory),
         }),
       /Command failed/u,
     );
