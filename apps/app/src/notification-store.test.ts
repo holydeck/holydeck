@@ -39,6 +39,13 @@ describe('the persisted inbox', () => {
     expect((await store.listFor('A', { unread: true })).map((item) => item.event)).toEqual(['event-2']);
   });
 
+  it('excludes a dismissed-but-unread row from the unread list, but keeps it in the full list', async () => {
+    await store.materialize([row(), row('event-2')]);
+    await store.markDismissed('A', 'event-1:A:inApp');
+    expect((await store.listFor('A', { unread: true })).map((item) => item.event)).toEqual(['event-2']);
+    expect((await store.listFor('A')).map((item) => item.event)).toEqual(['event-1', 'event-2']);
+  });
+
   it.each(['markRead', 'markDismissed'] as const)('%s refuses missing and foreign rows without changing them', async (method) => {
     await store.materialize([row()]);
     const before = await store.listFor('A');

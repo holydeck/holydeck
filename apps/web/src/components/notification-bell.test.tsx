@@ -165,11 +165,15 @@ describe('NotificationBell', () => {
     expect(fetching).toHaveBeenCalledWith('/api/v1/notifications/n1/dismiss', expect.objectContaining({ method: 'POST' }));
   });
 
-  it('keeps a dismissed notification out of the badge even though the server still lists it as unread', async () => {
+  it('keeps a dismissed notification out of the badge once the next poll confirms the server dropped it', async () => {
     vi.useFakeTimers();
+    let dismissed = false;
     const fetching = vi.fn<FetchLike>(async (url, init) => {
-      if (init.method === 'POST') return reply(200, successEnvelope({ dismissed: true }, 'r-dismiss'));
-      return reply(200, successEnvelope({ notifications: [row({ _id: 'n1' })] }, 'r-list'));
+      if (init.method === 'POST') {
+        dismissed = true;
+        return reply(200, successEnvelope({ dismissed: true }, 'r-dismiss'));
+      }
+      return reply(200, successEnvelope({ notifications: dismissed ? [] : [row({ _id: 'n1' })] }, 'r-list'));
     });
     setFetching(fetching);
     const { container } = render(<NotificationBell />);

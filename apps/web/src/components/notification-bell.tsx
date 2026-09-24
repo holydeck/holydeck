@@ -4,10 +4,9 @@
 // polite live region when the panel is closed, so a screen reader hears about it without opening the panel.
 //
 // `?unread=true` doubles as the panel's own content: the server has no separate count endpoint, so one
-// feed answers both the badge and the list. Its `readAt` filter does not also exclude a dismissed row
-// (`notification-store.ts`'s `listFor`), so a row this component just dismissed would reappear on the very
-// next poll if it trusted the server alone; `dismissedIds` remembers what this tab has dismissed and
-// filters every later poll's rows against it, client-side, for as long as the tab stays open.
+// feed answers both the badge and the list. The server already excludes a dismissed row from that feed
+// (`notification-store.ts`'s `listFor`), so a dismiss click only needs to update local state for the
+// instant before the next poll confirms it.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 
@@ -92,7 +91,6 @@ const outcomeLabel = (outcome: string): string =>
 /** The bell: its own unread count, and the panel of what is behind it. */
 export function NotificationBell(): JSX.Element {
   const [rows, setRows] = useState<readonly NotificationRow[]>([]);
-  const dismissedIds = useRef(new Set<string>());
   const knownIds = useRef(new Set<string>());
   const firstLoadRef = useRef(true);
   const openRef = useRef(false);
@@ -104,7 +102,7 @@ export function NotificationBell(): JSX.Element {
     const load = async (): Promise<void> => {
       const result = await request(`${NOTIFICATIONS_PATH}?unread=true`);
       if (cancelled || !result.ok) return;
-      const next = parsedRows(result.data).filter((row) => !dismissedIds.current.has(row.id));
+      const next = parsedRows(result.data);
       const arrived = firstLoadRef.current ? 0 : next.filter((row) => !knownIds.current.has(row.id)).length;
       knownIds.current = new Set(next.map((row) => row.id));
       firstLoadRef.current = false;
@@ -153,7 +151,6 @@ export function NotificationBell(): JSX.Element {
   const dismiss = async (id: string): Promise<void> => {
     const result = await request(`${NOTIFICATIONS_PATH}/${encodeURIComponent(id)}/dismiss`, { method: 'POST', csrf: csrf() ?? '' });
     if (!result.ok) return;
-    dismissedIds.current.add(id);
     knownIds.current.delete(id);
     setRows((current) => current.filter((row) => row.id !== id));
   };

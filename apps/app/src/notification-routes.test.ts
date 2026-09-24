@@ -153,6 +153,14 @@ describe('an account notification inbox', () => {
     expect((await getInbox('?unread=true')).json().data.notifications).toMatchObject([{ event: 'audit:e4' }]);
   });
 
+  test('excludes a dismissed-but-unread notification from the unread feed', async () => {
+    await entry();
+    await getInbox();
+    expect((await mutate(`${notificationId}/dismiss`)).statusCode).toBe(200);
+    expect((await getInbox('?unread=true')).json().data.notifications).toEqual([]);
+    expect((await getInbox()).json().data.notifications).toMatchObject([{ event: 'audit:e1', dismissedAt: NOW }]);
+  });
+
   test('excludes own actions by default and includes them when requested', async () => {
     await entry(ADMINISTRATOR);
     expect((await getInbox()).json().data.notifications).toEqual([]);
