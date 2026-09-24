@@ -68,6 +68,9 @@ describe('the navigation shell', () => {
       ['accounts.manage', '/admin/users'],
       ['settings.manage', '/admin/settings'],
       ['audit.read', '/admin/audit'],
+      ['jobs.view', '/admin/jobs'],
+      ['operations.read', '/admin/operations'],
+      ['backup.manage', '/admin/backups'],
       ['integrations.manage', '/admin/integrations'],
       ['catalogue.manage', '/admin/languages'],
     ];
@@ -80,7 +83,16 @@ describe('the navigation shell', () => {
   });
 
   it('lists each admin page the session may open while in Administration, marking the current one', () => {
-    session.value = signedIn(['accounts.manage', 'settings.manage', 'audit.read', 'integrations.manage', 'catalogue.manage']);
+    session.value = signedIn([
+      'accounts.manage',
+      'settings.manage',
+      'audit.read',
+      'jobs.view',
+      'operations.read',
+      'backup.manage',
+      'integrations.manage',
+      'catalogue.manage',
+    ]);
     render(<AppShell><p>page</p></AppShell>);
     expect(screen.queryByRole('navigation', { name: 'Administration' })).toBeNull();
 
@@ -93,6 +105,9 @@ describe('the navigation shell', () => {
       ['Users', '/admin/users'],
       ['Settings', '/admin/settings'],
       ['Audit log', '/admin/audit'],
+      ['Jobs', '/admin/jobs'],
+      ['Operations', '/admin/operations'],
+      ['Backups', '/admin/backups'],
       ['Integrations', '/admin/integrations'],
       ['Content languages', '/admin/languages'],
       ['Slide labels', '/admin/slide-labels'],
