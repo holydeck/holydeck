@@ -6,7 +6,8 @@ import type { TranslationStoreFile } from '@holydeck/core/storage';
 import { outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime, requireLocal, runtimeFlags } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
+import type { Runtime } from '../runtime.js';
 
 export interface TranslationStats {
   abbr: string;
@@ -45,13 +46,36 @@ export function statsOf(abbr: string, file: TranslationStoreFile): Omit<Translat
   return { abbr, chapters, canonChapters, revisions, updatedAt: file.updatedAt };
 }
 
+export function formatStatsLine(row: {
+  abbr: string;
+  chapters: number;
+  canonChapters: number | undefined;
+  revisions: number;
+  updatedAt: string;
+}): string {
+  const canon = row.canonChapters === undefined ? '?' : String(row.canonChapters);
+  return `${row.abbr}: ${row.chapters}/${canon} chapters, ${row.revisions} revisions, updated ${row.updatedAt.slice(0, 10)}`;
+}
+
 export async function runStats(
   ctx: CliContext,
   options: { translation?: string },
   globals: GlobalOptions,
 ): Promise<void> {
   const runtime = await createRuntime(ctx, runtimeFlags(globals));
-  requireLocal(runtime, 'stats');
+  if (runtime.mode === 'local') {
+    await runStatsLocal(ctx, runtime, options, globals);
+    return;
+  }
+  await runStatsServer(ctx, runtime, options, globals);
+}
+
+async function runStatsLocal(
+  ctx: CliContext,
+  runtime: Runtime,
+  options: { translation?: string },
+  globals: GlobalOptions,
+): Promise<void> {
   const dataDir = runtime.config.values.dataDir;
   let abbrs = await storedAbbrs(dataDir);
   if (options.translation !== undefined) {
@@ -80,14 +104,54 @@ export async function runStats(
     return;
   }
   for (const row of rows) {
-    const canon = row.canonChapters === undefined ? '?' : String(row.canonChapters);
-    outLine(
-      ctx,
-      `${row.abbr}: ${row.chapters}/${canon} chapters, ${row.revisions} revisions, updated ${row.updatedAt.slice(0, 10)}`,
-    );
+    outLine(ctx, formatStatsLine(row));
     outLine(ctx, `  store: ${row.path} (${row.bytes} bytes)`);
   }
   outLine(ctx, `total: ${rows.length} translations, ${totalBytes} bytes on disk`);
+}
+
+async function runStatsServer(
+  ctx: CliContext,
+  runtime: Runtime,
+  options: { translation?: string },
+  globals: GlobalOptions,
+): Promise<void> {
+  const server = runtime.server;
+  /* v8 ignore next */
+  if (server === undefined) throw new HolyDeckError('internal_error');
+  const response = await server.stats();
+  let rows = response.translations;
+  if (options.translation !== undefined) {
+    const wanted = options.translation.toUpperCase();
+    rows = rows.filter((row) => row.abbr === wanted);
+    if (rows.length === 0) {
+      throw new HolyDeckError('unknown_translation', {
+        abbr: wanted,
+        known: response.translations.map((row) => row.abbr).join(', '),
+      });
+    }
+  }
+  if (globals.json === true) {
+    outLine(ctx, JSON.stringify({ translations: rows, totals: response.totals }, undefined, 2));
+    return;
+  }
+  if (rows.length === 0) {
+    outLine(ctx, 'no translations stored yet.');
+    return;
+  }
+  for (const row of rows) {
+    outLine(
+      ctx,
+      formatStatsLine({
+        abbr: row.abbr,
+        chapters: row.chapters.stored,
+        canonChapters: row.chapters.total,
+        revisions: row.revisions,
+        updatedAt: row.updatedAt,
+      }),
+    );
+  }
+  outLine(ctx, `total: ${response.totals.translations} translations`);
 }
 
 export function registerStats(program: Command, ctx: CliContext): void {

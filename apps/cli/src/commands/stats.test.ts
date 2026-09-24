@@ -98,9 +98,88 @@ describe('stats', () => {
     expect(parsed.totalBytes).toBe(bytes);
   });
 
-  it('is local-only', async () => {
-    const setup = makeContext();
-    await expect(runCli(setup.ctx, ['stats', '--server-url', 'https://holydeck.example.com'])).resolves.toBe(1);
-    expect(setup.stderr()).toContain('works on the local datastore');
+  it('reports server stats without a store/bytes line', async () => {
+    const setup = makeContext({
+      env: { HOLYDECK_SERVER_URL: 'https://s.test' },
+      responses: {
+        'https://s.test/api/v1/stats': {
+          status: 200,
+          body: JSON.stringify({
+            translations: [
+              { abbr: 'KJV', chapters: { stored: 2, total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' },
+            ],
+            totals: { translations: 1, chapters: 2, revisions: 3 },
+          }),
+        },
+      },
+    });
+    await expect(runCli(setup.ctx, ['stats'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('KJV: 2/1189 chapters, 3 revisions, updated 2026-09-01');
+    expect(setup.stdout()).not.toContain('store:');
+    expect(setup.stdout()).toContain('total: 1 translations');
+  });
+
+  it('filters server stats by --translation client-side', async () => {
+    const setup = makeContext({
+      env: { HOLYDECK_SERVER_URL: 'https://s.test' },
+      responses: {
+        'https://s.test/api/v1/stats': {
+          status: 200,
+          body: JSON.stringify({
+            translations: [
+              { abbr: 'KJV', chapters: { stored: 2, total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' },
+              { abbr: 'WEB', chapters: { stored: 1, total: 1189 }, revisions: 1, updatedAt: '2026-09-01T00:00:00.000Z' },
+            ],
+            totals: { translations: 2, chapters: 3, revisions: 4 },
+          }),
+        },
+      },
+    });
+    await expect(runCli(setup.ctx, ['stats', '--translation', 'kjv'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('KJV: 2/1189 chapters');
+    expect(setup.stdout()).not.toContain('WEB:');
+  });
+
+  it('errors when --translation names an unstored translation in server mode', async () => {
+    const setup = makeContext({
+      env: { HOLYDECK_SERVER_URL: 'https://s.test' },
+      responses: {
+        'https://s.test/api/v1/stats': {
+          status: 200,
+          body: JSON.stringify({
+            translations: [
+              { abbr: 'KJV', chapters: { stored: 2, total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' },
+            ],
+            totals: { translations: 1, chapters: 2, revisions: 3 },
+          }),
+        },
+      },
+    });
+    await expect(runCli(setup.ctx, ['stats', '--translation', 'SCH2000'])).resolves.toBe(1);
+    expect(setup.stderr()).toContain('Unknown translation "SCH2000"');
+    expect(setup.stderr()).toContain('KJV');
+  });
+
+  it('server stats --json omits store/bytes fields', async () => {
+    const setup = makeContext({
+      env: { HOLYDECK_SERVER_URL: 'https://s.test' },
+      responses: {
+        'https://s.test/api/v1/stats': {
+          status: 200,
+          body: JSON.stringify({
+            translations: [
+              { abbr: 'KJV', chapters: { stored: 2, total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' },
+            ],
+            totals: { translations: 1, chapters: 2, revisions: 3 },
+          }),
+        },
+      },
+    });
+    await expect(runCli(setup.ctx, ['stats', '--json'])).resolves.toBe(0);
+    const parsed = JSON.parse(setup.stdout()) as { translations: Array<Record<string, unknown>>; totals: Record<string, unknown> };
+    expect(parsed.translations[0]).not.toHaveProperty('bytes');
+    expect(parsed.translations[0]).not.toHaveProperty('path');
+    expect(parsed).not.toHaveProperty('totalBytes');
+    expect(parsed.totals).toEqual({ translations: 1, chapters: 2, revisions: 3 });
   });
 });
