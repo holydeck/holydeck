@@ -116,13 +116,14 @@ export function capabilityContext(correlationId: string): RequestContext {
  * code path through this store can make either anything else: the type checker is the enforcement.
  */
 export type RedeemedCapability =
-  | { readonly kind: 'guest'; readonly service: string; readonly view: CapabilityView }
+  | { readonly kind: 'guest'; readonly service: string; readonly view: CapabilityView; readonly expiresAt: string }
   | {
       readonly kind: 'output';
       readonly service: string;
       readonly view: CapabilityView;
       readonly canControl: false;
       readonly grants: readonly [];
+      readonly expiresAt: string;
     };
 
 export interface CapabilityOptions {
@@ -230,7 +231,10 @@ export function capabilitiesOn(db: CapabilityDb, options: CapabilityOptions): Ca
       const kind = document['kind'] as CapabilityKind;
       const service = document['service'] as string;
       const view = document['view'] as CapabilityView;
-      return kind === 'guest' ? { kind, service, view } : { kind, service, view, canControl: false, grants: [] };
+      const expiresAt = String(document['expiresAt']);
+      return kind === 'guest'
+        ? { kind, service, view, expiresAt }
+        : { kind, service, view, canControl: false, grants: [], expiresAt };
     },
 
     async revoke(context, capabilityId) {

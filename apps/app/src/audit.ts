@@ -60,6 +60,11 @@ export const AUDIT_ACTIONS = [
   'capability.guest.issue',
   'capability.output.issue',
   'capability.revoke',
+  // An anonymous Guest or output window exchanging a capability token for the tickets OUT-01 describes.
+  // The trail holds the capability's own id, never the token, and never a name for whoever redeemed it —
+  // there is none to hold.
+  'live.guest.exchange',
+  'live.output.exchange',
   // The settings file, administered as the one thing it is: a change is recorded once, naming only
   // which fields it touched and never a value — viewing it is never audited, the same as any other GET.
   'settings.update',
@@ -203,6 +208,8 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'capability.guest.issue': 'authorization',
   'capability.output.issue': 'authorization',
   'capability.revoke': 'authorization',
+  'live.guest.exchange': 'authorization',
+  'live.output.exchange': 'authorization',
   'authorization.refuse': 'authorization',
   'settings.update': 'settings',
   'content.change': 'content',
@@ -358,6 +365,8 @@ export const AUDIT_DETAIL_REDACTION: Readonly<Record<AuditAction, 'verbatim' | '
   'capability.guest.issue': 'verbatim',
   'capability.output.issue': 'verbatim',
   'capability.revoke': 'verbatim',
+  'live.guest.exchange': 'verbatim',
+  'live.output.exchange': 'verbatim',
   'settings.update': 'verbatim',
   'content.change': 'verbatim',
   'pptx.import': 'verbatim',

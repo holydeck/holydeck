@@ -49,7 +49,7 @@ describe('a capability already issued, once some account is disabled', () => {
 
     await expect(
       capabilities.redeem(capabilityContext(CORRELATION), issued.token, { service: SERVICE, view: 'audience' }),
-    ).resolves.toEqual({ kind: 'guest', service: SERVICE, view: 'audience' });
+    ).resolves.toEqual({ kind: 'guest', service: SERVICE, view: 'audience', expiresAt: SOON });
   });
 });
 

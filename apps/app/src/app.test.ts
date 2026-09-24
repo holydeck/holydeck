@@ -34,6 +34,7 @@ import { contentLanguagesOn } from './content-languages.js';
 import { INTEGRATION_ID_PATH } from './integration-routes.js';
 import { JOBS_PATH } from './job-routes.js';
 import { libraryOn } from './library.js';
+import { GUEST_EXCHANGE_PATH, OUTPUT_EXCHANGE_PATH } from './live-exchange-routes.js';
 import { MEDIA_CLEANUP_PATH } from './media-cleanup-routes.js';
 import { MEDIA_MIGRATION_CLEANUP_PATH, MEDIA_MIGRATION_PATH } from './media-migration-routes.js';
 import { NOTIFICATIONS_PATH, NOTIFICATIONS_READ_ALL_PATH, NOTIFICATIONS_PREFERENCES_PATH } from './notification-routes.js';
@@ -343,8 +344,14 @@ describe('every route that changes something', () => {
 
   // An exception the guard declares is only sound if it names a route this application registers: a path
   // in `UNGUARDED` that nothing serves is dead text, and one that serves something else is a hole.
-  it('is behind it except the three declared, which are registered and answered without a session', async () => {
-    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`, `POST ${SESSION_PATH}`, `POST ${CORPUS_RENDER_PROXY_PATH}`]);
+  it('is behind it except the five declared, which are registered and answered without a session', async () => {
+    expect(UNGUARDED).toEqual([
+      `POST ${ONBOARDING_PATH}`,
+      `POST ${SESSION_PATH}`,
+      `POST ${CORPUS_RENDER_PROXY_PATH}`,
+      `POST ${GUEST_EXCHANGE_PATH}`,
+      `POST ${OUTPUT_EXCHANGE_PATH}`,
+    ]);
     const app = buildApp({ settings, logger: false, fetching: refusing });
     // Neither is 401 for want of a session: the guard is on neither. The claim is not-found because this
     // deployment was handed no accounts to claim, and signing in is refused in the words every refused
@@ -354,6 +361,12 @@ describe('every route that changes something', () => {
     const signIn = await app.inject({ method: 'POST', url: SESSION_PATH, headers: current });
     expect(signIn.statusCode).toBe(401);
     expect(signIn.json().error.code).toBe(SIGN_IN_REFUSED);
+    // The last two are proven the same way as the claim: not 401 for want of a session, but not-found
+    // because this deployment was handed no capabilities to redeem either.
+    const guestExchange = await app.inject({ method: 'POST', url: GUEST_EXCHANGE_PATH, headers: current });
+    expect(guestExchange.statusCode).toBe(404);
+    const outputExchange = await app.inject({ method: 'POST', url: OUTPUT_EXCHANGE_PATH, headers: current });
+    expect(outputExchange.statusCode).toBe(404);
     await app.close();
 
     // The third is proven the same way: not 401 for want of a session, this time because the guard's

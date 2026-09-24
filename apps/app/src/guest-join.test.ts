@@ -57,10 +57,11 @@ describe('a Guest joining the Audience view', () => {
   it('grants watch-only access to the Audience view with no name, email or account', async () => {
     const { services, capabilities } = harness();
     const service = await serviceAt(services, 'presenting');
-    const token = await guestToken(capabilities, service, new Date(START + 60_000).toISOString());
+    const expiresAt = new Date(START + 60_000).toISOString();
+    const token = await guestToken(capabilities, service, expiresAt);
     const grant = await admitGuest(capabilities, services, CORRELATION, { token, service, view: 'audience' });
-    expect(grant).toEqual({ ...VIEW_GRANTS.audience, capabilityId: tokenDigest(token) });
-    expect(Object.keys(grant)).toEqual(['watch', 'command', 'capabilityId']);
+    expect(grant).toEqual({ ...VIEW_GRANTS.audience, capabilityId: tokenDigest(token), capabilityExpiresAt: expiresAt });
+    expect(Object.keys(grant)).toEqual(['watch', 'command', 'capabilityId', 'capabilityExpiresAt']);
   });
 
   it('refuses a capability that has expired (time-scoped)', async () => {
@@ -147,11 +148,12 @@ describe('an output window opening one of its channels', () => {
   it('grants watch-only access to the view its capability names, whatever state the Service is in', async () => {
     const { services, capabilities } = harness();
     const service = await serviceAt(services);
+    const expiresAt = new Date(START + 60_000).toISOString();
     const { token } = await capabilities.issue(capabilityContext(CORRELATION), ADMINISTRATOR, {
-      kind: 'output', service, view: 'stage', expiresAt: new Date(START + 60_000).toISOString(),
+      kind: 'output', service, view: 'stage', expiresAt,
     });
     const grant = await admitOutput(capabilities, CORRELATION, { token, service, view: 'stage' });
-    expect(grant).toEqual({ ...VIEW_GRANTS.stage, capabilityId: tokenDigest(token) });
+    expect(grant).toEqual({ ...VIEW_GRANTS.stage, capabilityId: tokenDigest(token), capabilityExpiresAt: expiresAt });
   });
 
   it('refuses a capability that has expired', async () => {

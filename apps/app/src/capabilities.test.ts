@@ -225,8 +225,8 @@ describe('redeeming a capability', () => {
       expiresAt: soon(),
     });
     const redeemed = await store.redeem(context(), issued.token, { service: SERVICE, view: 'audience' });
-    expect(redeemed).toEqual({ kind: 'guest', service: SERVICE, view: 'audience' });
-    expect(Object.keys(redeemed).sort()).toEqual(['kind', 'service', 'view']);
+    expect(redeemed).toEqual({ kind: 'guest', service: SERVICE, view: 'audience', expiresAt: soon() });
+    expect(Object.keys(redeemed).sort()).toEqual(['expiresAt', 'kind', 'service', 'view']);
   });
 
   test('answers an output window with no control and no grants, and nothing can make that answer otherwise', async () => {
@@ -237,7 +237,9 @@ describe('redeeming a capability', () => {
       expiresAt: soon(),
     });
     const redeemed = await store.redeem(context(), issued.token, { service: SERVICE, view: 'stage' });
-    expect(redeemed).toEqual({ kind: 'output', service: SERVICE, view: 'stage', canControl: false, grants: [] });
+    expect(redeemed).toEqual({
+      kind: 'output', service: SERVICE, view: 'stage', canControl: false, grants: [], expiresAt: soon(),
+    });
   });
 
   test('redeems a singer-view output window exactly as it was issued', async () => {
@@ -248,7 +250,9 @@ describe('redeeming a capability', () => {
       expiresAt: soon(),
     });
     const redeemed = await store.redeem(context(), issued.token, { service: SERVICE, view: 'singer' });
-    expect(redeemed).toEqual({ kind: 'output', service: SERVICE, view: 'singer', canControl: false, grants: [] });
+    expect(redeemed).toEqual({
+      kind: 'output', service: SERVICE, view: 'singer', canControl: false, grants: [], expiresAt: soon(),
+    });
   });
 });
 

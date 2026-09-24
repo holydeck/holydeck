@@ -62,6 +62,7 @@ export interface LiveGrant {
   readonly watch: readonly LiveChannel[];
   readonly command: boolean;
   readonly capabilityId?: string;
+  readonly capabilityExpiresAt?: string;
 }
 
 /**

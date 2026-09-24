@@ -167,6 +167,8 @@ describe('the context the trail is written under', () => {
       'capability.guest.issue',
       'capability.output.issue',
       'capability.revoke',
+      'live.guest.exchange',
+      'live.output.exchange',
       'settings.update',
       'content.change',
       'pptx.import',

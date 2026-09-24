@@ -12,6 +12,7 @@
 import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
 import { UPDATE_REQUIRED_MESSAGE, UPDATE_REQUIRED_STATUS } from '@holydeck/contracts/clients';
 import { UPDATE_REQUIRED, errorEnvelope } from '@holydeck/contracts/http';
+import { GUEST_EXCHANGE_PATH, OUTPUT_EXCHANGE_PATH } from '@holydeck/contracts/live';
 import {
   CSRF_HEADER,
   SESSION_COOKIE,
@@ -61,11 +62,19 @@ const REFUSED_MESSAGE = 'The request could not be accepted.';
  * own `Authorization: Bearer ...` header — a header no cross-site page can make a browser attach the way
  * it attaches a cookie, which is what stands in for the origin and CSRF-token checks this route cannot
  * carry. Anything else added here is a hole.
+ *
+ * The last two are a different kind of exception again: a Guest's join token or an output window's
+ * capability, exchanged for the tickets OUT-01 describes. Neither caller ever holds a session to prove —
+ * a Guest is nobody, and an output window opens from a link, the same way signing in has none yet — so
+ * there is no origin or CSRF token for this guard to ask either for. What stands in for both is
+ * `live-exchange-routes.ts`'s own rate limit, the same defence `corpus-proxy-routes.ts` keeps.
  */
 export const UNGUARDED: readonly string[] = Object.freeze([
   `POST ${ONBOARDING_PATH}`,
   `POST ${SESSION_PATH}`,
   `POST ${CORPUS_RENDER_PROXY_PATH}`,
+  `POST ${GUEST_EXCHANGE_PATH}`,
+  `POST ${OUTPUT_EXCHANGE_PATH}`,
 ]);
 
 /** What the guard proved, for the route that asked for it. A route reads this; nothing else may set it. */

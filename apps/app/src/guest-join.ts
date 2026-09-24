@@ -31,6 +31,14 @@ import type { ServiceStore } from './services.js';
 
 export type GuestJoinRefusal = 'capability' | 'state';
 
+/** What `admitGuest` and `admitOutput` answer with, never anything less: a `LiveGrant` that always names
+ *  the capability it was redeemed from and when that capability stops being good, so a caller minting
+ *  tickets from it (OUT-01) never has to guard against either being absent. */
+export interface CapabilityGrant extends LiveGrant {
+  readonly capabilityId: string;
+  readonly capabilityExpiresAt: string;
+}
+
 /** Carries why a join was refused, so a caller can answer a defect and a plain "not yet" differently. */
 export class GuestJoinError extends Error {
   readonly kind: GuestJoinRefusal;
@@ -63,7 +71,7 @@ export async function admitGuest(
   services: ServiceStore,
   correlationId: string,
   request: GuestJoinRequest,
-): Promise<LiveGrant> {
+): Promise<CapabilityGrant> {
   let redeemed;
   try {
     redeemed = await capabilities.redeem(capabilityContext(correlationId), request.token, {
@@ -84,7 +92,11 @@ export async function admitGuest(
       `${request.service} is not Presenting, and a Guest capability opens only while its Service is`,
     );
   }
-  return { ...VIEW_GRANTS[redeemed.view], capabilityId: tokenDigest(request.token) };
+  return {
+    ...VIEW_GRANTS[redeemed.view],
+    capabilityId: tokenDigest(request.token),
+    capabilityExpiresAt: redeemed.expiresAt,
+  };
 }
 
 export interface OutputJoinRequest {
@@ -101,7 +113,7 @@ export async function admitOutput(
   capabilities: CapabilityStore,
   correlationId: string,
   request: OutputJoinRequest,
-): Promise<LiveGrant> {
+): Promise<CapabilityGrant> {
   let redeemed;
   try {
     redeemed = await capabilities.redeem(capabilityContext(correlationId), request.token, {
@@ -115,5 +127,9 @@ export async function admitOutput(
   if (redeemed.kind !== 'output') {
     throw new GuestJoinError('capability', 'capabilities: that capability does not open an output window');
   }
-  return { ...VIEW_GRANTS[redeemed.view], capabilityId: tokenDigest(request.token) };
+  return {
+    ...VIEW_GRANTS[redeemed.view],
+    capabilityId: tokenDigest(request.token),
+    capabilityExpiresAt: redeemed.expiresAt,
+  };
 }

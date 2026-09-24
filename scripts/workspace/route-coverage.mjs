@@ -52,6 +52,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'conflict-routes.ts': 'no harness test lists or settles a shelved conflict over HTTP',
   'integration-routes.ts': 'no harness test reads or toggles a third-party integration over HTTP',
   'job-routes.ts': 'no harness test lists or requeues a job over HTTP',
+  'live-exchange-routes.ts': 'no harness test exchanges a guest or output join token for live tickets over HTTP',
   'media-migration-routes.ts': 'no harness test triggers or cleans up a media storage-root migration over HTTP',
   'media-cleanup-routes.ts': 'no harness test reports on or purges media over HTTP',
   'notification-routes.ts': 'no harness test reads or manages a notification inbox over HTTP',

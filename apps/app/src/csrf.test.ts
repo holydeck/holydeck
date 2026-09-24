@@ -1,6 +1,7 @@
 import { ONBOARDING_PATH } from '@holydeck/contracts/accounts';
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import { UPDATE_REQUIRED } from '@holydeck/contracts/http';
+import { GUEST_EXCHANGE_PATH, OUTPUT_EXCHANGE_PATH } from '@holydeck/contracts/live';
 import {
   CSRF_HEADER,
   SESSION_COOKIE,
@@ -231,7 +232,13 @@ describe('the routes the guard covers', () => {
     // one creates the first account there could be a session for, the other opens the session. The third
     // is not this application's own change at all, only a render request forwarded to the corpus under
     // the caller's own bearer token. Anything else added here is a hole.
-    expect(UNGUARDED).toEqual([`POST ${ONBOARDING_PATH}`, `POST ${SESSION_PATH}`, `POST ${CORPUS_RENDER_PROXY_PATH}`]);
+    expect(UNGUARDED).toEqual([
+      `POST ${ONBOARDING_PATH}`,
+      `POST ${SESSION_PATH}`,
+      `POST ${CORPUS_RENDER_PROXY_PATH}`,
+      `POST ${GUEST_EXCHANGE_PATH}`,
+      `POST ${OUTPUT_EXCHANGE_PATH}`,
+    ]);
     expect(mutatingRoutesOf(app)).toEqual([{ method: 'POST', url: '/api/v1/anything' }]);
   });
 

@@ -18,6 +18,8 @@ import { notFound, withSafeErrors } from './failures.js';
 import { serveIntegrationRoutes, sermonAiSwitch } from './integration-routes.js';
 import { serveJobRoutes } from './job-routes.js';
 import { serveLibraryRoutes } from './library-routes.js';
+import { serveLiveExchangeRoutes } from './live-exchange-routes.js';
+import { liveTicketsOn } from './live-tickets.js';
 import { isUpgrade } from './live.js';
 import { guardMaintenance } from './maintenance.js';
 import { serveMediaCleanupRoutes } from './media-cleanup-routes.js';
@@ -260,6 +262,7 @@ export function buildApp({
   const notifications = identity === undefined || notificationDb === undefined
     ? undefined
     : notificationStoreOn(notificationDb, { now: () => new Date().toISOString() });
+  const liveTickets = capabilities === undefined ? undefined : liveTicketsOn(capabilities, { now: () => new Date().toISOString() });
   // HTTPS makes Fastify infer a specialised server, while the routes below use its common interface.
   const app = Fastify({ logger, ...(https === undefined ? {} : { https }) }) as unknown as FastifyInstance;
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
@@ -400,6 +403,7 @@ export function buildApp({
   // Behind the same permission as the account surface above: issuing a Guest's invitation or an output
   // window's capability is Control presentation's, not merely a proved session's.
   serveCapabilityRoutes(app, { capabilities, identity });
+  serveLiveExchangeRoutes(app, { capabilities, services, liveTickets, identity });
 
   // Behind the same permission as the account surface: reading or changing the settings file is Admin's
   // alone, the same as administering an account is.

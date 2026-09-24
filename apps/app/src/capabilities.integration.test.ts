@@ -64,11 +64,12 @@ beforeEach(async () => {
 
 describe('a capability in a real database', () => {
   test('is issued, redeemed and revoked, and is only ever addressed by a digest', async () => {
+    const expiresAt = soon();
     const issued = await store.issue(GATEKEEPER, OPERATOR, {
       kind: 'guest',
       service: SERVICE,
       view: 'audience',
-      expiresAt: soon(),
+      expiresAt,
     });
 
     const stored = await capabilities().findOne({ _id: issued.capabilityId });
@@ -81,6 +82,7 @@ describe('a capability in a real database', () => {
       kind: 'guest',
       service: SERVICE,
       view: 'audience',
+      expiresAt,
     });
 
     await store.revoke(GATEKEEPER, issued.capabilityId);
