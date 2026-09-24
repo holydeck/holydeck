@@ -94,6 +94,32 @@ describe('the service workspace strings', () => {
   });
 });
 
+// v1c-14 added the admin operations screens (Jobs, Operations, Backups + restore, the notification bell
+// and its preferences page) and the run review/recap screen in one pass, each with its own key prefix;
+// censused the same way WORKSPACE_PREFIXES censuses the service workspace above.
+const ADMIN_OPS_PREFIXES = [
+  'jobs.', 'operations.', 'backups.', 'notifications.', 'account.notifications.', 'run.',
+] as const;
+
+describe('the admin operations strings', () => {
+  it.each(['de', 'ta'] as const)('are all translated into %s, with the same placeholders', (locale) => {
+    for (const prefix of ADMIN_OPS_PREFIXES) {
+      const keys = MESSAGE_KEYS.filter((key) => key.startsWith(prefix));
+      expect(keys.length, prefix).toBeGreaterThan(0);
+      for (const key of keys) {
+        expect(MESSAGES[locale][key], key).not.toBe(MESSAGES.en[key]);
+        expect(placeholdersIn(MESSAGES[locale][key]), key).toEqual(placeholdersIn(MESSAGES.en[key]));
+      }
+    }
+  });
+
+  it('address the reader formally in German, as the rest of the catalog does', () => {
+    for (const key of MESSAGE_KEYS.filter((candidate) => ADMIN_OPS_PREFIXES.some((prefix) => candidate.startsWith(prefix)))) {
+      expect(MESSAGES.de[key], key).not.toMatch(/\b(du|dein|deine|dir|dich)\b/u);
+    }
+  });
+});
+
 describe('translating', () => {
   it('names run and theme outcomes in every shipped locale', () => {
     const keys = [
