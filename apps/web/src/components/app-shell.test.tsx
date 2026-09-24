@@ -198,6 +198,18 @@ describe('the navigation shell', () => {
     expect(screen.getByRole('link', { name: 'Security' }).getAttribute('aria-current')).toBe('page');
   });
 
+  it('offers Notifications to every signed-in session, and marks it current on its own route', () => {
+    session.value = signedIn([], 'editor');
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByRole('link', { name: 'Notifications' }).getAttribute('href')).toBe('/account/notifications');
+    expect(screen.getByRole('link', { name: 'Notifications' }).getAttribute('aria-current')).toBeNull();
+
+    act(() => {
+      currentPath.value = '/account/notifications';
+    });
+    expect(screen.getByRole('link', { name: 'Notifications' }).getAttribute('aria-current')).toBe('page');
+  });
+
   it('marks the library current while on it', () => {
     session.value = signedIn(['accounts.manage']);
     currentPath.value = '/library';

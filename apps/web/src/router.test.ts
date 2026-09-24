@@ -33,6 +33,7 @@ describe('matchRoute', () => {
     ['/admin/operations', { name: 'admin-operations' }],
     ['/admin/backups', { name: 'admin-backups' }],
     ['/account/security', { name: 'account-security' }],
+    ['/account/notifications', { name: 'account-notifications' }],
     ['/output/audience', { name: 'output', kind: 'audience' }],
     ['/services/a/b', { name: 'not-found' }],
     ['/services/%E0%A4%A', { name: 'not-found' }],

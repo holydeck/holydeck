@@ -71,7 +71,9 @@ const ADMINISTRATION_PAGES: readonly {
 const roleLabel = (role: AccountRole): string => t(`app.role.${role}`);
 
 /** Which primary section a route belongs to, so its link can say `aria-current="page"`. */
-const sectionOf = (current: Route): 'services' | 'library' | 'media' | 'administration' | 'security' | undefined => {
+const sectionOf = (
+  current: Route,
+): 'services' | 'library' | 'media' | 'administration' | 'security' | 'notifications' | undefined => {
   if (
     current.name === 'services' ||
     current.name === 'service-new' ||
@@ -85,6 +87,7 @@ const sectionOf = (current: Route): 'services' | 'library' | 'media' | 'administ
   if (current.name === 'media') return 'media';
   if (ADMINISTRATION_PAGES.some((page) => page.route === current.name)) return 'administration';
   if (current.name === 'account-security') return 'security';
+  if (current.name === 'account-notifications') return 'notifications';
   return undefined;
 };
 
@@ -199,6 +202,11 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
             <li>
               <a href="/account/security" aria-current={section === 'security' ? 'page' : undefined}>
                 {t('app.nav.security')}
+              </a>
+            </li>
+            <li>
+              <a href="/account/notifications" aria-current={section === 'notifications' ? 'page' : undefined}>
+                {t('app.nav.notifications')}
               </a>
             </li>
           </ul>

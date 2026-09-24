@@ -33,6 +33,7 @@ export type Route =
   | { readonly name: 'admin-languages' }
   | { readonly name: 'admin-slide-labels' }
   | { readonly name: 'account-security' }
+  | { readonly name: 'account-notifications' }
   | { readonly name: 'content-history'; readonly contentId: string }
   | { readonly name: 'output'; readonly kind: string }
   | { readonly name: 'not-found' };
@@ -90,6 +91,7 @@ export function matchRoute(pathWithSearch: string): Route {
   if (pathname === '/admin/languages') return { name: 'admin-languages' };
   if (pathname === '/admin/slide-labels') return { name: 'admin-slide-labels' };
   if (pathname === '/account/security') return { name: 'account-security' };
+  if (pathname === '/account/notifications') return { name: 'account-notifications' };
 
   const serviceLive = /^\/services\/([^/]+)\/live$/u.exec(pathname);
   if (serviceLive !== null) {

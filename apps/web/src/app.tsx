@@ -35,6 +35,8 @@ const AdminLanguagesPage = lazy(() => import('./pages/admin-languages.js').then(
 const AdminSlideLabelsPage = lazy(() => import('./pages/admin-slide-labels.js').then((module) => module.AdminSlideLabelsPage));
 const HistoryPage = lazy(() => import('./pages/history.js').then((module) => module.HistoryPage));
 const SecurityPage = lazy(() => import('./pages/account-security.js').then((module) => module.SecurityPage));
+const AccountNotificationsPage = lazy(() =>
+  import('./pages/account-notifications.js').then((module) => module.AccountNotificationsPage));
 const WorkspacePage = lazy(() => import('./workspace/Workspace.js').then((module) => module.Workspace)) as
   (props: { readonly id: string }) => JSX.Element;
 const NewServicePage = lazy(() => import('./workspace/NewService.js').then((module) => module.NewService));
@@ -82,6 +84,8 @@ function Page(): JSX.Element {
       return <AdminSlideLabelsPage />;
     case 'account-security':
       return <SecurityPage />;
+    case 'account-notifications':
+      return <AccountNotificationsPage />;
     case 'content-history':
       return <HistoryPage contentId={current.contentId} />;
     case 'welcome':
