@@ -119,3 +119,109 @@ describe('sync', () => {
     expect(setup.stderr()).toContain('works on the local datastore');
   });
 });
+
+describe('sync status', () => {
+  it('reports no background jobs locally, and exits 0', async () => {
+    const setup = makeContext({});
+    await expect(runCli(setup.ctx, ['sync', 'status', 'KJV'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('KJV: no background jobs locally.');
+  });
+
+  it('prints no sync job yet on a 404, and exits 0', async () => {
+    const setup = makeContext({
+      env: { HOLYDECK_SERVER_URL: 'https://s.test' },
+      responses: {
+        'https://s.test/api/v1/translations/KJV/sync': { status: 404, body: JSON.stringify({ error: { message: 'nope' } }) },
+      },
+    });
+    await expect(runCli(setup.ctx, ['sync', 'status', 'KJV'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('KJV: no sync job yet.');
+  });
+
+  it('prints the found job state/counts/times', async () => {
+    const setup = makeContext({
+      env: { HOLYDECK_SERVER_URL: 'https://s.test' },
+      responses: {
+        'https://s.test/api/v1/translations/KJV/sync': {
+          status: 200,
+          body: JSON.stringify({
+            translation: 'KJV',
+            state: 'running',
+            refresh: false,
+            startedAt: '2026-09-01T00:00:00.000Z',
+            progress: { done: 1, total: 2 },
+          }),
+        },
+      },
+    });
+    await expect(runCli(setup.ctx, ['sync', 'status', 'KJV'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('KJV: running, 1/2 chapters, started 2026-09-01T00:00:00.000Z');
+  });
+
+  it('prints the last error when the job failed', async () => {
+    const setup = makeContext({
+      env: { HOLYDECK_SERVER_URL: 'https://s.test' },
+      responses: {
+        'https://s.test/api/v1/translations/KJV/sync': {
+          status: 200,
+          body: JSON.stringify({
+            translation: 'KJV',
+            state: 'failed',
+            refresh: false,
+            startedAt: '2026-09-01T00:00:00.000Z',
+            finishedAt: '2026-09-01T00:01:00.000Z',
+            progress: { done: 1, total: 2 },
+            error: { code: 'sync_interrupted', message: 'server restarted mid-run' },
+          }),
+        },
+      },
+    });
+    await expect(runCli(setup.ctx, ['sync', 'status', 'KJV'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain(
+      'KJV: failed, 1/2 chapters, started 2026-09-01T00:00:00.000Z, finished 2026-09-01T00:01:00.000Z',
+    );
+    expect(setup.stdout()).toContain('  error: server restarted mid-run');
+  });
+
+  it('--json prints the raw job (or null) per abbreviation', async () => {
+    const setup = makeContext({
+      env: { HOLYDECK_SERVER_URL: 'https://s.test' },
+      responses: {
+        'https://s.test/api/v1/translations/KJV/sync': {
+          status: 200,
+          body: JSON.stringify({
+            translation: 'KJV',
+            state: 'completed',
+            refresh: false,
+            startedAt: '2026-09-01T00:00:00.000Z',
+            finishedAt: '2026-09-01T00:01:00.000Z',
+            progress: { done: 2, total: 2 },
+          }),
+        },
+        'https://s.test/api/v1/translations/WEB/sync': { status: 404, body: JSON.stringify({ error: { message: 'nope' } }) },
+      },
+    });
+    await expect(runCli(setup.ctx, ['sync', 'status', 'KJV', 'WEB', '--json'])).resolves.toBe(0);
+    const parsed = JSON.parse(setup.stdout()) as Array<{ abbr: string; job: Record<string, unknown> | null }>;
+    expect(parsed).toEqual([
+      {
+        abbr: 'KJV',
+        job: {
+          translation: 'KJV',
+          state: 'completed',
+          refresh: false,
+          startedAt: '2026-09-01T00:00:00.000Z',
+          finishedAt: '2026-09-01T00:01:00.000Z',
+          progress: { done: 2, total: 2 },
+        },
+      },
+      { abbr: 'WEB', job: null },
+    ]);
+  });
+
+  it('uses defaultTranslations when no abbr is given', async () => {
+    const setup = makeContext({ env: { HOLYDECK_TRANSLATIONS: 'KJV' } });
+    await expect(runCli(setup.ctx, ['sync', 'status'])).resolves.toBe(0);
+    expect(setup.stdout()).toContain('KJV: no background jobs locally.');
+  });
+});

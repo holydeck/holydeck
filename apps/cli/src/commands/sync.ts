@@ -7,6 +7,7 @@ import { createRuntime, runtimeFlags } from '../runtime.js';
 import type { Runtime } from '../runtime.js';
 import { startSpinner } from '../spinner.js';
 import { syncTranslation } from '@holydeck/core/sync';
+import type { ServerSyncJobStatus } from '../server-client.js';
 
 export async function runSync(
   ctx: CliContext,
@@ -93,8 +94,52 @@ async function runSyncLocal(
   if (anyFailed) ctx.exitCode = 1;
 }
 
+export async function runSyncStatus(ctx: CliContext, abbrs: string[], globals: GlobalOptions): Promise<void> {
+  const runtime = await createRuntime(ctx, runtimeFlags(globals));
+  const targets = abbrs.length > 0 ? abbrs : runtime.config.values.defaultTranslations;
+  if (targets.length === 0) {
+    throw new HolyDeckError('config_invalid_value', {
+      key: 'defaultTranslations',
+      value: '(empty)',
+      reason: 'pass translation abbreviations or configure default translations',
+    });
+  }
+  if (runtime.mode === 'local') {
+    if (globals.json === true) {
+      outLine(ctx, JSON.stringify(targets.map((abbr) => ({ abbr: abbr.toUpperCase(), job: null })), undefined, 2));
+      return;
+    }
+    for (const abbr of targets) outLine(ctx, `${abbr.toUpperCase()}: no background jobs locally.`);
+    return;
+  }
+  const server = runtime.server;
+  /* v8 ignore next */
+  if (server === undefined) throw new HolyDeckError('internal_error');
+  const results: Array<{ abbr: string; job: ServerSyncJobStatus | null }> = [];
+  for (const abbr of targets) {
+    const upper = abbr.toUpperCase();
+    results.push({ abbr: upper, job: (await server.syncStatus(upper)) ?? null });
+  }
+  if (globals.json === true) {
+    outLine(ctx, JSON.stringify(results, undefined, 2));
+    return;
+  }
+  for (const { abbr, job } of results) {
+    if (job === null) {
+      outLine(ctx, `${abbr}: no sync job yet.`);
+      continue;
+    }
+    const times =
+      job.finishedAt === undefined ? `started ${job.startedAt}` : `started ${job.startedAt}, finished ${job.finishedAt}`;
+    outLine(ctx, `${abbr}: ${job.state}, ${job.progress.done}/${job.progress.total} chapters, ${times}`);
+    if (job.state === 'failed' && job.error !== undefined) {
+      outLine(ctx, `  error: ${job.error.message}`);
+    }
+  }
+}
+
 export function registerSync(program: Command, ctx: CliContext): void {
-  program
+  const sync = program
     .command('sync')
     .description('Download or update whole translations in the local datastore')
     .argument('[abbr...]', 'translation abbreviations (default: configured translations)')
@@ -102,5 +147,15 @@ export function registerSync(program: Command, ctx: CliContext): void {
     .option('--dry-run', 'show what would be fetched without fetching')
     .action(async (abbrs: string[], options: { refresh?: boolean; dryRun?: boolean }, command: Command) => {
       await runSync(ctx, abbrs, options, command.optsWithGlobals<GlobalOptions>());
+    });
+  // No known translation abbreviation is literally "STATUS" today, so this doesn't collide with
+  // the [abbr...] action above; commander matches a positional "status" against this subcommand
+  // name before falling back to sync's own action.
+  sync
+    .command('status')
+    .description('Show background sync job status per translation')
+    .argument('[abbr...]', 'translation abbreviations (default: configured translations)')
+    .action(async (abbrs: string[], _options: Record<string, never>, command: Command) => {
+      await runSyncStatus(ctx, abbrs, command.optsWithGlobals<GlobalOptions>());
     });
 }
