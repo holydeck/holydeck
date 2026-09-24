@@ -45,4 +45,18 @@ describe('projectFor', () => {
       expect(JSON.stringify(projectFor(view, moved))).not.toContain('ANYTHING-PRIVATE');
     }
   });
+
+  it('carries the media timeline to every output view when one is playing', () => {
+    const media = { mediaId: 'media-1', playing: true, anchorAt: '2026-09-24T10:00:00.000Z', anchorPositionMs: 1500 };
+    const withMedia: LiveState = { ...BASE, media };
+    for (const view of ['audience', 'stage', 'singer'] as const) {
+      expect(projectFor(view, withMedia)).toMatchObject({ media });
+    }
+  });
+
+  it('carries no media field on an output view once none is playing', () => {
+    for (const view of ['audience', 'stage', 'singer'] as const) {
+      expect(projectFor(view, BASE)).not.toHaveProperty('media');
+    }
+  });
 });

@@ -102,8 +102,9 @@ const setup = () => {
       { itemId: 'item-2', title: 'Second song', kind: 'song', slides: [{ slideId: 'slide-3', boxes: [] }] },
     ],
   }));
-  const engine = runEngineOn({ hub, runs, runEvents, themes, midService, deck, clock: () => AT });
-  return { engine, hub, runs, runEvents, themes, midService, deck, order };
+  const clock = vi.fn(() => AT);
+  const engine = runEngineOn({ hub, runs, runEvents, themes, midService, deck, clock });
+  return { engine, hub, runs, runEvents, themes, midService, deck, order, clock };
 };
 const started = async () => {
   const built = setup();
@@ -276,6 +277,8 @@ describe('run-engine command ordering', () => {
     ['standby', {}], ['standby', { screenId: '' }], ['theme', {}],
     ['theme', { surface: 'unknown', themeId: 'stage-default' }], ['theme', { surface: 'stage', themeId: '' }],
     ['theme', { surface: 'stage', themeId: 'unknown' }], ['unrecognized', undefined],
+    ['media', {}], ['media', { action: 'unknown', mediaId: 'media-1' }], ['media', { action: 'seek', mediaId: 'media-1' }],
+    ['media', { action: 'play', mediaId: 'media-1', positionMs: 10 }],
   ])('acks invalid for %s with %j', async (type, args) => {
     const { engine, runs, runEvents, themes } = await started();
     expect(await engine.command(CONTROL_MEMBER, frame(type, args))).toEqual({ outcome: 'invalid' });
@@ -415,6 +418,94 @@ describe('run-engine command ordering', () => {
     expect(await engine.command(CONTROL_MEMBER, frame('theme', { surface: 'stage', themeId: 'stage-default' })))
       .toEqual({ outcome: kind === 'permission' || kind === 'schema' ? 'invalid' : 'failed' });
     expect(hub.publishToCalls).toEqual([]);
+  });
+});
+
+describe('run-engine media command', () => {
+  it('play sets anchorAt and anchorPositionMs from the server clock and reaches every channel', async () => {
+    const { engine, hub, order } = await started();
+    const result = await engine.command(CONTROL_MEMBER, frame('media', { action: 'play', mediaId: 'media-1' }));
+    expect(result).toEqual({ outcome: 'applied' });
+    expect(order).toEqual(['advance', 'publish']);
+    expect(engine.state('run-1')?.media).toEqual({ mediaId: 'media-1', playing: true, anchorAt: AT, anchorPositionMs: 0 });
+    expect(hub.changes).toMatchObject([{ type: LIVE_EVENT_TYPES.media, stateRevision: 8 }]);
+    expect(hub.publishToCalls.map((c) => c.channel).sort()).toEqual([...LIVE_CHANNELS].sort());
+    for (const channel of ['audience', 'stage', 'singer'] as const) {
+      expect(hub.publishToCalls.find((c) => c.channel === channel)?.state).toMatchObject({
+        media: { mediaId: 'media-1', playing: true, anchorAt: AT, anchorPositionMs: 0 },
+      });
+    }
+    expect(hub.publishToCalls.find((c) => c.channel === LIVE_CONTROL_CHANNEL)?.state).toMatchObject({
+      view: 'control', state: { media: { mediaId: 'media-1', playing: true } },
+    });
+  });
+
+  it('seek reanchors the timeline at the requested position, keeping it playing', async () => {
+    const { engine, runs } = await started();
+    runs.resume.mockResolvedValue({
+      ...RECORD, live: { ...LIVE, media: { mediaId: 'media-1', playing: true, anchorAt: '2026-09-23T08:59:50.000Z', anchorPositionMs: 1000 } },
+    });
+    const result = await engine.command(CONTROL_MEMBER, frame('media', { action: 'seek', mediaId: 'media-1', positionMs: 5000 }));
+    expect(result).toEqual({ outcome: 'applied' });
+    expect(engine.state('run-1')?.media).toEqual({ mediaId: 'media-1', playing: true, anchorAt: AT, anchorPositionMs: 5000 });
+  });
+
+  it('pause freezes the position at what had played since the last anchor', async () => {
+    const { engine, runs, clock } = await started();
+    runs.resume.mockResolvedValue({
+      ...RECORD, live: { ...LIVE, media: { mediaId: 'media-1', playing: true, anchorAt: '2026-09-23T09:00:00.000Z', anchorPositionMs: 1000 } },
+    });
+    clock.mockReturnValue('2026-09-23T09:00:04.000Z');
+    const result = await engine.command(CONTROL_MEMBER, frame('media', { action: 'pause', mediaId: 'media-1' }));
+    expect(result).toEqual({ outcome: 'applied' });
+    expect(engine.state('run-1')?.media).toEqual({ mediaId: 'media-1', playing: false, anchorAt: '2026-09-23T09:00:04.000Z', anchorPositionMs: 5000 });
+  });
+
+  it('play after a pause resumes from the frozen position rather than restarting', async () => {
+    const { engine, runs, clock } = await started();
+    runs.resume.mockResolvedValue({
+      ...RECORD, live: { ...LIVE, media: { mediaId: 'media-1', playing: false, anchorAt: '2026-09-23T09:00:04.000Z', anchorPositionMs: 5000 } },
+    });
+    clock.mockReturnValue('2026-09-23T09:00:10.000Z');
+    const result = await engine.command(CONTROL_MEMBER, frame('media', { action: 'play', mediaId: 'media-1' }));
+    expect(result).toEqual({ outcome: 'applied' });
+    expect(engine.state('run-1')?.media).toEqual({ mediaId: 'media-1', playing: true, anchorAt: '2026-09-23T09:00:10.000Z', anchorPositionMs: 5000 });
+  });
+
+  it('play with a different mediaId starts fresh at position 0', async () => {
+    const { engine, runs, clock } = await started();
+    runs.resume.mockResolvedValue({
+      ...RECORD, live: { ...LIVE, media: { mediaId: 'media-1', playing: true, anchorAt: '2026-09-23T09:00:00.000Z', anchorPositionMs: 1000 } },
+    });
+    clock.mockReturnValue('2026-09-23T09:00:10.000Z');
+    const result = await engine.command(CONTROL_MEMBER, frame('media', { action: 'play', mediaId: 'media-2' }));
+    expect(result).toEqual({ outcome: 'applied' });
+    expect(engine.state('run-1')?.media).toEqual({ mediaId: 'media-2', playing: true, anchorAt: '2026-09-23T09:00:10.000Z', anchorPositionMs: 0 });
+  });
+
+  it.each([
+    ['play while already playing', { mediaId: 'media-1', playing: true, anchorAt: AT, anchorPositionMs: 1000 }, 'play'],
+    ['pause while already paused', { mediaId: 'media-1', playing: false, anchorAt: AT, anchorPositionMs: 1000 }, 'pause'],
+  ] as const)('treats %s as applied without persisting or publishing', async (_label, media, action) => {
+    const { engine, runs, hub } = await started();
+    runs.resume.mockResolvedValue({ ...RECORD, live: { ...LIVE, media } });
+    expect(await engine.command(CONTROL_MEMBER, frame('media', { action, mediaId: 'media-1' }))).toEqual({ outcome: 'applied' });
+    expect(runs.advance).not.toHaveBeenCalled();
+    expect(hub.publishChange).not.toHaveBeenCalled();
+  });
+
+  it('acks stale and publishes nothing when a media command loses the CAS', async () => {
+    const { engine, runs, hub } = await started();
+    runs.advance.mockResolvedValue('stale');
+    expect(await engine.command(CONTROL_MEMBER, frame('media', { action: 'play', mediaId: 'media-1' }))).toEqual({ outcome: 'stale' });
+    expect(hub.publishToCalls).toEqual([]);
+  });
+
+  it('refuses a media command from a member without command grant', async () => {
+    const { engine, runs } = setup();
+    expect(await engine.command({ channel: 'stage', grant: grantFor([]) }, frame('media', { action: 'play', mediaId: 'media-1' })))
+      .toEqual({ outcome: 'unauthorized' });
+    expect(runs.resume).not.toHaveBeenCalled();
   });
 });
 

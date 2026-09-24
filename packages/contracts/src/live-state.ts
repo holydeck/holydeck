@@ -35,6 +35,7 @@ export type ChannelState =
       readonly themeId: string;
       readonly additionsRevision: number;
       readonly announcement?: string;
+      readonly media?: LiveState['media'];
     }
   | {
       readonly view: 'singer';
@@ -45,6 +46,7 @@ export type ChannelState =
       readonly additionsRevision: number;
       readonly next?: LivePosition;
       readonly announcement?: string;
+      readonly media?: LiveState['media'];
     }
   | {
       readonly view: 'stage';
@@ -57,6 +59,7 @@ export type ChannelState =
       readonly announcement?: string;
       readonly selected?: LivePosition;
       readonly mode: LiveMode;
+      readonly media?: LiveState['media'];
     }
   | { readonly view: 'control'; readonly state: LiveState; readonly counts: Readonly<Record<string, number>> };
 
@@ -74,6 +77,7 @@ export function projectFor(
     themeId: state.themes[view],
     additionsRevision: state.additionsRevision,
     ...(extra.announcement === undefined ? {} : { announcement: extra.announcement }),
+    ...(state.media === undefined ? {} : { media: state.media }),
   };
   if (view === 'audience') return { view, ...base };
   if (view === 'singer') return { view, ...base, ...(extra.next === undefined ? {} : { next: extra.next }) };

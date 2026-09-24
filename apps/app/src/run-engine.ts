@@ -8,7 +8,7 @@
 
 import { isDeepStrictEqual } from 'node:util';
 
-import { LIVE_CHANNELS, LIVE_CONTROL_CHANNEL } from '@holydeck/contracts/live';
+import { LIVE_CHANNELS, LIVE_CONTROL_CHANNEL, parseMediaCommandArgs } from '@holydeck/contracts/live';
 import { enterStandby, pause, resume, returnToLivePosition, select, takeSelectedLive } from '@holydeck/contracts/live-mode';
 import { projectFor } from '@holydeck/contracts/live-state';
 import { DEFAULT_THEMES, THEME_SURFACES } from '@holydeck/contracts/live-theme';
@@ -20,7 +20,7 @@ import { adjacentPosition } from './run-deck.js';
 import { RunEventError } from './run-events.js';
 import { RUN_PERMISSIONS, RunError, runContext } from './runs.js';
 
-import type { AckOutcome, CommandFrame, LiveChannel } from '@holydeck/contracts/live';
+import type { AckOutcome, CommandFrame, LiveChannel, MediaCommandArgs } from '@holydeck/contracts/live';
 import type { LiveMode, LiveModeState } from '@holydeck/contracts/live-mode';
 import type { ChannelState, LivePosition, LiveState } from '@holydeck/contracts/live-state';
 import type { Theme, ThemeSurface } from '@holydeck/contracts/live-theme';
@@ -95,7 +95,8 @@ type Command =
   | { readonly type: 'go-to' | 'select'; readonly position: LivePosition }
   | { readonly type: 'next' | 'previous' | 'pause' | 'take-selected' | 'return-to-live' | 'resume-live' }
   | { readonly type: 'standby'; readonly screenId: string }
-  | { readonly type: 'theme'; readonly surface: ThemeSurface; readonly theme: Theme };
+  | { readonly type: 'theme'; readonly surface: ThemeSurface; readonly theme: Theme }
+  | ({ readonly type: 'media' } & MediaCommandArgs);
 
 const commandFrom = (frame: CommandFrame): Command | undefined => {
   if ('args' in frame && (typeof frame.args !== 'object' || frame.args === null || Array.isArray(frame.args))) return undefined;
@@ -118,6 +119,10 @@ const commandFrom = (frame: CommandFrame): Command | undefined => {
       const theme = Object.values(DEFAULT_THEMES).find((candidate) => candidate.id === themeId);
       return theme === undefined ? undefined : { type, surface: surface as ThemeSurface, theme };
     }
+    case 'media': {
+      const parsed = parseMediaCommandArgs(args);
+      return parsed.ok ? { type, ...parsed.value } : undefined;
+    }
     case 'next':
     case 'previous':
     case 'pause':
@@ -137,7 +142,9 @@ const MODE_ANNOUNCEMENTS: Readonly<Record<LiveMode, MessageKey>> = {
   standby: 'live.mode.standby',
 };
 
-const reduce = (command: Exclude<Command, { type: 'theme' }>, mode: LiveModeState<LivePosition>, deck: RunDeck): LiveModeState<LivePosition> | undefined => {
+const reduce = (
+  command: Exclude<Command, { type: 'theme' } | { type: 'media' }>, mode: LiveModeState<LivePosition>, deck: RunDeck,
+): LiveModeState<LivePosition> | undefined => {
   switch (command.type) {
     case 'go-to':
     case 'select': {
@@ -174,6 +181,25 @@ const kindFor = (type: Command['type'], before: LiveState, next: LiveState): Liv
   if (type === 'standby') return LIVE_EVENT_TYPES.standby;
   const shown = !samePosition(before.public, next.public) && !('standby' in next.public) && next.public.itemId !== '';
   return shown ? LIVE_EVENT_TYPES.slide : LIVE_EVENT_TYPES.runState;
+};
+
+/** Where a timeline sits right now: frozen at its anchor while paused, advancing from it while playing
+ *  (spec OUT-07's own formula — a follower computes the same position from the anchor it was sent). */
+const mediaPositionAt = (media: NonNullable<LiveState['media']>, now: string): number =>
+  media.playing ? media.anchorPositionMs + (Date.parse(now) - Date.parse(media.anchorAt)) : media.anchorPositionMs;
+
+/** LIVE-11: play/pause always reanchor at the server's clock, carrying the position already played
+ *  forward rather than restarting it — except a play or pause that changes nothing repeats the current
+ *  timeline unchanged, so the caller's no-op check (identity, then a deep-equal `LiveState`) still holds.
+ *  Seek always reanchors at the requested position, whatever was playing before. Switching to a different
+ *  `mediaId` is never a continuation: it starts fresh at position 0. */
+const nextMedia = (current: LiveState['media'], command: MediaCommandArgs, now: string): LiveState['media'] => {
+  const { action, mediaId, positionMs } = command;
+  const tracking = current !== undefined && current.mediaId === mediaId ? current : undefined;
+  if (action === 'seek') return { mediaId, playing: tracking?.playing ?? false, anchorAt: now, anchorPositionMs: positionMs ?? 0 };
+  const playing = action === 'play';
+  if (tracking !== undefined && tracking.playing === playing) return tracking;
+  return { mediaId, playing, anchorAt: now, anchorPositionMs: tracking === undefined ? 0 : mediaPositionAt(tracking, now) };
 };
 
 export function runEngineOn(options: RunEngineOptions): RunEngine {
@@ -264,6 +290,18 @@ export function runEngineOn(options: RunEngineOptions): RunEngine {
       } catch (error) {
         return { outcome: error instanceof RunEventError && (error.kind === 'schema' || error.kind === 'permission') ? 'invalid' : 'failed' };
       }
+    }
+    if (command.type === 'media') {
+      const next: LiveState = { ...run.live, media: nextMedia(run.live.media, command, options.clock()) };
+      // Play-while-playing and pause-while-paused change nothing: `nextMedia` hands back the same object,
+      // so this is the same no-op check every other command uses, not a special case for media.
+      if (isDeepStrictEqual(next, run.live)) return { outcome: 'applied' };
+      const advanced = await options.runs.advance(context, runId, run.stateRevision, next, nextRevision());
+      if (advanced === 'stale') return { outcome: 'stale' };
+      if (advanced === undefined) return { outcome: 'failed' };
+      states.set(runId, next);
+      options.hub.publishChange({ type: LIVE_EVENT_TYPES.media, states: statesFor(next, deck, LIVE_CHANNELS), stateRevision: advanced.stateRevision });
+      return { outcome: 'applied' };
     }
     const prior = toModeState(run.live);
     const nextMode = reduce(command, prior, deck);
