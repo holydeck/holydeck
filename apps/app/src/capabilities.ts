@@ -83,6 +83,7 @@ export class CapabilityError extends Error {
 export interface CapabilityCollection {
   insertOne(document: Document): Promise<{ insertedId: unknown }>;
   findOne(filter: Filter): Promise<Document | null>;
+  find(filter: Filter): { toArray(): Promise<Document[]> };
   deleteOne(filter: Filter): Promise<{ deletedCount: number }>;
   deleteMany(filter: Filter): Promise<{ deletedCount: number }>;
   createIndex(keys: Readonly<Record<string, 1 | -1>>, options?: Readonly<Record<string, unknown>>): Promise<string>;
@@ -126,6 +127,15 @@ export type RedeemedCapability =
       readonly expiresAt: string;
     };
 
+/** What listing answers for one still-active capability. Never the token — only ever its digest is kept. */
+export interface ActiveCapability {
+  readonly id: string;
+  readonly kind: CapabilityKind;
+  readonly service: string;
+  readonly view: CapabilityView;
+  readonly expiresAt: string;
+}
+
 export interface CapabilityOptions {
   /** Injected, so every deadline this store writes or checks comes from one clock and a test does not wait. */
   readonly now: () => string;
@@ -146,6 +156,8 @@ export interface CapabilityStore {
       readonly expiresAt: string;
     },
   ): Promise<{ readonly token: string; readonly capabilityId: string }>;
+  /** Every capability still active for one service, read live so a stale or swept-later row never answers. */
+  list(context: unknown, service: string): Promise<readonly ActiveCapability[]>;
   /** Read live against the database on every call — nothing above it is ever trusted to have the answer. */
   redeem(
     context: unknown,
@@ -210,6 +222,21 @@ export function capabilitiesOn(db: CapabilityDb, options: CapabilityOptions): Ca
       const capabilityId = tokenDigest(token);
       await rows().insertOne({ _id: capabilityId, kind, service, view, expiresAt, expiresOn, issuedBy });
       return { token, capabilityId };
+    },
+
+    async list(context, service) {
+      permit(context, 'issue');
+      const now = Date.parse(options.now());
+      const found = await rows().find({ service }).toArray();
+      return found
+        .filter((document) => Date.parse(String(document['expiresAt'])) > now)
+        .map((document) => ({
+          id: String(document['_id']),
+          kind: document['kind'] as CapabilityKind,
+          service: document['service'] as string,
+          view: document['view'] as CapabilityView,
+          expiresAt: String(document['expiresAt']),
+        }));
     },
 
     async redeem(context, token, expected) {

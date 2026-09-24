@@ -39,6 +39,7 @@ const PERMISSION: RouteNeed = { kind: 'permission', need: PRESENTATION_CONTROL }
 const ROUTES = [
   ['POST', GUEST_INVITATION_PATH],
   ['POST', OUTPUT_CAPABILITY_PATH],
+  ['GET', CAPABILITIES_PATH],
   ['DELETE', REVOKE_PATH],
 ] as const;
 
@@ -64,6 +65,15 @@ const parseOutputCapabilityBody = (value: unknown): Parsed<OutputCapabilityBody>
     service: reader.text('service'),
     view: reader.choice('view', ['audience', 'stage', 'singer'] as const),
     expiresAt: reader.time('expiresAt'),
+  }));
+
+interface ListCapabilitiesQuery {
+  readonly service: string;
+}
+
+const parseListCapabilitiesQuery = (value: unknown): Parsed<ListCapabilitiesQuery> =>
+  parseObject(value, 'capabilities', (reader) => ({
+    service: reader.text('service'),
   }));
 
 export interface CapabilityRoutesOptions {
@@ -196,6 +206,14 @@ export function serveCapabilityRoutes(app: FastifyInstance, { capabilities, iden
       }
       throw error;
     }
+  });
+
+  app.get(CAPABILITIES_PATH, { config: { need: PERMISSION } }, async (request, reply) => {
+    const parsed = parseListCapabilitiesQuery(request.query);
+    if (!parsed.ok) return reply.code(422).send(validationFailure(request.id, parsed.problems));
+    const call = capabilityContext(correlationFor(CAPABILITY_PREFIX, request.id));
+    const active = await capabilities.list(call, parsed.value.service);
+    return reply.send(successEnvelope({ capabilities: active }, request.id, CLIENT_WINDOW.current));
   });
 
   app.delete(REVOKE_PATH, { config: { need: PERMISSION } }, async (request, reply) => {

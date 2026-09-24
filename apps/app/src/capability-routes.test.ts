@@ -64,7 +64,7 @@ const actions = (): unknown[] => entries().map((entry) => entry['action']);
 
 const revokePath = (id: string): string => `${CAPABILITIES_PATH}/${id}`;
 
-const asking = (method: 'POST' | 'DELETE', url: string, payload?: unknown, held: StartedSession = operator) =>
+const asking = (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: unknown, held: StartedSession = operator) =>
   app.inject({
     method,
     url,
@@ -86,6 +86,9 @@ const issuingOutput = (
   body: unknown = { service: SERVICE, view: 'stage', expiresAt: EXPIRES },
   held?: StartedSession,
 ) => asking('POST', OUTPUT_CAPABILITY_PATH, body, held);
+
+const listing = (service: string = SERVICE, held?: StartedSession) =>
+  asking('GET', `${CAPABILITIES_PATH}?service=${encodeURIComponent(service)}`, undefined, held);
 
 beforeEach(async () => {
   clock = Date.parse(NOW);
@@ -237,11 +240,55 @@ describe('who may ask any of it', () => {
     for (const response of [
       await issuingGuest(undefined, bystander),
       await issuingOutput(undefined, bystander),
+      await listing(SERVICE, bystander),
       await asking('DELETE', revokePath('whatever'), undefined, bystander),
     ]) {
       expect(response.statusCode).toBe(403);
       expect(response.json().error.code).toBe(FORBIDDEN);
     }
+  });
+});
+
+describe('listing active invitations', () => {
+  test('answers what is still active for a service, never a token', async () => {
+    const guest = await issuingGuest();
+    const output = await issuingOutput();
+    const response = await listing();
+    expect(response.statusCode).toBe(200);
+    const active = response.json().data.capabilities as ReadonlyArray<{ readonly id: string }>;
+    expect(active).toHaveLength(2);
+    expect(active.map((entry) => entry.id).sort()).toEqual(
+      [guest.json().data.capabilityId, output.json().data.capabilityId].sort(),
+    );
+    expect(JSON.stringify(response.json())).not.toContain(guest.json().data.token);
+    expect(JSON.stringify(response.json())).not.toContain(output.json().data.token);
+  });
+
+  test('excludes an invitation issued for another service', async () => {
+    await issuingGuest();
+    const response = await listing('another-service');
+    expect(response.json().data.capabilities).toEqual([]);
+  });
+
+  test('excludes a revoked invitation', async () => {
+    const issued = await issuingOutput();
+    await asking('DELETE', revokePath(issued.json().data.capabilityId));
+    const response = await listing();
+    expect(response.json().data.capabilities).toEqual([]);
+  });
+
+  test('excludes an expired invitation, even before the database has swept it', async () => {
+    await issuingGuest({ service: SERVICE, expiresAt: new Date(clock + 1000).toISOString() });
+    clock += 2000;
+    const response = await listing();
+    expect(response.json().data.capabilities).toEqual([]);
+  });
+
+  test('a service that is missing from the query is said plainly', async () => {
+    const response = await asking('GET', CAPABILITIES_PATH);
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe(VALIDATION_FAILED);
+    expect(response.json().error.fields[0].path).toBe('capabilities.service');
   });
 });
 
@@ -293,6 +340,7 @@ describe('what this surface refuses to answer at all', () => {
     app = await serving(undefined, identity);
     expect((await issuingGuest()).statusCode).toBe(404);
     expect((await issuingOutput()).statusCode).toBe(404);
+    expect((await listing()).statusCode).toBe(404);
     expect((await asking('DELETE', revokePath('whatever'))).statusCode).toBe(404);
   });
 

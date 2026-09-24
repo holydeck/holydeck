@@ -101,6 +101,26 @@ describe('a capability in a real database', () => {
     });
   });
 
+  test('lists what is active for a service straight from the database, and forgets what has expired', async () => {
+    const guestExpiry = soon();
+    const guest = await store.issue(GATEKEEPER, OPERATOR, { kind: 'guest', service: SERVICE, view: 'audience', expiresAt: guestExpiry });
+    const almostOver = new Date(clock + 1000).toISOString();
+    const output = await store.issue(GATEKEEPER, OPERATOR, { kind: 'output', service: SERVICE, view: 'stage', expiresAt: almostOver });
+    await store.issue(GATEKEEPER, OPERATOR, { kind: 'guest', service: 'service:other', view: 'audience', expiresAt: soon() });
+
+    expect(await store.list(GATEKEEPER, SERVICE)).toEqual(
+      expect.arrayContaining([
+        { id: guest.capabilityId, kind: 'guest', service: SERVICE, view: 'audience', expiresAt: guestExpiry },
+        { id: output.capabilityId, kind: 'output', service: SERVICE, view: 'stage', expiresAt: almostOver },
+      ]),
+    );
+
+    clock += 2000;
+    expect(await store.list(GATEKEEPER, SERVICE)).toEqual([
+      { id: guest.capabilityId, kind: 'guest', service: SERVICE, view: 'audience', expiresAt: guestExpiry },
+    ]);
+  });
+
   test('shares no row with a session, even for a token that happens to collide as text', async () => {
     const sessions = sessionsOn(sessionDb(live), { now: () => new Date(clock).toISOString() });
     const session = await sessions.start(sessionContext('req-shared'), { actor: OPERATOR, permissions: [] });

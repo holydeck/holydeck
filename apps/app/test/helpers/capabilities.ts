@@ -19,6 +19,12 @@ export const memoryCapabilities = (): {
       return { insertedId: id };
     },
     findOne: async (filter) => rows.get(idOf(filter)) ?? null,
+    find: (filter) => {
+      const found = [...rows.values()].filter((row) =>
+        Object.entries(filter).every(([field, wanted]) => row[field] === wanted),
+      );
+      return { toArray: async () => found };
+    },
     deleteOne: async (filter) => ({ deletedCount: rows.delete(idOf(filter)) ? 1 : 0 }),
     deleteMany: async () => {
       const count = rows.size;

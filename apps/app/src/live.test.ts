@@ -687,6 +687,7 @@ describe('a Guest joining the Audience view on a shared capability', () => {
     const broken: CapabilityStore = {
       onRevoked: () => () => {},
       issue: () => Promise.reject(defect),
+      list: () => Promise.reject(defect),
       redeem: () => Promise.reject(defect),
       revoke: () => Promise.reject(defect),
       revokeEvery: () => Promise.reject(defect),

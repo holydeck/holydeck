@@ -315,6 +315,50 @@ describe('revoking a capability', () => {
   });
 });
 
+describe('listing what is active for a service', () => {
+  test('answers every guest and output capability still active for that service, never a token', async () => {
+    const guest = await store.issue(context(), OPERATOR, { kind: 'guest', service: SERVICE, view: 'audience', expiresAt: soon() });
+    const output = await store.issue(context(), OPERATOR, { kind: 'output', service: SERVICE, view: 'stage', expiresAt: soon() });
+    const active = await store.list(context(), SERVICE);
+    expect(active).toHaveLength(2);
+    expect(active).toEqual(
+      expect.arrayContaining([
+        { id: guest.capabilityId, kind: 'guest', service: SERVICE, view: 'audience', expiresAt: soon() },
+        { id: output.capabilityId, kind: 'output', service: SERVICE, view: 'stage', expiresAt: soon() },
+      ]),
+    );
+    expect(JSON.stringify(active)).not.toContain(guest.token);
+    expect(JSON.stringify(active)).not.toContain(output.token);
+  });
+
+  test('excludes a capability issued for another service', async () => {
+    await store.issue(context(), OPERATOR, { kind: 'guest', service: SERVICE, view: 'audience', expiresAt: soon() });
+    expect(await store.list(context(), 'service:other')).toEqual([]);
+  });
+
+  test('excludes an expired capability, read live against the clock rather than trusted to have been swept', async () => {
+    await store.issue(context(), OPERATOR, { kind: 'guest', service: SERVICE, view: 'audience', expiresAt: soon() });
+    clock += 120_000;
+    expect(await store.list(context(), SERVICE)).toEqual([]);
+    expect(rows.size).toBe(1);
+  });
+
+  test('excludes a capability once it is revoked', async () => {
+    const issued = await store.issue(context(), OPERATOR, { kind: 'output', service: SERVICE, view: 'stage', expiresAt: soon() });
+    await store.revoke(context(), issued.capabilityId);
+    expect(await store.list(context(), SERVICE)).toEqual([]);
+  });
+
+  test('needs the permission to issue a capability, the same one that grants it', async () => {
+    const redeemOnly = requestContext({
+      actor: 'system',
+      permissions: [CAPABILITY_PERMISSIONS.redeem],
+      correlationId: CORRELATION,
+    });
+    await expect(store.list(redeemOnly, SERVICE)).rejects.toMatchObject({ kind: 'permission' });
+  });
+});
+
 describe('a capability is not a session', () => {
   test('is not found in the session store, and does not spend a ticket there, however alike the two tokens look', async () => {
     const sessionMemory = memorySessions();

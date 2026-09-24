@@ -48,7 +48,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'accounts-routes.ts': 'no harness test drives the admin account lifecycle over HTTP',
   'audit-routes.ts': 'no harness test reads the audit trail over HTTP',
   'backup-routes.ts': 'no harness test starts a backup over HTTP',
-  'capability-routes.ts': 'no harness test issues or revokes a guest or output capability over HTTP',
+  'capability-routes.ts': 'no harness test issues, lists or revokes a guest or output capability over HTTP',
   'conflict-routes.ts': 'no harness test lists or settles a shelved conflict over HTTP',
   'integration-routes.ts': 'no harness test reads or toggles a third-party integration over HTTP',
   'job-routes.ts': 'no harness test lists or requeues a job over HTTP',

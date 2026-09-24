@@ -30,6 +30,7 @@ export const KNOWN_INTEGRATION_GAPS = {
   'capability-routes.ts POST GUEST_INVITATION_PATH PRESENTATION_CONTROL': 'no harness test refuses guest invitations without Control presentation',
   'capability-routes.ts POST OUTPUT_CAPABILITY_PATH PRESENTATION_CONTROL': 'no harness test refuses output capabilities without Control presentation',
   'capability-routes.ts DELETE REVOKE_PATH PRESENTATION_CONTROL': 'no harness test refuses capability revocation without Control presentation',
+  'capability-routes.ts GET CAPABILITIES_PATH PRESENTATION_CONTROL': 'no harness test refuses the active-invitations list without Control presentation',
   'conflict-routes.ts GET CONFLICTS_PATH CONTENT_EDIT|LAYOUTS_MANAGE|SERVICE_TEMPLATES_MANAGE': 'no harness test refuses the conflict list to a session with none of these permissions',
   'conflict-routes.ts POST CONFLICT_RESOLVE_PATH CONTENT_EDIT|LAYOUTS_MANAGE|SERVICE_TEMPLATES_MANAGE': 'no harness test refuses settling a conflict to a session with none of these permissions',
   'content-language-routes.ts GET CONTENT_LANGUAGES_PATH CATALOGUE_MANAGE': 'no harness test refuses the content language list to a non-admin',

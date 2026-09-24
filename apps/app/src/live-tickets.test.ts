@@ -23,6 +23,7 @@ const harness = (): {
       return () => { listeners.delete(listener); };
     },
     issue: () => Promise.reject(new Error('not used by this harness')),
+    list: () => Promise.reject(new Error('not used by this harness')),
     redeem: () => Promise.reject(new Error('not used by this harness')),
     revoke: () => Promise.reject(new Error('not used by this harness')),
     revokeEvery: () => Promise.reject(new Error('not used by this harness')),
