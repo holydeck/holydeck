@@ -3,7 +3,8 @@ import { HolyDeckError } from '@holydeck/core/messages';
 import { errLine, outLine } from '../context.js';
 import type { CliContext } from '../context.js';
 import type { GlobalOptions } from '../program.js';
-import { createRuntime, requireLocal, runtimeFlags } from '../runtime.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
+import type { Runtime } from '../runtime.js';
 import { startSpinner } from '../spinner.js';
 import { syncTranslation } from '@holydeck/core/sync';
 
@@ -14,7 +15,6 @@ export async function runSync(
   globals: GlobalOptions,
 ): Promise<void> {
   const runtime = await createRuntime(ctx, runtimeFlags(globals));
-  requireLocal(runtime, 'sync');
   const targets = abbrs.length > 0 ? abbrs : runtime.config.values.defaultTranslations;
   if (targets.length === 0) {
     throw new HolyDeckError('config_invalid_value', {
@@ -23,6 +23,20 @@ export async function runSync(
       reason: 'pass translation abbreviations or configure default translations',
     });
   }
+  if (runtime.mode === 'local') {
+    await runSyncLocal(ctx, runtime, targets, options);
+    return;
+  }
+  // T7 adds the server branch
+  throw new HolyDeckError('local_only_command', { command: 'sync' });
+}
+
+async function runSyncLocal(
+  ctx: CliContext,
+  runtime: Runtime,
+  targets: string[],
+  options: { refresh?: boolean; dryRun?: boolean },
+): Promise<void> {
   let anyFailed = false;
   for (const abbr of targets) {
     const upper = abbr.toUpperCase();
