@@ -17,6 +17,8 @@ export interface HolyDeckConfig {
   defaultTranslations: string[];
   syncConcurrency: number;
   syncDelayMs: number;
+  /** How often to poll a server-mode sync job for progress, in milliseconds. */
+  syncPollIntervalMs: number;
   /** Fetch bible.com through a headless browser, which can pass its bot-protection challenge. */
   browserFetch: boolean;
   /** Enables the optional book-name resolver. Without it the sermon pipeline stays deterministic. */
@@ -95,6 +97,8 @@ export function parseConfigFile(text: string, path: string): Partial<HolyDeckCon
   if (concurrency !== undefined) out.syncConcurrency = concurrency;
   const delay = intValue(obj, 'syncDelayMs', 0);
   if (delay !== undefined) out.syncDelayMs = delay;
+  const pollInterval = intValue(obj, 'syncPollIntervalMs', 1);
+  if (pollInterval !== undefined) out.syncPollIntervalMs = pollInterval;
   const anthropicApiKey = stringValue(obj, 'anthropicApiKey');
   if (anthropicApiKey !== undefined) out.anthropicApiKey = anthropicApiKey;
   const browserFetchValue = boolValue(obj, 'browserFetch');
@@ -190,6 +194,9 @@ function envLayer(env: Record<string, string | undefined>, notices: string[]): P
   if (env.HOLYDECK_SYNC_DELAY_MS !== undefined && env.HOLYDECK_SYNC_DELAY_MS.trim() !== '') {
     layer.syncDelayMs = parseIntEnv('HOLYDECK_SYNC_DELAY_MS', env.HOLYDECK_SYNC_DELAY_MS, 0);
   }
+  if (env.HOLYDECK_SYNC_POLL_INTERVAL_MS !== undefined && env.HOLYDECK_SYNC_POLL_INTERVAL_MS.trim() !== '') {
+    layer.syncPollIntervalMs = parseIntEnv('HOLYDECK_SYNC_POLL_INTERVAL_MS', env.HOLYDECK_SYNC_POLL_INTERVAL_MS, 1);
+  }
   if (env.HOLYDECK_BROWSER_FETCH !== undefined && env.HOLYDECK_BROWSER_FETCH.trim() !== '') {
     layer.browserFetch = parseBoolEnv('HOLYDECK_BROWSER_FETCH', env.HOLYDECK_BROWSER_FETCH);
   }
@@ -208,6 +215,7 @@ export function resolveConfig(inputs: {
     defaultTranslations: [],
     syncConcurrency: 2,
     syncDelayMs: 1000,
+    syncPollIntervalMs: 2000,
     browserFetch: false,
     oidcCallbackPort: 53682,
   };
@@ -225,6 +233,7 @@ export function resolveConfig(inputs: {
     defaultTranslations: 'default',
     syncConcurrency: 'default',
     syncDelayMs: 'default',
+    syncPollIntervalMs: 'default',
     browserFetch: 'default',
     anthropicApiKey: 'default',
   };

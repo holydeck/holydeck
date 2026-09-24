@@ -37,6 +37,7 @@ describe('parseConfigFile', () => {
     expect(parseConfigFile('', 'x.yaml')).toEqual({});
     expect(parseConfigFile('serverUrl: http://localhost:3000\ntemplate: "{{ x }}"\nsyncConcurrency: 4\n', 'x.yaml'))
       .toEqual({ serverUrl: 'http://localhost:3000', template: '{{ x }}', syncConcurrency: 4 });
+    expect(parseConfigFile('syncPollIntervalMs: 500\n', 'x.yaml')).toEqual({ syncPollIntervalMs: 500 });
     expect(parseConfigFile('browserFetch: true\n', 'x.yaml')).toEqual({ browserFetch: true });
   });
 
@@ -74,6 +75,7 @@ describe('parseConfigFile', () => {
     ['syncConcurrency: many', 'config_invalid_value'],
     ['syncConcurrency: 0', 'config_invalid_value'],
     ['syncDelayMs: -5', 'config_invalid_value'],
+    ['syncPollIntervalMs: 0', 'config_invalid_value'],
     ['browserFetch: sometimes', 'config_invalid_value'],
     ['oidcCallbackPort: 0', 'config_invalid_value'],
     ['serverUrl: 7', 'config_invalid_value'],
@@ -226,6 +228,22 @@ describe('resolveConfig', () => {
       .toThrowError(HolyDeckError);
     expect(() => resolveConfig({ platform: darwin, env: { HOLYDECK_OIDC_CALLBACK_PORT: 'zero' } }))
       .toThrowError(HolyDeckError);
+  });
+
+  it('defaults syncPollIntervalMs to 2000', () => {
+    const resolved = resolveConfig({ platform: darwin, env: {} });
+    expect(resolved.values.syncPollIntervalMs).toBe(2000);
+  });
+
+  it('reads syncPollIntervalMs from HOLYDECK_SYNC_POLL_INTERVAL_MS', () => {
+    const resolved = resolveConfig({ platform: darwin, env: { HOLYDECK_SYNC_POLL_INTERVAL_MS: '500' } });
+    expect(resolved.values.syncPollIntervalMs).toBe(500);
+    expect(resolved.sources.syncPollIntervalMs).toBe('env');
+  });
+
+  it('rejects a non-integer syncPollIntervalMs env value', () => {
+    expect(() => resolveConfig({ platform: darwin, env: { HOLYDECK_SYNC_POLL_INTERVAL_MS: 'soon' } }))
+      .toThrow(HolyDeckError);
   });
 
   it('ignores an explicit undefined value in a layer', () => {
