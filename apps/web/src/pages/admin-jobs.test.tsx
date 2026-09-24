@@ -201,10 +201,9 @@ describe('AdminJobsPage', () => {
 
   it('renders the server’s own refusal message on a 409, not a generic one', async () => {
     session.value = signedIn(['jobs.view', 'jobs.manage']);
-    const message =
-      'This kind of job is not requeued here — start a new one through its own route so its checks run fresh.';
+    const message = 'a backup is already running';
     setFetching(byPath({
-      jobs: () => jobsReply([job({ id: 'job-1', kind: 'restore-apply', state: 'failed' })]),
+      jobs: () => jobsReply([job({ id: 'job-1', state: 'failed' })]),
       requeue: () => reply(409, errorEnvelope('entity.conflict', message, 'request-jobs')),
     }));
     await renderPage();
@@ -214,6 +213,18 @@ describe('AdminJobsPage', () => {
 
     expect((await screen.findByRole('alert')).textContent).toBe(message);
   });
+
+  it.each(['restore-apply', 'media-root-migrate'])(
+    'offers no Requeue button for a failed %s job, since it is never requeued here',
+    async (kind) => {
+      session.value = signedIn(['jobs.view', 'jobs.manage']);
+      setFetching(byPath({ jobs: () => jobsReply([job({ id: 'job-1', kind, state: 'failed' })]) }));
+      await renderPage();
+      await screen.findByText('job-1');
+
+      expect(screen.queryByRole('button', { name: 'Requeue' })).toBeNull();
+    },
+  );
 
   it('shows a load failure as an alert', async () => {
     setFetching(async () => reply(500, errorEnvelope('server.failed', 'Failed', 'request-jobs')));

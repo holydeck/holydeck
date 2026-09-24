@@ -26,6 +26,10 @@ import type { JSX } from 'preact';
 export const JOBS_PATH = '/api/v1/jobs';
 const JOBS_SUMMARY_PATH = `${JOBS_PATH}/summary`;
 
+// Mirrors `job-routes.ts`'s own `REQUEUE_REFUSED_KINDS`: these two kinds refuse a requeue server-side (409),
+// so the button is withheld here rather than offered and then refused.
+const REQUEUE_REFUSED_KINDS = new Set(['restore-apply', 'media-root-migrate']);
+
 type JobSummary = Readonly<Record<JobState, number>>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
@@ -228,7 +232,7 @@ export function AdminJobsPage(): JSX.Element {
                   <td><code>{JSON.stringify(row.payload)}</code></td>
                   {canManage ? (
                     <td>
-                      {row.state === 'failed' ? (
+                      {row.state === 'failed' && !REQUEUE_REFUSED_KINDS.has(row.kind) ? (
                         <button type="button" disabled={requeuingId === row.id} onClick={() => void requeue(row.id)}>
                           {t('jobs.requeue')}
                         </button>

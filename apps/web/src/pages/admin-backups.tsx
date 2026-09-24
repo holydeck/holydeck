@@ -8,23 +8,42 @@
 // individual record classes (`MONGO_CONTENTS` in `backups.ts`), while `settings`/`media` are each their
 // own single Restic-backed entry (`backup-producer.ts`); a content whose class is neither `settings` nor
 // `media` is therefore Mongo's own, which is how the three checkbox/column labels are derived from the
-// manifest without importing `apps/app`'s server-only class list. "Last rehearsal" has no column and
-// "Rehearse" has no button here — D-PLAN-3, no server route exists yet to read or trigger either; the
-// restore wizard (T6) is a separate pass onto this same page.
+// manifest without importing `apps/app`'s server-only class list.
+//
+// "Last rehearsal" has no column and "Rehearse" has no button here — D-PLAN-3, no server route exists to
+// read or trigger either. The restore wizard below (OUI-03, T6) is gated by its own permission,
+// `restore.manage`, apart from `backup.manage`: a password re-check and the typed backup id are sent in
+// the same request as the restore itself (`restore-routes.ts`), a 401 re-prompts for the password rather
+// than failing hard, and a 409 means the backup has no passing rehearsal — the one place this page shows
+// "last rehearsal" without a route that reads rehearsal history (D-PLAN-3 again). Success has no status
+// route either, so progress is watched by polling `GET /api/v1/jobs?kind=restore-apply` for the enqueued
+// job's id (D-PLAN-4); a failed `restore-apply` job is never requeued (`job-routes.ts`'s
+// `REQUEUE_REFUSED_KINDS`, mirrored in `admin-jobs.tsx`), so a failed restore says to start over here
+// instead of pointing at Requeue.
 
 import { useEffect, useState } from 'preact/hooks';
 
 import { RESTORE_CLASSES, type RestoreClass } from '@holydeck/contracts/backups';
+import { ENTITY_CONFLICT } from '@holydeck/contracts/http';
+import { JOB_STATES, type JobState } from '@holydeck/contracts/jobs';
+import { SIGN_IN_REFUSED } from '@holydeck/contracts/sessions';
 
 import { can, csrf } from '../app-state.js';
 import { t } from '../i18n.js';
 import { formatBytes } from '../library/upload.js';
+import { JOBS_PATH } from './admin-jobs.js';
 import { NotFoundPage } from './not-found.js';
 import { request } from '../request.js';
 
 import type { JSX } from 'preact';
 
 export const BACKUPS_PATH = '/api/v1/backups';
+export const RESTORES_PATH = '/api/v1/restores';
+
+// Watched, not ambient: an operator is looking at this page waiting for their own restore, unlike the
+// notification bell's 30s background poll (T7). A few seconds keeps the wait visible without hammering
+// the jobs route.
+export const RESTORE_POLL_MS = 3000;
 
 interface BackupContentView {
   readonly class: string;
@@ -84,15 +103,37 @@ const componentsOf = (contents: readonly BackupContentView[]): readonly RestoreC
 
 const sizeOf = (contents: readonly BackupContentView[]): number => contents.reduce((total, entry) => total + entry.bytes, 0);
 
+const isJobState = (value: unknown): value is JobState => typeof value === 'string' && (JOB_STATES as readonly string[]).includes(value);
+
+/** Reads only what polling a restore needs from a `GET /api/v1/jobs` answer: one job's state, by id. */
+const restoreStateOf = (value: unknown, jobId: string): JobState | undefined => {
+  if (!isRecord(value) || !Array.isArray(value['jobs'])) return undefined;
+  for (const row of value['jobs']) {
+    if (isRecord(row) && row['id'] === jobId && isJobState(row['state'])) return row['state'];
+  }
+  return undefined;
+};
+
 /** The backups this deployment has recorded, and a way to trigger one on demand. */
 export function AdminBackupsPage(): JSX.Element {
   const permitted = can('backup.manage');
+  const canRestore = can('restore.manage');
   const [backups, setBackups] = useState<readonly BackupView[]>([]);
   const [loading, setLoading] = useState(permitted);
   const [loadFailed, setLoadFailed] = useState(false);
   const [checked, setChecked] = useState<ReadonlySet<RestoreClass>>(new Set(RESTORE_CLASSES));
   const [backingUp, setBackingUp] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | undefined>(undefined);
+
+  const [restoreBackupId, setRestoreBackupId] = useState('');
+  const [restoreChecked, setRestoreChecked] = useState<ReadonlySet<RestoreClass>>(new Set(RESTORE_CLASSES));
+  const [restoreConfirm, setRestoreConfirm] = useState('');
+  const [restorePassword, setRestorePassword] = useState('');
+  const [restoreSubmitting, setRestoreSubmitting] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | undefined>(undefined);
+  const [restoreNoRehearsal, setRestoreNoRehearsal] = useState(false);
+  const [restoreJobId, setRestoreJobId] = useState<string | undefined>(undefined);
+  const [restoreJobState, setRestoreJobState] = useState<JobState | undefined>(undefined);
 
   const load = async (): Promise<void> => {
     const result = await request(BACKUPS_PATH);
@@ -117,6 +158,28 @@ export function AdminBackupsPage(): JSX.Element {
       current = false;
     };
   }, [permitted]);
+
+  useEffect(() => {
+    if (restoreJobId === undefined) return;
+    let cancelled = false;
+
+    const poll = async (): Promise<void> => {
+      const result = await request(`${JOBS_PATH}?kind=restore-apply`);
+      if (cancelled || !result.ok) return;
+      const state = restoreStateOf(result.data, restoreJobId);
+      if (state === 'succeeded' || state === 'failed') {
+        setRestoreJobState(state);
+        setRestoreJobId(undefined);
+      }
+    };
+
+    void poll();
+    const interval = setInterval(() => void poll(), RESTORE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [restoreJobId]);
 
   if (!permitted) return <NotFoundPage />;
 
@@ -145,6 +208,57 @@ export function AdminBackupsPage(): JSX.Element {
       setBackingUp(false);
     }
   };
+
+  const toggleRestoreComponent = (component: RestoreClass, on: boolean): void => {
+    setRestoreChecked((current) => {
+      const next = new Set(current);
+      if (on) next.add(component);
+      else next.delete(component);
+      return next;
+    });
+  };
+
+  const resetRestore = (): void => {
+    setRestoreBackupId('');
+    setRestoreChecked(new Set(RESTORE_CLASSES));
+    setRestoreConfirm('');
+    setRestorePassword('');
+    setRestoreError(undefined);
+    setRestoreNoRehearsal(false);
+    setRestoreJobState(undefined);
+  };
+
+  const startRestore = async (event: JSX.TargetedEvent<HTMLFormElement, SubmitEvent>): Promise<void> => {
+    event.preventDefault();
+    setRestoreSubmitting(true);
+    setRestoreError(undefined);
+    setRestoreNoRehearsal(false);
+    try {
+      const components = RESTORE_CLASSES.filter((restoreClass) => restoreChecked.has(restoreClass));
+      const result = await request(RESTORES_PATH, {
+        method: 'POST',
+        csrf: csrf() ?? '',
+        body: { backupId: restoreBackupId, confirm: restoreConfirm, components, password: restorePassword },
+      });
+      if (!result.ok) {
+        if (result.code === SIGN_IN_REFUSED) {
+          setRestoreError(t('backups.restore.wrongPassword'));
+          setRestorePassword('');
+          return;
+        }
+        if (result.code === ENTITY_CONFLICT) setRestoreNoRehearsal(true);
+        setRestoreError(result.message);
+        return;
+      }
+      const data = result.data as { readonly id: string };
+      setRestoreJobId(data.id);
+    } finally {
+      setRestoreSubmitting(false);
+    }
+  };
+
+  const restoreDisabled =
+    restoreSubmitting || restoreBackupId === '' || restoreConfirm !== restoreBackupId || restoreChecked.size === 0;
 
   return (
     <>
@@ -196,6 +310,81 @@ export function AdminBackupsPage(): JSX.Element {
           </table>
         </div>
       )}
+      {canRestore ? (
+        <section aria-labelledby="backups-restore-heading">
+          <h2 id="backups-restore-heading">{t('backups.restore.heading')}</h2>
+          {restoreJobId !== undefined ? (
+            <p role="status">{t('backups.restore.polling')}</p>
+          ) : restoreJobState === 'succeeded' ? (
+            <>
+              <p role="status">{t('backups.restore.succeeded')}</p>
+              <button type="button" onClick={resetRestore}>{t('backups.restore.startOver')}</button>
+            </>
+          ) : restoreJobState === 'failed' ? (
+            <>
+              <p role="alert">{t('backups.restore.failed')}</p>
+              <button type="button" onClick={resetRestore}>{t('backups.restore.startOver')}</button>
+            </>
+          ) : (
+            <form onSubmit={(event) => void startRestore(event)}>
+              {restoreNoRehearsal ? (
+                <p role="alert">
+                  <strong>{t('backups.restore.noRehearsalHeading')}</strong> {restoreError}
+                </p>
+              ) : restoreError === undefined ? null : (
+                <p role="alert">{restoreError}</p>
+              )}
+              <fieldset>
+                <legend>{t('backups.restore.selectBackupLegend')}</legend>
+                {backups.map((row) => (
+                  <label key={row.backupId}>
+                    <input
+                      type="radio"
+                      name="restore-backup"
+                      checked={restoreBackupId === row.backupId}
+                      onChange={() => setRestoreBackupId(row.backupId)}
+                    />
+                    {row.backupId}
+                  </label>
+                ))}
+              </fieldset>
+              <fieldset>
+                <legend>{t('backups.restore.componentsLegend')}</legend>
+                {RESTORE_CLASSES.map((restoreClass) => (
+                  <label key={restoreClass}>
+                    <input
+                      type="checkbox"
+                      checked={restoreChecked.has(restoreClass)}
+                      onChange={(event) => toggleRestoreComponent(restoreClass, event.currentTarget.checked)}
+                    />
+                    {t(`backups.component.${restoreClass}`)}
+                  </label>
+                ))}
+              </fieldset>
+              <div class="form-field">
+                <label for="restore-confirm">{t('backups.restore.confirmLabel')}</label>
+                <input
+                  id="restore-confirm"
+                  type="text"
+                  value={restoreConfirm}
+                  onInput={(event) => setRestoreConfirm(event.currentTarget.value)}
+                />
+              </div>
+              <div class="form-field">
+                <label for="restore-password">{t('welcome.password')}</label>
+                <input
+                  id="restore-password"
+                  type="password"
+                  autocomplete="current-password"
+                  value={restorePassword}
+                  onInput={(event) => setRestorePassword(event.currentTarget.value)}
+                />
+              </div>
+              <button type="submit" disabled={restoreDisabled}>{t('backups.restore.submit')}</button>
+            </form>
+          )}
+        </section>
+      ) : null}
     </>
   );
 }
