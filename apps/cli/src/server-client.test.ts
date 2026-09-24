@@ -417,3 +417,50 @@ describe('syncStatus', () => {
     expect((error as HolyDeckError).code).toBe('server_admin_token_required');
   });
 });
+
+describe('stats', () => {
+  it('parses the stats response', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/api/v1/stats': {
+        status: 200,
+        body: JSON.stringify({
+          translations: [
+            { abbr: 'KJV', chapters: { stored: 2, total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' },
+          ],
+          totals: { translations: 1, chapters: 2, revisions: 3 },
+        }),
+      },
+    });
+    await expect(client.stats()).resolves.toEqual({
+      translations: [
+        { abbr: 'KJV', chapters: { stored: 2, total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' },
+      ],
+      totals: { translations: 1, chapters: 2, revisions: 3 },
+    });
+  });
+
+  it('maps a 401 to server_admin_token_required', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/api/v1/stats': {
+        status: 401,
+        body: JSON.stringify({ error: { code: 'auth_failed', message: 'no token' } }),
+      },
+    });
+    const error = await client.stats().catch((e: unknown) => e as HolyDeckError);
+    expect((error as HolyDeckError).code).toBe('server_admin_token_required');
+  });
+
+  it('rejects a malformed chapters field', async () => {
+    const client = getClient({
+      'https://holydeck.example.com/api/v1/stats': {
+        status: 200,
+        body: JSON.stringify({
+          translations: [{ abbr: 'KJV', chapters: { total: 1189 }, revisions: 3, updatedAt: '2026-09-01T00:00:00.000Z' }],
+          totals: { translations: 1, chapters: 2, revisions: 3 },
+        }),
+      },
+    });
+    const error = await client.stats().catch((e: unknown) => e as HolyDeckError);
+    expect((error as HolyDeckError).code).toBe('server_bad_response');
+  });
+});

@@ -56,6 +56,16 @@ export interface ServerSyncJobStatus {
   error?: { code: string; message: string };
 }
 
+export interface ServerStatsResponse {
+  translations: Array<{
+    abbr: string;
+    chapters: { stored: number; total: number };
+    revisions: number;
+    updatedAt: string;
+  }>;
+  totals: { translations: number; chapters: number; revisions: number };
+}
+
 const ACCEPT = { accept: 'application/json' };
 
 function bad(url: string, reason: string): never {
@@ -292,5 +302,33 @@ export class ServerClient {
       if (error instanceof HolyDeckError && error.code === 'server_error' && error.params['status'] === 404) return undefined;
       throw error;
     }
+  }
+
+  async stats(): Promise<ServerStatsResponse> {
+    const url = `${this.baseUrl}/api/v1/stats`;
+    const data = asRecord(await this.requestAdmin(url), url, 'not an object');
+    if (!Array.isArray(data['translations'])) bad(url, 'field "translations" is not an array');
+    const translations = data['translations'].map((item) => {
+      const entry = asRecord(item, url, 'translation entry is not an object');
+      const chapters = asRecord(entry['chapters'], url, 'field "chapters" is not an object');
+      return {
+        abbr: asString(entry['abbr'], url, 'abbr'),
+        chapters: {
+          stored: asNumber(chapters['stored'], url, 'chapters.stored'),
+          total: asNumber(chapters['total'], url, 'chapters.total'),
+        },
+        revisions: asNumber(entry['revisions'], url, 'revisions'),
+        updatedAt: asString(entry['updatedAt'], url, 'updatedAt'),
+      };
+    });
+    const totals = asRecord(data['totals'], url, 'field "totals" is not an object');
+    return {
+      translations,
+      totals: {
+        translations: asNumber(totals['translations'], url, 'totals.translations'),
+        chapters: asNumber(totals['chapters'], url, 'totals.chapters'),
+        revisions: asNumber(totals['revisions'], url, 'totals.revisions'),
+      },
+    };
   }
 }
