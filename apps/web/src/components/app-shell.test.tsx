@@ -10,6 +10,7 @@ import { resetAppState, session } from '../app-state.js';
 import { setFetching } from '../request.js';
 import { currentPath } from '../router.js';
 import { AppShell } from './app-shell.js';
+import { NOTIFICATIONS_PATH } from './notification-bell.js';
 
 import type { FetchLike } from '../api.js';
 import type { SessionView } from '@holydeck/contracts/sessions';
@@ -28,6 +29,7 @@ describe('the navigation shell', () => {
   beforeEach(() => {
     resetAppState();
     currentPath.value = '/services';
+    setFetching(async () => reply(200, successEnvelope({ notifications: [] }, 'req-notifications')));
   });
 
   it('keeps only the skip link, main and live regions while signed out', () => {
@@ -49,6 +51,18 @@ describe('the navigation shell', () => {
     expect(screen.getByText('Administrator')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(signOut).toHaveBeenCalledOnce();
+  });
+
+  it('carries the notification bell between the account menu and sign-out', async () => {
+    const fetching = vi.fn<FetchLike>(async () => reply(200, successEnvelope({ notifications: [] }, 'req-notifications')));
+    setFetching(fetching);
+    session.value = signedIn(['accounts.manage']);
+    render(<AppShell onSignOut={vi.fn()}><p>page</p></AppShell>);
+    await vi.waitFor(() => expect(fetching).toHaveBeenCalledWith(`${NOTIFICATIONS_PATH}?unread=true`, expect.anything()));
+    const bar = document.querySelector('.app-bar');
+    const marks = [...(bar?.children ?? [])].map((child) => child.className);
+    expect(marks.indexOf('notification-bell')).toBeGreaterThan(marks.indexOf('app-account-menu'));
+    expect(marks.indexOf('notification-bell')).toBeLessThan(marks.indexOf('app-sign-out'));
   });
 
   it('shows Administration only to a session that administers accounts or settings', () => {

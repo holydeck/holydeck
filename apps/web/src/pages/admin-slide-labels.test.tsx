@@ -49,6 +49,9 @@ const listReply = (entries: readonly unknown[]) => reply(200, successEnvelope(en
 
 const renderPage = async (): Promise<void> => {
   currentPath.value = '/admin/slide-labels';
+  // Keeps the shell's notification bell from polling and consuming a slot in this file's sequential
+  // `mockResolvedValueOnce` fetch queues; the page under test never needs the bell to be active.
+  Object.defineProperty(document, 'hidden', { value: true, configurable: true });
   render(<App />);
   await screen.findByRole('heading', { level: 1, name: 'Slide labels' });
 };

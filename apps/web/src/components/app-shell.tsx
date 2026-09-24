@@ -20,6 +20,7 @@ import { switchAccount } from '../account-switch.js';
 import { can, session } from '../app-state.js';
 import { ExpiryBanner } from './expiry-banner.js';
 import { t } from '../i18n.js';
+import { NotificationBell } from './notification-bell.js';
 import { route, type Route } from '../router.js';
 import { ToastRegion } from './toast.js';
 import { UpdateDialog } from './update-dialog.js';
@@ -173,6 +174,7 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
             </p>
           )}
           <AccountMenu current={current} />
+          <NotificationBell />
           {onSignOut === undefined ? null : (
             <button type="button" class="app-sign-out" onClick={onSignOut}>{t('app.signOut')}</button>
           )}
