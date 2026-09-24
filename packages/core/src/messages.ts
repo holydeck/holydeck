@@ -51,6 +51,8 @@ export type MessageCode =
   | 'auth_failed'
   | 'auth_not_configured'
   | 'local_only_command'
+  | 'local_only_option'
+  | 'server_admin_token_required'
   | 'unknown_shell'
   | 'deprecated_flag'
   | 'refresh_unchanged'
@@ -149,6 +151,9 @@ export const messageCatalog: Record<MessageCode, string> = {
   auth_failed: 'Authentication failed: {reason}.',
   auth_not_configured: 'No OIDC login is stored for {url}. Run "holydeck --server-url {url} auth login" first.',
   local_only_command: '"holydeck {command}" works on the local datastore and is not available in server mode (--server-url). Run it where the data lives.',
+  local_only_option: '"{option}" is local-only and not available in server mode (--server-url).',
+  server_admin_token_required:
+    'This command needs the corpus service token (HOLYDECK_SERVER_TOKEN), not a client token — refused by {url}.',
   unknown_shell: 'Unknown shell "{shell}". Supported: zsh, bash.',
   deprecated_flag: 'Flag {oldFlag} is deprecated; use {newFlag} instead.',
   refresh_unchanged: '{abbr} {book} {chapter}: content unchanged, no new revision.',

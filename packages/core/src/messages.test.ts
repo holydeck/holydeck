@@ -37,6 +37,18 @@ describe('formatMessage', () => {
       'Server error (HTTP 502) from https://holydeck.example.com/api/v1/translations: upstream down',
     );
   });
+
+  it('formats the local-only-option refusal', () => {
+    expect(formatMessage('local_only_option', { option: '--dry-run' })).toBe(
+      '"--dry-run" is local-only and not available in server mode (--server-url).',
+    );
+  });
+
+  it('formats the server-admin-token-required refusal', () => {
+    expect(formatMessage('server_admin_token_required', { url: 'https://holydeck.example.com/api/v1/stats' })).toBe(
+      'This command needs the corpus service token (HOLYDECK_SERVER_TOKEN), not a client token — refused by https://holydeck.example.com/api/v1/stats.',
+    );
+  });
 });
 
 describe('HolyDeckError', () => {
