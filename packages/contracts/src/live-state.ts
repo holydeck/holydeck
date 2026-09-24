@@ -14,6 +14,16 @@ export type LiveState = {
   readonly selected: LivePosition;
   readonly themes: Readonly<Record<ThemeSurface, string>>;
   readonly additionsRevision: number;
+  /** The media a `type: 'media'` command last moved, when one is playing or paused (LIVE-11). `anchorAt`
+   *  is the instant `anchorPositionMs` was true, following the same anchor-from-event convention
+   *  `live-media.ts`'s `mediaTimelineFromEvent` already uses — a follower computes its own live position
+   *  by advancing from this anchor rather than trusting a position that ages in transit. */
+  readonly media?: {
+    readonly mediaId: string;
+    readonly playing: boolean;
+    readonly anchorAt: string;
+    readonly anchorPositionMs: number;
+  };
 };
 
 export type ChannelState =

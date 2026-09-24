@@ -43,6 +43,67 @@ export const capabilityPath = (capabilityId: string): string =>
   `${CAPABILITIES_PATH}/${encodeURIComponent(capabilityId)}`;
 
 /**
+ * Where a Guest's join token is exchanged for what actually opens a live session: a short-lived socket
+ * ticket and a read ticket bound to the capability, service and view it was issued for (OUT-01). Named
+ * here, not app-locally, because both the web `/join` page and the server that answers it are two
+ * different workspaces that must spell the same path.
+ */
+export const GUEST_EXCHANGE_PATH = `${LIVE_PATH}/guest-exchange`;
+
+/** The same exchange, for an output window opened from a capability minted by `OUTPUT_CAPABILITY_PATH`
+ *  rather than a shared join link (OUT-02). */
+export const OUTPUT_EXCHANGE_PATH = `${LIVE_PATH}/output-exchange`;
+
+/** What a Guest's join token names, to be traded in at `GUEST_EXCHANGE_PATH` for a socket ticket. */
+export interface GuestExchangeBody {
+  readonly token: string;
+  readonly service: string;
+}
+
+export function parseGuestExchangeBody(value: unknown): Parsed<GuestExchangeBody> {
+  return parseObject(value, 'guestExchange', (reader) => ({
+    token: reader.text('token'),
+    service: reader.text('service'),
+  }));
+}
+
+/** The same, for an output capability, which additionally names the one view it opens. */
+export interface OutputExchangeBody {
+  readonly token: string;
+  readonly service: string;
+  readonly view: OutputChannel;
+}
+
+export function parseOutputExchangeBody(value: unknown): Parsed<OutputExchangeBody> {
+  return parseObject(value, 'outputExchange', (reader) => ({
+    token: reader.text('token'),
+    service: reader.text('service'),
+    view: reader.choice('view', OUTPUT_CHANNELS),
+  }));
+}
+
+/**
+ * What either exchange answers with: a socket ticket the connection upgrade spends and a read ticket
+ * bound to the capability, service and view it was issued for — never the capability itself, which
+ * stays server-side once redeemed.
+ */
+export interface LiveExchangeResponse {
+  readonly socketTicket: string;
+  readonly readTicket: string;
+  readonly view: OutputChannel;
+  readonly expiresAt: string;
+}
+
+export function parseLiveExchangeResponse(value: unknown): Parsed<LiveExchangeResponse> {
+  return parseObject(value, 'liveExchange', (reader) => ({
+    socketTicket: reader.text('socketTicket'),
+    readTicket: reader.text('readTicket'),
+    view: reader.choice('view', OUTPUT_CHANNELS),
+    expiresAt: reader.time('expiresAt'),
+  }));
+}
+
+/**
  * What an upgrade request carries in its query string, and only there: a browser WebSocket can set no
  * request header, so the channel asked for and the client version declared travel in the URL — as does
  * the capability a shared join link carries, with the service it opens (T81). The ticket a signed-in
@@ -268,6 +329,30 @@ export function parseHeartbeatFrame(value: unknown): Parsed<HeartbeatFrame> {
     channel: readChannel(reader),
     at: reader.time('at'),
   }));
+}
+
+/** What a `type: 'media'` command's `args` carries (LIVE-11). Only `seek` moves the timeline to a
+ *  position, matching `live-media.ts`'s own `playMediaTimeline`/`pauseMediaTimeline`/`seekMediaTimeline`
+ *  signatures, so `positionMs` is required for a seek and forbidden otherwise. */
+export const MEDIA_COMMAND_ACTIONS = ['play', 'pause', 'seek'] as const;
+export type MediaCommandAction = (typeof MEDIA_COMMAND_ACTIONS)[number];
+
+export type MediaCommandArgs = {
+  readonly action: MediaCommandAction;
+  readonly mediaId: string;
+  readonly positionMs?: number;
+};
+
+export function parseMediaCommandArgs(value: unknown): Parsed<MediaCommandArgs> {
+  return parseObject(value, 'media', (reader) => {
+    const action = reader.choice('action', MEDIA_COMMAND_ACTIONS);
+    const mediaId = reader.text('mediaId');
+    if (action !== 'seek') {
+      reader.absent('positionMs', FIELD_CODES.notAllowed, 'is carried only when the action is seek');
+      return { action, mediaId };
+    }
+    return { action, mediaId, positionMs: reader.wholeNumber('positionMs') };
+  });
 }
 
 // Keyed by the value read off the wire rather than by a declared key, so a frame claiming `constructor`

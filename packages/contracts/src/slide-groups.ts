@@ -89,6 +89,9 @@ export interface SlideGroupBody {
    *  following exactly the convention `background` above already set. Absent is the ordinary case
    *  — a group with nothing to play, which behaves exactly as one always has. */
   readonly audioTrackId?: string;
+  /** How long its backing track fades out when the group is left (OUT-11), in milliseconds. Absent
+   *  matches today's behaviour exactly: stopping immediately, with no fade. */
+  readonly audioFadeOutMs?: number;
   /**
    * Present only when `mode === 'generated'`. Opaque here — the shape a concrete generator (T51
    * songs, later sermon/general projections) pins is that generator's to define; this file only
@@ -158,6 +161,7 @@ export const parseSlideGroupBody: ParseFn<SlideGroupBody> = (value, path) =>
     const slideLayoutId = reader.text('slideLayoutId');
     const background = reader.optionalText('background');
     const audioTrackId = reader.optionalText('audioTrackId');
+    const audioFadeOutMs = reader.optionalWholeNumber('audioFadeOutMs');
     const slides = reader.parsedList('slides', parseSlide);
     const generatedFrom = reader.optionalParsed('generatedFrom', parseOpaqueRecord);
     return {
@@ -166,6 +170,7 @@ export const parseSlideGroupBody: ParseFn<SlideGroupBody> = (value, path) =>
       slideLayoutId,
       ...(background === undefined ? {} : { background }),
       ...(audioTrackId === undefined ? {} : { audioTrackId }),
+      ...(audioFadeOutMs === undefined ? {} : { audioFadeOutMs }),
       slides,
       ...(generatedFrom === undefined ? {} : { generatedFrom }),
     };

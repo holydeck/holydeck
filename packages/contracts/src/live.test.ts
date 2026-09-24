@@ -3,19 +3,26 @@ import { describe, expect, it } from 'vitest';
 import { STALE_STATE_REVISION } from './http.js';
 import {
   ACK_OUTCOMES,
+  GUEST_EXCHANGE_PATH,
   LIVE_CHANNELS,
   LIVE_CLOSE,
   CAPABILITIES_PATH,
   LIVE_CONNECTIONS_PATH,
   LIVE_SESSION_STATES,
+  MEDIA_COMMAND_ACTIONS,
   OUTPUT_CAPABILITY_PATH,
   OUTPUT_CHANNELS,
+  OUTPUT_EXCHANGE_PATH,
   capabilityPath,
   parseAckFrame,
   parseCommandFrame,
   parseEventFrame,
   parseFrame,
+  parseGuestExchangeBody,
   parseHeartbeatFrame,
+  parseLiveExchangeResponse,
+  parseMediaCommandArgs,
+  parseOutputExchangeBody,
   parseResumeFrame,
   parseSnapshotFrame,
 } from './live.js';
@@ -239,6 +246,77 @@ describe('frames a client sends', () => {
   it('refuses a resume from a fraction of a sequence', () => {
     expect(codes({ ...resume(), fromSequence: 101.5 }, parseResumeFrame)).toEqual([
       `resume.fromSequence=${FIELD_CODES.notAWholeNumber}`,
+    ]);
+  });
+});
+
+describe('exchanging a Guest or output capability token for live credentials (OUT-01, OUT-02)', () => {
+  it('names one path both the guest-exchange route and the client that calls it share', () => {
+    expect(GUEST_EXCHANGE_PATH).toBe('/api/v1/live/guest-exchange');
+    expect(OUTPUT_EXCHANGE_PATH).toBe('/api/v1/live/output-exchange');
+  });
+
+  it('parses a guest exchange request', () => {
+    const body = { token: 'tok-1', service: 'svc-1' };
+    expect(parseGuestExchangeBody(body)).toEqual({ ok: true, value: body });
+  });
+
+  it('refuses a guest exchange request missing its token or service', () => {
+    expect(codes({}, parseGuestExchangeBody)).toEqual([
+      `guestExchange.token=${FIELD_CODES.required}`,
+      `guestExchange.service=${FIELD_CODES.required}`,
+    ]);
+  });
+
+  it('parses an output exchange request naming the view it opens', () => {
+    const body = { token: 'tok-2', service: 'svc-1', view: 'stage' };
+    expect(parseOutputExchangeBody(body)).toEqual({ ok: true, value: body });
+  });
+
+  it('refuses an output exchange naming a view the protocol does not present', () => {
+    expect(codes({ token: 't', service: 's', view: 'live-control' }, parseOutputExchangeBody)).toEqual([
+      `outputExchange.view=${FIELD_CODES.notAllowed}`,
+    ]);
+  });
+
+  it('parses what either exchange answers with, never the capability itself', () => {
+    const response = { socketTicket: 'st-1', readTicket: 'rt-1', view: 'audience', expiresAt: NOW };
+    expect(parseLiveExchangeResponse(response)).toEqual({ ok: true, value: response });
+  });
+});
+
+describe('the media command a live run answers (LIVE-11)', () => {
+  it('names the three things a media command may ask for', () => {
+    expect(MEDIA_COMMAND_ACTIONS).toEqual(['play', 'pause', 'seek']);
+  });
+
+  it('parses play and pause carrying only the media they act on', () => {
+    for (const action of ['play', 'pause'] as const) {
+      const args = { action, mediaId: 'media-1' };
+      expect(parseMediaCommandArgs(args)).toEqual({ ok: true, value: args });
+    }
+  });
+
+  it('parses a seek carrying the position it moves to', () => {
+    const args = { action: 'seek', mediaId: 'media-1', positionMs: 4200 };
+    expect(parseMediaCommandArgs(args)).toEqual({ ok: true, value: args });
+  });
+
+  it('requires a position on a seek, because a seek without one moves nowhere', () => {
+    expect(codes({ action: 'seek', mediaId: 'media-1' }, parseMediaCommandArgs)).toEqual([
+      `media.positionMs=${FIELD_CODES.required}`,
+    ]);
+  });
+
+  it('refuses a position on play or pause, which never move the timeline', () => {
+    expect(codes({ action: 'play', mediaId: 'media-1', positionMs: 100 }, parseMediaCommandArgs)).toEqual([
+      `media.positionMs=${FIELD_CODES.notAllowed}`,
+    ]);
+  });
+
+  it('refuses an action the media command does not declare', () => {
+    expect(codes({ action: 'stop', mediaId: 'media-1' }, parseMediaCommandArgs)).toEqual([
+      `media.action=${FIELD_CODES.notAllowed}`,
     ]);
   });
 });

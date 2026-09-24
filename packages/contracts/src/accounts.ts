@@ -41,6 +41,12 @@ export const DISPLAY_NAME: Bounds = Object.freeze({ minimum: 1, maximum: 64 });
  */
 export const PASSWORD: Bounds = Object.freeze({ minimum: 12, maximum: 128 });
 
+/** The three choices a Singer output's background may be set to (LIVE-17): the run's own theme, or a
+ *  fixed dark or light background regardless of it. */
+export const SINGER_BACKGROUNDS = ['theme', 'dark', 'light'] as const;
+
+export type SingerBackground = (typeof SINGER_BACKGROUNDS)[number];
+
 const ID = /^[A-Za-z0-9_-]{22,43}$/u;
 
 const NAME = /^[a-z0-9][a-z0-9._-]{1,30}[a-z0-9]$/u;
@@ -97,24 +103,40 @@ export interface AccountRecord {
   readonly controlPresentation: boolean;
   /** Not deleted, not renamed, kept in every other respect — this is the entire distinction of being closed. */
   readonly disabled: boolean;
+  /** What a Singer output shows behind this account's lyrics, when it has ever chosen one (LIVE-17).
+   *  Absent means the ordinary case: nothing chosen, so a Singer output falls back to the run's theme. */
+  readonly singerBackground?: SingerBackground;
 }
 
 export function parseAccountRecord(value: unknown): Parsed<AccountRecord> {
   return parseObject(value, 'account', (reader) => {
-    const record = {
-      id: reader.text('id'),
-      name: reader.text('name'),
-      displayName: reader.text('displayName'),
-      role: reader.choice('role', ACCOUNT_ROLES),
-      createdAt: reader.time('createdAt'),
-      controlPresentation: reader.flag('controlPresentation'),
-      disabled: reader.flag('disabled'),
-    };
-    if (record.id !== '' && !isAccountId(record.id)) {
+    const id = reader.text('id');
+    const name = reader.text('name');
+    const displayName = reader.text('displayName');
+    const role = reader.choice('role', ACCOUNT_ROLES);
+    const createdAt = reader.time('createdAt');
+    const controlPresentation = reader.flag('controlPresentation');
+    const disabled = reader.flag('disabled');
+    // Read with `optionalText`, not `reader.choice`, because a choice reader is a required-field reader
+    // and this field must never appear in the problems a record without one yields.
+    const singerBackground = reader.optionalText('singerBackground');
+    if (singerBackground !== undefined && !SINGER_BACKGROUNDS.includes(singerBackground as SingerBackground)) {
+      reader.reject('singerBackground', FIELD_CODES.notAllowed, `must be one of ${SINGER_BACKGROUNDS.join(', ')}`);
+    }
+    if (id !== '' && !isAccountId(id)) {
       reader.reject('id', FIELD_CODES.notAllowed, 'must be an opaque identifier this server issued');
     }
-    if (record.name !== '' && !isAccountName(record.name)) reader.reject('name', FIELD_CODES.notAllowed, NAME_RULE);
-    return record;
+    if (name !== '' && !isAccountName(name)) reader.reject('name', FIELD_CODES.notAllowed, NAME_RULE);
+    return {
+      id,
+      name,
+      displayName,
+      role,
+      createdAt,
+      controlPresentation,
+      disabled,
+      ...(singerBackground === undefined ? {} : { singerBackground: singerBackground as SingerBackground }),
+    };
   });
 }
 

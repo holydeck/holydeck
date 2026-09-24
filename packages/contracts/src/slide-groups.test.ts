@@ -203,6 +203,38 @@ describe('reading a SlideGroupBody', () => {
     };
     expect(parseSlideGroupBody(body, 'group')).toEqual({ ok: true, value: body });
   });
+
+  it('round-trips a group fade-out duration for its backing track (LIVE-20/OUT-11)', () => {
+    const body = {
+      mode: 'custom',
+      enabled: true,
+      slideLayoutId: 'layout-a',
+      audioTrackId: 'media-hymn-1',
+      audioFadeOutMs: 800,
+      slides: [SLIDE],
+    };
+    expect(parseSlideGroupBody(body, 'group')).toEqual({ ok: true, value: body });
+  });
+
+  it('leaves audioFadeOutMs absent when not configured, matching an immediate stop', () => {
+    const body = { mode: 'custom', enabled: true, slideLayoutId: 'layout-a', slides: [SLIDE] };
+    const parsed = parseSlideGroupBody(body, 'group');
+    expect(parsed).toEqual({ ok: true, value: body });
+    expect(parsed.ok && 'audioFadeOutMs' in parsed.value).toBe(false);
+  });
+
+  it('refuses a negative fade-out duration', () => {
+    const parsed = parseSlideGroupBody(
+      { mode: 'custom', enabled: true, slideLayoutId: 'layout-a', audioFadeOutMs: -1, slides: [SLIDE] },
+      'group',
+    );
+    expect(parsed.ok).toBe(false);
+    expect(!parsed.ok && parsed.problems).toContainEqual({
+      path: 'group.audioFadeOutMs',
+      code: FIELD_CODES.tooSmall,
+      message: 'must be at least 0',
+    });
+  });
 });
 
 describe("resolving a slide's effective background and Slide Layout (SLID-02)", () => {

@@ -8,6 +8,7 @@ import {
   DISPLAY_NAME,
   ONBOARDING_PATH,
   PASSWORD,
+  SINGER_BACKGROUNDS,
   accountIdIn,
   actorFor,
   isAccountId,
@@ -127,6 +128,33 @@ describe('what an account is', () => {
     const parsed = parseAccountRecord({ ...RECORD, role: 'owner' });
     expect(!parsed.ok && parsed.problems.map((problem) => `${problem.path}=${problem.code}`)).toEqual([
       `account.role=${FIELD_CODES.notAllowed}`,
+    ]);
+  });
+});
+
+describe('a signed-in account’s Singer background preference (LIVE-17)', () => {
+  it('names the three choices a profile may set', () => {
+    expect(SINGER_BACKGROUNDS).toEqual(['theme', 'dark', 'light']);
+  });
+
+  it('round-trips a record carrying one', () => {
+    const themed = { ...RECORD, singerBackground: 'dark' as const };
+    expect(parseAccountRecord(themed)).toEqual({ ok: true, value: themed });
+  });
+
+  it('leaves it absent when never set, the ordinary case', () => {
+    const parsed = parseAccountRecord(RECORD);
+    expect(parsed.ok && 'singerBackground' in parsed.value).toBe(false);
+  });
+
+  it('refuses a value the three choices do not name', () => {
+    const parsed = parseAccountRecord({ ...RECORD, singerBackground: 'sepia' });
+    expect(!parsed.ok && parsed.problems).toEqual([
+      {
+        path: 'account.singerBackground',
+        code: FIELD_CODES.notAllowed,
+        message: `must be one of ${SINGER_BACKGROUNDS.join(', ')}`,
+      },
     ]);
   });
 });
