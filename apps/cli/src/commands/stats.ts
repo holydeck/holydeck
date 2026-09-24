@@ -157,7 +157,7 @@ async function runStatsServer(
 export function registerStats(program: Command, ctx: CliContext): void {
   program
     .command('stats')
-    .description('Show what the local datastore holds: coverage, revisions, size on disk, store location')
+    .description('Show translation coverage and revisions (local datastore, or a server with --server-url)')
     .option('--translation <abbr>', 'limit the report to one stored translation')
     .action(async (options: { translation?: string }, command: Command) => {
       await runStats(ctx, options, command.optsWithGlobals<GlobalOptions>());

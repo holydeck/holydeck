@@ -215,7 +215,7 @@ export async function runSyncStatus(ctx: CliContext, abbrs: string[], globals: G
 export function registerSync(program: Command, ctx: CliContext): void {
   const sync = program
     .command('sync')
-    .description('Download or update whole translations in the local datastore')
+    .description('Download or update whole translations (local datastore, or a server with --server-url)')
     .argument('[abbr...]', 'translation abbreviations (default: configured translations)')
     .option('--refresh', 're-fetch stored chapters and record changed content as new revisions')
     .option('--dry-run', 'show what would be fetched without fetching')
