@@ -23,6 +23,7 @@ describe('the environment each service in the harness stack is started with', ()
       HOLYDECK_PORT: '3100',
       HOLYDECK_DATA_DIR: '/tmp/holydeck-harness-test',
       HOLYDECK_MEDIA_ROOT: '/tmp/holydeck-harness-test/media',
+      HOLYDECK_RESTIC_REPOSITORY: '/tmp/holydeck-harness-test/restic',
       HOLYDECK_LOCALE: 'en',
       HOLYDECK_CORPUS_URL: 'http://127.0.0.1:3000',
       HOLYDECK_CORPUS_TOKEN: CORPUS_TOKEN,
@@ -47,8 +48,10 @@ describe('the environment each service in the harness stack is started with', ()
   // application writes them to, so it gets that address and it has to be the same one.
   it('gives the worker the mounts it owns, the application database, and no port at all', () => {
     expect(workerEnvironment(ADDRESSES)).toEqual({
+      PATH: process.env.PATH ?? '',
       HOLYDECK_DATA_DIR: '/tmp/holydeck-harness-test',
       HOLYDECK_MEDIA_ROOT: '/tmp/holydeck-harness-test/media',
+      HOLYDECK_RESTIC_REPOSITORY: '/tmp/holydeck-harness-test/restic',
       HOLYDECK_MONGO_URL: `mongodb://127.0.0.1:27017/${APP_DATABASE}`,
       HOLYDECK_SETTINGS_PATH: '/tmp/holydeck-harness-test/config/settings.yaml',
       HOLYDECK_LOG_LEVEL: 'warn',
@@ -60,16 +63,26 @@ describe('the environment each service in the harness stack is started with', ()
 
   // Exact rather than partial on purpose: a HOLYDECK_ variable left over in the shell that started the
   // run would otherwise move the ports, the database or the library out from under the assertions, and
-  // the suite would be grading a developer's own stack instead of this one.
-  it('inherits nothing from the shell the run was started in', () => {
-    const built = [applicationEnvironment(ADDRESSES), corpusEnvironment(ADDRESSES), workerEnvironment(ADDRESSES)];
-    for (const environment of built) {
-      expect(Object.keys(environment).every((key) => key.startsWith('HOLYDECK_'))).toBe(true);
-    }
+  // the suite would be grading a developer's own stack instead of this one. The worker's `PATH` is the
+  // one deliberate exception, since it is the one process that shells out to a binary on the host.
+  it('inherits nothing from the shell the run was started in, besides the worker\'s PATH', () => {
+    expect(Object.keys(applicationEnvironment(ADDRESSES)).every((key) => key.startsWith('HOLYDECK_'))).toBe(true);
+    expect(Object.keys(corpusEnvironment(ADDRESSES)).every((key) => key.startsWith('HOLYDECK_'))).toBe(true);
+    expect(
+      Object.keys(workerEnvironment(ADDRESSES)).every((key) => key === 'PATH' || key.startsWith('HOLYDECK_')),
+    ).toBe(true);
   });
 
   it('names the database whether or not the address it was given ends in a slash', () => {
     expect(applicationMongoUrl('mongodb://127.0.0.1:27017/')).toBe(`mongodb://127.0.0.1:27017/${APP_DATABASE}`);
     expect(applicationMongoUrl('mongodb://127.0.0.1:27017')).toBe(`mongodb://127.0.0.1:27017/${APP_DATABASE}`);
+  });
+
+  // `mongoFor()` starts a replica set so `apps/app/src/backups.ts`'s transaction can run; its URI
+  // carries a query string, which the database name has to land ahead of, not after.
+  it('names the database ahead of a replica set address\'s own query string', () => {
+    expect(applicationMongoUrl('mongodb://127.0.0.1:27017/?replicaSet=testset')).toBe(
+      `mongodb://127.0.0.1:27017/${APP_DATABASE}?replicaSet=testset`,
+    );
   });
 });

@@ -57,6 +57,23 @@ describe('initializing the restic repository', () => {
     await expect(initializing).resolves.toBeUndefined();
   });
 
+  it('treats restic 0.18\'s own already-initialized wording as success too', async () => {
+    const child = new FakeChild();
+    spawned.mockReturnValue(child);
+
+    const initializing = initRepository(OPTIONS, new AbortController().signal);
+    await vi.waitFor(() => expect(spawned).toHaveBeenCalled());
+    child.stderr.emit(
+      'data',
+      Buffer.from(
+        `Fatal: create repository at ${OPTIONS.repository} failed: Fatal: unable to open repository at ${OPTIONS.repository}: config file already exists\n`,
+      ),
+    );
+    child.emit('close', 1);
+
+    await expect(initializing).resolves.toBeUndefined();
+  });
+
   it('rejects a failure that is not the already-initialized case', async () => {
     const child = new FakeChild();
     spawned.mockReturnValue(child);

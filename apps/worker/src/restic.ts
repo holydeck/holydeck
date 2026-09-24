@@ -18,7 +18,10 @@ export interface ResticOptions {
   readonly password: string;
 }
 
-const ALREADY_INITIALIZED = /already initialized/iu;
+// Two phrasings, not one: older restic refuses re-init with "already initialized", current restic
+// (0.18) with "config file already exists" instead. Both mean the same thing here — a repository an
+// earlier run already created — so both are success.
+const ALREADY_INITIALIZED = /already initialized|config file already exists/iu;
 
 interface ResticSummary {
   readonly message_type?: string;

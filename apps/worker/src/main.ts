@@ -133,7 +133,12 @@ if (work.runs === 'nothing') {
 } else {
   process.stdout.write(`worker claims ${work.kinds.join(', ')}\n`);
   const name = `worker-${process.pid}`;
-  const store = new MongoClient(settings.values.mongoUrl);
+  // `ignoreUndefined: true`, the same as every `apps/app` MongoClient: without it the driver writes an
+  // explicit BSON null for an entity stamp's `archivedAt`/`archivedBy` when they are `undefined` (a live
+  // entity), which `parseEntityStamp`'s `readArchival` does not accept as "absent" — so every stamp this
+  // process touches (`touchedStamp` et al., on every processing-state transition) came back unreadable
+  // the next time anything read the row.
+  const store = new MongoClient(settings.values.mongoUrl, { ignoreUndefined: true });
   await store.connect();
   // The storageKey a write() hands back is bare — never root-prefixed — so a later storage-root migration
   // (OPS-16) leaves every asset uploaded under the old root still readable under the new one. read()/
