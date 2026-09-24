@@ -28,8 +28,82 @@ export async function runSync(
     await runSyncLocal(ctx, runtime, targets, options);
     return;
   }
-  // T7 adds the server branch
-  throw new HolyDeckError('local_only_command', { command: 'sync' });
+  await runSyncServer(ctx, runtime, targets, options);
+}
+
+/** Falls back to a plain timer when the caller (production, unlike tests) never set ctx.sleep. */
+function sleeper(ctx: CliContext): (ms: number) => Promise<void> {
+  return ctx.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+}
+
+export async function runSyncServer(
+  ctx: CliContext,
+  runtime: Runtime,
+  targets: string[],
+  options: { refresh?: boolean; dryRun?: boolean },
+): Promise<void> {
+  if (options.dryRun === true) throw new HolyDeckError('local_only_option', { option: '--dry-run' });
+  const server = runtime.server;
+  /* v8 ignore next */
+  if (server === undefined) throw new HolyDeckError('internal_error');
+  const sleep = sleeper(ctx);
+  const pollMs = runtime.config.values.syncPollIntervalMs;
+  let anyFailed = false;
+  for (const abbr of targets) {
+    const upper = abbr.toUpperCase();
+    let job: ServerSyncJobStatus;
+    try {
+      job = await server.sync(upper, { refresh: options.refresh === true });
+    } catch (error) {
+      if (error instanceof HolyDeckError && error.code === 'server_error' && error.params['status'] === 409) {
+        const attached = await server.syncStatus(upper);
+        if (attached === undefined) throw error;
+        job = attached;
+      } else {
+        throw error;
+      }
+    }
+    let lastDone = -1;
+    while (job.state === 'running') {
+      if (job.progress.done !== lastDone) {
+        errLine(ctx, `[${upper}] ${job.progress.done}/${job.progress.total}`);
+        lastDone = job.progress.done;
+      }
+      if (ctx.abortSignal?.aborted === true) {
+        outLine(ctx, `${upper}: stopped early — run sync again to continue where it left off.`);
+        ctx.exitCode = 130;
+        return;
+      }
+      await sleep(pollMs);
+      const polled = await server.syncStatus(upper);
+      if (polled === undefined) throw new HolyDeckError('sync_job_not_found', { abbr: upper });
+      job = polled;
+    }
+    if (job.report?.metadataBuildChanged !== undefined) {
+      outLine(
+        ctx,
+        `${upper} metadata build changed ${job.report.metadataBuildChanged.from} → ${job.report.metadataBuildChanged.to}.`,
+      );
+    }
+    if (job.state === 'failed') {
+      outLine(ctx, `${upper}: sync failed${job.error === undefined ? '' : `: ${job.error.message}`}`);
+      anyFailed = true;
+      continue;
+    }
+    const report = job.report;
+    /* v8 ignore next */
+    if (report === undefined) throw new HolyDeckError('internal_error');
+    outLine(
+      ctx,
+      `${upper}: ${report.planned} planned, ${report.fetched} fetched, ${report.unchanged} unchanged, ` +
+        `${report.newRevisions} new revisions, ${report.failed.length} failed`,
+    );
+    for (const failure of report.failed) {
+      outLine(ctx, `failed: ${failure.book} ${failure.chapter} (${failure.code})`);
+      anyFailed = true;
+    }
+  }
+  if (anyFailed) ctx.exitCode = 1;
 }
 
 async function runSyncLocal(

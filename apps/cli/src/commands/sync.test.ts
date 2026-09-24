@@ -1,8 +1,46 @@
 import { describe, expect, it } from 'vitest';
+import { HolyDeckError } from '@holydeck/core/messages';
 import type { TranslationMeta } from '@holydeck/core/canon';
 import { chapterUrl, versionUrl } from '@holydeck/core/scraper';
 import { chapterHtml, makeContext, seedStore, versionMetaJson } from '../../test/harness.js';
+import type { TestSetup } from '../../test/harness.js';
 import { runCli } from '../program.js';
+import { createRuntime, runtimeFlags } from '../runtime.js';
+import type { Runtime } from '../runtime.js';
+import type { ServerClient, ServerSyncJobStatus } from '../server-client.js';
+import { runSyncServer } from './sync.js';
+
+/** Builds a real Runtime (config/store/fetcher) in server mode, then swaps in a hand-scripted
+ *  ServerClient — this is the seam T7 needs to unit-test polling without real HTTP. */
+async function serverSetup(
+  env: Record<string, string> = {},
+  server?: ServerClient,
+  overrides: Parameters<typeof makeContext>[0] = {},
+): Promise<TestSetup & { runtime: Runtime }> {
+  const setup = makeContext({
+    env: { HOLYDECK_SERVER_URL: 'https://s.test', HOLYDECK_SYNC_POLL_INTERVAL_MS: '1', ...env },
+    ...overrides,
+  });
+  const runtime = await createRuntime(setup.ctx, runtimeFlags({}));
+  if (server !== undefined) runtime.server = server;
+  return { ...setup, runtime };
+}
+
+function fakeServer(script: {
+  sync?: (abbr: string, options: { refresh?: boolean }) => Promise<ServerSyncJobStatus>;
+  syncStatus?: (abbr: string) => Promise<ServerSyncJobStatus | undefined>;
+}): ServerClient {
+  return {
+    sync: script.sync ?? (async () => { throw new Error('sync not scripted'); }),
+    syncStatus: script.syncStatus ?? (async () => { throw new Error('syncStatus not scripted'); }),
+    stats: async () => { throw new Error('not used'); },
+    health: async () => { throw new Error('not used'); },
+    getTranslations: async () => { throw new Error('not used'); },
+    getCanon: async () => { throw new Error('not used'); },
+    getVerses: async () => { throw new Error('not used'); },
+    render: async () => { throw new Error('not used'); },
+  } as unknown as ServerClient;
+}
 
 // tiny canon: GEN with chapters 1 and 2 (versionMetaJson default)
 function responses(): Record<string, { status: number; body: string }> {
@@ -113,10 +151,95 @@ describe('sync', () => {
     expect(setup.stdout()).toContain('KJV: stopped early — run sync again to continue where it left off.');
   });
 
-  it('is local-only', async () => {
-    const setup = makeContext({ env: env() });
-    await expect(runCli(setup.ctx, ['sync', 'KJV', '--server-url', 'https://holydeck.example.com'])).resolves.toBe(1);
-    expect(setup.stderr()).toContain('works on the local datastore');
+});
+
+describe('sync in server mode', () => {
+  it('refuses --dry-run with local_only_option', async () => {
+    const setup = await serverSetup();
+    await expect(runCli(setup.ctx, ['sync', 'KJV', '--dry-run'])).resolves.toBe(1);
+    expect(setup.stderr()).toContain('"--dry-run" is local-only and not available in server mode');
+  });
+
+  it('polls until completion and prints a done/total line per tick', async () => {
+    const polls: ServerSyncJobStatus[] = [
+      { translation: 'KJV', state: 'running', refresh: false, startedAt: 't', progress: { done: 0, total: 2 } },
+      { translation: 'KJV', state: 'running', refresh: false, startedAt: 't', progress: { done: 1, total: 2 } },
+      { translation: 'KJV', state: 'running', refresh: false, startedAt: 't', progress: { done: 2, total: 2 } },
+      {
+        translation: 'KJV',
+        state: 'completed',
+        refresh: false,
+        startedAt: 't',
+        finishedAt: 't2',
+        progress: { done: 2, total: 2 },
+        report: { planned: 2, fetched: 2, unchanged: 0, newRevisions: 2, failed: [] },
+      },
+    ];
+    let i = 0;
+    const setup = await serverSetup(
+      {},
+      fakeServer({ sync: async () => polls[0]!, syncStatus: async () => polls[Math.min(++i, polls.length - 1)]! }),
+    );
+    await runSyncServer(setup.ctx, setup.runtime, ['KJV'], {});
+    expect(setup.stderr()).toContain('[KJV] 0/2');
+    expect(setup.stderr()).toContain('[KJV] 1/2');
+    expect(setup.stderr()).toContain('[KJV] 2/2');
+    expect(setup.stdout()).toContain('KJV: 2 planned, 2 fetched, 0 unchanged, 2 new revisions, 0 failed');
+  });
+
+  it('attaches to an already-running job on a 409 instead of failing', async () => {
+    const running: ServerSyncJobStatus = {
+      translation: 'KJV',
+      state: 'completed',
+      refresh: false,
+      startedAt: 't',
+      finishedAt: 't2',
+      progress: { done: 2, total: 2 },
+      report: { planned: 2, fetched: 2, unchanged: 0, newRevisions: 0, failed: [] },
+    };
+    const setup = await serverSetup(
+      {},
+      fakeServer({
+        sync: async () => {
+          throw new HolyDeckError('server_error', { status: 409, url: 'https://s.test/api/v1/translations/KJV/sync', message: 'running' });
+        },
+        syncStatus: async () => running,
+      }),
+    );
+    await runSyncServer(setup.ctx, setup.runtime, ['KJV'], {});
+    expect(setup.stdout()).toContain('KJV: 2 planned, 2 fetched, 0 unchanged, 0 new revisions, 0 failed');
+  });
+
+  it('sets exit code 1 when the job ends failed, printing the job error', async () => {
+    const failed: ServerSyncJobStatus = {
+      translation: 'KJV',
+      state: 'failed',
+      refresh: false,
+      startedAt: 't',
+      finishedAt: 't2',
+      progress: { done: 1, total: 2 },
+      error: { code: 'sync_interrupted', message: 'server restarted mid-run' },
+    };
+    const setup = await serverSetup({}, fakeServer({ sync: async () => failed }));
+    await runSyncServer(setup.ctx, setup.runtime, ['KJV'], {});
+    expect(setup.ctx.exitCode).toBe(1);
+    expect(setup.stdout()).toContain('KJV: sync failed: server restarted mid-run');
+  });
+
+  it('stops polling and exits 130 when the abort signal fires mid-poll', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const running: ServerSyncJobStatus = {
+      translation: 'KJV',
+      state: 'running',
+      refresh: false,
+      startedAt: 't',
+      progress: { done: 0, total: 2 },
+    };
+    const setup = await serverSetup({}, fakeServer({ sync: async () => running }), { overrides: { abortSignal: controller.signal } });
+    await runSyncServer(setup.ctx, setup.runtime, ['KJV'], {});
+    expect(setup.ctx.exitCode).toBe(130);
+    expect(setup.stdout()).toContain('KJV: stopped early — run sync again to continue where it left off.');
   });
 });
 
