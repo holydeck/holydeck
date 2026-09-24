@@ -3,14 +3,22 @@ import { request } from 'node:http';
 
 import { CLIENT_VERSION_HEADER, CLIENT_WINDOW, UPDATE_REQUIRED_MESSAGE, supportedClientVersions } from '@holydeck/contracts/clients';
 import { STALE_STATE_REVISION } from '@holydeck/contracts/http';
-import { LIVE_CHANNELS, LIVE_CLOSE, OUTPUT_CHANNELS, parseSnapshotFrame } from '@holydeck/contracts/live';
+import {
+  GUEST_EXCHANGE_PATH,
+  LIVE_CHANNELS,
+  LIVE_CLOSE,
+  OUTPUT_CHANNELS,
+  OUTPUT_EXCHANGE_PATH,
+  parseSnapshotFrame,
+} from '@holydeck/contracts/live';
 import { TICKET_QUERY, sessionCookie } from '@holydeck/contracts/sessions';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SNAPSHOT_PINS } from '@holydeck/contracts/snapshots';
 
 import { buildApp } from './app.js';
-import { capabilityContext, capabilitiesOn } from './capabilities.js';
+import { auditOn } from './audit.js';
+import { capabilityContext, capabilitiesOn, tokenDigest } from './capabilities.js';
 import {
   CAPABILITY_QUERY,
   CLIENT_VERSION_QUERY,
@@ -22,6 +30,7 @@ import {
   serveLive,
 } from './live.js';
 import { liveHub } from './live-protocol.js';
+import { liveTicketsOn } from './live-tickets.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { runEngineOn } from './run-engine.js';
 import { serviceContext, servicesOn } from './services.js';
@@ -33,17 +42,19 @@ import { memorySessions } from '../test/helpers/sessions.js';
 
 import type { LiveState } from '@holydeck/contracts/live-state';
 import type { SnapshotPin } from '@holydeck/contracts/snapshots';
+import type { AuditTrail } from './audit.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { Fetching } from './corpus.js';
 import type { LiveHub } from './live-protocol.js';
+import type { LiveTicketStore } from './live-tickets.js';
 import type { ThemeStore } from './live-theme.js';
 import type { MidServiceStore } from './mid-service-additions.js';
 import type { RunEngine } from './run-engine.js';
 import type { RunEventStore } from './run-events.js';
 import type { RunDeck } from './run-deck.js';
 import type { RunRecord, RunStore } from './runs.js';
-import type { ServiceStore } from './services.js';
 import type { OperatorSession } from './snapshots.js';
+import type { Document } from './repositories.js';
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import type { SessionStore } from './sessions.js';
@@ -93,11 +104,10 @@ const hubFor = (clock: () => string = () => AT): LiveHub => liveHub({ clock });
 
 const listening = async (
   sessions?: SessionStore,
-  guests?: { readonly capabilities: CapabilityStore; readonly services: ServiceStore },
   engineWiring?: { readonly hub?: LiveHub; readonly engine?: Pick<RunEngine, 'command'> },
 ): Promise<string> => {
   const app = buildApp({ settings, logger: false, fetching: refusing, sessions });
-  await serveLive(app, { hub: engineWiring?.hub ?? hubFor(), sessions, engine: engineWiring?.engine, ...guests });
+  await serveLive(app, { hub: engineWiring?.hub ?? hubFor(), sessions, engine: engineWiring?.engine });
   await app.listen({ host: '127.0.0.1', port: 0 });
   running = app;
   const { port } = app.server.address() as AddressInfo;
@@ -202,7 +212,7 @@ const deployment = async (
   const real = sessionsOn(memorySessions().db, { now: () => new Date().toISOString() });
   const context = sessionContext('req-0f9c2a41');
   const signedIn = await real.start(context, { actor: 'account:7f3a', permissions });
-  const base = await listening(real, undefined, engineWiring);
+  const base = await listening(real, engineWiring);
   const cookie = sessionCookie(signedIn.token, 60);
   return {
     base,
@@ -223,31 +233,56 @@ const GUEST_ADMINISTRATOR = `account:${'E'.repeat(22)}`;
 const GUEST_CORRELATION = 'req-guest-0001';
 
 /**
- * One deployment that keeps capabilities and Services but no sessions at all — a Guest signs in to
- * nothing, so nothing here has anything for a Guest to sign in to (spec 9.5).
+ * One deployment that keeps capabilities, Services, the tickets an exchange mints from a capability and an
+ * audit trail — and sessions only where a test hands it some. A Guest signs in to nothing (spec 9.5): it
+ * trades its capability at the exchange route for a socket ticket, and spends that ticket here (OUT-01).
+ * The ticket store's clock is the one `advance` moves; everything else keeps the fixed test clock.
  */
-const guestDeployment = async (): Promise<{
-  readonly base: string;
-  readonly service: string;
-  readonly capabilities: CapabilityStore;
-  readonly services: ServiceStore;
-  readonly tokenFor: (service: string) => Promise<string>;
-}> => {
+const ticketDeployment = async (sessions?: SessionStore) => {
+  let clockAt = Date.parse(AT);
   const services = servicesOn(fakeDb(), { now: () => AT });
   const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => AT });
+  const liveTickets = liveTicketsOn(capabilities, { now: () => new Date(clockAt).toISOString() });
+  const trail = fakeDb();
+  const entries = (): Document[] => trail.rows.get('audit_events') ?? [];
+  const audit = auditOn(trail, { now: () => AT, newId: () => `e${entries().length}` });
   const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
   const created = await services.create(context, {
     title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
   });
   await services.transition(context, created.stamp.id, 'presenting');
-  const tokenFor = async (service: string): Promise<string> => {
+  const service = created.stamp.id;
+
+  const app = buildApp({ settings, logger: false, fetching: refusing, sessions, capabilities, services, liveTickets });
+  await serveLive(app, { hub: hubFor(), sessions, capabilities, liveTickets, audit });
+  await app.listen({ host: '127.0.0.1', port: 0 });
+  running = app;
+  const { port } = app.server.address() as AddressInfo;
+  const base = `ws://127.0.0.1:${port}`;
+
+  const issue = async (kind: 'guest' | 'output', view: 'audience' | 'stage' | 'singer'): Promise<string> => {
     const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
-      kind: 'guest', service, view: 'audience', expiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
+      kind, service, view, expiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
     });
     return token;
   };
-  const base = await listening(undefined, { capabilities, services });
-  return { base, service: created.stamp.id, capabilities, services, tokenFor };
+  /** The exchange a Guest's join page or an output window makes, over real HTTP: the socket ticket only. */
+  const exchange = async (kind: 'guest' | 'output', token: string, view: 'audience' | 'stage' | 'singer'): Promise<string> => {
+    const answer = await fetch(`http://127.0.0.1:${port}${kind === 'guest' ? GUEST_EXCHANGE_PATH : OUTPUT_EXCHANGE_PATH}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', [CLIENT_VERSION_HEADER]: String(CLIENT_WINDOW.current) },
+      body: JSON.stringify(kind === 'guest' ? { token, service } : { token, service, view }),
+    });
+    expect(answer.status).toBe(200);
+    return ((await answer.json()) as { data: { socketTicket: string } }).data.socketTicket;
+  };
+  const revoke = async (token: string): Promise<void> => {
+    await capabilities.revoke(capabilityContext(GUEST_CORRELATION), tokenDigest(token));
+  };
+  return {
+    base, service, capabilities, entries, issue, exchange, revoke,
+    advance: (ms: number): void => { clockAt += ms; },
+  };
 };
 
 afterEach(async () => {
@@ -638,87 +673,151 @@ describe('a deployment that keeps no sessions', () => {
   });
 });
 
-// LIVE-03: a Guest joins the Audience view with no name, email or account — a capability opens the
-// socket in place of a ticket, and nothing here ever asks a Guest to sign in to anything (spec 9.5).
-describe('a Guest joining the Audience view on a shared capability', () => {
-  it('opens the socket with no cookie at all, and shows exactly what any Audience surface is shown', async () => {
-    const { base, service, tokenFor } = await guestDeployment();
-    const token = await tokenFor(service);
+// OUT-01: a capability token never travels in a socket URL again. A client that still puts one there —
+// a stale page, a stale link — is closed as a policy refusal and the attempt is written down, so an
+// operator can see a capability that has been leaking into URLs and revoke it.
+describe('a capability carried in a socket URL (OUT-01)', () => {
+  it('is closed as a policy refusal and audited by its digest, never by the token', async () => {
+    const { base, service, issue, entries } = await ticketDeployment();
+    const token = await issue('guest', 'audience');
     const query = `channel=audience&${SERVICE_QUERY}=${service}&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
     const live = session(`${base}${LIVE_PATH}?${query}`, { origin: base.replace(/^ws/u, 'http') });
+    const { code } = await live.closed;
+    expect(code).toBe(LIVE_CLOSE.refused);
+    expect(entries()).toMatchObject([
+      { action: 'live.guest.url-capability', subject: tokenDigest(token), outcome: 'refused' },
+    ]);
+    expect(JSON.stringify(entries())).not.toContain(token);
+  });
+
+  it('is refused even beside a socket ticket that would have opened the socket on its own', async () => {
+    const { base, issue, exchange } = await ticketDeployment();
+    const token = await issue('guest', 'audience');
+    const ticket = await exchange('guest', token, 'audience');
+    const query = `channel=audience&${TICKET_QUERY}=${ticket}&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
+    const live = session(`${base}${LIVE_PATH}?${query}`, { origin: base.replace(/^ws/u, 'http') });
+    expect((await live.closed).code).toBe(LIVE_CLOSE.refused);
+  });
+
+  it('is refused by a deployment that keeps sessions, rather than asked for a ticket', async () => {
+    const run = await deployment([]);
+    const live = session(`${run.base}${LIVE_PATH}?channel=audience&${CAPABILITY_QUERY}=anything&${CURRENT}`, {
+      cookie: run.cookie,
+      origin: run.base.replace(/^ws/u, 'http'),
+    });
+    expect((await live.closed).code).toBe(LIVE_CLOSE.refused);
+  });
+
+  it('is refused by a deployment that proves nothing at all, which would otherwise open to anyone', async () => {
+    const base = await listening();
+    const live = session(`${base}${LIVE_PATH}?channel=audience&${CAPABILITY_QUERY}=anything&${CURRENT}`);
+    expect((await live.closed).code).toBe(LIVE_CLOSE.refused);
+  });
+});
+
+// LIVE-03, OUT-01, OUT-02: a Guest or an output window opens its socket on the single-use ticket its
+// exchange minted from a capability — no cookie, no name, and no capability anywhere in the URL.
+describe('a socket opened on the ticket a capability exchange minted', () => {
+  it('opens a Guest’s Audience view with no cookie at all, showing what any Audience surface is shown', async () => {
+    const { base, issue, exchange } = await ticketDeployment();
+    const token = await issue('guest', 'audience');
+    const ticket = await exchange('guest', token, 'audience');
+    const url = `${base}${LIVE_PATH}?channel=audience&${TICKET_QUERY}=${ticket}&${CURRENT}`;
+    expect(url).not.toContain(token);
+    const live = session(url, { origin: base.replace(/^ws/u, 'http') });
     await live.opened;
     expect(await live.frame()).toMatchObject({ kind: 'snapshot', channel: 'audience' });
   });
 
-  it('refuses a capability presented against a different Service (service-scoped)', async () => {
-    const { base, service, tokenFor } = await guestDeployment();
-    const token = await tokenFor(service);
-    const query = `channel=audience&${SERVICE_QUERY}=a-different-service&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
+  it('opens an output window on the view its capability was issued for', async () => {
+    const { base, issue, exchange } = await ticketDeployment();
+    const token = await issue('output', 'stage');
+    const ticket = await exchange('output', token, 'stage');
+    const live = session(`${base}${LIVE_PATH}?channel=stage&${TICKET_QUERY}=${ticket}&${CURRENT}`, {
+      origin: base.replace(/^ws/u, 'http'),
+    });
+    await live.opened;
+    expect(await live.frame()).toMatchObject({ kind: 'snapshot', channel: 'stage' });
+  });
+
+  it('refuses a ticket already spent on a socket', async () => {
+    const { base, issue, exchange } = await ticketDeployment();
+    const ticket = await exchange('guest', await issue('guest', 'audience'), 'audience');
+    const query = `channel=audience&${TICKET_QUERY}=${ticket}&${CURRENT}`;
+    expect(await handshake(base, query, {})).toBe(101);
     expect(await handshake(base, query, {})).toBe(403);
   });
 
-  it('refuses a join while the Service is not Presenting, whatever the capability proves', async () => {
-    const { base, services, capabilities } = await guestDeployment();
-    const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
-    const upcoming = await services.create(context, {
-      title: 'Next Sunday', date: '2026-09-20', site: 'Main Hall', sections: [],
-    });
-    const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
-      kind: 'guest', service: upcoming.stamp.id, view: 'audience', expiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
-    });
-    const query = `channel=audience&${SERVICE_QUERY}=${upcoming.stamp.id}&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
-    expect(await handshake(base, query, {})).toBe(403);
+  it('refuses a ticket no exchange minted, on a deployment with no sessions to have minted one either', async () => {
+    const { base } = await ticketDeployment();
+    expect(await handshake(base, `channel=audience&${TICKET_QUERY}=never-minted&${CURRENT}`, {})).toBe(403);
   });
 
-  it('refuses a handshake naming no Service at all', async () => {
-    const { base, service, tokenFor } = await guestDeployment();
-    const token = await tokenFor(service);
-    expect(await handshake(base, `channel=audience&${CAPABILITY_QUERY}=${token}&${CURRENT}`, {})).toBe(403);
+  it('refuses a ticket whose thirty seconds have passed', async () => {
+    const { base, issue, exchange, advance } = await ticketDeployment();
+    const ticket = await exchange('guest', await issue('guest', 'audience'), 'audience');
+    advance(30_001);
+    expect(await handshake(base, `channel=audience&${TICKET_QUERY}=${ticket}&${CURRENT}`, {})).toBe(403);
   });
 
-  it('refuses a handshake carrying neither a capability nor a ticket, on a deployment with no sessions', async () => {
-    const { base, service } = await guestDeployment();
-    expect(await handshake(base, `channel=audience&${SERVICE_QUERY}=${service}&${CURRENT}`, {})).toBe(403);
+  it('refuses a ticket presented for a view other than the one it was minted for', async () => {
+    const { base, issue, exchange } = await ticketDeployment();
+    const ticket = await exchange('guest', await issue('guest', 'audience'), 'audience');
+    expect(await handshake(base, `channel=stage&${TICKET_QUERY}=${ticket}&${CURRENT}`, {})).toBe(403);
   });
 
-  it('answers a capability store that failed for any other reason as a fault of this server’s', async () => {
-    const services = servicesOn(fakeDb(), { now: () => AT });
-    const defect = new TypeError('mongodb://holydeck:hunter2@records.invalid:27017 is not a function');
-    const broken: CapabilityStore = {
-      onRevoked: () => () => {},
-      issue: () => Promise.reject(defect),
-      list: () => Promise.reject(defect),
-      redeem: () => Promise.reject(defect),
-      revoke: () => Promise.reject(defect),
-      revokeEvery: () => Promise.reject(defect),
-    };
-    const base = await listening(undefined, { capabilities: broken, services });
-    const query = `channel=audience&${SERVICE_QUERY}=service-1&${CAPABILITY_QUERY}=x&${CURRENT}`;
-    expect(await handshake(base, query, {})).toBe(500);
+  it('refuses a ticket whose capability was revoked between the exchange and the handshake', async () => {
+    const { base, issue, exchange, revoke } = await ticketDeployment();
+    const token = await issue('guest', 'audience');
+    const ticket = await exchange('guest', token, 'audience');
+    await revoke(token);
+    expect(await handshake(base, `channel=audience&${TICKET_QUERY}=${ticket}&${CURRENT}`, {})).toBe(403);
   });
-});
 
-describe('adversarial: a capability past its expiry', () => {
-  it('is refused at the socket handshake, not only where redeeming it is proven in isolation', async () => {
-    let clockAt = Date.parse(AT);
-    const services = servicesOn(fakeDb(), { now: () => AT });
-    const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => new Date(clockAt).toISOString() });
-    const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
-    const created = await services.create(context, {
-      title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
+  it('refuses a handshake carrying no ticket at all, on a deployment with no sessions', async () => {
+    const { base } = await ticketDeployment();
+    expect(await handshake(base, `channel=audience&${CURRENT}`, {})).toBe(403);
+  });
+
+  it('refuses a handshake asked for from another site, whatever ticket it carries', async () => {
+    const { base, issue, exchange } = await ticketDeployment();
+    const ticket = await exchange('guest', await issue('guest', 'audience'), 'audience');
+    const query = `channel=audience&${TICKET_QUERY}=${ticket}&${CURRENT}`;
+    expect(await handshake(base, query, { origin: 'https://elsewhere.invalid' })).toBe(403);
+  });
+
+  it.each([['guest', 'audience'], ['output', 'singer']] as const)(
+    'closes a %s socket the moment the capability its ticket came from is revoked',
+    async (kind, view) => {
+      const { base, issue, exchange, revoke } = await ticketDeployment();
+      const token = await issue(kind, view);
+      const ticket = await exchange(kind, token, view);
+      const live = session(`${base}${LIVE_PATH}?channel=${view}&${TICKET_QUERY}=${ticket}&${CURRENT}`, {
+        origin: base.replace(/^ws/u, 'http'),
+      });
+      await live.opened;
+      await live.frame();
+      await revoke(token);
+      expect((await live.closed).code).toBe(LIVE_CLOSE.refused);
+    },
+  );
+
+  it('opens a signed-in session’s ticket beside a capability’s on one deployment', async () => {
+    const real = sessionsOn(memorySessions().db, { now: () => new Date().toISOString() });
+    const context = sessionContext('req-0f9c2a41');
+    const signedIn = await real.start(context, { actor: 'account:7f3a', permissions: [] });
+    const { base, issue, exchange } = await ticketDeployment(real);
+    const origin = base.replace(/^ws/u, 'http');
+    const sessionTicket = await real.issueTicket(context, signedIn.token);
+    const operator = session(`${base}${LIVE_PATH}?channel=audience&${TICKET_QUERY}=${sessionTicket}&${CURRENT}`, {
+      cookie: sessionCookie(signedIn.token, 60),
+      origin,
     });
-    await services.transition(context, created.stamp.id, 'presenting');
-    const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
-      kind: 'guest', service: created.stamp.id, view: 'audience', expiresAt: new Date(clockAt + 1000).toISOString(),
-    });
-
-    // Minted for one second's use and then let run out — the clock below is the one `redeem` itself
-    // reads at handshake time, not a value this test only asserts against, so the socket sees exactly
-    // what an attacker trying a stolen capability after its window closed would.
-    clockAt += 2000;
-    const base = await listening(undefined, { capabilities, services });
-    const query = `channel=audience&${SERVICE_QUERY}=${created.stamp.id}&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
-    expect(await handshake(base, query, {})).toBe(403);
+    await operator.opened;
+    const ticket = await exchange('guest', await issue('guest', 'audience'), 'audience');
+    const guest = session(`${base}${LIVE_PATH}?channel=audience&${TICKET_QUERY}=${ticket}&${CURRENT}`, { origin });
+    await guest.opened;
+    expect(await guest.frame()).toMatchObject({ kind: 'snapshot', channel: 'audience' });
   });
 });
 
@@ -763,35 +862,27 @@ describe('operator-visible connection counts by view type', () => {
     expect((await counted(run.base, run.cookie)).body).toMatchObject({ data: { counts: { control: 1, audience: 1 } } });
   });
 
-  it('counts a Guest apart from an ordinary Audience connection, though both watch the same channel', async () => {
-    const services = servicesOn(fakeDb(), { now: () => AT });
-    const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => AT });
-    const guestContext = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
-    const created = await services.create(guestContext, {
-      title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
-    });
-    await services.transition(guestContext, created.stamp.id, 'presenting');
-
+  it('counts a Guest apart from an ordinary Audience connection, and an output window as its own view', async () => {
     const real = sessionsOn(memorySessions().db, { now: () => new Date().toISOString() });
     const opContext = sessionContext('req-0f9c2a41');
     const signedIn = await real.start(opContext, { actor: 'account:7f3a', permissions: [PRESENTATION_CONTROL] });
     const cookie = sessionCookie(signedIn.token, 60);
-    const base = await listening(real, { capabilities, services });
+    const { base, issue, exchange } = await ticketDeployment(real);
     const origin = base.replace(/^ws/u, 'http');
 
     const ticket = await real.issueTicket(opContext, signedIn.token);
     const control = session(`${base}${LIVE_PATH}?channel=live-control&${CURRENT}&${TICKET_QUERY}=${ticket}`, { cookie, origin });
     await control.opened;
 
-    const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
-      kind: 'guest', service: created.stamp.id, view: 'audience', expiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
-    });
-    const query = `channel=audience&${SERVICE_QUERY}=${created.stamp.id}&${CAPABILITY_QUERY}=${token}&${CURRENT}`;
-    const guest = session(`${base}${LIVE_PATH}?${query}`, { origin });
+    const guestTicket = await exchange('guest', await issue('guest', 'audience'), 'audience');
+    const guest = session(`${base}${LIVE_PATH}?channel=audience&${TICKET_QUERY}=${guestTicket}&${CURRENT}`, { origin });
     await guest.opened;
+    const stageTicket = await exchange('output', await issue('output', 'stage'), 'stage');
+    const stage = session(`${base}${LIVE_PATH}?channel=stage&${TICKET_QUERY}=${stageTicket}&${CURRENT}`, { origin });
+    await stage.opened;
 
     expect((await counted(base, cookie)).body).toMatchObject({
-      data: { counts: { control: 1, audience: 0, guest: 1, stage: 0, singer: 0 } },
+      data: { counts: { control: 1, audience: 0, guest: 1, stage: 1, singer: 0 } },
     });
 
     guest.socket.close();
@@ -802,79 +893,56 @@ describe('operator-visible connection counts by view type', () => {
 
 describe('live socket security without a listening port', () => {
   const headers = { host: 'localhost', origin: 'http://localhost', 'x-forwarded-proto': 'http' };
-  it.each(['unknown', 'expired', 'service', 'view', 'state'] as const)(
-    'keeps a %s refusal generic for capabilities and specific for service state',
-    async (reason) => {
-      let clockAt = Date.parse(AT);
-      const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => new Date(clockAt).toISOString() });
-      const services = servicesOn(fakeDb(), { now: () => AT });
-      const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
-      const created = await services.create(context, {
-        title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
-      });
-      if (reason !== 'state') await services.transition(context, created.stamp.id, 'presenting');
-      const { token } = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
-        kind: 'guest', service: created.stamp.id, view: 'audience',
-        expiresAt: new Date(clockAt + 60_000).toISOString(),
-      });
-      if (reason === 'expired') clockAt += 60_000;
-      const app = buildApp({ settings, logger: false, fetching: refusing });
-      running = app;
-      await serveLive(app, { hub: hubFor(), capabilities, services });
-      const query = new URLSearchParams({
-        channel: reason === 'view' ? 'stage' : 'audience',
-        [CLIENT_VERSION_QUERY]: String(CLIENT_WINDOW.current),
-        [SERVICE_QUERY]: reason === 'service' ? 'different-service' : created.stamp.id,
-        [CAPABILITY_QUERY]: reason === 'unknown' ? 'unknown-token' : token,
-      });
-      const response = await app.inject({
-        method: 'GET', url: `${LIVE_PATH}?${query}`, headers: { ...headers, upgrade: 'websocket' },
-      });
-      expect(response.statusCode).toBe(403);
-      expect(response.json()).toMatchObject({
-        error: { fields: [{
-          path: CAPABILITY_QUERY,
-          message: reason === 'state'
-            ? `${created.stamp.id} is not Presenting, and a Guest capability opens only while its Service is`
-            : 'that capability could not be redeemed',
-        }] },
-      });
-    },
-  );
 
-  const prepared = async (duringRead?: (capabilities: CapabilityStore, id: string) => Promise<void>) => {
+  /**
+   * A deployment reached through `injectWS`, with a Guest capability and a way to mint a fresh socket
+   * ticket from it for every socket a test opens — a ticket opens one socket. `onRedeemed` runs in the
+   * middle of a handshake, right after its ticket is spent, for a test that needs something to happen
+   * there; it is handed the revocation listeners `serveLive` subscribed, so it can fire one synchronously.
+   */
+  const prepared = async (
+    onRedeemed?: (capabilityId: string, revoked: readonly ((capabilityId: string | undefined) => void)[]) => void,
+  ) => {
     const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => AT });
-    const services = servicesOn(fakeDb(), { now: () => AT });
-    const context = serviceContext(GUEST_ADMINISTRATOR, GUEST_CORRELATION);
-    const created = await services.create(context, {
-      title: 'Sunday Morning', date: '2026-09-13', site: 'Main Hall', sections: [],
-    });
-    await services.transition(context, created.stamp.id, 'presenting');
     const issued = await capabilities.issue(capabilityContext(GUEST_CORRELATION), GUEST_ADMINISTRATOR, {
-      kind: 'guest', service: created.stamp.id, view: 'audience',
+      kind: 'guest', service: 'service-1', view: 'audience',
       expiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
     });
+    const tickets = liveTicketsOn(capabilities, { now: () => AT });
+    const listeners: ((capabilityId: string | undefined) => void)[] = [];
+    const watched: CapabilityStore = {
+      ...capabilities,
+      onRevoked: (listener) => {
+        listeners.push(listener);
+        return capabilities.onRevoked(listener);
+      },
+    };
+    const liveTickets: LiveTicketStore = onRedeemed === undefined ? tickets : {
+      ...tickets,
+      redeemSocketTicket: (ticket) => {
+        const admitted = tickets.redeemSocketTicket(ticket);
+        onRedeemed(admitted.capabilityId, listeners);
+        return admitted;
+      },
+    };
     const app = buildApp({ settings, logger: false, fetching: refusing });
     running = app;
-    await serveLive(app, {
-      hub: hubFor(), capabilities,
-      services: duringRead === undefined ? services : {
-        ...services,
-        current: async (...args) => {
-          await duringRead(capabilities, issued.capabilityId);
-          return services.current(...args);
-        },
-      },
-    });
+    await serveLive(app, { hub: hubFor(), capabilities: watched, liveTickets });
     await app.ready();
-    const path = `${LIVE_PATH}?channel=audience&${CURRENT}&${SERVICE_QUERY}=${created.stamp.id}&${CAPABILITY_QUERY}=${issued.token}`;
+    const path = (): string => {
+      const { socketTicket } = tickets.mint({
+        capabilityId: issued.capabilityId, kind: 'guest', service: 'service-1', view: 'audience',
+        capabilityExpiresAt: new Date(Date.parse(AT) + 60_000).toISOString(),
+      });
+      return `${LIVE_PATH}?channel=audience&${CURRENT}&${TICKET_QUERY}=${socketTicket}`;
+    };
     return { app, capabilities, issued, path };
   };
 
   it('closes every socket admitted by a revoked capability immediately', async () => {
     const { app, capabilities, issued, path } = await prepared();
-    const first = await app.injectWS(path, { headers });
-    const second = await app.injectWS(path, { headers });
+    const first = await app.injectWS(path(), { headers });
+    const second = await app.injectWS(path(), { headers });
     const closed = [once(first, 'close'), once(second, 'close')];
     await capabilities.revoke(capabilityContext(GUEST_CORRELATION), issued.capabilityId);
     expect([...app.websocketServer.clients].every((socket) => socket.readyState !== socket.OPEN)).toBe(true);
@@ -883,22 +951,56 @@ describe('live socket security without a listening port', () => {
 
   it('closes live guests when all capabilities are revoked', async () => {
     const { app, capabilities, path } = await prepared();
-    const socket = await app.injectWS(path, { headers });
+    const socket = await app.injectWS(path(), { headers });
     const closed = once(socket, 'close');
     await capabilities.revokeEvery(capabilityContext(GUEST_CORRELATION));
     expect([...app.websocketServer.clients].every((peer) => peer.readyState !== peer.OPEN)).toBe(true);
     expect((await closed)[0]).toBe(LIVE_CLOSE.refused);
   });
 
-  it('refuses a grant revoked while its service is being checked', async () => {
-    const { app, path } = await prepared((capabilities, id) => capabilities.revoke(capabilityContext(GUEST_CORRELATION), id));
+  it('refuses a grant revoked while its handshake is still being admitted', async () => {
+    const { app, path } = await prepared((capabilityId, revoked) => {
+      for (const listener of revoked) listener(capabilityId);
+    });
     const frames: unknown[] = [];
-    const socket = await app.injectWS(path, { headers }, {
+    const socket = await app.injectWS(path(), { headers }, {
       onInit: (peer) => { peer.on('message', (frame: unknown) => frames.push(frame)); },
     });
     expect([...app.websocketServer.clients].every((peer) => peer.readyState !== peer.OPEN)).toBe(true);
     expect(frames).toEqual([]);
     socket.terminate();
+  });
+
+  it('answers a ticket store that fails while spending a ticket as the defect it is, not a refusal', async () => {
+    const capabilities = capabilitiesOn(memoryCapabilities().db, { now: () => AT });
+    const broken: LiveTicketStore = {
+      ...liveTicketsOn(capabilities, { now: () => AT }),
+      redeemSocketTicket: () => {
+        throw new Error('the ticket map is gone');
+      },
+    };
+    const app = buildApp({ settings, logger: false, fetching: refusing });
+    running = app;
+    await serveLive(app, { hub: hubFor(), capabilities, liveTickets: broken });
+    await app.ready();
+    await expect(app.injectWS(`${LIVE_PATH}?channel=audience&${CURRENT}&${TICKET_QUERY}=any`, { headers }))
+      .rejects.toThrow(/500/u);
+  });
+
+  it('still closes a socket URL carrying a capability when the audit trail refuses the entry', async () => {
+    const audit: AuditTrail = {
+      record: () => Promise.reject(new Error('the trail is down')),
+      list: () => Promise.reject(new Error('never read here')),
+    };
+    const app = buildApp({ settings, logger: false, fetching: refusing });
+    running = app;
+    await serveLive(app, { hub: hubFor(), audit });
+    await app.ready();
+    let closed: Promise<unknown[]> | undefined;
+    await app.injectWS(`${LIVE_PATH}?channel=audience&${CURRENT}&${CAPABILITY_QUERY}=anything`, { headers }, {
+      onInit: (peer) => { closed = once(peer, 'close'); },
+    });
+    expect((await closed)?.[0]).toBe(LIVE_CLOSE.refused);
   });
 
   it('sets an explicit eight-KiB payload ceiling', async () => {
@@ -908,7 +1010,7 @@ describe('live socket security without a listening port', () => {
 
   it('accepts a resume at exactly the payload ceiling', async () => {
     const { app, path } = await prepared();
-    const socket = await app.injectWS(path, { headers });
+    const socket = await app.injectWS(path(), { headers });
     const resumed = once(socket, 'message');
     const frame = JSON.stringify({ kind: 'resume', channel: 'audience', fromSequence: 0 });
     socket.send(frame.padEnd(8 * 1024, ' '));
@@ -918,7 +1020,7 @@ describe('live socket security without a listening port', () => {
 
   it('closes an oversized frame with the standard message-too-big code', async () => {
     const { app, path } = await prepared();
-    const socket = await app.injectWS(path, { headers });
+    const socket = await app.injectWS(path(), { headers });
     const closed = once(socket, 'close');
     socket.send(' '.repeat(8 * 1024 + 1));
     expect((await closed)[0]).toBe(1009);

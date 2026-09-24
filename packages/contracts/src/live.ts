@@ -116,10 +116,11 @@ export const CHANNEL_QUERY = 'channel';
 /** Which client version is connecting — read against `CLIENT_WINDOW` before the socket is accepted. */
 export const CLIENT_VERSION_QUERY = 'clientVersion';
 
-/** The capability a shared join link carries, where this connection is a Guest's rather than a session's. */
+/** Where a capability token was once carried in a socket URL. Never sent now (OUT-01): the server refuses a
+ *  socket URL that carries one with `LIVE_CLOSE.refused`, and a capability is exchanged for a ticket. */
 export const CAPABILITY_QUERY = 'capability';
 
-/** Which service that capability opens. Sent with `CAPABILITY_QUERY`, and meaningless without it. */
+/** Which service that capability opened, sent alongside it. Never sent now, for the same reason. */
 export const SERVICE_QUERY = 'service';
 
 /**

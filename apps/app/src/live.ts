@@ -17,28 +17,30 @@ import {
   LIVE_CLOSE,
   LIVE_CONNECTIONS_PATH,
   LIVE_PATH,
-  OUTPUT_CHANNELS,
   SERVICE_QUERY,
   type LiveChannel,
-  type OutputChannel,
 } from '@holydeck/contracts/live';
 import { TICKET_QUERY, isSameOrigin } from '@holydeck/contracts/sessions';
 import websocket from '@fastify/websocket';
 
+import { auditContext } from './audit.js';
+import { tokenDigest } from './capabilities.js';
 import { correlationFor } from './context.js';
 import { unexpectedFailure } from './failures.js';
-import { GuestJoinError, admitGuest } from './guest-join.js';
+import { GuestJoinError, admitSocketTicket } from './guest-join.js';
 import { grantFor } from './live-protocol.js';
 import { originOf, refuseAsForbidden, refuseAsStoreSaid, sessionCallFor, sessionFor } from './csrf.js';
 import { PRESENTATION_CONTROL } from './roles.js';
 import { SessionError } from './sessions.js';
 
+import type { AuditTrail } from './audit.js';
 import type { CapabilityStore } from './capabilities.js';
 import type { Guarded } from './csrf.js';
-import type { LiveGrant, LiveHub, LiveTransport } from './live-protocol.js';
+import type { SocketTicketAdmission } from './guest-join.js';
+import type { LiveHub, LiveTransport } from './live-protocol.js';
+import type { LiveTicketStore } from './live-tickets.js';
 import type { RunEngine } from './run-engine.js';
 import type { RouteNeed } from './authorization.js';
-import type { ServiceStore } from './services.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { SessionStore } from './sessions.js';
 
@@ -52,10 +54,11 @@ const PUBLIC: RouteNeed = { kind: 'public' };
 const PERMISSION: RouteNeed = { kind: 'permission', need: PRESENTATION_CONTROL };
 
 // The path this route answers on, and the query names an upgrade carries — a browser WebSocket can set
-// no request header, so the channel, the client version, and a Guest capability with the service it
-// opens all travel in the URL. All five are the contract's (`@holydeck/contracts/live`), so the client
-// that opens a socket and the route that answers it name them once; re-exported here because this is
-// where this application's own modules and tests have always read them from.
+// no request header, so the channel, the client version and a ticket all travel in the URL. A capability
+// and the service it opens no longer do (OUT-01): their names are still read here, but only to refuse a
+// socket URL that carries one. All are the contract's (`@holydeck/contracts/live`), so the client that
+// opens a socket and the route that answers it name them once; re-exported here because this is where
+// this application's own modules and tests have always read them from.
 export { CAPABILITY_QUERY, CHANNEL_QUERY, CLIENT_VERSION_QUERY, LIVE_CONNECTIONS_PATH, LIVE_PATH, SERVICE_QUERY };
 
 /** How often a session is asked whether it is still there, and whatever it fell behind on is drained. */
@@ -81,10 +84,6 @@ export function declaredVersion(url: string): unknown {
 const isChannel = (value: string | undefined): value is LiveChannel =>
   LIVE_CHANNELS.includes(value as LiveChannel);
 
-// Never `live-control`: a Guest capability opens a surface to watch, not the one an operator runs on.
-const isOutputChannel = (value: string | undefined): value is OutputChannel =>
-  OUTPUT_CHANNELS.includes(value as OutputChannel);
-
 /**
  * What the handshake proved, read back by the route handler that runs after it. Held here rather than on
  * the request, because the request-wide store is the session guard's and is written by nothing else: a
@@ -92,9 +91,13 @@ const isOutputChannel = (value: string | undefined): value is OutputChannel =>
  */
 const PROVEN = new WeakMap<FastifyRequest, Guarded>();
 
-/** What a redeemed Guest capability proved for this request, read back by the route handler below —
- *  the capability-token counterpart to `PROVEN`, held apart because a Guest never has a `Guarded`. */
-const CAPABILITY_GRANT = new WeakMap<FastifyRequest, LiveGrant>();
+/** What a ticket an exchange minted from a capability proved for this request, read back by the route
+ *  handler below — the capability counterpart to `PROVEN`, held apart because a Guest or an output window
+ *  never has a `Guarded`. */
+const TICKET_ADMISSION = new WeakMap<FastifyRequest, SocketTicketAdmission>();
+
+/** Requests whose URL carried a capability token, closed by the route handler as a policy refusal. */
+const URL_CAPABILITY = new WeakSet<FastifyRequest>();
 
 export interface LiveOptions {
   readonly engine?: Pick<RunEngine, 'command'>;
@@ -103,95 +106,93 @@ export interface LiveOptions {
   readonly hub: LiveHub;
   /** Absent where a deployment keeps no sessions, and there is no ticket for a socket to be carrying. */
   readonly sessions?: SessionStore;
-  /** Absent the same way, and for the same reason: with nowhere a capability is kept, a shared join
-   *  link opens nothing (T81). Required together with `services`, which the Presenting gate reads. */
+  /** Absent the same way, and for the same reason: with nowhere a capability is kept, no ticket was ever
+   *  minted from one. Its revocations close every socket a revoked capability's ticket opened. */
   readonly capabilities?: CapabilityStore;
-  readonly services?: ServiceStore;
+  /** The tickets the exchange routes mint from a capability (OUT-01) — the same store, so a ticket minted
+   *  there is the one spent here. Absent where no capability is kept. */
+  readonly liveTickets?: LiveTicketStore;
+  /** Where a socket URL still carrying a capability token is written down. Absent where a deployment
+   *  keeps no identity, and the refusal is only logged. */
+  readonly audit?: AuditTrail;
   /** Explicit, so a test can beat the protocol by hand instead of waiting out a real interval. */
   readonly heartbeatMs?: number;
 }
 
 /**
- * A Guest's join link carries a capability token and the Service it opens, in the query string —
- * the only place a browser socket can carry anything at all. Success is silent: nothing is written to
- * `reply`, and the grant `admitGuest` returns waits in `CAPABILITY_GRANT` for the route handler.
- * `undefined` means this request is not a Guest join at all, and the ticket flow below gets to try it.
+ * A capability token in a socket URL is refused outright (OUT-01): a URL reaches access logs, proxy logs
+ * and a browser's history, and a capability is good for as long as it was issued for. The attempt is
+ * written down by the token's digest — the id an operator revokes it by — never by the token itself.
+ * An audit trail that refuses the entry does not let the socket open; the handler still closes it.
  */
-const proveGuestJoin = async (
-  capabilities: CapabilityStore,
-  services: ServiceStore,
+const noteUrlCapability = async (
+  audit: AuditTrail | undefined,
   request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<boolean | undefined> => {
-  const token = queryOf(request.url, CAPABILITY_QUERY);
-  if (token === undefined) return undefined;
-  const service = queryOf(request.url, SERVICE_QUERY);
-  const view = queryOf(request.url, CHANNEL_QUERY);
-  if (service === undefined || !isOutputChannel(view)) {
-    await refuseAsForbidden(
-      request,
-      reply,
-      CAPABILITY_QUERY,
-      `${SERVICE_QUERY} and ${CHANNEL_QUERY} say what a Guest capability opens`,
-    );
-    return false;
-  }
+  token: string,
+): Promise<void> => {
+  request.log.warn('a socket URL carried a capability token');
+  if (audit === undefined) return;
   try {
-    const grant = await admitGuest(capabilities, services, correlationFor('guest:', request.id), {
-      token, service, view,
+    await audit.record(auditContext('system', correlationFor('live:', request.id)), {
+      action: 'live.guest.url-capability',
+      subject: tokenDigest(token),
+      outcome: 'refused',
+      detail: 'a capability is exchanged for a ticket, never carried in a socket URL',
     });
-    CAPABILITY_GRANT.set(request, grant);
-    return true;
   } catch (error: unknown) {
-    if (error instanceof GuestJoinError) {
-      if (error.kind === 'capability') {
-        request.log.warn({ err: error }, 'guest capability redeem refused');
-        await refuseAsForbidden(request, reply, CAPABILITY_QUERY, 'that capability could not be redeemed');
-      } else {
-        await refuseAsForbidden(request, reply, CAPABILITY_QUERY, error.message);
-      }
-      return false;
-    }
-    request.log.error(error);
-    await reply.code(500).send(unexpectedFailure(request.id));
-    return false;
+    request.log.error({ err: error }, 'the live trail refused an entry');
   }
 };
 
 /**
  * What a socket proves before it is one. A browser sets no header on a WebSocket, so the two
  * things a mutation proves in a header and a cookie are proven here in the cookie and the query string:
- * the origin the page asking was served from, and either a Guest capability (T81) or a ticket this
- * session was issued, good once and for seconds. The ticket is what appears in the URL — never the
- * session identifier, which stays in the cookie where a proxy log, a referrer and a browser history
- * never reach it.
+ * the origin the page asking was served from, and a ticket good once and for seconds — either one an
+ * exchange minted from a capability (OUT-01), or one this session was issued. The ticket is what appears
+ * in the URL — never a capability, and never the session identifier, which stays in the cookie where a
+ * proxy log, a referrer and a browser history never reach it.
  *
  * Refused before the upgrade finishes rather than closed after it: a status is something a client and an
  * operator can both read, and a close code on a socket that already opened is neither.
  */
 const proveHandshake =
-  (sessions: SessionStore | undefined, capabilities: CapabilityStore | undefined, services: ServiceStore | undefined) =>
+  (sessions: SessionStore | undefined, liveTickets: LiveTicketStore | undefined) =>
   async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!isSameOrigin(request.headers.origin, originOf(request))) {
       await refuseAsForbidden(request, reply, 'origin', 'a socket is opened only from this deployment’s own pages');
       return;
     }
 
-    if (capabilities !== undefined && services !== undefined) {
-      const guest = await proveGuestJoin(capabilities, services, request, reply);
-      if (guest !== undefined) return;
+    const ticket = queryOf(request.url, TICKET_QUERY);
+    if (ticket === undefined) {
+      await refuseAsForbidden(request, reply, TICKET_QUERY, 'exchange a capability or ask this session for a ticket, and spend it here');
+      return;
+    }
+
+    if (liveTickets !== undefined) {
+      try {
+        const admission = admitSocketTicket(liveTickets, ticket, queryOf(request.url, CHANNEL_QUERY));
+        if (admission !== undefined) {
+          TICKET_ADMISSION.set(request, admission);
+          return;
+        }
+      } catch (error: unknown) {
+        if (error instanceof GuestJoinError) {
+          request.log.warn({ err: error }, 'live socket ticket refused');
+          await refuseAsForbidden(request, reply, TICKET_QUERY, 'a ticket opens one socket, within the seconds it is good for');
+          return;
+        }
+        request.log.error(error);
+        await reply.code(500).send(unexpectedFailure(request.id));
+        return;
+      }
     }
 
     if (sessions === undefined) {
-      await refuseAsForbidden(request, reply, CAPABILITY_QUERY, 'ask an operator for a guest link to open this socket');
+      await refuseAsForbidden(request, reply, TICKET_QUERY, 'a ticket opens one socket, within the seconds it is good for');
       return;
     }
 
-    const ticket = queryOf(request.url, TICKET_QUERY);
-    if (ticket === undefined) {
-      await refuseAsForbidden(request, reply, TICKET_QUERY, 'ask this session for a ticket, and spend it here');
-      return;
-    }
     const proven = await sessionFor(sessions, request, reply);
     if (proven === undefined) return;
     try {
@@ -224,7 +225,7 @@ const transportOf = (socket: {
 
 export async function serveLive(
   app: FastifyInstance,
-  { hub, engine, sessions, capabilities, services, heartbeatMs = HEARTBEAT_MS }: LiveOptions,
+  { hub, engine, sessions, capabilities, liveTickets, audit, heartbeatMs = HEARTBEAT_MS }: LiveOptions,
 ): Promise<void> {
   if (engine !== undefined) hub.useCommands((member, frame) => engine.command(member, frame));
   await app.register(websocket, { options: { maxPayload: MAX_LIVE_PAYLOAD_BYTES } });
@@ -248,16 +249,21 @@ export async function serveLive(
   // A deployment with neither sessions nor capabilities has nothing to prove a handshake against, and
   // serves the socket the way it serves everything else: to whoever asked. Whoever asked carries no
   // permissions, so what they reach is what a permission is not needed for — the surfaces a service is
-  // shown on, watched only. Either one configured is a handshake worth proving.
-  const proving =
-    sessions === undefined && capabilities === undefined
-      ? {}
-      : {
-          preValidation: async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-            admittedAt.set(request, revocationRevision);
-            await proveHandshake(sessions, capabilities, services)(request, reply);
-          },
-        };
+  // shown on, watched only. Either one configured is a handshake worth proving. A capability in the URL
+  // is refused by every deployment alike, including one that proves nothing, so no stale link anywhere
+  // ever learns to work again.
+  const guarded = sessions !== undefined || capabilities !== undefined || liveTickets !== undefined;
+  const preValidation = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const smuggled = queryOf(request.url, CAPABILITY_QUERY);
+    if (smuggled !== undefined) {
+      URL_CAPABILITY.add(request);
+      await noteUrlCapability(audit, request, smuggled);
+      return;
+    }
+    if (!guarded) return;
+    admittedAt.set(request, revocationRevision);
+    await proveHandshake(sessions, liveTickets)(request, reply);
+  };
 
   // Read-only, and behind Control presentation like every other operator-only surface: never a
   // per-connection row, only how many of each view type are open right now (spec 9.5, LIVE-06).
@@ -265,7 +271,14 @@ export async function serveLive(
     successEnvelope({ counts: hub.connectionCounts() }, request.id, CLIENT_WINDOW.current),
   );
 
-  app.get(LIVE_PATH, { websocket: true, config: { need: PUBLIC }, ...proving }, (socket, request) => {
+  app.get(LIVE_PATH, { websocket: true, config: { need: PUBLIC }, preValidation }, (socket, request) => {
+    // Closed rather than refused with a status, so the policy code OUT-01 names is what a stale client
+    // reads — and closed before anything else is read from a URL that should never have been sent.
+    if (URL_CAPABILITY.has(request)) {
+      socket.close(LIVE_CLOSE.refused, `${CAPABILITY_QUERY}: exchange it for a ticket; a socket URL never carries one`);
+      return;
+    }
+
     // Graded here rather than by the versioned-surface hook, for two reasons that point the same way: a
     // refused handshake tells a browser client nothing it can read, and an HTTP refusal written onto a
     // connection that asked to stop being HTTP is a socket both ends then wait on.
@@ -284,17 +297,18 @@ export async function serveLive(
       return;
     }
 
-    // A capability's grant, when this handshake redeemed one, is what tells `connectionCounts()` a
-    // Guest apart from an ordinary Audience session — the grant's own shape does not (spec 9.5).
-    const capabilityGrant = CAPABILITY_GRANT.get(request);
+    // A ticket minted from a capability carries the grant to join on and whether it is a Guest's — what
+    // tells `connectionCounts()` a Guest apart from an ordinary Audience session, since the grant's own
+    // shape does not (spec 9.5).
+    const admission = TICKET_ADMISSION.get(request);
     // Any revocation during admission requires a fresh handshake; no revoked-id history is retained.
-    if (capabilityGrant !== undefined && admittedAt.get(request) !== revocationRevision) {
+    if (admission !== undefined && admittedAt.get(request) !== revocationRevision) {
       socket.close(LIVE_CLOSE.refused, 'capability: revoked during admission');
       return;
     }
-    const grant = capabilityGrant ?? grantFor(PROVEN.get(request)?.record.permissions ?? []);
+    const grant = admission?.grant ?? grantFor(PROVEN.get(request)?.record.permissions ?? []);
     const connection = hub.join(
-      transportOf(socket), channel, grant, capabilityGrant !== undefined,
+      transportOf(socket), channel, grant, admission?.guest ?? false,
       PROVEN.get(request)?.record.actor,
     );
     if (connection === undefined) return;

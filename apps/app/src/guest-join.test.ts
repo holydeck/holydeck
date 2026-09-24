@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { capabilityContext, capabilitiesOn, tokenDigest } from './capabilities.js';
-import { GuestJoinError, admitGuest, admitOutput } from './guest-join.js';
+import { GuestJoinError, admitGuest, admitOutput, admitSocketTicket } from './guest-join.js';
 import { VIEW_GRANTS } from './live-protocol.js';
+import { liveTicketsOn } from './live-tickets.js';
 import { serviceContext, servicesOn } from './services.js';
 
 import type { CapabilityStore } from './capabilities.js';
@@ -212,5 +213,79 @@ describe('an output window opening one of its channels', () => {
       admitOutput(capabilities, CORRELATION, { token, service: 'service-1', view: 'audience' }),
     );
     expect(error.kind).toBe('capability');
+  });
+});
+
+// OUT-01: the socket handshake never sees a capability token again, only the single-use socket ticket an
+// exchange minted from one — and it is admitted on exactly what that exchange already proved.
+describe('a socket admitted on the ticket an exchange minted', () => {
+  const minted = (kind: 'guest' | 'output', view: 'audience' | 'stage' | 'singer' = 'audience') => {
+    const { capabilities, advance } = harness();
+    const tickets = liveTicketsOn(capabilities, { now: () => new Date(START).toISOString() });
+    const { socketTicket } = tickets.mint({
+      capabilityId: 'cap-1', kind, service: 'service-1', view,
+      capabilityExpiresAt: new Date(START + 60_000).toISOString(),
+    });
+    return { tickets, socketTicket, advance };
+  };
+
+  const refusedNow = (call: () => unknown): GuestJoinError => {
+    try {
+      call();
+    } catch (error) {
+      if (error instanceof GuestJoinError) return error;
+      throw error;
+    }
+    throw new Error('the ticket was admitted');
+  };
+
+  it('admits a Guest on the view its ticket was minted for, counted as a Guest', () => {
+    const { tickets, socketTicket } = minted('guest');
+    expect(admitSocketTicket(tickets, socketTicket, 'audience')).toEqual({
+      grant: { ...VIEW_GRANTS.audience, capabilityId: 'cap-1' },
+      guest: true,
+    });
+  });
+
+  it('admits an output window on its view, not counted as a Guest', () => {
+    const { tickets, socketTicket } = minted('output', 'singer');
+    expect(admitSocketTicket(tickets, socketTicket, 'singer')).toEqual({
+      grant: { ...VIEW_GRANTS.singer, capabilityId: 'cap-1' },
+      guest: false,
+    });
+  });
+
+  it('answers nothing for a ticket no exchange minted, so a session ticket may still be tried', () => {
+    const { tickets } = minted('guest');
+    expect(admitSocketTicket(tickets, 'a-session-ticket', 'audience')).toBeUndefined();
+  });
+
+  it('refuses a ticket already spent on a socket', () => {
+    const { tickets, socketTicket } = minted('guest');
+    admitSocketTicket(tickets, socketTicket, 'audience');
+    expect(refusedNow(() => admitSocketTicket(tickets, socketTicket, 'audience')).kind).toBe('capability');
+  });
+
+  it('refuses a ticket presented for a channel other than the view it was minted for, and spends it', () => {
+    const { tickets, socketTicket } = minted('output', 'stage');
+    expect(refusedNow(() => admitSocketTicket(tickets, socketTicket, 'live-control')).kind).toBe('capability');
+    expect(refusedNow(() => admitSocketTicket(tickets, socketTicket, 'stage')).kind).toBe('capability');
+  });
+
+  it('passes a ticket store that fails for any other reason through untouched, as the defect it is', () => {
+    const { tickets } = minted('guest');
+    const failure = new Error('the ticket map is gone');
+    const broken = {
+      ...tickets,
+      redeemSocketTicket: () => {
+        throw failure;
+      },
+    };
+    expect(() => admitSocketTicket(broken, 'any', 'audience')).toThrow(failure);
+  });
+
+  it('refuses a ticket presented for no channel at all', () => {
+    const { tickets, socketTicket } = minted('guest');
+    expect(refusedNow(() => admitSocketTicket(tickets, socketTicket, undefined)).kind).toBe('capability');
   });
 });

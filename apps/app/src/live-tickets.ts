@@ -10,6 +10,11 @@
 // the single-use rule OUT-01 asks of the socket ticket specifically (D-PLAN-5) — tracked here, in a plain
 // `Map`, because nothing about "spent" belongs to the capability itself.
 //
+// A socket ticket also carries the `LiveGrant` the handshake it opens is admitted on (spec OUT-01, Server
+// design note): the one view it was minted for, watched only, and the capability it came from — the id
+// `hub.revokeCapability` closes that socket by when the capability is revoked. It is derived here from
+// the binding, never handed in, so a ticket can never grant more than the view its capability names.
+//
 // Ticket values are drawn the same way a capability token is (`randomBytes(...).toString('base64url')`,
 // `capabilities.ts`), for the same entropy. They are not hashed before being kept as this store's own map
 // keys: hashing guards a token that reaches a database another reader might leak; these values never
@@ -19,7 +24,10 @@ import { randomBytes } from 'node:crypto';
 
 import { TICKET_SECONDS } from '@holydeck/contracts/sessions';
 
-import type { CapabilityStore, CapabilityView } from './capabilities.js';
+import { VIEW_GRANTS } from './live-protocol.js';
+
+import type { CapabilityKind, CapabilityStore, CapabilityView } from './capabilities.js';
+import type { LiveGrant } from './live-protocol.js';
 
 const TICKET_BYTES = 32;
 
@@ -37,10 +45,13 @@ export class LiveTicketError extends Error {
   }
 }
 
-/** What both tickets this store mints are bound to: the capability they were derived from, and the one
- *  service and view it redeemed against — the same triple `capabilities.ts` checks `redeem` against. */
+/** What both tickets this store mints are bound to: the capability they were derived from, which kind of
+ *  capability that was, and the one service and view it redeemed against — the same triple
+ *  `capabilities.ts` checks `redeem` against. `kind` is what tells a Guest apart from an output window
+ *  once neither carries anything but a ticket (spec 9.5's connection counts). */
 export interface LiveTicketBinding {
   readonly capabilityId: string;
+  readonly kind: CapabilityKind;
   readonly service: string;
   readonly view: CapabilityView;
 }
@@ -59,6 +70,11 @@ export interface MintedLiveTickets {
   readonly expiresAt: string;
 }
 
+/** What spending a socket ticket admits a handshake on: its binding, and the grant that binding opens. */
+export interface LiveTicketAdmission extends LiveTicketBinding {
+  readonly grant: LiveGrant;
+}
+
 export interface LiveTicketOptions {
   /** Explicit, so a test can move the clock instead of waiting out a real thirty seconds. */
   readonly now?: () => string;
@@ -67,14 +83,14 @@ export interface LiveTicketOptions {
 export interface LiveTicketStore {
   mint(input: LiveTicketMintInput): MintedLiveTickets;
   /** Redeems and, in the same call, spends a socket ticket: a second call with the same value refuses. */
-  redeemSocketTicket(ticket: string): LiveTicketBinding;
+  redeemSocketTicket(ticket: string): LiveTicketAdmission;
   /** Redeems a read ticket without spending it — good again on the very next call, until its capability
    *  expires or is revoked. */
   redeemReadTicket(ticket: string): LiveTicketBinding;
 }
 
 interface StoredSocketTicket {
-  readonly binding: LiveTicketBinding;
+  readonly admission: LiveTicketAdmission;
   readonly expiresAtMs: number;
   spent: boolean;
 }
@@ -96,7 +112,7 @@ export function liveTicketsOn(capabilities: CapabilityStore, options: LiveTicket
 
   capabilities.onRevoked((capabilityId) => {
     for (const [ticket, stored] of socketTickets) {
-      if (capabilityId === undefined || stored.binding.capabilityId === capabilityId) {
+      if (capabilityId === undefined || stored.admission.capabilityId === capabilityId) {
         socketTickets.delete(ticket);
       }
     }
@@ -109,12 +125,18 @@ export function liveTicketsOn(capabilities: CapabilityStore, options: LiveTicket
 
   return {
     mint(input) {
-      const binding: LiveTicketBinding = { capabilityId: input.capabilityId, service: input.service, view: input.view };
+      const binding: LiveTicketBinding = {
+        capabilityId: input.capabilityId, kind: input.kind, service: input.service, view: input.view,
+      };
+      const admission: LiveTicketAdmission = {
+        ...binding,
+        grant: { ...VIEW_GRANTS[input.view], capabilityId: input.capabilityId },
+      };
       const nowMs = Date.parse(now());
       const expiresAtMs = nowMs + TICKET_SECONDS * 1000;
       const socketTicket = newTicket();
       const readTicket = newTicket();
-      socketTickets.set(socketTicket, { binding, expiresAtMs, spent: false });
+      socketTickets.set(socketTicket, { admission, expiresAtMs, spent: false });
       readTickets.set(readTicket, { binding, capabilityExpiresAtMs: Date.parse(input.capabilityExpiresAt) });
       return { socketTicket, readTicket, expiresAt: new Date(expiresAtMs).toISOString() };
     },
@@ -131,7 +153,7 @@ export function liveTicketsOn(capabilities: CapabilityStore, options: LiveTicket
       if (Date.parse(now()) >= stored.expiresAtMs) {
         throw new LiveTicketError('expired', 'that socket ticket’s thirty seconds have passed');
       }
-      return stored.binding;
+      return stored.admission;
     },
 
     redeemReadTicket(ticket) {

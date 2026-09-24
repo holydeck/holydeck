@@ -344,7 +344,7 @@ const audienceSide = async (): Promise<{
   const client = createLiveClient({
     channel: 'audience',
     origin: ORIGIN,
-    credentials: async (): Promise<LiveCredentials> => ({ kind: 'capability', capability: 'cap', service: SERVICE }),
+    credentials: async (): Promise<LiveCredentials> => ({ kind: 'ticket', ticket: 'socket-ticket' }),
     open: () => side.socket,
     clock: () => AT,
     retry: () => undefined,

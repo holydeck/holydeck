@@ -25,6 +25,7 @@ import { requestContext, systemContext } from './context.js';
 import { probeCorpusIsClosed } from './corpus.js';
 import { LIBRARY_PERMISSIONS, libraryOn } from './library.js';
 import { serveLive } from './live.js';
+import { liveTicketsOn } from './live-tickets.js';
 import { liveHub } from './live-protocol.js';
 import { themesOn } from './live-theme.js';
 import { maintenanceDb, maintenanceOn } from './maintenance.js';
@@ -148,8 +149,8 @@ let identity: Identity | undefined;
 // Capabilities are kept the same way and for the same reason: a deployment with nowhere to put one has
 // no guest invitation and no output capability to issue, and its route answers not-found instead.
 let capabilities: CapabilityStore | undefined;
-// Services are kept the same way, and the live socket reads this one to gate a Guest's join on the
-// Presenting state (spec 9.3, T81): a deployment with nowhere to keep a Service has no state to gate on.
+// Services are kept the same way, and a Guest's capability exchange reads this one to gate its join on
+// the Presenting state (spec 9.3, T81): a deployment with nowhere to keep a Service has no state to gate on.
 let services: ServiceStore | undefined;
 let serviceTemplates: ServiceTemplateStore | undefined;
 let preparation: PreparationStore | undefined;
@@ -373,6 +374,10 @@ const https = settings.values.tlsCertFile === ''
 // key itself is never worth persisting to the settings file it would then have to be redacted out of.
 const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
+// One ticket store, shared by the exchange routes that mint a socket ticket from a capability and the
+// live socket that spends it (OUT-01): two stores would each refuse every ticket the other minted.
+const liveTickets = capabilities === undefined ? undefined : liveTicketsOn(capabilities);
+
 const app = buildApp({
   settings,
   // Every secret this deployment was configured with is replaced wherever it appears in a log line: a
@@ -385,6 +390,7 @@ const app = buildApp({
   identity,
   compatibility,
   capabilities,
+  liveTickets,
   settingsAdmin,
   slideLayouts,
   revisions,
@@ -429,14 +435,12 @@ const app = buildApp({
 
 // The live socket is part of the surface this service serves, so it is registered before it listens.
 //
-// Guarded by a handshake ticket wherever a session can be held, or a Guest capability wherever one can
-// be issued (spec 9.3, T81) — a ticket is spent from a session and a session is opened by signing in; a
-// capability is redeemed against a Service left Presenting, and a Guest signs in to nothing at all. A
-// deployment that keeps no durable records has neither to hand the guard, and its socket refuses every
-// client there is — which is the same answer as before, reached now because there is nothing to sign in
-// to or be invited into, rather than no way to sign in.
+// Guarded by a handshake ticket wherever a session can be held or a capability can be issued (spec 9.3,
+// OUT-01) — a session's ticket is spent from a session opened by signing in; a Guest's or an output
+// window's is minted by the exchange routes from a capability, and neither signs in to anything. The
+// capability itself never reaches the socket: a URL that still carries one is refused and audited.
 if (engine !== undefined) await engine.restore();
-await serveLive(app, { hub, engine, sessions, capabilities, services });
+await serveLive(app, { hub, engine, sessions, capabilities, liveTickets, audit: identity?.audit });
 
 for (const [key, source] of Object.entries(settings.sources)) {
   app.log.info(`${key} came from the ${source}`);

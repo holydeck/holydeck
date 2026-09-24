@@ -65,6 +65,9 @@ export const AUDIT_ACTIONS = [
   // there is none to hold.
   'live.guest.exchange',
   'live.output.exchange',
+  // A socket URL that still carried a capability token (OUT-01), refused at the handshake: recorded by
+  // the token's digest so an operator can find and revoke a capability that has been leaking into URLs.
+  'live.guest.url-capability',
   // The settings file, administered as the one thing it is: a change is recorded once, naming only
   // which fields it touched and never a value — viewing it is never audited, the same as any other GET.
   'settings.update',
@@ -210,6 +213,7 @@ export const CATEGORY_OF: Readonly<Record<AuditAction, AuditCategory>> = {
   'capability.revoke': 'authorization',
   'live.guest.exchange': 'authorization',
   'live.output.exchange': 'authorization',
+  'live.guest.url-capability': 'authorization',
   'authorization.refuse': 'authorization',
   'settings.update': 'settings',
   'content.change': 'content',
@@ -367,6 +371,7 @@ export const AUDIT_DETAIL_REDACTION: Readonly<Record<AuditAction, 'verbatim' | '
   'capability.revoke': 'verbatim',
   'live.guest.exchange': 'verbatim',
   'live.output.exchange': 'verbatim',
+  'live.guest.url-capability': 'verbatim',
   'settings.update': 'verbatim',
   'content.change': 'verbatim',
   'pptx.import': 'verbatim',

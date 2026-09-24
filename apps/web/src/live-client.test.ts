@@ -420,14 +420,20 @@ describe('liveSocketUrl', () => {
     expect(url.searchParams.get(TICKET_QUERY)).toBe('ticket-1');
   });
 
-  it('opens ws for a page served over http, and carries a capability with the service it opens', () => {
-    const url = new URL(
-      liveSocketUrl('http://127.0.0.1:3000', 'stage', { kind: 'capability', capability: 'token-1', service: 'service-1' }),
-    );
+  it('opens ws for a page served over http, carrying the ticket an exchange minted and nothing else', () => {
+    const url = new URL(liveSocketUrl('http://127.0.0.1:3000', 'stage', { kind: 'ticket', ticket: 'socket-ticket-1' }));
     expect(url.protocol).toBe('ws:');
-    expect(url.searchParams.get('capability')).toBe('token-1');
-    expect(url.searchParams.get('service')).toBe('service-1');
-    expect(url.searchParams.get(TICKET_QUERY)).toBeNull();
+    expect(url.searchParams.get(TICKET_QUERY)).toBe('socket-ticket-1');
+    expect([...url.searchParams.keys()].toSorted()).toEqual([CHANNEL_QUERY, 'clientVersion', TICKET_QUERY].toSorted());
+  });
+
+  // OUT-01: a capability token never travels in a socket URL — a server closes any socket whose URL does.
+  it('never puts a capability or the service it opens in the URL, whatever a caller hands it', () => {
+    const smuggled = { kind: 'capability', capability: 'token-1', service: 'service-1' } as const;
+    // @ts-expect-error -- a capability is not a credential a socket can be opened with any more
+    const url = new URL(liveSocketUrl(ORIGIN, 'audience', smuggled));
+    expect(url.searchParams.get('capability')).toBeNull();
+    expect(url.searchParams.get('service')).toBeNull();
   });
 
   it('declares whichever client version it was given', () => {

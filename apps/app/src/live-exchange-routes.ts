@@ -133,6 +133,7 @@ export function serveLiveExchangeRoutes(
         });
         const minted = liveTickets.mint({
           capabilityId: grant.capabilityId,
+          kind: 'guest',
           service: parsed.value.service,
           view: 'audience',
           capabilityExpiresAt: grant.capabilityExpiresAt,
@@ -171,6 +172,7 @@ export function serveLiveExchangeRoutes(
         });
         const minted = liveTickets.mint({
           capabilityId: grant.capabilityId,
+          kind: 'output',
           service: parsed.value.service,
           view: parsed.value.view,
           capabilityExpiresAt: grant.capabilityExpiresAt,

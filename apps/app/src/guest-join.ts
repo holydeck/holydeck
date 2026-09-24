@@ -12,10 +12,10 @@
 // spec 9.5's whole privacy contract is kept by there being no field here for a name, an email or an
 // account to go in, not by a promise to leave one blank.
 //
-// Wiring either grant into an actual live socket's handshake is this module's callers' job, not this
-// module's: `admitGuest` is already consumed by the query-string join path in `live.ts`; `admitOutput`'s
-// own consumer — minting the tickets OUT-01 describes from the grant it returns — is a later task's to
-// build.
+// Neither grant ever reaches a live socket's handshake directly (OUT-01): the exchange routes redeem a
+// capability through `admitGuest` or `admitOutput` and mint a single-use socket ticket from the grant, and
+// the handshake in `live.ts` admits on that ticket alone, through `admitSocketTicket` below. A capability
+// token is never read from a socket URL, so it never lands in an access log, a proxy log or a history.
 
 import { joinAllowedFor } from '@holydeck/contracts/services';
 
@@ -25,8 +25,11 @@ import { VIEW_GRANTS } from './live-protocol.js';
 import { SERVICE_PERMISSIONS } from './services.js';
 
 import type { OutputChannel } from '@holydeck/contracts/live';
+import { LiveTicketError } from './live-tickets.js';
+
 import type { CapabilityStore } from './capabilities.js';
 import type { LiveGrant } from './live-protocol.js';
+import type { LiveTicketStore } from './live-tickets.js';
 import type { ServiceStore } from './services.js';
 
 export type GuestJoinRefusal = 'capability' | 'state';
@@ -132,4 +135,36 @@ export async function admitOutput(
     capabilityId: tokenDigest(request.token),
     capabilityExpiresAt: redeemed.expiresAt,
   };
+}
+
+/** What a socket ticket admits a handshake on: the grant its capability opens, and whether it is counted
+ *  as a Guest (spec 9.5) rather than as an output window on its view. */
+export interface SocketTicketAdmission {
+  readonly grant: LiveGrant;
+  readonly guest: boolean;
+}
+
+/**
+ * Admits a live handshake on a socket ticket an exchange minted, or refuses. The ticket is spent by the
+ * attempt whatever follows, so a ticket presented for the wrong channel cannot be retried on the right
+ * one. A ticket this store never minted answers `undefined` rather than a refusal: it may still be a
+ * signed-in session's own ticket, which only `live.ts` can check.
+ */
+export function admitSocketTicket(
+  tickets: LiveTicketStore,
+  ticket: string,
+  channel: string | undefined,
+): SocketTicketAdmission | undefined {
+  let admitted;
+  try {
+    admitted = tickets.redeemSocketTicket(ticket);
+  } catch (error: unknown) {
+    if (error instanceof LiveTicketError && error.kind === 'unknown') return undefined;
+    if (error instanceof LiveTicketError) throw new GuestJoinError('capability', error.message);
+    throw error;
+  }
+  if (channel !== admitted.view) {
+    throw new GuestJoinError('capability', `that socket ticket opens the ${admitted.view} view, and only that one`);
+  }
+  return { grant: admitted.grant, guest: admitted.kind === 'guest' };
 }

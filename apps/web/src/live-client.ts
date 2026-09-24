@@ -42,12 +42,10 @@
 
 import { CLIENT_WINDOW } from '@holydeck/contracts/clients';
 import {
-  CAPABILITY_QUERY,
   CHANNEL_QUERY,
   CLIENT_VERSION_QUERY,
   LIVE_CLOSE,
   LIVE_PATH,
-  SERVICE_QUERY,
   parseCommandFrame,
   parseFrame,
 } from '@holydeck/contracts/live';
@@ -116,14 +114,13 @@ export function detectLiveSocket(global: LiveSocketGlobalLike): WebSocketOpener 
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * What proves this context may open a socket: the ticket a signed-in session spent, or the capability a
- * shared join link carries with the service it opens (T81). Either is good for exactly one socket, which
- * is why a client is handed a way to obtain them rather than the values themselves — a reconnect three
- * hours into a service needs a ticket minted then, not the one this page loaded with.
+ * What proves this context may open a socket: a ticket, spent by a signed-in session or minted by
+ * exchanging a capability (OUT-01). A capability itself is never carried in a socket URL — the server
+ * refuses one there. A ticket is good for exactly one socket, which is why a client is handed a way to
+ * obtain one rather than the value itself — a reconnect three hours into a service needs a ticket minted
+ * then, not the one this page loaded with.
  */
-export type LiveCredentials =
-  | { readonly kind: 'ticket'; readonly ticket: string }
-  | { readonly kind: 'capability'; readonly capability: string; readonly service: string };
+export type LiveCredentials = { readonly kind: 'ticket'; readonly ticket: string };
 
 /**
  * Where this context's socket is opened. The page's own origin, with the scheme it is actually served
@@ -140,12 +137,7 @@ export function liveSocketUrl(
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set(CHANNEL_QUERY, channel);
   url.searchParams.set(CLIENT_VERSION_QUERY, String(clientVersion));
-  if (credentials.kind === 'ticket') {
-    url.searchParams.set(TICKET_QUERY, credentials.ticket);
-  } else {
-    url.searchParams.set(CAPABILITY_QUERY, credentials.capability);
-    url.searchParams.set(SERVICE_QUERY, credentials.service);
-  }
+  url.searchParams.set(TICKET_QUERY, credentials.ticket);
   return url.toString();
 }
 

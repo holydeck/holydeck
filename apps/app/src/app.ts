@@ -58,6 +58,7 @@ import { serveWorkspacePositionRoutes } from './workspace-position-routes.js';
 
 import type { RouteNeed } from './authorization.js';
 import type { CapabilityStore } from './capabilities.js';
+import type { LiveTicketStore } from './live-tickets.js';
 import type { ConflictShelf } from './conflicts.js';
 import type { ContentLanguageStore } from './content-languages.js';
 import type { Fetching } from './corpus.js';
@@ -124,6 +125,9 @@ export interface AppOptions {
   notificationDb?: NotificationDb;
   /** Where a Guest's invitation or an output window's capability is kept. Without it, there is none to grant. */
   capabilities?: CapabilityStore;
+  /** The tickets a capability exchange mints (OUT-01), shared with the live socket that spends them.
+   *  Without it, one is built on `capabilities` — enough where nothing else spends its socket tickets. */
+  liveTickets?: LiveTicketStore;
   /** Where the settings file is written and hot-reloaded. Without it, there is nothing to administer. */
   settingsAdmin?: SettingsAdmin;
   /** Where Slide Layouts are kept. Without it, there is none to create, version or archive. */
@@ -221,6 +225,7 @@ export function buildApp({
   compatibility,
   notificationDb,
   capabilities,
+  liveTickets: sharedLiveTickets,
   settingsAdmin,
   slideLayouts,
   revisions,
@@ -262,7 +267,8 @@ export function buildApp({
   const notifications = identity === undefined || notificationDb === undefined
     ? undefined
     : notificationStoreOn(notificationDb, { now: () => new Date().toISOString() });
-  const liveTickets = capabilities === undefined ? undefined : liveTicketsOn(capabilities, { now: () => new Date().toISOString() });
+  const liveTickets = sharedLiveTickets
+    ?? (capabilities === undefined ? undefined : liveTicketsOn(capabilities, { now: () => new Date().toISOString() }));
   // HTTPS makes Fastify infer a specialised server, while the routes below use its common interface.
   const app = Fastify({ logger, ...(https === undefined ? {} : { https }) }) as unknown as FastifyInstance;
   const corpus = corpusClient({ url: settings.values.corpusUrl, token: settings.values.corpusToken }, fetching);
