@@ -18,10 +18,24 @@ export const CORPUS_TOKEN = 'harness-corpus-token-not-a-secret';
 export const APP_DATABASE = 'harness_application';
 export const CORPUS_DATABASE = 'harness_corpus';
 
-export const applicationMongoUrl = (base: string): string => `${base.replace(/\/+$/u, '')}/${APP_DATABASE}`;
+// `base` may carry a query string of its own (`mongoFor()` now starts a replica set, whose URI is
+// `mongodb://host:port/?replicaSet=name`), so the database name is spliced in before it rather than
+// appended after — appending blindly would put `/harness_application` after the query string instead
+// of before it, and the application would read that whole tail as an unnamed database.
+export const applicationMongoUrl = (base: string): string => {
+  const [address, query] = base.split('?');
+  const path = `${(address ?? base).replace(/\/+$/u, '')}/${APP_DATABASE}`;
+  return query === undefined ? path : `${path}?${query}`;
+};
 
 const settingsPath = (dataDir: string): string => `${dataDir}/config/settings.yaml`;
 const mediaRoot = (dataDir: string): string => `${dataDir}/media`;
+// Restic creates this itself on first `init`, the same as a real deployment's mounted repository
+// directory — unlike `mediaRoot`/`config`, nothing here has to pre-create it (`stack.ts` only makes
+// `media` and `config`). Left unset, both processes fall back to `settings.ts`'s own
+// `CANONICAL_SETTINGS_PATH`-neighboring default, `/data/holydeck/restic`, which this harness never owns
+// and a sandboxed dev machine may not even be able to write to.
+const resticRepository = (dataDir: string): string => `${dataDir}/restic`;
 
 // The services log at warn: a run that fails has to be readable, and three services at debug bury the
 // one line that says why.
@@ -32,6 +46,7 @@ export function applicationEnvironment({ appPort, corpusPort, mongoBase, dataDir
     HOLYDECK_PORT: String(appPort),
     HOLYDECK_DATA_DIR: dataDir,
     HOLYDECK_MEDIA_ROOT: mediaRoot(dataDir),
+    HOLYDECK_RESTIC_REPOSITORY: resticRepository(dataDir),
     HOLYDECK_LOCALE: 'en',
     HOLYDECK_CORPUS_URL: `http://127.0.0.1:${corpusPort}`,
     HOLYDECK_CORPUS_TOKEN: CORPUS_TOKEN,
@@ -56,8 +71,14 @@ export function corpusEnvironment({ corpusPort, mongoBase }: Addresses): Record<
 
 export function workerEnvironment({ dataDir, mongoBase }: Addresses): Record<string, string> {
   return {
+    // The one inherited variable, and only here: the worker is the one process that shells out to
+    // binaries on the host (`restic`, `ffmpeg`), and an explicit `env` given to `spawn` replaces the
+    // child's environment rather than merging with it, so without this `restic`/`ffmpeg` fail to resolve
+    // by name at all (`spawn restic ENOENT`) rather than running against the wrong one.
+    PATH: process.env.PATH ?? '',
     HOLYDECK_DATA_DIR: dataDir,
     HOLYDECK_MEDIA_ROOT: mediaRoot(dataDir),
+    HOLYDECK_RESTIC_REPOSITORY: resticRepository(dataDir),
     HOLYDECK_MONGO_URL: applicationMongoUrl(mongoBase),
     HOLYDECK_SETTINGS_PATH: settingsPath(dataDir),
     HOLYDECK_LOG_LEVEL: LOG_LEVEL,

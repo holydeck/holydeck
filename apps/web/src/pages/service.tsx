@@ -13,6 +13,7 @@ import { announceConnection, createAnnouncer } from '../announcements.js';
 import { csrf, locale } from '../app-state.js';
 import { type ControlData, readControlData } from '../components/order-data.js';
 import { OrderView } from '../components/order-view.js';
+import { RunReview } from '../components/run-review.js';
 import { t } from '../i18n.js';
 import { createLiveClient, detectLiveSocket, type LiveSocketGlobalLike } from '../live-client.js';
 import { request } from '../request.js';
@@ -65,5 +66,10 @@ export function ServicePage({ id }: { readonly id: string }): JSX.Element {
 
   return data === undefined
     ? <p role="status">{t('app.loading')}</p>
-    : <OrderView data={data} serviceId={id} connectionStatus={connectionStatus} />;
+    : (
+      <>
+        <OrderView data={data} serviceId={id} connectionStatus={connectionStatus} />
+        <RunReview serviceId={id} />
+      </>
+    );
 }

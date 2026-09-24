@@ -10,6 +10,7 @@ import { resetAppState, session } from '../app-state.js';
 import { setFetching } from '../request.js';
 import { currentPath } from '../router.js';
 import { AppShell } from './app-shell.js';
+import { NOTIFICATIONS_PATH } from './notification-bell.js';
 
 import type { FetchLike } from '../api.js';
 import type { SessionView } from '@holydeck/contracts/sessions';
@@ -28,6 +29,7 @@ describe('the navigation shell', () => {
   beforeEach(() => {
     resetAppState();
     currentPath.value = '/services';
+    setFetching(async () => reply(200, successEnvelope({ notifications: [] }, 'req-notifications')));
   });
 
   it('keeps only the skip link, main and live regions while signed out', () => {
@@ -51,6 +53,18 @@ describe('the navigation shell', () => {
     expect(signOut).toHaveBeenCalledOnce();
   });
 
+  it('carries the notification bell between the account menu and sign-out', async () => {
+    const fetching = vi.fn<FetchLike>(async () => reply(200, successEnvelope({ notifications: [] }, 'req-notifications')));
+    setFetching(fetching);
+    session.value = signedIn(['accounts.manage']);
+    render(<AppShell onSignOut={vi.fn()}><p>page</p></AppShell>);
+    await vi.waitFor(() => expect(fetching).toHaveBeenCalledWith(`${NOTIFICATIONS_PATH}?unread=true`, expect.anything()));
+    const bar = document.querySelector('.app-bar');
+    const marks = [...(bar?.children ?? [])].map((child) => child.className);
+    expect(marks.indexOf('notification-bell')).toBeGreaterThan(marks.indexOf('app-account-menu'));
+    expect(marks.indexOf('notification-bell')).toBeLessThan(marks.indexOf('app-sign-out'));
+  });
+
   it('shows Administration only to a session that administers accounts or settings', () => {
     session.value = signedIn([], 'editor');
     const view = render(<AppShell><p>page</p></AppShell>);
@@ -68,6 +82,9 @@ describe('the navigation shell', () => {
       ['accounts.manage', '/admin/users'],
       ['settings.manage', '/admin/settings'],
       ['audit.read', '/admin/audit'],
+      ['jobs.view', '/admin/jobs'],
+      ['operations.read', '/admin/operations'],
+      ['backup.manage', '/admin/backups'],
       ['integrations.manage', '/admin/integrations'],
       ['catalogue.manage', '/admin/languages'],
     ];
@@ -80,7 +97,16 @@ describe('the navigation shell', () => {
   });
 
   it('lists each admin page the session may open while in Administration, marking the current one', () => {
-    session.value = signedIn(['accounts.manage', 'settings.manage', 'audit.read', 'integrations.manage', 'catalogue.manage']);
+    session.value = signedIn([
+      'accounts.manage',
+      'settings.manage',
+      'audit.read',
+      'jobs.view',
+      'operations.read',
+      'backup.manage',
+      'integrations.manage',
+      'catalogue.manage',
+    ]);
     render(<AppShell><p>page</p></AppShell>);
     expect(screen.queryByRole('navigation', { name: 'Administration' })).toBeNull();
 
@@ -93,6 +119,9 @@ describe('the navigation shell', () => {
       ['Users', '/admin/users'],
       ['Settings', '/admin/settings'],
       ['Audit log', '/admin/audit'],
+      ['Jobs', '/admin/jobs'],
+      ['Operations', '/admin/operations'],
+      ['Backups', '/admin/backups'],
       ['Integrations', '/admin/integrations'],
       ['Content languages', '/admin/languages'],
       ['Slide labels', '/admin/slide-labels'],
@@ -181,6 +210,18 @@ describe('the navigation shell', () => {
       currentPath.value = '/account/security';
     });
     expect(screen.getByRole('link', { name: 'Security' }).getAttribute('aria-current')).toBe('page');
+  });
+
+  it('offers Notifications to every signed-in session, and marks it current on its own route', () => {
+    session.value = signedIn([], 'editor');
+    render(<AppShell><p>page</p></AppShell>);
+    expect(screen.getByRole('link', { name: 'Notifications' }).getAttribute('href')).toBe('/account/notifications');
+    expect(screen.getByRole('link', { name: 'Notifications' }).getAttribute('aria-current')).toBeNull();
+
+    act(() => {
+      currentPath.value = '/account/notifications';
+    });
+    expect(screen.getByRole('link', { name: 'Notifications' }).getAttribute('aria-current')).toBe('page');
   });
 
   it('marks the library current while on it', () => {

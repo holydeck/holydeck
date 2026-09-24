@@ -27,11 +27,16 @@ const ServicePage = lazy(() => import('./pages/service.js').then((module) => mod
 const AdminUsersPage = lazy(() => import('./pages/admin-users.js').then((module) => module.AdminUsersPage));
 const AdminSettingsPage = lazy(() => import('./pages/admin-settings.js').then((module) => module.AdminSettingsPage));
 const AdminAuditPage = lazy(() => import('./pages/admin-audit.js').then((module) => module.AdminAuditPage));
+const AdminJobsPage = lazy(() => import('./pages/admin-jobs.js').then((module) => module.AdminJobsPage));
+const AdminOperationsPage = lazy(() => import('./pages/admin-operations.js').then((module) => module.AdminOperationsPage));
+const AdminBackupsPage = lazy(() => import('./pages/admin-backups.js').then((module) => module.AdminBackupsPage));
 const AdminIntegrationsPage = lazy(() => import('./pages/admin-integrations.js').then((module) => module.AdminIntegrationsPage));
 const AdminLanguagesPage = lazy(() => import('./pages/admin-languages.js').then((module) => module.AdminLanguagesPage));
 const AdminSlideLabelsPage = lazy(() => import('./pages/admin-slide-labels.js').then((module) => module.AdminSlideLabelsPage));
 const HistoryPage = lazy(() => import('./pages/history.js').then((module) => module.HistoryPage));
 const SecurityPage = lazy(() => import('./pages/account-security.js').then((module) => module.SecurityPage));
+const AccountNotificationsPage = lazy(() =>
+  import('./pages/account-notifications.js').then((module) => module.AccountNotificationsPage));
 const WorkspacePage = lazy(() => import('./workspace/Workspace.js').then((module) => module.Workspace)) as
   (props: { readonly id: string }) => JSX.Element;
 const NewServicePage = lazy(() => import('./workspace/NewService.js').then((module) => module.NewService));
@@ -65,6 +70,12 @@ function Page(): JSX.Element {
       return <AdminSettingsPage />;
     case 'admin-audit':
       return <AdminAuditPage />;
+    case 'admin-jobs':
+      return <AdminJobsPage />;
+    case 'admin-operations':
+      return <AdminOperationsPage />;
+    case 'admin-backups':
+      return <AdminBackupsPage />;
     case 'admin-integrations':
       return <AdminIntegrationsPage />;
     case 'admin-languages':
@@ -73,6 +84,8 @@ function Page(): JSX.Element {
       return <AdminSlideLabelsPage />;
     case 'account-security':
       return <SecurityPage />;
+    case 'account-notifications':
+      return <AccountNotificationsPage />;
     case 'content-history':
       return <HistoryPage contentId={current.contentId} />;
     case 'welcome':

@@ -109,7 +109,9 @@ export function notificationStoreOn(db: NotificationDb, options: NotificationSto
 
   const store: NotificationStore = {
     async listFor(accountId, options2 = {}) {
-      const filter: Filter = options2.unread === true ? { accountId, readAt: { $exists: false } } : { accountId };
+      const filter: Filter = options2.unread === true
+        ? { accountId, readAt: { $exists: false }, dismissedAt: { $exists: false } }
+        : { accountId };
       const found = await rows().find(filter, { sort: { createdAt: -1 } }).toArray();
       return found as unknown as readonly NotificationRow[];
     },

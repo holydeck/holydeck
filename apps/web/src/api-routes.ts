@@ -88,4 +88,12 @@ export const API = {
   serviceTemplate: (id: string) => `/api/v1/service-templates/${enc(id)}`,
   contentHistory: (kind: HistoryKind, id: string) =>
     kind === 'song' ? `${songPath(id)}/history` : kind === 'sermon' ? `${sermonPath(id)}/history` : `${slideGroupPath(id)}/history`,
+  runs: (query: { readonly serviceId: string; readonly phase?: string }) =>
+    withQuery('/api/v1/runs', { serviceId: query.serviceId, phase: query.phase }),
+  runReview: (runId: string) => `/api/v1/runs/${enc(runId)}/review`,
+  runRecap: (runId: string, query: { readonly format: 'md' | 'text'; readonly includeRehearsal?: boolean }) =>
+    withQuery(`/api/v1/runs/${enc(runId)}/recap`, {
+      format: query.format,
+      includeRehearsal: query.includeRehearsal === true ? 'true' : undefined,
+    }),
 } as const;

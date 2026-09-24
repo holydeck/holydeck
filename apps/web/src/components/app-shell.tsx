@@ -20,6 +20,7 @@ import { switchAccount } from '../account-switch.js';
 import { can, session } from '../app-state.js';
 import { ExpiryBanner } from './expiry-banner.js';
 import { t } from '../i18n.js';
+import { NotificationBell } from './notification-bell.js';
 import { route, type Route } from '../router.js';
 import { ToastRegion } from './toast.js';
 import { UpdateDialog } from './update-dialog.js';
@@ -36,6 +37,9 @@ export const ADMINISTRATION_PERMISSIONS = Object.freeze([
   'accounts.manage',
   'settings.manage',
   'audit.read',
+  'jobs.view',
+  'operations.read',
+  'backup.manage',
   'integrations.manage',
   'catalogue.manage',
 ] as const);
@@ -57,6 +61,9 @@ const ADMINISTRATION_PAGES: readonly {
   { route: 'admin-users', href: '/admin/users', label: 'users.title', permission: 'accounts.manage' },
   { route: 'admin-settings', href: '/admin/settings', label: 'settings.title', permission: 'settings.manage' },
   { route: 'admin-audit', href: '/admin/audit', label: 'audit.heading', permission: 'audit.read' },
+  { route: 'admin-jobs', href: '/admin/jobs', label: 'jobs.heading', permission: 'jobs.view' },
+  { route: 'admin-operations', href: '/admin/operations', label: 'operations.heading', permission: 'operations.read' },
+  { route: 'admin-backups', href: '/admin/backups', label: 'backups.heading', permission: 'backup.manage' },
   { route: 'admin-integrations', href: '/admin/integrations', label: 'integrations.heading', permission: 'integrations.manage' },
   { route: 'admin-languages', href: '/admin/languages', label: 'languages.heading', permission: 'catalogue.manage' },
   { route: 'admin-slide-labels', href: '/admin/slide-labels', label: 'slideLabels.heading', permission: 'catalogue.manage' },
@@ -65,7 +72,9 @@ const ADMINISTRATION_PAGES: readonly {
 const roleLabel = (role: AccountRole): string => t(`app.role.${role}`);
 
 /** Which primary section a route belongs to, so its link can say `aria-current="page"`. */
-const sectionOf = (current: Route): 'services' | 'library' | 'media' | 'administration' | 'security' | undefined => {
+const sectionOf = (
+  current: Route,
+): 'services' | 'library' | 'media' | 'administration' | 'security' | 'notifications' | undefined => {
   if (
     current.name === 'services' ||
     current.name === 'service-new' ||
@@ -79,6 +88,7 @@ const sectionOf = (current: Route): 'services' | 'library' | 'media' | 'administ
   if (current.name === 'media') return 'media';
   if (ADMINISTRATION_PAGES.some((page) => page.route === current.name)) return 'administration';
   if (current.name === 'account-security') return 'security';
+  if (current.name === 'account-notifications') return 'notifications';
   return undefined;
 };
 
@@ -164,6 +174,7 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
             </p>
           )}
           <AccountMenu current={current} />
+          <NotificationBell />
           {onSignOut === undefined ? null : (
             <button type="button" class="app-sign-out" onClick={onSignOut}>{t('app.signOut')}</button>
           )}
@@ -193,6 +204,11 @@ export function AppShell({ children, onSignOut }: AppShellProps): JSX.Element {
             <li>
               <a href="/account/security" aria-current={section === 'security' ? 'page' : undefined}>
                 {t('app.nav.security')}
+              </a>
+            </li>
+            <li>
+              <a href="/account/notifications" aria-current={section === 'notifications' ? 'page' : undefined}>
+                {t('app.nav.notifications')}
               </a>
             </li>
           </ul>

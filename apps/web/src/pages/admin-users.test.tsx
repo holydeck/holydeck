@@ -58,6 +58,9 @@ const list = (): ReturnType<typeof reply> => reply(200, successEnvelope([ruth, m
 
 const renderPage = async (): Promise<void> => {
   currentPath.value = '/admin/users';
+  // Keeps the shell's notification bell from polling and consuming a slot in this file's sequential
+  // `mockResolvedValueOnce` fetch queues; the page under test never needs the bell to be active.
+  Object.defineProperty(document, 'hidden', { value: true, configurable: true });
   render(<App />);
   await screen.findByRole('table');
 };
